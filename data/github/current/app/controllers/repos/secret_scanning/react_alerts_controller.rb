@@ -165,32 +165,27 @@ class Repos::SecretScanning::ReactAlertsController < AbstractRepositoryControlle
     closure_request_comment = request_body["closure_request_comment"]
 
     if !closure_request_comment.present?
-      flash[:error] = "Comment is required"
-      return head :bad_request
+      return render plain: "Comment is required", status: :bad_request
     end
 
     if closure_request_comment.length > 280
-      flash[:error] = "Comment is too long (maximum is 280 characters)"
-      return head :bad_request
+      return render plain: "Comment is too long (maximum is 280 characters)", status: :bad_request
     end
 
     resolution = request_body["resolution"]
     if !resolution.present?
-      flash[:error] = "Resolution is required"
-      return head :bad_request
+      return render plain: "Resolution is required", status: :bad_request
     end
 
     if !request_body["id"].present?
-      flash[:error] = "Must provide an alert number"
-      return head :bad_request
+      return render plain: "Must provide an alert number", status: :bad_request
     end
 
     id = request_body["id"]
     begin
       delegated_alert_closures_service.create_alert_closure_request(current_repository, current_user, id.to_s, resolution, closure_request_comment)
     rescue SecretScanning::Errors::ServiceError
-      flash[:error] = "A closure request already exists for this alert."
-      return head :bad_request
+      return render plain: "Unable to create closure request for this alert.", status: :bad_request
     end
 
     head :ok

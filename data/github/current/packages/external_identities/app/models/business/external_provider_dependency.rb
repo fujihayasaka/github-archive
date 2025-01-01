@@ -1,6 +1,8 @@
 # typed: false
 # frozen_string_literal: true
 
+require "github/external_identities/kv"
+
 # Tracking external Identity Provider dependencies for a business. Supports both SAML and OIDC
 module Business::ExternalProviderDependency
   extend ActiveSupport::Concern
@@ -131,21 +133,21 @@ module Business::ExternalProviderDependency
   #
   # Returns a Boolean
   def removing_external_provider?
-    !!ExternalIdentities::KV.get(external_provider_removal_key).value { nil }
+    !!::ExternalIdentities::KV.get(external_provider_removal_key).value { nil }
   end
 
   # Description: The type of the external provider that is being removed.
   #
   # Returns a String
   def removing_external_provider_type
-    ExternalIdentities::KV.get(external_provider_removal_key).value { nil }
+    ::ExternalIdentities::KV.get(external_provider_removal_key).value { nil }
   end
 
   # Description: Set the business as removing an external provider.
   #
   # Returns nothing
   def set_removing_external_provider(provider_type)
-    ExternalIdentities::KV.set(external_provider_removal_key, provider_type, expires: 1.day.from_now)
+    ::ExternalIdentities::KV.set(external_provider_removal_key, provider_type, expires: 1.day.from_now)
   end
 
   private
@@ -161,7 +163,7 @@ module Business::ExternalProviderDependency
   #
   # Returns nothing
   def del_removing_external_provider
-    ExternalIdentities::KV.del(external_provider_removal_key)
+    ::ExternalIdentities::KV.del(external_provider_removal_key)
   end
 
   # Description: Is the job past the max run time?

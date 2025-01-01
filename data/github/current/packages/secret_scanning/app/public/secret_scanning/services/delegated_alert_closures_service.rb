@@ -44,6 +44,22 @@ module SecretScanning
           raise SecretScanning::Errors::ServiceError.new("A request to close this alert has already been made.")
         end
 
+        # Fetch the alert to check if it exists and is already closed before creating the closure request.
+        alert, alert_error = @alerts_service.get_alert(repo, requester, token_number, nil, include_related_alerts: false)
+        if alert_error.present? || alert.nil?
+          raise SecretScanning::Errors::ServiceError.new("Unable to fetch alert.")
+        end
+        if alert.resolved?
+          GitHub.logger.info(
+            "SecretScanningDelegatedAlertClosures: Tried to create closure request for an already closed alert",
+            "requester_id": requester.id,
+            "requester_type": requester.class.name,
+            "resource_id": resource_id,
+            "repo_id": repo.id
+          )
+          raise SecretScanning::Errors::ServiceError.new("Cannot create a closure request for an already closed alert.")
+        end
+
         GitHub.logger.info(
           "SecretScanningDelegatedAlertClosures: Creating closure request",
           "requester_id": requester.id,
@@ -61,7 +77,7 @@ module SecretScanning
           expires_at: 1.week.from_now.floor(0),
           metadata: {
             "reason": reason,
-            "alert_title": SecretScanning::Services::AlertsService.new.get_alert(repo, requester, resource_id.to_i, nil, include_related_alerts: false).first&.label
+            "alert_title": alert.label
           },
           requester_comment:
         )

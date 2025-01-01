@@ -14,6 +14,8 @@ class HydroAuthenticCommitsJob < Repositories::RepositoryHydroMessageJob
   end
 
   def perform
+    return unless GitHub.persistent_commit_signature_verification_enabled?
+
     if @commit_shas&.any?
       has_next_page = T.let(true, T::Boolean)
       next_cursor = T.let(nil, T.untyped)

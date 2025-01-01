@@ -2705,7 +2705,14 @@ Alternatively, for proxima login experience run `script/multi-tenant/toggle-feat
 
       if allow_meta_redirect
         render "site/post_saml_pages_meta_redirect", locals: { redirect_url: parsed_url.to_s }, layout: "layouts/redirect"
+      elsif !parsed_url || !parsed_url.absolute?
+        # Relative URLs (e.g. /login/oauth/authorize?...) are same-host and
+        # don't need the meta redirect workaround for Pages CSP. Use the
+        # standard return_to flow.
+        redirect_to_return_to(fallback: fallback)
       else
+        # Absolute URL that failed meta redirect validation (e.g. unsafe host,
+        # non-http scheme, or includes a port). Fall back to "/" defensively.
         safe_redirect_to(
           fallback,
           allow_query: true,

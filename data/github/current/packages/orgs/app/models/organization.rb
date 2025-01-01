@@ -4645,16 +4645,17 @@ class Organization < User
 
       organization_ids.each do |org_id|
         org_team = org_teams[org_id]&.first
+        next if org_team.nil?
 
         already_members_user_ids = existing_memberships.select { |_, subject_ids| subject_ids.include?(org_id) }.keys
         # avoid creating admin entries just because the user was already in the org due to membership from another ET managed team
         potential_admin_user_ids = already_members_user_ids - OrganizationMembershipEntry.where(organization_id: org_id, user_id: already_members_user_ids, adder_type: :enterprise_team).pluck(:user_id).uniq
         new_admin_entries = potential_admin_user_ids - OrganizationMembershipEntry.where(organization_id: org_id, user_id: potential_admin_user_ids, adder_type: :admin).pluck(:user_id).uniq
-        with_write { T.must(org_team).organization&.bulk_add_organization_membership_entry(user_ids: new_admin_entries, team: org_team, adder_type: :admin, caller_type: caller_type) if new_admin_entries.any? }
+        with_write { org_team.organization&.bulk_add_organization_membership_entry(user_ids: new_admin_entries, team: org_team, adder_type: :admin, caller_type: caller_type) if new_admin_entries.any? }
 
         # we still need to create their :enterprise_team OMEs
         newly_managed_user_ids = already_members_user_ids - new_admin_entries
-        with_write { T.must(org_team).organization&.bulk_add_organization_membership_entry(user_ids: newly_managed_user_ids, team: org_team, adder_type: :enterprise_team, caller_type: caller_type) if newly_managed_user_ids.any? }
+        with_write { org_team.organization&.bulk_add_organization_membership_entry(user_ids: newly_managed_user_ids, team: org_team, adder_type: :enterprise_team, caller_type: caller_type) if newly_managed_user_ids.any? }
       end
     end
 
@@ -4672,8 +4673,10 @@ class Organization < User
       org_teams ||= Team.where(id: team_ids).group_by(&:organization_id)
       organization_ids.each do |org_id|
         org_team = org_teams[org_id]&.first
+        next if org_team.nil?
+
         users_added = needed_memberships.select { |_, subject_ids| subject_ids.include?(org_id) }.keys
-        with_write { T.must(org_team).organization&.bulk_add_organization_membership_entry(user_ids: users_added, team: org_team, caller_type: caller_type, adder_type: :enterprise_team) if users_added.any? }
+        with_write { org_team.organization&.bulk_add_organization_membership_entry(user_ids: users_added, team: org_team, caller_type: caller_type, adder_type: :enterprise_team) if users_added.any? }
       end
     end
 

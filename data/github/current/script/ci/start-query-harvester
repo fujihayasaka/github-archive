@@ -17,6 +17,31 @@ else
   prod_tables=$(awk -F': ' '{print $1}' db/tableowners.yaml | grep -v '^$' | grep -v '_idx$' | grep -v '_seq$' | paste -sd "," -)
   echo "Prod tables for filtering: $prod_tables"
 
+  stmt_summary_table=$([[ "$TRACK_QUERY_GUARD_QUERIES" == "1" ]] && echo "ci_stmt_summary_rerun" || echo "stmt_summary")
+
+  OIDC_RESPONSE=$(curl -sS -w "\n%{http_code}" -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+  "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://AzureADTokenExchange")
+
+  OIDC_HTTP_CODE=$(echo "$OIDC_RESPONSE" | tail -n1)
+  OIDC_BODY=$(echo "$OIDC_RESPONSE" | sed '$d')
+
+  if [ "$OIDC_HTTP_CODE" -ne 200 ]; then
+    echo "ERROR: Failed to fetch OIDC token (HTTP $OIDC_HTTP_CODE): $OIDC_BODY" >&2
+    exit 1
+  fi
+
+  OIDC_TOKEN=$(echo "$OIDC_BODY" | jq -r '.value')
+  if [ -z "$OIDC_TOKEN" ] || [ "$OIDC_TOKEN" = "null" ]; then
+    echo "ERROR: OIDC response did not contain a token. Response: $OIDC_BODY" >&2
+    exit 1
+  fi
+
+  echo "Successfully fetched OIDC token (${#OIDC_TOKEN} chars)"
+
+  OIDC_TOKEN_FILE=$(mktemp)
+  echo "$OIDC_TOKEN" > "$OIDC_TOKEN_FILE"
+  chmod 644 "$OIDC_TOKEN_FILE"
+
   docker run -d --name query-harvester-container \
     --network host \
     -e MYSQL_RO_USER="root" \
@@ -25,9 +50,11 @@ else
     -e RUN_ID="$GITHUB_RUN_ID" \
     -e BRANCH="$BUILD_BRANCH" \
     -e PROD_TABLES="$prod_tables" \
-    -e spn_query_harvester_client_id="$SPN_GITHUB_PANORAMA_CLIENT_ID" \
-    -e spn_query_harvester="$SPN_GITHUB_PANORAMA" \
-    -e spn_query_harvester_tenant_id="$SPN_GITHUB_PANORAMA_TENANT_ID" \
+    -v "$OIDC_TOKEN_FILE":/var/run/secrets/azure/tokens/azure-identity-token:ro \
+    -e AZURE_CLIENT_ID="$SPN_GITHUB_PANORAMA_CLIENT_ID" \
+    -e AZURE_TENANT_ID="$SPN_GITHUB_PANORAMA_TENANT_ID" \
+    -e AZURE_FEDERATED_TOKEN_FILE="/var/run/secrets/azure/tokens/azure-identity-token" \
+    -e AZURE_AUTHORITY_HOST="https://login.microsoftonline.com/" \
     -e EVENTHUB_NS="query-harvester-ci.servicebus.windows.net" \
     -e EVENTHUB_NAME="ci-ingest" \
     -e HARVEST_PERIOD="100ms" \
