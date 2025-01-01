@@ -16,7 +16,7 @@ Gem::Specification.new do |s|
   s.homepage = "https://github.com/github/advisory-db/tree/main/packages/advisory_db_toolkit".freeze
   s.licenses = ["MIT".freeze]
   s.required_ruby_version = Gem::Requirement.new(">= 3.1.0".freeze)
-  s.rubygems_version = "3.6.7".freeze
+  s.rubygems_version = "3.6.9".freeze
   s.summary = "Gem consolidating common Advisory DB tools, including OSV translation logic for GHSA -> OSV and vice versa.".freeze
 
   s.installed_by_version = "3.6.9".freeze

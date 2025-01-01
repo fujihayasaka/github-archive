@@ -6,13 +6,12 @@ Gem::Specification.new do |s|
   s.version = "1.1.1".freeze
 
   s.required_rubygems_version = Gem::Requirement.new(">= 0".freeze) if s.respond_to? :required_rubygems_version=
-  s.metadata = { "github_repo" => "https://github.com/github/monolith-twirp-features" } if s.respond_to? :metadata=
   s.require_paths = ["lib".freeze]
   s.authors = ["GitHub".freeze]
-  s.date = "2022-08-04"
+  s.date = "2022-07-18"
   s.homepage = "https://github.com/github/monolith-twirp-features".freeze
   s.licenses = ["Nonstandard".freeze]
-  s.rubygems_version = "3.3.10".freeze
+  s.rubygems_version = "3.0.3".freeze
   s.summary = "Generated client/server code for github/github core data.".freeze
 
   s.installed_by_version = "3.6.9".freeze

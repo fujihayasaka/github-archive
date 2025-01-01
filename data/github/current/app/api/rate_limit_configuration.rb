@@ -283,23 +283,13 @@ class Api::RateLimitConfiguration
         duration: 1.hour,
       }
     when CODE_SCANNING_UPLOAD_FAMILY
-      integration_installation = request_context.try(:current_integration_installation)
-      authenticated_limit = GitHub.api_code_scanning_upload_rate_limit
-
-      ActiveRecord::Base.connected_to(role: :reading) do
-        # We constantize and create a new instance of the target type to avoid a database query to load the target.
-        # Having its type and ID is all that we need here.
-        target = T.let(integration_installation.nil? ? nil : integration_installation.target_type.constantize.new(id: integration_installation.target_id), T.nilable(GitHub::IFlipperActor))
-        if target.nil? ? GitHub.flipper.feature(:code_scanning_higher_api_rate_limit).enabled? : GitHub.flipper[:code_scanning_higher_api_rate_limit].enabled?(target)
-          authenticated_limit *= 6
-        end
-      end
-
       {
         request_context: request_context,
-        family: CODE_SCANNING_UPLOAD_FAMILY,
+        family: DEFAULT_FAMILY,
         unauthenticated_limit: GitHub.api_unauthenticated_rate_limit,
-        authenticated_limit: authenticated_limit.to_i,
+        authenticated_limit: GitHub.api_default_rate_limit,
+        enterprise_cloud_soft_limit: GitHub.api_enterprise_cloud_soft_rate_limit,
+        enterprise_cloud_hard_limit: GitHub.api_enterprise_cloud_hard_rate_limit,
         duration: 1.hour,
       }
     when CODE_SCANNING_AUTOFIX_FAMILY

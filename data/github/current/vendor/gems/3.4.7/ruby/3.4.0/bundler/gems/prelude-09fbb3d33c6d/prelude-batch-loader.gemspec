@@ -12,7 +12,7 @@ Gem::Specification.new do |s|
   s.email = "john.crepezzi@gmail.com".freeze
   s.files = ["lib/prelude.rb".freeze, "lib/prelude/enumerator.rb".freeze, "lib/prelude/method.rb".freeze, "lib/prelude/preloadable.rb".freeze, "lib/prelude/preloader.rb".freeze, "lib/prelude/version.rb".freeze, "spec/prelude_spec.rb".freeze, "spec/spec_helper.rb".freeze]
   s.licenses = ["MIT".freeze]
-  s.rubygems_version = "3.6.7".freeze
+  s.rubygems_version = "3.6.9".freeze
   s.summary = "ActiveRecord custom preloading".freeze
   s.test_files = ["spec/prelude_spec.rb".freeze, "spec/spec_helper.rb".freeze]
 

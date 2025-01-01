@@ -9,7 +9,7 @@ Gem::Specification.new do |s|
   s.metadata = { "github_repo" => "https://github.com/github/dependency-graph-platform" } if s.respond_to? :metadata=
   s.require_paths = ["lib".freeze]
   s.authors = ["GitHub".freeze]
-  s.date = "2024-10-17"
+  s.date = "2025-01-21"
   s.homepage = "https://github.com/github/dependency-graph-platform".freeze
   s.licenses = ["Nonstandard".freeze]
   s.required_ruby_version = Gem::Requirement.new(">= 3.0".freeze)

@@ -493,6 +493,11 @@ module Search
           !unauthorized_org_logins.include?(@single_repo.owner_display_login) &&
           @single_repo.visible_and_readable_by?(current_user)
 
+          # For non-public repositories, verify OAuth token has repo scope
+          if !@single_repo.public? && !can_search_private_repositories_for_user?
+            return nil
+          end
+
           return @single_repo.id
         end
 

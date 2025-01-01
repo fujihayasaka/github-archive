@@ -14,7 +14,7 @@ Gem::Specification.new do |s|
   s.email = ["mistydemeo@github.com".freeze]
   s.files = [".github/workflows/ruby.yml".freeze, ".gitignore".freeze, ".ruby-version".freeze, ".travis.yml".freeze, "Brewfile".freeze, "Gemfile".freeze, "Gemfile.lock".freeze, "README.md".freeze, "Rakefile".freeze, "lib/rollup.rb".freeze, "lib/rollup/version.rb".freeze, "rollup.gemspec".freeze, "script/bootstrap".freeze, "script/cibuild".freeze, "script/test".freeze]
   s.homepage = "https://github.com/github/rollup".freeze
-  s.rubygems_version = "3.6.7".freeze
+  s.rubygems_version = "3.6.9".freeze
   s.summary = "Generate a unique identifier for an exception".freeze
 
   s.installed_by_version = "3.6.9".freeze

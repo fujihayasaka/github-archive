@@ -10,10 +10,10 @@ Gem::Specification.new do |s|
   s.require_paths = ["lib".freeze]
   s.authors = ["@github/data-pipelines".freeze]
   s.bindir = "exe".freeze
-  s.date = "2025-02-05"
+  s.date = "2025-02-07"
   s.homepage = "https://github.com/github/aqueduct-client-ruby".freeze
   s.licenses = ["MIT".freeze]
-  s.rubygems_version = "3.4.20".freeze
+  s.rubygems_version = "3.6.2".freeze
   s.summary = "An aqueduct client for ruby".freeze
 
   s.installed_by_version = "3.6.9".freeze

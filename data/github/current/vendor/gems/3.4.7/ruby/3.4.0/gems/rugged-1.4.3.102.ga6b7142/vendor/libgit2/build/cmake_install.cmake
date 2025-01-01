@@ -1,4 +1,4 @@
-# Install script for directory: /workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2
+# Install script for directory: /github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -39,7 +39,7 @@ endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for each subdirectory.
-  include("/workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/src/cmake_install.cmake")
+  include("/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/src/cmake_install.cmake")
 
 endif()
 
@@ -51,5 +51,5 @@ endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
-file(WRITE "/workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/${CMAKE_INSTALL_MANIFEST}"
+file(WRITE "/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")

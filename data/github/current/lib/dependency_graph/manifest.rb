@@ -12,7 +12,7 @@ module DependencyGraph
       "package_json" => %w[package_lock_json yarn_lock],
       "pipenv" => ["pipenv_lock"],
       "composer_json" => ["composer_lock"],
-      "pyproject_toml" => ["poetry_lock"],
+      "pyproject_toml" => %w[poetry_lock uv_lock],
       "cargo_toml" => ["cargo_lock"],
       "pubspec_yaml" => ["pubspec_lock"],
     }

@@ -28,6 +28,7 @@ class DependencyManifestFile
   SETUP_PY_PATTERN = /(\A|\/)setup\.py\z/i
   PYPROJECT_TOML_PATTERN = /(\A|\/)pyproject\.toml\z/i
   POETRY_LOCK_PATTERN = /(\A|\/)poetry\.lock\z/i
+  UV_LOCK_PATTERN = /(\A|\/)uv\.lock\z/i
   POM_XML_PATTERN = /(\A|\/)pom\.xml\z/i
   NUSPEC_PATTERN = /\.nuspec\z/i
   CSPROJ_PATTERN = /(\A|\/)(.*)?\.csproj\z/i
@@ -75,6 +76,7 @@ class DependencyManifestFile
     SETUP_PY_PATTERN,
     PYPROJECT_TOML_PATTERN,
     POETRY_LOCK_PATTERN,
+    UV_LOCK_PATTERN,
     POM_XML_PATTERN,
     NUSPEC_PATTERN,
     CSPROJ_PATTERN,
@@ -120,6 +122,8 @@ class DependencyManifestFile
   #    composer.lock
   #    go.mod
   #    Package.resolved
+  #    environment.yml
+  #    uv.lock
   #
   # They'll be recognized at any point in the repository directory hierarchy
   # except within vendor directories as defined by Linguist.
@@ -153,7 +157,7 @@ class DependencyManifestFile
     case corresponding_manifest_type(path: path)
     when :gemfile, :gemfile_lock, :gemspec then :rubygems
     when :package_json, :package_lock_json, :yarn_lock, :pnpm_lock then :npm
-    when :requirements_txt, :pipfile, :pipfile_lock, :setup_py, :project_toml, :poetry_lock then :pip
+    when :requirements_txt, :pipfile, :pipfile_lock, :setup_py, :project_toml, :poetry_lock, :uv_lock then :pip
     when :pom_xml then :maven
     when :composer_json, :composer_lock then :composer
     when :nuspec, :csproj, :vbproj, :fsproj, :vcxproj, :package_config then :nuget
@@ -202,6 +206,7 @@ class DependencyManifestFile
     when SETUP_PY_PATTERN then :setup_py
     when PYPROJECT_TOML_PATTERN then :project_toml
     when POETRY_LOCK_PATTERN then :poetry_lock
+    when UV_LOCK_PATTERN then :uv_lock
 
     # Maven
     when POM_XML_PATTERN then :pom_xml

@@ -16,7 +16,7 @@ Gem::Specification.new do |s|
   s.homepage = "https://github.com/ruby/webrick".freeze
   s.licenses = ["Ruby".freeze, "BSD-2-Clause".freeze]
   s.required_ruby_version = Gem::Requirement.new(">= 2.4.0".freeze)
-  s.rubygems_version = "3.6.7".freeze
+  s.rubygems_version = "3.6.9".freeze
   s.summary = "HTTP server toolkit".freeze
 
   s.installed_by_version = "3.6.9".freeze
