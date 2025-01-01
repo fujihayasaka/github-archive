@@ -106,9 +106,13 @@ module PullRequests
 
         sig { returns(T::Boolean) }
         def include_rebase_commit?
-          !feature_enabled?(:merge_commit_request_skip_rebase_via_api) ||
-          @pull.merge_commit_allowed? ||
-          @pull.rebase_merge_allowed?
+          if GitHub.skip_rebase_commit_generation_from_rebase_merge_settings
+            @pull.rebase_merge_allowed?
+          else
+            !feature_enabled?(:merge_commit_request_skip_rebase_via_api) ||
+            @pull.merge_commit_allowed? ||
+            @pull.rebase_merge_allowed?
+          end
         end
 
         private

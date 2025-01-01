@@ -7,11 +7,12 @@
 # even when all jobs have completed, which can cause the in-progress key to not be deleted.
 module SecurityProductsEnablement
   class ProgressTrackerKeysMonitorJob < ApplicationJob
+    INTERVAL = 10.minutes
 
     queue_as :security_configurations
     retry_on_dirty_exit
 
-    schedule interval: 10.minutes, condition: -> { !GitHub.enterprise? }
+    schedule interval: INTERVAL, condition: -> { !GitHub.enterprise? }
 
     sig { void }
     def perform
@@ -20,21 +21,19 @@ module SecurityProductsEnablement
       org_ids = redis.smembers(SecurityProductsEnablement::JobProgressTracker::ORG_IDS_KEY).map(&:to_i)
       org_ids.each do |org_id|
         job_progress_tracker = SecurityProductsEnablement::JobProgressTracker.new(org_id)
-        # If the in-progress key is still set, we assume that the job is still running.
-        next if job_progress_tracker.in_progress?
-        # If the remaining jobs key is nil, it means that the job has finished and the keys have been cleaned up.
-        remaining_jobs = job_progress_tracker.remaining_jobs
-        next if remaining_jobs.nil?
+        next unless job_progress_tracker.stalled?
 
         GitHub.logger.info(
           "Found stale security configurations job progress tracking keys",
           org_id:,
-          remaining_jobs:,
-          total_jobs: job_progress_tracker.total_jobs
+          remaining_jobs: job_progress_tracker.remaining_jobs,
+          total_jobs: job_progress_tracker.total_jobs,
+          total_jobs_locked: job_progress_tracker.total_jobs_locked?,
         )
-        GitHub.dogstats.increment("security_products_enablement.progress_tracker_monitor", tags: ["org_id:#{org_id}"])
 
-        redis.srem(SecurityProductsEnablement::JobProgressTracker::ORG_IDS_KEY, org_id)
+        GitHub.dogstats.increment("security_products_enablement.progress_tracker_monitor")
+
+        job_progress_tracker.clear
       end
     end
   end

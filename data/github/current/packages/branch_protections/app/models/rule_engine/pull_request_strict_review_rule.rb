@@ -407,10 +407,15 @@ module RuleEngine
       payload[:required_reviewers] = evaluate_result.statuses if evaluate_result.statuses
 
       has_copilot_co_author_accepting_reviews = begin
-        pull_author = pull_request.user
-        if pull_author.is_a?(Bot) && pull_author == Apps::Privileged.integration(:copilot_swe_agent).bot
-          pull_request.reviews.load
-          pull_request.reviews.any? { |review| review.approved? && pull_request.is_copilot_co_author?(review.user) }
+        if GitHub.enterprise?
+          # GitHub Enterprise does not support Copilot
+          false
+        else
+          pull_author = pull_request.user
+          if pull_author.is_a?(Bot) && pull_author == Apps::Privileged.integration(:copilot_swe_agent)&.bot
+            pull_request.reviews.load
+            pull_request.reviews.any? { |review| review.approved? && pull_request.is_copilot_co_author?(review.user) }
+          end
         end
       end
       copilot_co_author_addendum = has_copilot_co_author_accepting_reviews ? " #{COPILOT_CO_AUTHOR_APPROVAL_ADDENDUM}" : ""

@@ -15,6 +15,8 @@ class Stafftools::EnterpriseTeamLimitsController < StafftoolsController
     ApplicationRecord::Billing,
     only: [:show]
 
+  before_action :ensure_visible
+
   def show
     if request_for_business?
       render "stafftools/enterprise_team_limits/show",
@@ -70,6 +72,14 @@ class Stafftools::EnterpriseTeamLimitsController < StafftoolsController
   end
 
   private
+
+  def ensure_visible
+    # Hide in GHES
+    render_404 if GitHub.single_business_environment?
+
+    # Hide if BusinessTeam disabled for the business
+    render_404 if request_for_business? && !BusinessTeam.enabled_for_enterprise?(business: this_business)
+  end
 
   def request_for_business?
     this_business.present?

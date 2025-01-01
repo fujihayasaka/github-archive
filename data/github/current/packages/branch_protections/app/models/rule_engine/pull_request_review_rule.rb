@@ -634,20 +634,25 @@ module RuleEngine
       last_pusher_policy = last_pusher_policy_info(reviews, rule_config, commit_oid, consider_open_pulls_only)
 
       has_copilot_co_author_accepting_reviews = begin
-        pull = begin
-          if pull_request
-            pull_request
-          else
-            repository.pull_requests.open_pulls.find_by(head_sha: commit_oid, base_ref: ref_update.branch_name, work_in_progress: false) # domain-isolation-query-violation:ignore:packages/issues (SELECT)
-          end
-        end
-        if pull.nil?
+        if GitHub.enterprise?
+          # GitHub Enterprise does not support Copilot
           false
         else
-          pull_author = pull.user
-          if pull_author.is_a?(Bot) && pull_author == Apps::Privileged.integration(:copilot_swe_agent).bot
-            pull.reviews.load
-            pull.reviews.any? { |review| review.approved? && pull.is_copilot_co_author?(review.user) }
+          pull = begin
+            if pull_request
+              pull_request
+            else
+              repository.pull_requests.open_pulls.find_by(head_sha: commit_oid, base_ref: ref_update.branch_name, work_in_progress: false) # domain-isolation-query-violation:ignore:packages/issues (SELECT)
+            end
+          end
+          if pull.nil?
+            false
+          else
+            pull_author = pull.user
+            if pull_author.is_a?(Bot) && pull_author == Apps::Privileged.integration(:copilot_swe_agent)&.bot
+              pull.reviews.load
+              pull.reviews.any? { |review| review.approved? && pull.is_copilot_co_author?(review.user) }
+            end
           end
         end
       end

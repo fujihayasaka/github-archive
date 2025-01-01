@@ -333,8 +333,8 @@ module GitHub
       #    Subscribed users are repo admins, or are subscribed to security alerts via settings,
       #    and already receive notification emails for all secrets found in the repo.
       #
-      # 2) Do not notify if the secret author has ignored the repo.
-      # 3) Do not notify if the secret author is no longer a member of the org.
+      # 2) Do not notify if the secret author's email is not verified.
+      # 3) Do not notify if the secret author no longer has access to the repo.
       sig { params(repo: Repository, user: T.nilable(User), email: T.nilable(String), subscribed_users: T::Array[User]).returns(T::Boolean) }
       def do_not_notify_author?(repo, user, email, subscribed_users)
         return true unless user.present?
@@ -351,11 +351,8 @@ module GitHub
         # ensure user has access to the repo
         return true unless ::SecretScanning::AccessControl::CommitAuthorView.new(repo).has_access_to_repository?(user)
 
-        # Get the user's subscription status for the repo.
-        subscription_status = GitHub.newsies.subscription_status(user, repo)
-
-        # do not send email if user has chosen to ignore this repo
-        subscription_status.ignored?
+        # Always notify commit authors (unless they're already getting the admin email)
+        false
       end
 
       sig do
