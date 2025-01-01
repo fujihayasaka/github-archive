@@ -69,10 +69,6 @@ module Profiles
 
       respond_to do |format|
         format.html do
-          # Make sure the browser caches AJAX responses separately from regular
-          # HTML responses.
-          response.headers["Vary"] = "X-Requested-With"
-
           instrument_hydro_user_profile_page_view
 
           render_user_profile

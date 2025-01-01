@@ -38,11 +38,7 @@ module ApplicationController::TurboDependency
   # Ensures Turbo requests are always cached seperately from their full response
   # counterparts.
   def set_vary_turbo
-    if response.headers["Vary"]
-      response.headers["Vary"] += ", Turbo-Visit, Turbo-Frame"
-    else
-      response.headers["Vary"] = "Turbo-Visit, Turbo-Frame"
-    end
+    add_headers_to_vary(%w(Turbo-Visit Turbo-Frame))
   end
 
   # We want to respond with a minimal layout for partial requests

@@ -48,7 +48,7 @@ module ControllerMethods
 
       request.format = :html if request.format.blank? || request.format.nil?
 
-      response.headers["Vary"] = [response.headers["Vary"], "Accept"].compact.join(", ")
+      add_headers_to_vary(["Accept"])
 
       request.env["issue.record_id"] = issue.id
     end

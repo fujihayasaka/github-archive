@@ -53,7 +53,6 @@ class SecretScanningBypassRequestsController < AbstractRepositoryController
 
   sig { void }
   def index
-    return render_404 if current_repository.fork?
     render_react_app(
       payload: rules_bypass_requests_payload(
         viewing_source: current_repository,

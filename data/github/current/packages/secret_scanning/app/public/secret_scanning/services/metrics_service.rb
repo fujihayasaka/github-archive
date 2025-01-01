@@ -217,7 +217,7 @@ module SecretScanning
         ])
       end
       def self.get_delegated_bypass_metrics(scope, actor, repo_ids: [], exclude_repo_ids: [], repo_owners: nil, repos_in_archived_state: nil, start_date: nil, end_date: nil, token_filters: nil, bypass_request_ids: [])
-        bypass_requests = Exemptions::ExemptionRequest.where(request_type: SecretScanning::Constants::EXEMPTION_REQUEST_TYPE)
+        bypass_requests = Exemptions::ExemptionRequest.not_expired.where(request_type: SecretScanning::Constants::EXEMPTION_REQUEST_TYPE)
 
         if scope.is_a?(Business)
           owner_ids = []
