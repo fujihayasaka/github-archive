@@ -4412,6 +4412,11 @@ module GitHub
     end
     attr_writer :suspended_users_visible
 
+    # Determine whether to show the enterprise suspend form.
+    def show_enterprise_suspend_form?
+      enterprise?
+    end
+
     # Determine whether to show the suspended/spammy alerts at the top of the
     # profile page. Enabled by default for enterprise only
     #
@@ -8905,6 +8910,18 @@ module GitHub
       @proxima_service_identity_default_secret_key
     end
     attr_writer :proxima_service_identity_default_secret_key
+
+    # Populated by the ENTERPRISE_WEB_SOCKETS_RATE_LIMIT variable or alternatively enabled with a dotcom feature flag.
+    # (defaults to rate limiting on the 100th request)
+    #
+    # GHES admins can configure this rate limit by running:
+    # ghe-config app.github.web-sockets-rate-limit 50 && ghe-config-apply
+    # GHES admins can disable this rate limit by running:
+    # ghe-config app.github.web-sockets-rate-limit 0 && ghe-config-apply
+    def web_sockets_rate_limit
+      return @web_sockets_rate_limit if defined?(@web_sockets_rate_limit)
+      @web_sockets_rate_limit = [0, GitHub.environment.fetch("ENTERPRISE_WEB_SOCKETS_RATE_LIMIT", "99").to_i].max
+    end
   end
 end
 

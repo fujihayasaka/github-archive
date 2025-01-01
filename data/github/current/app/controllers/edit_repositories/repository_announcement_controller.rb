@@ -59,12 +59,12 @@ class EditRepositories::RepositoryAnnouncementController < AbstractRepositoryCon
       return redirect_to edit_repository_announcement_path
     end
 
-    banner.upsert_for(current_repository)
+    banner.upsert_for(current_repository, current_user)
     redirect_to edit_repository_announcement_path, notice: "The announcement was successfully published. It will be displayed to all users of this repository."
   end
 
   def destroy
-    EnterpriseBanner.clear_for(current_repository)
+    EnterpriseBanner.clear_for(current_repository, current_user)
     redirect_to edit_repository_announcement_path, notice: "Unpublished the announcement."
   end
 

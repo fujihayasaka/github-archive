@@ -168,7 +168,7 @@ class Api::AnnouncementBanners < Api::App
     if !existing_banner.nil? && existing_banner == new_banner
       deliver_banner_if_exists existing_banner
     elsif new_banner.valid?
-      new_banner.upsert_for(owner)
+      new_banner.upsert_for(owner, current_user)
       deliver_banner_if_exists new_banner
     else
       deliver_error!(400, message: new_banner.errors.full_messages.to_sentence)
@@ -176,7 +176,7 @@ class Api::AnnouncementBanners < Api::App
   end
 
   def handle_delete(owner)
-    EnterpriseBanner.clear_for(owner)
+    EnterpriseBanner.clear_for(owner, current_user)
     deliver_empty status: 204
   end
 

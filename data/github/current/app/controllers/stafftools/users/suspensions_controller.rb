@@ -17,8 +17,12 @@ class Stafftools::Users::SuspensionsController < StafftoolsController
     missing_fields = [:reason, :content_formats, :created_at, :source].select { |field| params[field].blank? }
     dsa_submission_not_required = %w[ACCOUNT_TAKEOVER HIDE_FROM_PUBLIC OTHER]
 
-    if !dsa_submission_not_required.include?(params[:reason]) && missing_fields.any?
+    if !GitHub.show_enterprise_suspend_form? && !dsa_submission_not_required.include?(params[:reason]) && missing_fields.any?
       flash[:error] = "Could not suspend user(s). Please submit responses for the required fields: #{missing_fields.join(", ")}"
+      redirect_to stafftools_user_administrative_tasks_path(this_user)
+      return
+    elsif GitHub.show_enterprise_suspend_form? && params[:reason].nil?
+      flash[:error] = "Could not suspend user(s). Please submit a reason for the suspension"
       redirect_to stafftools_user_administrative_tasks_path(this_user)
       return
     end
@@ -32,18 +36,23 @@ class Stafftools::Users::SuspensionsController < StafftoolsController
       if !this_user.suspendable?
         flash[:error] = "Site admins can not be suspended. Remove site admin privileges before "\
           "suspending."
-      elsif this_user.suspend(
-        reason,
-        actor: current_user,
-        send_email: !dsa_submission_not_required.include?(reason),
-        dsa_source: dsa_submission_not_required.include?(reason) ? nil : source,
-        notes: notes,
-        content_formats: content_formats,
-        content_creation_date: DateTime.parse(created_at || DateTime.now.to_s),
-        items_reported_to_ncmec: params[:items_reported_to_ncmec]
-      )
-        billing_part = " and their billing is locked!" if GitHub.billing_enabled?
-        flash[:notice] = "#{this_user.login} suspended#{billing_part}"
+      elsif GitHub.show_enterprise_suspend_form?
+        show_suspension_results(this_user.suspend(
+          reason,
+          actor: current_user,
+          send_email: params[:send_email] ? true : false
+        ))
+      elsif !GitHub.show_enterprise_suspend_form?
+        show_suspension_results(this_user.suspend(
+          reason,
+          actor: current_user,
+          send_email: !dsa_submission_not_required.include?(reason),
+          dsa_source: dsa_submission_not_required.include?(reason) ? nil : source,
+          notes: notes,
+          content_formats: content_formats,
+          content_creation_date: DateTime.parse(created_at || DateTime.now.to_s),
+          items_reported_to_ncmec: params[:items_reported_to_ncmec]
+        ))
       else
         flash[:error] = this_user.errors[:base].to_sentence
       end
@@ -74,5 +83,16 @@ class Stafftools::Users::SuspensionsController < StafftoolsController
     end
 
     redirect_to stafftools_user_administrative_tasks_path(this_user)
+  end
+
+  private
+
+  def show_suspension_results(suspension_results)
+    if suspension_results
+      billing_part = " and their billing is locked!" if GitHub.billing_enabled?
+      flash[:notice] = "#{this_user.login} suspended#{billing_part}"
+    else
+      flash[:error] = this_user.errors[:base].to_sentence
+    end
   end
 end

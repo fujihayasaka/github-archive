@@ -105,7 +105,7 @@ module Commits::ReactPayloadDataDependency
       if preload_errors.include?(:commit_status_check)
         status_check_status = { state: "error" }
       else
-        status_check_status = GitHub.actions_enabled? ? commit.status_check_rollup.as_json(only: %w[state short_text]) : nil
+        status_check_status = commit.status_check_rollup.as_json(only: %w[state short_text])
       end
 
       {

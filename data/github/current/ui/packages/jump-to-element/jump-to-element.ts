@@ -117,6 +117,14 @@ export class JumpToElement extends HTMLElement {
   // Handle selecting an item from the suggestion list
   handleSuggestionClick = (event: Event) => {
     const link = event.currentTarget as HTMLAnchorElement
+
+    // If it's a mousedown event, prevent default to avoid losing focus
+    // but allow the click event to proceed naturally for navigation
+    if (event.type === 'mousedown') {
+      event.preventDefault()
+      return
+    }
+
     // Ensure we have an up-to-date search q param on the search suggestion link on click
     if (link.getAttribute('data-target-type') === 'Search') {
       link.href = updateSearchURL(this.queryText, link.href)
