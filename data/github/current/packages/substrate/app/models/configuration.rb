@@ -194,7 +194,7 @@ class Configuration
 
   def initialize(target, entries: nil)
     @target = target
-    @entries = entries
+    @entries = entries unless target == GitHub # never memoize entries for the global target
   end
 
   # Internal: Get a snapshot of the current configuration

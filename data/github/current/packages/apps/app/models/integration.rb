@@ -1276,7 +1276,11 @@ class Integration < ApplicationRecord::Domain::Integrations
     return true if application_callback_urls.exists?(url: url)
 
     if Apps::Privileged.capable?(:proxima_first_party_sync, app: self)
-      return application_callback_urls.map(&:url).any? { |u| u.match?(url) }
+      if FeatureFlag.vexi.enabled?(:oauth_redirect_exact_match_fix, self, default: false)
+        return application_callback_urls.any? { |callback| callback.url == url }
+      else
+        return application_callback_urls.any? { |callback| callback.url.match?(url) }
+      end
     end
 
     false

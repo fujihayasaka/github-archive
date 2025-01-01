@@ -41,6 +41,10 @@ class Memexes::PartialsController < Memexes::Controller
 
     return render_404 if copy_as_template && !this_memex.owner.is_a?(Organization)
 
+    if copy_as_template || this_memex.private?
+      return render_404 unless this_memex.viewer_can_write?(current_user)
+    end
+
     if params[:template_id]
       return render_404 if !this_memex.owner.is_a?(Organization)
 

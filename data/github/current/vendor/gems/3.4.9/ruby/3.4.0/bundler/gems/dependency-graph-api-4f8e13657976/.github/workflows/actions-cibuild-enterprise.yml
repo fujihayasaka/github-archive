@@ -1,0 +1,67 @@
+name: Build enterprise container
+# Run this action on any pull request, push to the master branch
+on:
+  workflow_call:
+  pull_request: {}
+  push:
+    branches:
+      - main
+      - master
+      - enterprise-*.*-release
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  dependency-graph-api:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      # The CONTAINER_BUILDER_TOKEN requires repos hosting private Go modules
+      # to be added to the "container-builder" org team. See Dockerfile.ghex
+      # comments for details and Issue links.
+      - name: Log into registry
+        run: echo "${{ secrets.CONTAINER_BUILDER_TOKEN }}" | docker login ghcr.io -u ${{github.actor}} --password-stdin
+
+      - name: obtain OIDC token for goproxy
+        uses: github/setup-goproxy@v1.1.0
+
+      - name: Build containers
+        run: script/ghex-ci-docker-build
+        env:
+          GITHUB_TOKEN: ${{ secrets.CONTAINER_BUILDER_TOKEN }}
+
+      - name: Push result to GPR if a push to master
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ] || [ "${{ github.ref }}" = "refs/heads/master" ]; then
+            is_main_branch=true
+          fi
+
+          if [ "${{ github.event_name }}" = "push" ] && [ "${is_main_branch}" = true ]; then
+            docker_push_url=ghcr.io/github/dependency-graph-api/dependency-graph-api:${{ github.sha }}
+            echo "JANKY_SHA1=${{ github.sha }}" >> $GITHUB_ENV
+          else
+            docker_push_url=ghcr.io/github/dependency-graph-api/dependency-graph-api:${{ github.sha }}
+            docker tag ghcr.io/github/dependency-graph-api/dependency-graph-api:${{ github.sha }} "$docker_push_url"
+            echo "JANKY_SHA1=${{ github.event.pull_request.head.sha }}" >> $GITHUB_ENV
+          fi
+          manifest_digest=$(docker push $docker_push_url | tail -1 | cut -f 3 -d " ")
+          docker_image_url="dependency-graph-api=$docker_push_url@$manifest_digest"
+          echo "docker_image_url: $docker_image_url"
+          echo "DOCKER_IMAGE_URL=$docker_image_url" >> $GITHUB_ENV
+          ref="${{ github.ref }}"
+          merge_branch=${ref#"refs/heads/"}
+
+      - name: Queue an enterprise2-dependency-graph-api-docker Build
+        run: |
+          ref="${{ github.ref }}"
+          merge_branch=${ref#"refs/heads/"}
+          branch_name=${GITHUB_HEAD_REF:-$merge_branch}
+          curl -v -X POST \
+            -u "hubot:${{ secrets.API_AUTH_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"buildable_name":"enterprise2-dependency-graph-api-docker","repo":"dependency-graph-api","branch_name": "'"$branch_name"'","env_vars":{"JANKY_ENV_DOCKER_IMAGE_URL": "${{ env.DOCKER_IMAGE_URL }}", "JANKY_ENV_SHA1": "${{ env.JANKY_SHA1 }}" },"force":"true","room_id":"#builds"}' \
+            "https://janky.githubapp.com/api/builds"

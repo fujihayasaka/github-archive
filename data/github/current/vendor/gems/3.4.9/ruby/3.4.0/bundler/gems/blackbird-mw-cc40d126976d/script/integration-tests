@@ -1,0 +1,137 @@
+#! /usr/bin/env bash
+#
+#/ Usage: script/integration-tests [--fast]
+#/
+#/ This script runs end-to-end integration tests for blackbird-mw.
+#/
+#/ --fast  - Run the integration tests without fully tearing down and restarting the docker compose environment.
+
+set -euo pipefail
+IFS=$'\n\t'
+
+function usage {
+    grep "^#/" "${BASH_SOURCE[0]}" | cut -c 4-
+}
+
+cd "$(dirname "$0")/.."
+
+fast=false
+while (( $# )); do
+    case $1 in
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        --fast)
+            fast=true
+            ;;
+        *)
+            usage
+            exit 1
+            ;;
+    esac
+    shift
+done
+
+# Default the cluster and corpus for integration tests
+export BLACKBIRD_MW_OUTPUT_CORPUS=${BLACKBIRD_MW_OUTPUT_CORPUS:-blue}
+export BLACKBIRD_CLUSTERNAME=${BLACKBIRD_CLUSTERNAME:-zeta}
+
+if $fast; then
+    echo "Running against: ${BLACKBIRD_MW_OUTPUT_CORPUS}/${BLACKBIRD_CLUSTERNAME} in fast mode"
+else
+    echo "Running against: ${BLACKBIRD_MW_OUTPUT_CORPUS}/${BLACKBIRD_CLUSTERNAME}"
+    echo "::group::Docker version info"
+    docker compose version
+    docker version
+    echo "::endgroup::"
+
+    echo "::group::Running script/setup"
+    # Bring up blackbird-mw and it's dependencies (spokes, kafka, mysql, redis, blackbird)
+    script/setup --spokes
+    echo "::endgroup::"
+fi
+
+overlays=(-f docker-compose.yml -f docker-compose.mw.yml -f docker-compose.build-blackbird.yml)
+
+# Wait on a status endpoint
+wait_until_ready() {
+    i=0
+    until curl -s --fail $1 > /dev/null; do
+        # try up to 5 minutes and then give up
+        if (( i >= 300 )); then
+        echo "timed out waiting for services to be ready"
+         exit 1
+        fi
+
+        sleep 1
+        let "i+=1"
+    done
+}
+
+echo "::group::Waiting for all middleware services to report ready"
+wait_until_ready http://localhost:9887/ready # ingest
+wait_until_ready http://localhost:9888/ready # query
+wait_until_ready http://localhost:9889/ready # admin
+docker compose "${overlays[@]}" ps
+echo "::endgroup::"
+
+sleep 5 # Give the compose environment a moment to startup
+
+echo "::group::Docker image versions"
+docker image ls
+echo "::endgroup::"
+
+echo "::group::Running Go integration tests for ${BLACKBIRD_MW_OUTPUT_CORPUS}/${BLACKBIRD_CLUSTERNAME}"
+set +e
+RUN_INT_TESTS=True BLACKBIRD_MW_ENV=test go test -p 1 -v ./internal/test/integration/*.go
+exit_code=$?
+echo "::endgroup::"
+
+if [[ "${BLACKBIRD_DUMP_LOGS:-0}" != "0" ]]; then
+    echo "::group::Container status"
+    docker compose "${overlays[@]}" ps
+    echo "::endgroup::"
+
+    echo "::group::blackbird-mw-admin logs"
+    docker compose "${overlays[@]}" logs blackbird-mw-admin
+    echo "::endgroup::"
+    echo "::group::blackbird-mw-ingest logs"
+    docker compose "${overlays[@]}" logs blackbird-mw-ingest
+    echo "::endgroup::"
+    echo "::group::blackbird-mw-query logs"
+    docker compose "${overlays[@]}" logs blackbird-mw-query
+    echo "::endgroup::"
+    echo "::group::blackbird-mw-semantic logs"
+    docker compose "${overlays[@]}" logs blackbird-mw-semantic
+    echo "::endgroup::"
+    echo "::group::blackbird-1 logs"
+    docker compose "${overlays[@]}" logs blackbird-1
+    echo "::endgroup::"
+    echo "::group::blackbird-2 logs"
+    docker compose "${overlays[@]}" logs blackbird-2
+    echo "::endgroup::"
+    echo "::group::blackbird-cache-1 logs"
+    docker compose "${overlays[@]}" logs blackbird-cache-1
+    echo "::endgroup::"
+
+    echo "::group::Database state"
+    docker compose exec -T mysql \
+        mysql --user root --database blackbird_test --execute \
+        "SELECT * FROM blackbird_corpus_state;"
+    echo "::endgroup::"
+
+    echo "::group::Index state -- no. of index files (blackbird-1)"
+    docker compose exec -T blackbird-1 find /data/blackbird/idx -type f | wc -l
+    echo "::endgroup::"
+
+    echo "::group::Index state -- no. of index files (blackbird-2)"
+    docker compose exec -T blackbird-2 find /data/blackbird/idx -type f | wc -l
+    echo "::endgroup::"
+
+    echo "::group::Kafka topics"
+    docker compose exec -T kafka kafka-topics --zookeeper blackbird-mw-zookeeper:2182 --list --exclude-internal
+    echo "::endgroup"
+fi
+
+exit $exit_code

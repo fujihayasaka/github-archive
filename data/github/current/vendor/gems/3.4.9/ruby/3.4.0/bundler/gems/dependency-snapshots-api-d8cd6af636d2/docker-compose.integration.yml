@@ -1,0 +1,55 @@
+version: '3.4'
+
+services:
+  integration_tests:
+    image: "dependency-snapshots-api-test"
+    network_mode: "host"
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    entrypoint: ./script/test-integration
+#    ports:
+#      - '127.0.0.1:28081:28081'
+#    expose:
+#      - 28081
+
+  dsapi:
+    image: "dependency-snapshots-api"
+    network_mode: "host"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    entrypoint: /app/bin/ds-api
+    environment:
+      - DEPENDENCY_SNAPSHOTS_DB_HOST=localhost
+      - DEPENDENCY_SNAPSHOTS_DB_PORT=3001
+      - DEPENDENCY_SNAPSHOTS_DB=dependency_snapshots_test
+      - ENABLE_AZURE_STORAGE_FOR_SNAPSHOT_BLOBS=1
+      - SPOKES_URL=http://localhost:28081 # this is the hostname running the docker daemon - and allows the api to loopback to the integration test mocks
+#    ports:
+#      - '127.0.0.1:9597:9597'
+#    expose:
+#      - 9597
+
+  integration_db:
+    image: mysql:8.4.0
+    command:
+      - --mysql-native-password=ON
+      - --sql_mode=NO_AUTO_VALUE_ON_ZERO,STRICT_ALL_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+    environment:
+      MYSQL_DATABASE: dependency_snapshots_test
+      MYSQL_ALLOW_EMPTY_PASSWORD: 1
+    tmpfs:
+      - /var/lib/mysql
+    ports:
+      - '127.0.0.1:3001:3306'
+    expose:
+      - 3306
+    healthcheck:
+      test: ["CMD", "mysql", "-e", "select version();"]
+      interval: 2s
+      timeout: 2s
+      retries: 3
+      start_period: 30s
+
+

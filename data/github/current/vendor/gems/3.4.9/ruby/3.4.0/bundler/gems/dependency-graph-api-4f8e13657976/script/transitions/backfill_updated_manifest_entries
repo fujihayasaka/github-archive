@@ -1,0 +1,200 @@
+#!/usr/bin/env ruby
+
+require_relative "../../config/environment"
+
+class BackfillMissedManifestEntries
+  include DependencyGraph::Tracing
+
+  CHECKPOINT_NAME = "transitions/backfill_updated_manifest_entries"
+
+  attr_reader :batch_size, :from_date, :to_date, :throttler
+
+  def initialize(batch_size:, from_start:, from_date:, to_date:)
+    # If we start from the beginning, we need to clear the checkpoint
+    if from_start
+      checkpoint.reset!
+    end
+
+    @batch_size = batch_size
+    @from_date = from_date
+    @to_date = to_date
+    @throttler = DependencyGraph.throttler
+  end
+
+  trace_method :execute
+  def execute
+    batches_processed = 0
+    # Since the checkpoint contains the last ID that was already processed, start at the next one
+
+    include_to_date = nil
+    unless to_date.nil?
+      include_to_date = "AND dg_manifest_dependencies.updated_at < '%s'"
+    end
+
+    cte_ids = <<~SQL
+      SELECT id FROM dg_manifest_dependencies
+        WHERE dg_manifest_dependencies.id > %d
+          AND dg_manifest_dependencies.updated_at > '%s'
+          #{include_to_date}
+        ORDER BY id ASC LIMIT %d
+    SQL
+
+    cte = <<~SQL
+    SELECT * FROM dg_manifest_dependencies
+      WHERE dg_manifest_dependencies.id IN (%s)
+    SQL
+
+    insert_packages = <<~SQL
+      INSERT IGNORE INTO dg_manifest_packages (package_name, package_manager)
+      WITH dependencies AS (#{cte})
+      SELECT package_name, package_manager FROM dependencies GROUP BY package_name, package_manager ORDER BY package_name, package_manager
+    SQL
+    insert_package_versions = <<~SQL
+      INSERT IGNORE INTO dg_manifest_package_versions (manifest_package_id, requirements, encoded_lower_bound, encoded_upper_bound)
+      WITH dependencies AS (#{cte})
+      SELECT p.id, requirements, encoded_lower_bound, encoded_upper_bound
+      FROM dependencies JOIN dg_manifest_packages p ON dependencies.package_manager = p.package_manager AND dependencies.package_name = p.package_name
+      GROUP BY p.id, requirements, encoded_lower_bound, encoded_upper_bound
+      ORDER BY p.id, requirements, encoded_lower_bound, encoded_upper_bound
+    SQL
+    insert_entries = <<~SQL
+      INSERT INTO dg_manifest_entries (manifest_id, manifest_package_version_id, scope, last_seen_at_revision, created_at, updated_at)
+      WITH dependencies AS (#{cte})
+      SELECT dependencies.manifest_id, pv.id, scope, last_seen_at_revision, created_at, updated_at
+      FROM dependencies JOIN dg_manifest_packages p ON dependencies.package_manager = p.package_manager AND dependencies.package_name = p.package_name
+      JOIN dg_manifest_package_versions pv ON pv.manifest_package_id = p.id AND dependencies.requirements = pv.requirements
+      GROUP BY manifest_id, pv.id, scope, last_seen_at_revision, created_at, updated_at
+      ORDER BY manifest_id, pv.id, scope, last_seen_at_revision, created_at, updated_at
+      ON DUPLICATE KEY UPDATE last_seen_at_revision = VALUES(last_seen_at_revision), scope = LEAST(scope, VALUES(scope)), updated_at = VALUES(updated_at)
+    SQL
+
+
+    start = checkpoint.get
+    while true
+      retries = 0
+      begin
+        if to_date.nil?
+          args = [start, from_date.to_fs(:db), batch_size]
+        else
+          args = [start, from_date.to_fs(:db), to_date.to_fs(:db), batch_size]
+        end
+
+        ids = ActiveRecord::Base.connection.execute(cte_ids % args).rows.flatten
+        break if ids.empty?
+
+        throttler.throttle(:"dependency-graph") do
+          start_time = Time.now
+          DependencyGraph.logger.with_named_tags(
+            "gh.dependency_graph.backfill.batch_size": batch_size,
+            "gh.dependency_graph.backfill.batch_number": (batches_processed + 1),
+            "gh.dependency_graph.backfill.start_time": start_time,
+            "gh.dependency_graph.backfill.start_manifest_dependency_id": ids.first,
+          ) do
+
+            ids_list = ids.join(", ")
+
+            ActiveRecord::Base.connection.execute(insert_packages % ids_list)
+            ActiveRecord::Base.connection.execute(insert_package_versions % ids_list)
+            ActiveRecord::Base.connection.execute(insert_entries % ids_list)
+
+            batches_processed += 1
+
+            # Sets checkpoint to the last _ManifestDependency_ object that was processed.
+            checkpoint.set!(ids.last)
+
+            end_time = Time.now
+            elapsed = end_time - start_time
+            DependencyGraph.logger.info(
+              "Processed #{ids.size} entries in batch #{batches_processed}",
+              "gh.dependency_graph.backfill.end_time": end_time,
+              "gh.dependency_graph.backfill.elapsed": elapsed,
+            )
+
+            start = ids.last
+          end
+        end
+      rescue ActiveRecord::StatementInvalid, Freno::Throttler::WaitedTooLong => e
+        Failbot.report(e)
+        retries += 1
+        if retries < 3
+          DependencyGraph.logger.info("Retrying batch",
+                                      "gh.dependency_graph.backfill.batch_start": start)
+          retry
+        end
+      end
+    end
+  end
+
+  private
+
+  def checkpoint
+    @checkpoint ||= Checkpoint
+      .with_name(CHECKPOINT_NAME)
+      .first_or_create!
+  end
+end
+
+options = {
+  batch_size: 1000,
+  from_start: false,
+  from_date: nil,
+  to_date: nil,
+}
+
+enable_console_appender = false
+enable_query_logging = false
+
+OptionParser.new do |opts|
+  opts.on("--batch-size N", Integer, "Set the batch size for the backfill") do |bs|
+    options[:batch_size] = bs
+  end
+
+  opts.on("--from-start", "Start from the beginning of the table instead of the checkpoint") do
+    options[:from_start] = true
+  end
+
+  opts.on("--from-date D", String, "Process ManifestDependencies with an updated_at date that is greater than or equal to D.") do |d|
+    parsed = Date.parse(d).to_datetime
+    options[:from_date] = parsed
+  end
+
+  opts.on("--to-date D", String, "Process ManifestDependencies with an updated_at date that is less than D.") do |d|
+    parsed = Date.parse(d).to_datetime
+    options[:to_date] = parsed
+  end
+
+  opts.on("--stdout", "Enable console appender") do
+    enable_console_appender = true
+  end
+
+  opts.on("--log-sql", "Enable query logging") do
+    enable_query_logging = true
+  end
+end.parse!
+
+if enable_console_appender
+  SemanticLogger.add_appender(io: $stdout) unless SemanticLogger.appenders.console_output?
+end
+
+if enable_query_logging
+  # Special case: if we are in development then print the raw SQL queries.
+  # This is a little nicer to read than the tagged log output.
+  if Rails.env.development?
+    ActiveSupport::Notifications.subscribe("sql.active_record") do |_name, _start, _finish, _id, payload|
+      sql = payload[:sql]
+      puts "#{sql}\n" unless sql.blank?
+    end
+  else
+    # In production/any other environment, log the SQL queries as structured data, as normal.
+    RailsSemanticLogger::ActiveRecord::LogSubscriber.logger.level = :debug
+  end
+end
+
+raise OptionParser::MissingArgument, "--batch-size is required" if options[:batch_size].nil?
+raise OptionParser::MissingArgument, "--from-date is required" if options[:from_date].nil?
+
+if !options[:from_date].nil? && !options[:to_date].nil? && options[:to_date].before?(options[:from_date])
+  raise OptionParser::InvalidArgument, "--to-date must be greater than or equal to --from-date"
+end
+
+BackfillMissedManifestEntries.new(**options).execute

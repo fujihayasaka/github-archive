@@ -356,7 +356,7 @@ module Business::LicenseDependency
   # Valid for billing platform enabled products that support user specific cost centers.
   sig { returns(T::Boolean) }
   memoize def user_scoped_cost_centers?
-    true
+    GitHub.billing_enabled?
   end
 
   sig { returns(T.nilable(T::Hash[String, String])) }

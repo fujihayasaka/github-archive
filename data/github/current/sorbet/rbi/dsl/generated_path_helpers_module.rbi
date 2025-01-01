@@ -11449,9 +11449,6 @@ module GeneratedPathHelpersModule
   def repository_secret_scanning_add_bypass_reviewer_path(*args); end
 
   sig { params(args: T.untyped).returns(String) }
-  def repository_secret_scanning_get_bypass_reviewers_path(*args); end
-
-  sig { params(args: T.untyped).returns(String) }
   def repository_secret_scanning_push_protection_bypass_add_from_blob_path(*args); end
 
   sig { params(args: T.untyped).returns(String) }

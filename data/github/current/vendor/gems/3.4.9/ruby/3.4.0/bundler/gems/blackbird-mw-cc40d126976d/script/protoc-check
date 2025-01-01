@@ -1,0 +1,39 @@
+#! /usr/bin/env bash
+#
+#/ Usage: script/protoc-check
+#/
+#/ Check to make sure there aren't any proto changes that require running
+#/ script/protoc and commiting the result. Intended to be run by CI.
+
+set -euo pipefail
+IFS=$'\n\t'
+
+function usage {
+    grep "^#/" "${BASH_SOURCE[0]}" | cut -c 4-
+}
+
+cd "$(dirname "$0")/.."
+
+while (( $# )); do
+    case $1 in
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        *)
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+# This should be a noop if code has already been properly generated
+script/protoc
+
+if [[ $(git diff --exit-code) ]]; then
+    git diff
+    echo "Found changes after running script/protoc. Please run script/protoc locally. Then inspect, commit, and push the results."
+    exit 1
+else
+    echo "OK: no proto changes detected."
+fi

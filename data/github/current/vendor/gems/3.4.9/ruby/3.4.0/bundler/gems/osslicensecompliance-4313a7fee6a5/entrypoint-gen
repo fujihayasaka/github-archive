@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# This script runs from inside the Docker container, and performs code gen
+# Before landing breaking changes, please update the README documentation!
+
+PROTO_RELATIVE_BASE="proto"
+PROTO_BASE="/${PROTO_RELATIVE_BASE}"
+PROTO_RELATIVE_SOURCE="${PROTO_RELATIVE_BASE}/oss_license_compliance/v${MAJOR_VERSION}"
+PROTO_SOURCE="/${PROTO_RELATIVE_SOURCE}"
+
+GO_OUT="pkg/proto/v${MAJOR_VERSION}"
+RUBY_OUT="ruby/lib"
+DOCS_IN="${PROTO_RELATIVE_SOURCE}/*.proto"
+DOCS_OUT="${PROTO_RELATIVE_BASE}/"
+DOCS_TEMPLATE="${PROTO_RELATIVE_BASE}/template/markdown.tmpl,README.md"
+
+mkdir -p "$GO_OUT"
+mkdir -p "$RUBY_OUT"
+
+echo ">>> Running protoc generation..."
+for PROTOFILE in $(find "$PROTO_SOURCE" -name '*.proto'); do
+  # Generate Twirp RPC code for Golang and Ruby
+  echo "       processing: $PROTOFILE"
+  protoc --twirp_out="$GO_OUT" \
+         --go_out="$GO_OUT" \
+         --twirp_ruby_out="$RUBY_OUT" \
+         --ruby_out="$RUBY_OUT" \
+         --proto_path="$PROTO_BASE" \
+         --experimental_allow_proto3_optional \
+         "$PROTOFILE"
+done
+echo ">>> DONE -- Running protoc generation"
+echo
+
+# Find all occurrences of OssLicenseCompliance and change it to OSSLicenseCompliance in ruby files
+echo ">>> Fixing Ruby module names..."
+find "$RUBY_OUT" -type f -name '*.rb' -exec sed -i 's/OssLicenseCompliance/OSSLicenseCompliance/g' {} +
+echo ">>> DONE -- Fixing Ruby module names"
+echo
+
+# Create the base app ruby file
+BASE_APP_FILE="./ruby/lib/osslicensecompliance-client.rb"
+echo ">>> Creating base app file: $BASE_APP_FILE"
+echo "# frozen_string_literal: true" > "$BASE_APP_FILE"
+echo >> "$BASE_APP_FILE"
+echo "# Auto-generated file. Do not edit!" >> "$BASE_APP_FILE"
+echo >> "$BASE_APP_FILE"
+for TWIRP_FILE in $(find ./ruby/lib -name '*_twirp.rb'); do
+  REQUIRE_PATH="${TWIRP_FILE#./ruby/lib/}"
+  REQUIRE_PATH="${REQUIRE_PATH%.rb}"
+  echo "       requiring: ${REQUIRE_PATH}"
+  echo "require '$REQUIRE_PATH'" >> "$BASE_APP_FILE"
+done
+echo >> "$BASE_APP_FILE"
+echo ">>> DONE -- Creating base app file"
+echo
+
+VERSION_FILE="./ruby/lib/oss_license_compliance/version.rb"
+echo ">>> Creating version file: $VERSION_FILE"
+echo "       setting VERSION: ${VERSION}"
+echo "# frozen_string_literal: true" > "$VERSION_FILE"
+echo >> "$VERSION_FILE"
+echo "# Auto-generated file. Do not edit!" >> "$VERSION_FILE"
+echo >> "$VERSION_FILE"
+echo "module OSSLicenseCompliance" >> "$VERSION_FILE"
+echo "  VERSION = '${VERSION}'" >> "$VERSION_FILE"
+echo "end" >> "$VERSION_FILE"
+echo >> "$VERSION_FILE"
+echo ">>> DONE -- Creating version file"
+echo
+
+
+echo ">>> Generate docs..."
+protoc  -I ./proto --doc_out=${DOCS_OUT} --doc_opt=${DOCS_TEMPLATE} ${DOCS_IN}
+sed -i "1s;^;_Version: ${VERSION}_\n\n;" proto/README.md
+echo ">>> DONE -- Generate docs"
+echo

@@ -1,0 +1,206 @@
+syntax = "proto3";
+
+package github.secretscanning.v3;
+
+option go_package = "github.com/github/secret-scanning-proto/gen/go/v3/api";
+option ruby_package = "GitHub::Proto::SecretScanning::Api::V3";
+
+import "google/protobuf/timestamp.proto";
+
+service CustomPatternAPI {
+  rpc GetCustomPatterns(GetCustomPatternsRequest) returns (GetCustomPatternsResponse);
+  rpc GetCustomPatternsCount(GetCustomPatternsCountRequest) returns (GetCustomPatternsCountResponse);
+  // Updates various settings of a custom pattern, but doesn't require backfilling the pattern after an update
+  rpc UpdateCustomPatternSettings(UpdateCustomPatternSettingsRequest) returns (UpdateCustomPatternSettingsResponse);
+  rpc DeleteCustomPatterns(DeleteCustomPatternsRequest) returns (DeleteCustomPatternsResponse);
+  rpc GetGeneratedExpressions(GetGeneratedExpressionsRequest) returns (GetGeneratedExpressionsResponse);
+}
+
+message CustomPatternIdsSelector {
+  repeated uint64 ids = 1;
+}
+
+message CustomPatternOrgSelector {
+  uint64 owner_id = 1;
+}
+
+message CustomPatternRepoSelector {
+  uint64 repository_id = 1;
+}
+
+message CustomPatternScanSelector {
+  uint64 repository_id = 1;
+  uint64 owner_id = 2;
+  uint64 business_id = 3;
+}
+
+message CustomPatternBusinessSelector {
+  uint64 business_id = 1;
+}
+
+enum CustomPatternState {
+  PUBLISHED = 0;
+  DELETED = 1;
+  DISABLED = 2;
+  UNPUBLISHED = 3;
+}
+
+enum SortOrder {
+  NO_SORT_ORDER = 0;
+  CREATED_ASCENDING = 1;
+  CREATED_DESCENDING = 2;
+  UPDATED_ASCENDING = 3; // Not used, but included for completion
+  UPDATED_DESCENDING = 4;
+  NAME_ASCENDING = 5;
+  NAME_DESCENDING = 6; // Not used, but included for completion
+}
+
+message CustomPatternSelector {
+  oneof selector {
+    CustomPatternIdsSelector ids_selector = 1;
+    CustomPatternOrgSelector org_selector = 2;
+    CustomPatternRepoSelector repo_selector = 3;
+    CustomPatternScanSelector scan_selector = 4;
+    CustomPatternBusinessSelector business_selector = 5;
+  }
+}
+
+message GetCustomPatternsRequest {
+  CustomPatternSelector selector = 1;
+  repeated CustomPatternState included_states = 2;
+  bytes cursor = 3;
+  // Provide sort_order with a nil cursor to modify the sort order of the default cursor.
+  // If cursor is not nil, this field will be ignored.
+  SortOrder sort_order = 4;
+  CustomPatternsFilter filter = 5;
+}
+
+enum PushProtectedFilter {
+  INCLUDE_ALL = 0; //default
+  PUSH_PROTECTED = 1;
+  NOT_PUSH_PROTECTED = 2;
+}
+
+message CustomPatternsFilter {
+  repeated CustomPatternState included_states = 1;
+  PushProtectedFilter push_protected_filter = 2;
+}
+
+message GetCustomPatternsCountRequest {
+  CustomPatternSelector selector = 1;
+  repeated CustomPatternState included_states = 2;
+  CustomPatternsFilter filter = 3;
+}
+
+message GetCustomPatternsCountResponse {
+  uint64 total_result_count = 1;
+}
+
+message UpdateCustomPatternSettingsRequest {
+  uint64 id = 1;
+  uint64 owner_id = 2;
+  OwnerScope owner_scope = 3;
+  string row_version = 4;
+  uint64 updated_by_id = 5;
+  // Sets whether to enable or disable push protection for a custom pattern
+  bool push_protection_enabled = 6;
+}
+
+message UpdateCustomPatternSettingsResponse {}
+
+message DeleteCustomPatternsRequest {
+  // This encapsulates the custom pattern fields necessary to perform a write/update operation.
+  message CustomPatternIDWithVersion {
+    uint64 id = 1;
+    string row_version = 2;
+  }
+  repeated CustomPatternIDWithVersion to_delete = 1;
+  uint64 owner_id = 2;
+  OwnerScope owner_scope = 3;
+  uint64 deleted_by_id = 4;
+  PostUpdateCustomPatternAction post_delete_action = 5;
+}
+
+message DeleteCustomPatternsResponse {
+  // empty for now, but gives us option to add fields later
+}
+
+message GetGeneratedExpressionsRequest {
+  // Description of the secret type to generate expressions for
+  string description = 1;
+
+  // Optional: Examples of secrets to generate expressions for
+  string examples = 2;
+
+  // The user ID of the user requesting the expressions. Required by copilot for user-based rate limiting
+  uint64 user_id = 3;
+}
+
+message GetGeneratedExpressionsResponse {
+  repeated GeneratedExpression generated_expressions = 1;
+}
+
+message GeneratedExpression {
+  string regex = 1;
+  string explanation = 2;
+}
+
+enum PostUpdateCustomPatternAction {
+  UNKNOWN = 0;
+  RESOLVE_ALERTS = 1;
+  DELETE_ALERTS = 2;
+}
+
+enum OwnerScope {
+  UNKNOWN_SCOPE = 0;
+  REPOSITORY_SCOPE = 1;
+  ORGANIZATION_SCOPE = 2;
+  BUSINESS_SCOPE = 3;
+}
+
+message CustomPatternBusinessScope {
+  uint64 business_id = 1;
+}
+
+message CustomPatternOrgScope {
+  uint64 owner_id = 1;
+}
+
+message CustomPatternRepoScope {
+  uint64 repository_id = 1;
+}
+
+message PostProcessing {
+  string start_delimiter = 1;
+  string end_delimiter = 2;
+  repeated string must_match = 3;
+  repeated string must_not_match = 4;
+}
+
+message SecretScanCustomPattern {
+  oneof scope {
+    CustomPatternOrgScope org_scope = 1;
+    CustomPatternRepoScope repo_scope = 2;
+    CustomPatternBusinessScope business_scope = 14;
+  }
+  string secret_type = 3 [deprecated=true];
+  string expression = 4;
+  string display_name = 5;
+  string slug = 6;
+  PostProcessing post_processing = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+  uint64 id = 11;
+  uint64 created_by_id = 12;
+  CustomPatternState state = 13;
+  uint64 updated_by_id = 15;
+  repeated uint64 dry_run_repositories = 16;
+  string row_version = 17;
+  bool push_protection_enabled = 18;
+}
+
+message GetCustomPatternsResponse {
+  repeated SecretScanCustomPattern custom_patterns = 1;
+  bytes previous_cursor = 2;
+  bytes next_cursor = 3;
+}

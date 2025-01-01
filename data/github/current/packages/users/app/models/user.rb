@@ -2010,6 +2010,7 @@ class User < ApplicationRecord::Domain::Users
 
     if (access = OauthAccessTokens.domain.active(hashed_token, hashed: true))
       return if !access.personal_access_token? && access.application.nil?
+      return if access.installation_id.present? && access.installation.nil?
 
       if (user = access.user) && user.can_authenticate_via_oauth?
         access.bump

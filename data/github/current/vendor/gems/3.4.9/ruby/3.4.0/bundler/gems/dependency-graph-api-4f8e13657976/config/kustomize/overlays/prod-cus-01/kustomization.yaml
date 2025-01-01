@@ -1,0 +1,72 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base/prod-cus-01
+  - ../../base/api
+  - ../../base/workers
+  - ../../base/service-mesh-config
+  - namespaces/namespace.yaml
+  - pdb.yml
+
+components:
+  - ../../components/logging
+
+patches:
+  - target:
+      kind: Deployment
+      name: api
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+  - target:
+      kind: Deployment
+      name: slow-query-api
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+  - target:
+      kind: Service
+      name: api
+    patch: |-
+      - op: add
+        path: "/metadata/annotations/moda.github.net~1domain-name"
+        value: dependency-graph-api.service.%stamp%.github.net
+      - op: add
+        path: "/metadata/annotations/moda.github.net~1istio-ingress-enabled"
+        value: true
+  - target:
+      kind: Service
+      name: slow-query-api
+    patch: |-
+      - op: add
+        path: "/metadata/annotations/moda.github.net~1domain-name"
+        value: dependency-graph-api-slow-queries.service.%stamp%.github.net
+      - op: add
+        path: "/metadata/annotations/moda.github.net~1istio-ingress-enabled"
+        value: true
+  - target:
+      kind: Deployment
+      name: aqueduct-resqued-worker
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+  - target:
+      kind: Deployment
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/dnsPolicy
+        value: ClusterFirst
+  - target:
+      kind: Job
+      name: transition-template-job
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/dnsPolicy
+        value: ClusterFirst
+      - op: replace
+        path: /spec/template/spec/containers/0/command
+        value: ["/usr/bin/tools/istio-job-wrapper", "./script/run-transition"]

@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: api
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "api"
+        heaven.githubapp.com/image-placeholder: "dependency-snapshots-api"
+        heaven.githubapp.com/deploy-requirement: "true"
+        moda.github.net/canary-v2: "true"
+        moda.github.net/canary-label: "canary"
+spec:
+    replicas: 2
+    selector:
+        matchLabels:
+            app: dependency-snapshots-api
+            role: api
+            canary: "api"
+    template:
+        metadata:
+            labels:
+                app: dependency-snapshots-api
+                role: api
+                canary: "api"
+        spec:
+            terminationGracePeriodSeconds: 60
+            dnsPolicy: ClusterFirst
+            containers:
+                - name: api
+                  image: dependency-snapshots-api
+                  command: ["./bin/ds-api", "--port", "9597"]
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command: ["sleep", "30"]
+                  readinessProbe:
+                    httpGet:
+                        scheme: HTTP
+                        path: /_ping
+                        port: 9597
+                  resources:
+                    requests:
+                        cpu: 1
+                        memory: "256Mi"
+                    limits:
+                        cpu: 2
+                        memory: "1Gi"
+                  ports:
+                    - name: http
+                      containerPort: 9597
+                      protocol: TCP
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: OTEL_RESOURCE_ATTRIBUTES
+                      value: "deployment.environment=production,deployed_to=$(KUBE_NODE_HOSTNAME),env=production,deployed_env=production"
+                    - name: STATS_ADDR
+                      value: "$(KUBE_NODE_HOSTNAME):28125"
+                    - name: GOMAXPROCS
+                      value: "2"

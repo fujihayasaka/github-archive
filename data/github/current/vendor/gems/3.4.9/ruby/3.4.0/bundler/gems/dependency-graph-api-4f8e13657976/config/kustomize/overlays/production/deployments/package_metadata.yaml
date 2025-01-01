@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    annotations:
+        heaven.githubapp.com/deploy-requirement: "true"
+        heaven.githubapp.com/image-placeholder: dependency-graph-api
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: package-metadata
+    name: package-metadata
+spec:
+    replicas: 2
+    selector:
+        matchLabels:
+            app: dependency-graph-api
+            role: package-metadata
+    strategy:
+        type: RollingUpdate
+    template:
+        metadata:
+            labels:
+                app: dependency-graph-api
+                role: package-metadata
+        spec:
+            containers:
+                - command:
+                    - ./script/etl/package_metadata
+                  env:
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - secretRef:
+                        name: vault-secrets
+                  image: dependency-graph-api
+                  name: package-metadata
+                  readinessProbe:
+                    tcpSocket:
+                        port: 8888
+                    timeoutSeconds: 1
+                  resources:
+                    limits:
+                        cpu: 1000m
+                        memory: 4Gi
+                    requests:
+                        cpu: 200m
+                        memory: 1Gi
+                  volumeMounts:
+                    - mountPath: /etc/github/metadata.json
+                      name: github-metadata
+                      readOnly: true
+            dnsPolicy: ClusterFirst
+            volumes:
+                - hostPath:
+                    path: /etc/github/metadata.json
+                  name: github-metadata

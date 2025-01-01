@@ -1,0 +1,106 @@
+<cve-reviews-reject-button>
+  <%= render Primer::Beta::Details.new(reset: true, overlay: :dark, open: show_reject_modal) do |details| %>
+    <% details.with_summary(
+      display: :flex,
+      align_items: :center,
+      scheme: :danger,
+      mb: 2,
+      aria: { haspopup: true },
+      test_selector: "cve-reviews-reject-button",
+      classes: "btn-large"
+    ) do %>
+      <%= render IconComponent.new(icon: "no-entry", mr: 3) %>
+      Reject Publication
+    <% end %>
+    <% details.with_body(tag: :"details-dialog", animation: :fade_in, classes: "fast no-outline") do %>
+      <%= render Primer::Beta::BorderBox.new(classes: "js-comment-template-container js-cve-reviews-reject-published") do |border_box| %>
+        <% border_box.with_header do |header| %>
+          <button class="Box-btn-octicon btn-octicon float-right" type="button" aria-label="Close dialog" tabindex="-1" data-close-dialog>
+            <%= render IconComponent.new(icon: "x") %>
+          </button>
+          <h3 class="Box-title">Reject Published CVE Review</h3>
+        <% end %>
+        <% border_box.with_body(font_size: 4, classes: "px-0") do %>
+          <%= form_with scope: :rejection, url: reject_cve_review_path(cve_review), method: :put, "data-target": "triage-control.dialogForm form-tracker.form", id: "cve-reviews-reject-published-form", model: rejection do |form| %>
+            <% if reject_modal_error.present? %>
+              <%= render(Primer::Alpha::Banner.new(scheme: :danger, mx: 3, mb: 3)) { reject_modal_error } %>
+            <% end %>
+            <div class="">
+              <div class="form-group mt-0 px-3">
+                <div class="form-group-header">
+                  <%= form.label :reason_template, "Rejected Reason Template" %>
+                </div>
+                <%= render Primer::Beta::Details.new(reset: true, overlay: :default, position: :relative, classes: "form-group-body") do |details| %>
+                  <% details.with_summary(
+                    pr: 2,
+                    classes: "color-bg-default width-full",
+                    aria: { disabled: false, haspopup: true },
+                  ) do %>
+                    <div class="d-flex flex-row flex-justify-between">
+                      <span class="overflow-hidden" data-menu-button>
+                        <% if rejection.reason_template.blank? %>
+                          <%= render(Primer::Truncate.new(color: :subtle)) { "Select a comment" } %>
+                        <% else %>
+                          <%= rejection.reason_template.capitalize %>
+                        <% end %>
+                      </span>
+                      <span class="dropdown-caret m-2"></span>
+                    </div>
+                    <%= form.hidden_field :reason_template, data: { target: "cve-reviews-reject-button.reasonTemplateInput" } %>
+                  <% end %>
+
+                  <% details.with_body(tag: :"details-menu", classes: "SelectMenu mr-3 js-comment-template-dropdown", aria: { labelledby: "templated-open-cve-comments" }, data: { action: "details-menu-selected:cve-reviews-reject-button#handleTemplateChange" , target: "cve-reviews-reject-button.detailsMenu" }) do %>
+                    <div class="SelectMenu-modal width-full">
+                      <div class="SelectMenu-list SelectMenu-list--borderless">
+                        <% reject_comment_template_options.each do |option| %>
+                          <button type="button" role="menuitem" class="SelectMenu-item text-normal" data-value="<%= option[:value] %>" aria-checked="<%= option[:value] == rejection.reason_template %>">
+                            <span data-menu-button-contents>
+                            <%= render(Primer::Truncate.new()) { option[:label] } %>
+                            </span>
+                            <span class="js-comment-template" hidden><%= option[:text] %></span>
+                          </button>
+                        <% end %>
+                      </div>
+                    </div>
+                  <% end %>
+                <% end %>
+              </div>
+
+              <div class="form-group my-0">
+                <div class="form-group-header px-3">
+                  <%= form.label :reason, "Rejected Reason" %>
+                </div>
+                <div class="form-group-body">
+                </div>
+              </div>
+              <%= render(
+                MarkdownEditorComponent.new(
+                  attribute: :reason,
+                  form: form,
+                  id_prefix: "cve-reviews-rejection-reason",
+                  toolbar: false,
+                  px: 3,
+                  required: true,
+                  text_area_classes: "js-comment-template-target js-cve-reviews-reject-published-form-rejected-reason",
+                  text_area_data: { target: "cve-reviews-reject-button.reasonTextarea" }
+                )
+              ) %>
+              <%= render FormFieldWithErrorsComponent.new(classes: "js-cve-reviews-reject-published-form-replaced-by-field m-3", hidden: !rejection.template_duplicate?, data: { target: "cve-reviews-reject-button.replacedByField" }) do |c| %>
+                <% c.with_label_content do %>
+                  <%= form.label :replaced_by %>
+                <% end %>
+                <auto-check src="<%= replaced_by_cve_id_validations_path %>" csrf="<%= form_authenticity_token %>" <%= "required" if rejection.template_duplicate? %>>
+                  <%= form.text_field :replaced_by, class: "form-control width-full", placeholder: "e.g. CVE-#{Date.current.year}-12345", data: { target: "cve-reviews-reject-button.replacedByInput" } %>
+                </auto-check>
+              <% end %>
+            </div>
+          <% end %>
+        <% end %>
+        <% border_box.with_footer(display: :flex, justify_content: :flex_end) do %>
+          <%= render(Primer::ButtonComponent.new(mr: 2, data: { close_dialog: true })) { "Cancel" } %>
+          <%= render(Primer::ButtonComponent.new(scheme: :danger, type: :submit, form: "cve-reviews-reject-published-form")) { "Reject" } %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+</cve-reviews-reject-button>
