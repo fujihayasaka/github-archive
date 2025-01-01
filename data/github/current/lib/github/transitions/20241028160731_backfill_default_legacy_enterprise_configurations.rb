@@ -260,6 +260,13 @@ module GitHub
         return if dry_run?
 
         write_to(model_class: SecurityConfiguration) do
+          # during a GHES upgrade, an earlier migration may have added columns to the SecurityConfiguration table
+          # we need to reload the column information so that we are aware of them
+          # there is some sort of complicated interaction between other migrations, the workers we use to
+          # process transitions, needing to be in a write connection, that I don't fully understand.
+          # see https://github.com/github/security-products-enablement/issues/1677
+          log "calling SecurityConfiguration.reset_column_information"
+          SecurityConfiguration.reset_column_information
           if create_configs_by_repo_visibility
             public_config = SecurityConfiguration.create!(
               target: business,

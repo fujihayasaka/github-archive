@@ -122,7 +122,7 @@ module Organization::NotificationRestrictionsDependency
     return user.organization_ids.include?(T.unsafe(self).id) if T.unsafe(self).business.nil?
 
     user.organization_ids.include?(T.unsafe(self).id) ||
-      T.unsafe(self).business.admin_and_organization_member_ids.include?(user.id)
+      T.unsafe(self).business.admin_and_organization_member_ids(actor_ids: [user.id]).any?
   end
 
   # Public: Is this user able to receive email notifications for this organization or its business?

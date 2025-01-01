@@ -422,10 +422,7 @@ class MemexProjectItem < ApplicationRecord::Domain::Memexes
   end
 
   def notify_socket_subscribers
-    associated_updates = {}
-    if content&.repository&.feature_enabled?(:project_event_updates)
-      associated_updates = { projects_updated: true }
-    end
+    associated_updates = { projects_updated: true }
     content.notify_socket_subscribers(associated_updates:)
   end
 
