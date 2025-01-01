@@ -115,13 +115,15 @@ module Elastomer
           aliases[slice_alias] = {}
         end
       end
-
       _create_index \
           name:     name,
           cluster:  template.cluster,
           metadata: metadata,
           aliases:  aliases,
           version:  template.version_sha
+
+      # Busts the local cache of index configurations
+      Elastomer.router.index_map.refresh
 
       name
     end

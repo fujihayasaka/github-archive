@@ -44,9 +44,10 @@ class SshCertificateAuthority < ApplicationRecord::Collab
 
   def allowed_algos
     algos = [SSHData::PublicKey::ALGO_RSA, SSHData::PublicKey::ALGO_ECDSA256, SSHData::PublicKey::ALGO_ECDSA384,
-      SSHData::PublicKey::ALGO_ECDSA521]
+      SSHData::PublicKey::ALGO_ECDSA521, SSHData::PublicKey::ALGO_SKECDSA256]
     unless GitHub.fips_mode?
       algos << SSHData::PublicKey::ALGO_ED25519
+      algos << SSHData::PublicKey::ALGO_SKED25519
     end
 
     algos
