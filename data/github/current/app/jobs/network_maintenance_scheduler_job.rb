@@ -54,10 +54,12 @@ class NetworkMaintenanceSchedulerJob < ApplicationJob
 
       RepositoryNetwork.maintenance_counts.each do |status, network_count|
         GitHub.dogstats.gauge("git_maintenance.count", network_count, tags: ["type:network", "status:#{status}"])
+        GitHub.stats.gauge("git_maintenance.network.count.#{status}", network_count) if GitHub.enterprise?
       end
 
-      GitHub.dogstats.gauge("git_maintenance.need_maintenance", RepositoryNetwork.count_over_activity_threshold,
-                            tags: ["type:network"])
+      need_count = RepositoryNetwork.count_over_activity_threshold
+      GitHub.dogstats.gauge("git_maintenance.need_maintenance", need_count, tags: ["type:network"])
+      GitHub.stats.gauge("git_maintenance.network.count.needed", need_count) if GitHub.enterprise?
 
       networks
     end

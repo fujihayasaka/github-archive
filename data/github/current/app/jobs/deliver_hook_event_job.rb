@@ -122,6 +122,7 @@ class DeliverHookEventJob < ApplicationJob
   end
 
   def try_wait_for_replication(event_type, action, last_writes, tags)
+    return 0 if GitHub.enterprise?
     # Performs a multi-cluster wait to accommodate the replication lag of the slowest
     # cluster that was previously written to. If we fail to wait, we will not retry,
     # but rather log the exception and proceed with potentially stale data.

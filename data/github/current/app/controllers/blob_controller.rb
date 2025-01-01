@@ -1233,7 +1233,7 @@ class BlobController < GitContentController
       violations = check_for_rule_violations(hook_error, "File could not be created")
 
       increment_quick_pull_error_stats
-      return render(json: { data: { error: flash.now[:error], error_details: { ruleViolations: violations } }, code: 422 }, status: :unprocessable_entity) if react_repos_view_enabled?
+      return render(json: { data: { error: hook_error.present? ? hook_error : flash.now[:error], error_details: { ruleViolations: violations } }, code: 422 }, status: :unprocessable_entity) if react_repos_view_enabled?
       return new
     end
 
@@ -1337,7 +1337,7 @@ class BlobController < GitContentController
       @contents = contents
       @allow_contents_unchanged = true
 
-      return render(json: { data: { error: flash.now[:error], error_details: { ruleViolations: violations } }, code: 422 }, status: :unprocessable_entity) if react_repos_view_enabled?
+      return render(json: { data: { error: hook_error.present? ? hook_error : flash.now[:error], error_details: { ruleViolations: violations } }, code: 422 }, status: :unprocessable_entity) if react_repos_view_enabled?
       return edit
     end
 
@@ -1383,7 +1383,7 @@ class BlobController < GitContentController
       violations = check_for_rule_violations(hook_error, "File could not be deleted")
 
       increment_quick_pull_error_stats
-      return render(json: { data: { error: flash.now[:error], error_details: { ruleViolations: violations } }, code: 422 }, status: :unprocessable_entity) if react_repos_view_enabled?
+      return render(json: { data: { error: hook_error.present? ? hook_error : flash.now[:error], error_details: { ruleViolations: violations } }, code: 422 }, status: :unprocessable_entity) if react_repos_view_enabled?
       return delete
     end
 

@@ -80,13 +80,6 @@ class VerifiableDomain < ApplicationRecord::Ballast
   VERIFY_ATTEMPTS_LIMIT = 10
   VERIFY_ATTEMPTS_LIMIT_TTL = 1.hour
 
-  DNS_RESOLVER_OPTIONS = {
-    retry_times: 2,
-    query_timeout: 3,
-    dnssec: false,
-    do_caching: false,
-  }.freeze
-
   def self.normalize_domain(domain)
     return unless domain
     normalized_domain = domain.dup
@@ -591,12 +584,17 @@ class VerifiableDomain < ApplicationRecord::Ballast
   # Private: Get the DNS query timeout value in seconds based on the given
   # request timeout value.
   #
-  # Set the timeout to be half a second shorter than the request timeout, so
-  # there's time for Resolv::ResolvTimeout timeout to get raised and rescued.
+  # This timeout is per authoritative nameserver, so the total timeout needs to be less than the
+  # request timeout. Each request is tried once before moving on to the next nameserver.
+  #
+  # Assuming a domain has 10 authoritative nameservers, the total timeout will be:
+  #
+  # dotcom: 9.5s @ 0.475s per nameserver
+  # ghes: 27.5s @ 1.375s per nameserver
   #
   # Returns Float
   def dns_timeout(request_timeout)
-    request_timeout - 0.5
+    ((request_timeout - 0.5) / 2) / authoritative_nameservers.length
   end
 
   # Private: Destroy the verification token if it exists.

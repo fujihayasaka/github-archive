@@ -25,12 +25,15 @@ module SecurityProduct
 
     def self.blocked_by_connect?
       return false unless GitHub.enterprise?
-      license = GitHub::Enterprise.license(sync_global_business: false)
-      return false unless license.metered_advanced_security?
-      # GHES users with metered billing must have GitHub Connect enabled
-      return true unless license.github_connect_support? && DotcomConnection.new.is_connected?
-      # license sync must also be enabled
-      !GitHub.dotcom_user_license_usage_upload_enabled?
+      GitHub.cache.fetch("SecurityProduct::AdvancedSecurity.blocked_by_connect?/#{GitHub.current_sha}", expires_in: 5.minutes) do
+        license = GitHub::Enterprise.license(sync_global_business: false)
+
+        next false unless license.metered_advanced_security?
+        # GHES users with metered billing must have GitHub Connect enabled
+        next true unless license.github_connect_support? && DotcomConnection.new.is_connected?
+        # license sync must also be enabled
+        !GitHub.dotcom_user_license_usage_upload_enabled?
+      end
     end
 
     # Can the repository explicitly enable and disable GHAS?

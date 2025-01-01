@@ -225,6 +225,7 @@ GitHub.stats_allowlist = %w(
   unicorn.{browser,anon,ajax,poll,api,robot,raw,atom,other}.gc.{time,major,minor,allocations,collections}
   exception.github.count
   git.hooks.pre_receive.custom.timing
+  git_maintenance.{network,gist}.count.{needed,scheduled,running,failed,spurious_failure,retry,broken}
   dgit.3pc.timing
   dgit.*.{repos,networks,gists}.{cleanup,failed,bad-checksum,no-checksum}.count
   dgit.*.actions.{create,destroy,repair}*.{timing,count}

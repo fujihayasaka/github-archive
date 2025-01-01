@@ -129,12 +129,6 @@ class Orgs::TeamMembersController < Orgs::Controller
         view = create_view_model(Orgs::TeamMembers::IndexPageView, options)
         if request.xhr?
           render partial: "orgs/team_members/member_table", locals: { view: view }
-        elsif this_organization.render_team_member_index?(this_team)
-          render "orgs/team_members/new_index", locals: {
-            rate_limited: org_invite_rate_limited?,
-            selected_nav_item: :members,
-            view: view,
-          }
         else
           render "orgs/team_members/index", locals: {
             rate_limited: org_invite_rate_limited?,

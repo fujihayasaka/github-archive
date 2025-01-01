@@ -96,9 +96,7 @@ class VerifiableDomainTest < GitHub::TestCase
           "I'm a nameserver",
           Resolv::DNS::Config.default_config_hash[:nameserver],
         ].flatten
-      new_resolver_params = VerifiableDomain::DNS_RESOLVER_OPTIONS.merge(
-        nameservers: expected_nameservers,
-      )
+
       mock_resolver = mock("resolver")
       mock_resolver.stubs(:timeouts=)
       Resolv::DNS.stubs(:new).with(nameserver: expected_nameservers).returns(mock_resolver)

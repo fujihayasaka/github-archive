@@ -45,6 +45,7 @@ class GistMaintenanceSchedulerJob < ApplicationJob
 
       Gist.maintenance_counts.each do |status, gist_count|
         GitHub.dogstats.gauge("git_maintenance.count", gist_count, tags: ["type:gist", "status:#{status}"])
+        GitHub.stats.gauge("git_maintenance.gist.count.#{status}", gist_count) if GitHub.enterprise?
       end
 
       gists

@@ -20,6 +20,11 @@ class SecurityProduct::AdvancedSecurityTest < GitHub::IntegrationTestCase
 
   setup do
     Organization.any_instance.stubs(:advanced_security_purchased?).returns(true)
+
+    if GitHub.enterprise?
+      GitHub.cache.allow = /^SecurityProduct::AdvancedSecurity/
+      GitHub.cache.clear
+    end
   end
 
   test "by default it is disabled for private repos" do
@@ -350,6 +355,15 @@ class SecurityProduct::AdvancedSecurityTest < GitHub::IntegrationTestCase
 
       assert can_enable
       assert_nil error
+    end
+
+    test "caches the result of blocked_by_connect?", enterprise_only: true do
+      GitHub::Enterprise.license.stubs(:advanced_security_enabled).returns(true)
+      GitHub::Enterprise.license.stubs(:metered_advanced_security?).returns(true)
+      GitHub::Enterprise.license.stubs(:github_connect_support?).returns(true)
+      DotcomConnection.any_instance.stubs(:check_status).returns(true).once
+      assert SecurityProduct::AdvancedSecurity.blocked_by_connect?
+      assert SecurityProduct::AdvancedSecurity.blocked_by_connect?
     end
 
     test "returns false if GHAS is metered and connect is not supported", enterprise_only: true do

@@ -4140,11 +4140,6 @@ class Organization < User
     feature_enabled?(:enhanced_team_posts)
   end
 
-  def render_team_member_index?(team)
-    return true if team_discussions_disabled?
-    team&.migration_complete?
-  end
-
   def team_discussions_disabled?
     return @is_team_discussions_disabled if defined?(@is_team_discussions_disabled)
     @is_team_discussions_disabled = feature_enabled?(:team_discussions_disabled)
