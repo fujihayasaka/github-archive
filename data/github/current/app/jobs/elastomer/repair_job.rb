@@ -52,9 +52,20 @@ module Elastomer
     WORKER_KEY  = "workers".freeze
     UPDATED_AT_START_KEY = "updated_after_start".freeze
     UPPER_BOUND_KEY = "upper_bound".freeze
+    FINISHED_KEY = "finished_at".freeze
 
     def to_partial_path
       "stafftools/search_indexes/repair_job"
+    end
+
+    class Strategy < T::Enum
+      enums do
+        # AllModels is a strategy that reconciles all index models.
+        AllModels = new("all_models")
+
+        # PartialBackfill is a strategy that reconciles index models that have been updated between a given date range.
+        PartialBackfill = new("partial_backfill")
+      end
     end
 
     # Start up one or more background jobs to perform the repair task.
@@ -113,7 +124,13 @@ module Elastomer
         "group_key:#{group_key}",
         "search_cluster:#{cluster_name}",
       ] })
+
+      GitHub.logger.info(
+        "Starting repair job for index #{name} with options: #{opts.inspect}",
+        tags: logger_tags
+      )
       repair!
+
     ensure
       active_jobs = redis.hget(group_key, ACTIVE_KEY).to_i
       worker_count = redis.hget(group_key, WORKER_KEY).to_i
@@ -180,17 +197,25 @@ module Elastomer
 
     # Returns `true` if all the reconcilers report that they have finished
     # processing all models. Returns `false` if any reconciler has more models
-    # to process. Returns `nil` if there are no reconcilers.
+    # to process.
     def finished?
-      keys = reconcilers.map { |r| r.finished_key }
-      return if keys.empty?
-
-      redis.hmget(group_key, *keys).all?
+      completed_at = redis.hget(group_key, FINISHED_KEY)&.to_f
+      return true if completed_at&.positive?
+      if reconcilers.all?(&:finished?)
+        completed_at = Time.now.utc.to_f
+        redis.hsetnx(group_key, FINISHED_KEY, completed_at)
+        GitHub.logger.info(
+          "Repair job for index #{index_name} with group key #{group_key} marked complete at #{completed_at}",
+          tags: logger_tags
+        )
+      end
+      completed_at&.positive? || false
     end
 
     # Returns the progress through the repair job - a floating point number
     # between 0.0 and 100.0.
     def progress
+      return 0.0 unless exists?
       return 100.0 if finished?
 
       values = reconcilers.map { |r| r.progress }
@@ -265,8 +290,26 @@ module Elastomer
     #
     # Returns this repair job instance.
     def reset!
+      GitHub.logger.warn(
+        "Resetting repair job for index #{index_name} with group key #{group_key}",
+        tags: logger_tags
+      )
       redis.del(group_key)
       self
+    end
+
+    def logger_tags
+      [
+        "index:#{index_name}",
+        "group_key:#{group_key}",
+        "search_cluster:#{cluster_name}",
+        "repo_id:#{repo_id}",
+        "enabled:#{enabled?}",
+        "active:#{active?}",
+        "finished:#{finished?}",
+        "raise_errors:#{raise_errors?}",
+        "repair_strategy:#{repair_strategy}",
+      ]
     end
 
     # Returns `true` if the repair job group key exists in Redis. This
@@ -352,11 +395,17 @@ module Elastomer
 
     def group_key
       return @group_key if defined?(@group_key)
+      @group_key = "#{self.class.name}/#{index_name}"
+    end
 
-      if repo_id.present?
-        @group_key = "#{self.class.name}/#{index_name}/repo_id_#{repo_id}"
+    # Returns the strategy to use for the reconciliation process. By default, we repair all models otherwise we use
+    # the PartialBackfill strategy if a time range is provided.
+    sig { returns(Strategy) }
+    def repair_strategy
+      if updated_at_start? && upper_bound?
+        Strategy::PartialBackfill
       else
-        @group_key = "#{self.class.name}/#{index_name}"
+        Strategy::AllModels
       end
     end
 
@@ -422,13 +471,25 @@ module Elastomer
       return @reconcilers if defined?(@reconcilers)
 
       @reconcilers = self.class.reconcilers.map do |hash|
-        Elastomer::Reconciler.new(hash.merge(
-          index: index,
-          group_key: group_key,
-          redis: redis,
-          raise_errors: raise_errors?,
-          proc_args: [self]
-        ))
+        if repair_strategy == Strategy::PartialBackfill
+          Elastomer::PartialBackfillReconciler.new(hash.merge(
+            index: index,
+            group_key: group_key,
+            redis:,
+            raise_errors: raise_errors?,
+            start_date_time: updated_at_start,
+            end_date_time: upper_bound,
+            proc_args: [self]
+          ))
+        else
+          Elastomer::Reconciler.new(hash.merge(
+            index: index,
+            group_key: group_key,
+            redis: redis,
+            raise_errors: raise_errors?,
+            proc_args: [self]
+          ))
+        end
       end
     end
 
