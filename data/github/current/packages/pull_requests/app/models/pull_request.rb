@@ -1177,7 +1177,7 @@ class PullRequest < ApplicationRecord::Domain::IssuesPullRequests
       end
     end
 
-    event_payload = GitHub.flipper[:pr_channel_event_payload_builder].enabled?(repository) ? ChannelEventBuilder.new(self, associated_updates).build_payload : {}
+    event_payload = GitHub.use_channel_event_builder? ? ChannelEventBuilder.new(self, associated_updates).build_payload : {}
 
     channel = GitHub::WebSocket::Channels.pull_request(self)
     GitHub::WebSocket.notify_pull_request_channel(self, channel, data.merge(event_payload))

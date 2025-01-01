@@ -552,55 +552,12 @@ class CloseIssueReferenceTest < GitHub::TestCase
   end
 
   context "#notify_socket_subscribers" do
-    test "should be triggered on create and trigger issue and pr updates" do
+    test "should be triggered on create and trigger issue and pr updates with event_updates including timeline_updated" do
       Timecop.freeze do
         user = create(:user)
         repo = create(:repository, owner: user).reload
         issue = create(:issue, repository: repo, user: user).reload
         pull_request = create(:pull_request, :disable_disk_access, repository: repo, user: user).reload
-
-        GitHub.flipper[:pr_channel_event_payload_builder].disable(repo)
-
-        frozen_time = Time.now.to_i
-
-        xref_data = {
-          timestamp: frozen_time,
-          reason: "close issue references updated for issue ##{issue.id}",
-          wait: issue.default_live_updates_wait,
-        }
-
-        issue_data = {
-          timestamp: frozen_time,
-          wait: issue.default_live_updates_wait,
-          reason: "issue ##{issue.id} updated",
-          gid: issue.global_relay_id,
-        }
-
-        pr_data = {
-          timestamp: frozen_time,
-          wait: pull_request.default_live_updates_wait,
-          reason: "pull request ##{pull_request.id} updated",
-          gid: pull_request.global_relay_id,
-        }
-
-        channel = GitHub::WebSocket::Channels.close_issue_references(issue)
-
-        GitHub::WebSocket.expects(:notify_issue_channel).with(issue, channel, xref_data).returns([]).once
-        GitHub::WebSocket.expects(:notify_issue_channel).with(issue, "issue:#{issue.id}", issue_data).returns([]).once
-        GitHub::WebSocket.expects(:notify_pull_request_channel).with(pull_request, "pull_request:#{pull_request.id}", pr_data).returns([]).once
-
-        create(:close_issue_reference, issue: issue, pull_request: pull_request)
-      end
-    end
-
-    test "should be triggered on create and trigger issue and pr updates with event_updates including timeline_updated when FF enabled" do
-      Timecop.freeze do
-        user = create(:user)
-        repo = create(:repository, owner: user).reload
-        issue = create(:issue, repository: repo, user: user).reload
-        pull_request = create(:pull_request, :disable_disk_access, repository: repo, user: user).reload
-
-        GitHub.flipper[:pr_channel_event_payload_builder].enable(repo)
 
         frozen_time = Time.now.to_i
 
@@ -636,36 +593,11 @@ class CloseIssueReferenceTest < GitHub::TestCase
       end
     end
 
-    test "should not be triggered on update" do
-      Timecop.freeze do
-        reference = create(:close_issue_reference)
-        ref_issue = reference.issue
-        new_issue = create(:issue, repository: ref_issue.repository, user: ref_issue.user)
-
-        GitHub.flipper[:pr_channel_event_payload_builder].disable(ref_issue.repository)
-
-        data = {
-          timestamp: Time.now.to_i,
-          wait: new_issue.default_live_updates_wait,
-          reason: "close issue references updated for issue ##{new_issue.id}",
-        }
-
-        channel = GitHub::WebSocket::Channels.close_issue_references(new_issue)
-
-        GitHub::WebSocket.stubs(:notify_issue_channel)
-        GitHub::WebSocket.expects(:notify_issue_channel).with(new_issue, channel, data).never
-
-        reference.update!(issue: new_issue)
-      end
-    end
-
     test "should not be triggered on update with event_updates including timeline_updated" do
       Timecop.freeze do
         reference = create(:close_issue_reference)
         ref_issue = reference.issue
         new_issue = create(:issue, repository: ref_issue.repository, user: ref_issue.user)
-
-        GitHub.flipper[:pr_channel_event_payload_builder].enable(ref_issue.repository)
 
         data = {
           timestamp: Time.now.to_i,
@@ -683,53 +615,11 @@ class CloseIssueReferenceTest < GitHub::TestCase
       end
     end
 
-    test "should be triggered on delete" do
-      Timecop.freeze do
-        reference = create(:close_issue_reference)
-        issue = reference.issue.reload
-        pull_request = reference.pull_request.reload
-
-        GitHub.flipper[:pr_channel_event_payload_builder].disable(pull_request.repository)
-
-        frozen_time = Time.now.to_i
-
-        xref_data = {
-          timestamp: frozen_time,
-          wait: issue.default_live_updates_wait,
-          reason: "close issue references updated for issue ##{issue.id}",
-        }
-
-        issue_data = {
-          timestamp: frozen_time,
-          wait: issue.default_live_updates_wait,
-          reason: "issue ##{issue.id} updated",
-          gid: issue.global_relay_id,
-        }
-
-        pr_data = {
-          timestamp: frozen_time,
-          wait: pull_request.default_live_updates_wait,
-          reason: "pull request ##{pull_request.id} updated",
-          gid: pull_request.global_relay_id,
-        }
-
-        channel = GitHub::WebSocket::Channels.close_issue_references(issue)
-
-        GitHub::WebSocket.expects(:notify_issue_channel).with(issue, channel, xref_data).returns([]).once
-        GitHub::WebSocket.expects(:notify_issue_channel).with(issue, "issue:#{issue.id}", issue_data).returns([]).once
-        GitHub::WebSocket.expects(:notify_pull_request_channel).with(pull_request, "pull_request:#{pull_request.id}", pr_data).returns([]).once
-
-        reference.destroy!
-      end
-    end
-
     test "should be triggered on delete with event_updates" do
       Timecop.freeze do
         reference = create(:close_issue_reference)
         issue = reference.issue.reload
         pull_request = reference.pull_request.reload
-
-        GitHub.flipper[:pr_channel_event_payload_builder].enable(pull_request.repository)
 
         frozen_time = Time.now.to_i
 

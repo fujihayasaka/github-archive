@@ -608,8 +608,6 @@ class PullRequestReviewTest < GitHub::TestCase
   end
 
   test "submitting a review notifies with the reviewers_updated event" do
-    GitHub.flipper[:pr_channel_event_payload_builder].enable
-
     review = @pull.reviews.new(head_sha: "DEADBEEF" * 5, user: @owner, body: "blah")
     channel = GitHub::WebSocket::Channels.pull_request(@pull)
 
