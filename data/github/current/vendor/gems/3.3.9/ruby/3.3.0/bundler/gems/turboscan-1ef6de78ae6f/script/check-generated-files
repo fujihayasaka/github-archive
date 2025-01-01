@@ -1,0 +1,30 @@
+#!/bin/bash
+set -eu
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$DIR/ensure-devcontainer.sh"
+
+export GOPROXY='https://goproxy.githubapp.com/mod,https://proxy.golang.org,direct'
+export GOPRIVATE=''
+export GONOPROXY=''
+export GONOSUMDB='github.com/github/*'
+
+if [ -n "${GH_TOKEN:-}" ]; then
+  echo "machine goproxy.githubapp.com login nobody password ${GH_TOKEN}" >>"${HOME}/.netrc"
+fi
+
+cd "$DIR/.."
+./script/mocks
+./script/protoc
+./script/deep-copy
+./script/go-generate
+./script/kustomize
+./script/sync-workflow-actions-to-gem
+./script/sync-suggested-fix-supported-rules-to-gem
+./script/generate-reference-workflow
+make vendor
+
+changed_files="$(git ls-files --exclude-standard --others --deleted --modified)"
+if [ ! -z "$changed_files" ]; then
+  >&2 echo -e "Please ensure these generated files are up-to-date by running script/check-generated-files and committing the changes:\n$changed_files"
+  exit 1
+fi

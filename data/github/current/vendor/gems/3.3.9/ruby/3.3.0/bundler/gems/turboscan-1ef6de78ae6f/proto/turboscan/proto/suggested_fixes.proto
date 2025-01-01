@@ -1,0 +1,216 @@
+syntax = "proto3";
+
+package github.turboscan;
+
+import "google/protobuf/timestamp.proto";
+import "turboscan/proto/turboscan.proto";
+
+option go_package = "./;proto";
+option ruby_package = "Turboscan::Proto";
+
+// SuggestedFixes service provides methods to manage suggested fixes for alerts.
+service SuggestedFixes {
+  // GetSuggestedFix returns a suggested fix for an alert.
+  rpc GetSuggestedFix(GetSuggestedFixRequest) returns (GetSuggestedFixResponse) {}
+
+  // GenerateSuggestedFix triggers the generation of suggested fixes for the given alerts.
+  rpc GenerateSuggestedFix(GenerateSuggestedFixRequest) returns (GenerateSuggestedFixResponse) {}
+
+  // ApplySuggestedFix marks an alert suggestion as applied
+  rpc ApplySuggestedFix(ApplySuggestedFixRequest) returns (ApplySuggestedFixResponse) {}
+
+  // GetSuggestedFixStatistics returns total suggested fixes
+  rpc GetSuggestedFixStatistics(GetSuggestedFixStatisticsRequest) returns (GetSuggestedFixStatisticsResponse) {}
+
+  // GenerateDependabotFix triggers the generation of fixes for dependabot alerts.
+  rpc GenerateDependabotFix(GenerateDependabotFixRequest) returns (GenerateDependabotFixResponse) {}
+
+  // GenerateSyncFix triggers the generation of fixes using cocofix.
+  rpc GenerateSyncFix(GenerateSyncFixRequest) returns (GenerateSyncFixResponse) {}
+
+  // GetSuggestedFixStatesForOrg returns the state of suggested fixes for the given org from the ES index.
+  rpc GetSuggestedFixStatesForOrg(GetSuggestedFixStatesForOrgRequest) returns (GetSuggestedFixStatesForOrgResponse) {}
+}
+
+message GenerateSuggestedFixRequest {
+  uint64 repository_id = 1;
+  // the list of alerts to trigger fix generation
+  repeated uint32 alert_numbers = 2;
+  reserved 3;
+  repeated bytes ref_names_bytes = 4;
+  uint64 pull_request_id = 5;
+  uint64 user_id = 6;
+  bool public = 7; // Indicates if the repository is public or private
+  SuggestedFixSource source = 8;
+  uint64 security_campaign_id = 9;
+}
+
+message GenerateSuggestedFixResponse {
+  reserved 1;
+  bool success = 2;
+}
+
+message GenerateDependabotFixRequest {
+  uint32 request_id = 1;
+  uint64 repository_id = 2;
+  string commit_oid = 3;
+  string sarif = 4;
+  repeated string file_paths = 5;
+}
+
+message GenerateDependabotFixResponse {
+  bool success = 1;
+}
+
+message GetSuggestedFixRequest {
+  reserved 2;
+  uint64 repository_id = 1;
+  string head_commit_oid = 3;
+  repeated uint32 alert_numbers = 4;
+  repeated bytes ref_names_bytes = 5;
+}
+
+message GetSuggestedFixResponse {
+  reserved 1;
+  reserved 2;
+  reserved 3;
+  map<uint32, SuggestedFixAlert> suggested_fix_alerts = 4;
+}
+
+message SuggestedFixAlert {
+  uint32 alert_number = 1;
+  SuggestedFixAlertState state = 2;
+  google.protobuf.Timestamp state_updated_at = 3;
+  uint64 state_updated_actor_id = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
+  SuggestedFix suggested_fix = 7;
+  string rule_sarif_identifier = 8;
+}
+
+message SuggestedFix {
+  string description = 1;
+  repeated SuggestedFixFile files = 2;
+  reserved 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+  repeated DependencyMetadata dependency_metadata = 6;
+  bool outdated = 7;
+}
+
+message SuggestedFixFile {
+  reserved 2;
+  string file_path = 1;
+  bytes diff_content = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+message ApplySuggestedFixRequest {
+  uint64 repository_id = 1;
+  uint32 alert_number = 2;
+  repeated bytes ref_names_bytes = 3;
+  uint64 actor_id = 4;
+}
+
+message ApplySuggestedFixResponse {
+  bool success = 1;
+}
+
+message GetSuggestedFixStatisticsRequest {
+  repeated uint64 owner_ids = 5;
+  repeated uint64 repository_ids = 1;
+  repeated github.turboscan.Severity severities = 2;
+  google.protobuf.Timestamp start = 3;
+  google.protobuf.Timestamp end = 4;
+
+  repeated string rule_ids = 6;
+  repeated string exclude_rule_ids = 7;
+}
+
+message GetSuggestedFixStatisticsResponse {
+  uint64 suggested = 1;
+}
+
+message DependencyMetadata {
+  string name = 1;
+  string version = 2;
+  repeated Advisory advisories = 3;
+  string url = 4;
+  string description = 5;
+  string ecosystem = 6;
+  bool malicious = 7;
+}
+
+message Advisory {
+  string id = 1;
+  string html_url = 2;
+  string summary = 3;
+  string description = 4;
+  AdvisorySeverity severity = 5;
+}
+
+enum AdvisorySeverity {
+  ADVISORY_SEVERITY_UNKNOWN = 0;
+  ADVISORY_SEVERITY_LOW = 1;
+  ADVISORY_SEVERITY_MEDIUM = 2;
+  ADVISORY_SEVERITY_HIGH = 3;
+  ADVISORY_SEVERITY_CRITICAL = 4;
+}
+
+enum SuggestedFixAlertState {
+  reserved 2;
+  SUGGESTED_FIX_ALERT_STATE_UNKNOWN = 0;
+  SUGGESTED_FIX_ALERT_STATE_APPLIED = 1;
+  SUGGESTED_FIX_ALERT_STATE_ERROR = 3;
+  SUGGESTED_FIX_ALERT_STATE_INVALID = 4;
+  SUGGESTED_FIX_ALERT_STATE_RULE_NOT_SUPPORTED = 5;
+  SUGGESTED_FIX_ALERT_STATE_PENDING = 6;
+  SUGGESTED_FIX_ALERT_STATE_VALID = 7;
+  SUGGESTED_FIX_ALERT_STATE_VALID_MISSING_DEP = 8;
+}
+
+enum SuggestedFixSource {
+  SUGGESTED_FIX_SOURCE_UNKNOWN = 0;
+  SUGGESTED_FIX_SOURCE_PR = 1;
+  SUGGESTED_FIX_SOURCE_ONDEMAND = 2;
+  SUGGESTED_FIX_SOURCE_SECURITY_CAMPAIGN = 3;
+  SUGGESTED_FIX_SOURCE_ONDEMAND_API = 4;
+}
+
+message GetSuggestedFixStatesForOrgRequest {
+  uint32 limit = 1;
+  string before_cursor = 2;
+  string after_cursor = 3;
+
+  repeated uint64 owner_ids = 4;
+  repeated uint64 repository_ids = 5;
+  repeated uint64 excluded_repository_ids = 6;
+  AlertsFilter filter = 7;
+}
+
+message GetSuggestedFixStatesForOrgResponse {
+  repeated RepoSuggestedFixState suggested_fix_states = 1;
+  string next_cursor = 2;
+  string prev_cursor = 3;
+}
+
+message RepoSuggestedFixState {
+  uint64 repository_id = 1;
+  uint32 alert_number = 2;
+  bool eligible = 3;
+  SuggestedFixAlertState state = 4;
+  google.protobuf.Timestamp state_updated_at = 5;
+}
+
+message GenerateSyncFixRequest {
+  reserved 1,2,4;
+  string sarif = 3;
+}
+
+message GenerateSyncFixResponse {
+  SuggestedFix suggested_fix = 1;
+  SuggestedFixAlertState state = 2;
+  string ai_version = 3;
+  string ai_model = 4;
+}

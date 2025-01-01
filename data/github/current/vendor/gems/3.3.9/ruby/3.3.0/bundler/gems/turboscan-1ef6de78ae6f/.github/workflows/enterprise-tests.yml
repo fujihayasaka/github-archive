@@ -1,0 +1,43 @@
+name: Enterprise Tests
+on:
+  pull_request:
+    branches:
+      - enterprise-*-release
+
+permissions: {}
+
+jobs:
+  enterprise-tests:
+    name: Enterprise Tests
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Login to Docker Registry
+        run: |
+          echo "${{ secrets.CONTAINER_BUILDER_TOKEN }}" | docker login containers.pkg.github.com --username gh-containers-bot --password-stdin
+
+      - name: Checkout github/code-scanning
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          repository: github/code-scanning
+          path: code-scanning
+          token: ${{ secrets.DSP_CODE_SCANNING_TOKEN }}
+
+      - name: Enterprise Tests
+        env:
+          BRANCH: ${{ github.event.pull_request.base.ref }}
+          JANKY_API_TOKEN: ${{ secrets.JANKY_API_TOKEN }}
+        run: |
+          image="containers.pkg.github.com/github/turboscan/turboscan:${{ github.event.pull_request.head.sha }}"
+
+          while true; do
+            >&2 echo "Waiting for image $image to be available..."
+            manifest="$(docker manifest inspect --verbose "$image")" && break || sleep 10
+          done
+
+          digest="$(echo "$manifest" | jq --raw-output ".Descriptor.digest")"
+          image="$image@$digest"
+
+          >&2 echo "Running tests with image $image..."
+
+          cd ./code-scanning/.github/workflows/enterprise-nightly-tests/
+          go run ./main/main.go --branch="$BRANCH" --turboscan="$image"

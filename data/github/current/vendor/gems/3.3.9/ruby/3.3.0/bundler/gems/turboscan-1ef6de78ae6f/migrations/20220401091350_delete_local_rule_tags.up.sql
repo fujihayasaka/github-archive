@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20220401091350_delete_local_rule_tags.go on GHES

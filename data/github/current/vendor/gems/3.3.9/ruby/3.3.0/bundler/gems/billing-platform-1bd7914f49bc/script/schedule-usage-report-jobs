@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+
+help="Usage: $0 [options]
+
+Sends an is-alive request to the Aqueduct job queue which will be picked up and ignored by the request handler.
+
+Options
+  -a  Aqueduct application name
+  -q  Aqueduct queue name
+  -u  Aqueduct URL
+"
+
+# Set the default values
+app="billing-platform-development"
+queue="request-handler"
+url="http://localhost:18081"
+
+# Parse the command-line options
+while getopts ":a:q:u:y:m:c:s:d:" opt; do
+    case $opt in
+        a)
+        app="$OPTARG"
+        ;;
+        q)
+        queue="$OPTARG"
+        ;;
+        \?)
+        echo "$help"
+        exit 1
+        ;;
+    esac
+done
+
+# Create the payload
+request_type="schedule-usage-report-jobs"
+payload="{\"Type\":\"$request_type\"}"
+hashed_payload=$(echo -n "$payload" | base64 | tr -d '[:space:]')
+
+# Send the request to the job queue
+curl \
+    --header "Content-Type:application/json" \
+    --data '{"app": "'$app'", "queue":"'$queue'", "payload":"'$hashed_payload'"}' \
+    "$url/twirp/aqueduct.api.v1.JobQueueService/Send"
+
+# New line after the curl response
+echo

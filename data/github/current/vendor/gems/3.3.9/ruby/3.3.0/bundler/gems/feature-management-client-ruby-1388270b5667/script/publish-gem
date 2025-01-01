@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+path=""
+while getopts p: flag
+do
+    case "${flag}" in
+        p) path=${OPTARG};;
+    esac
+done
+
+if [ -z "$path" ]; then
+    echo "Path not provided"
+    exit 1
+fi
+
+root="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." >/dev/null 2>&1 && pwd )"
+cd "$root"
+
+gems_dir="$root/gems"
+gem=$(echo $path | sed 's/lib\///')
+gem_path="$gems_dir/$gem.gem"
+
+# check if gem file exists
+if [ ! -f $gem_path ]; then
+    echo "Gem file not found: $gem_path"
+    exit 1
+fi
+
+echo "Publishing gem: $gem";
+
+# set up credentials
+if [ ! -d ~/.gem ]; then
+    mkdir ~/.gem
+fi
+
+[ -e ~/.gem/credentials ] && rm ~/.gem/credentials
+echo "---"  >> ~/.gem/credentials
+echo ":github: Bearer ${RUBY_GEM_AUTH_TOKEN}" >> ~/.gem/credentials
+chmod 0600 ~/.gem/credentials
+
+gem sources --add https://nobody:${RUBY_GEM_AUTH_TOKEN}@rubygems.pkg.github.com/github
+
+# publish gem
+echo "Publishing gem: $gem_path"
+gem push --key github --host https://rubygems.pkg.github.com/github $gem_path

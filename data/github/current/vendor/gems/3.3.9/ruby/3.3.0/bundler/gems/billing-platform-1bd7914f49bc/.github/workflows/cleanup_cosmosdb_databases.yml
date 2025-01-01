@@ -1,0 +1,53 @@
+name: Cleanup CosmosDB Databases
+on:
+  schedule:
+    # Run daily at a time where no one is likely running integration tests
+    - cron: '0 6 * * *'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  run_cleanup:
+    runs-on: ubuntu-latest
+    env:
+      GOPROXY: https://goproxy.githubapp.com/mod,https://proxy.golang.org/,direct
+      GOPRIVATE: ""
+      GONOPROXY: ""
+      GONOSUMDB: github.com/github/*
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '~1.22.0'
+
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_SPN_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_SPN_CLIENT_SECRET }}","subscriptionId":"57997474-7983-4d65-a2e3-83410c0e43b3","tenantId":"${{ secrets.AZURE_SPN_TENANT_ID }}"}'
+
+      # From https://github.com/github/goproxy/blob/main/doc/user.md#set-up:
+      - name: Configure Go private module access
+        run: echo "machine goproxy.githubapp.com login nobody password ${{ secrets.CONTAINER_BUILDER_TOKEN }}" >> $HOME/.netrc
+
+      - name: Configure ghcr.io access
+        env:
+          CONTAINER_BUILDER_TOKEN: ${{ secrets.CONTAINER_BUILDER_TOKEN }}
+        run: docker login -u token -p "${CONTAINER_BUILDER_TOKEN}" ghcr.io
+
+      - name: SetRemote
+        run: script/set-remote ci
+
+      - name: Delete orphaned CosmosDB databases
+        run: source dev.env && go run ./cmd/cli --delete-databases --with-uuid-only --force-all
+
+      # This will delete the databases for the CI environment i.e billing-platform-ci-1, billing-platform-ci-2, ..., billing-platform-ci-9
+      - name: Delete CI CosmosDB databases
+        run: |
+          for i in {0..9}; do
+            source dev.env && go run ./cmd/cli --delete-databases --force-all --target-account=billing-platform-ci-$i
+          done

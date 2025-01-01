@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-server
+spec:
+  selector:
+    matchLabels:
+      app: api-server
+  template:
+    metadata:
+      annotations:
+        observability.github.com/splunk_index: actions-usage-metrics
+    spec:
+      containers:
+        - name: api-server
+          env:
+            - name: FAILBOT_HAYSTACK_URL
+              valueFrom:
+                secretKeyRef:
+                  key: FAILBOT_HAYSTACK_URL
+                  name: vault-secrets
+            - name: HMAC_PRIMARY
+              valueFrom:
+                secretKeyRef:
+                  key: HMAC_PRIMARY
+                  name: vault-secrets
+            - name: HMAC_SECONDARY
+              valueFrom:
+                secretKeyRef:
+                  key: HMAC_SECONDARY
+                  name: vault-secrets
+            - name: DD_AGENT_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: DD_DOGSTATSD_PORT
+              value: "28125"
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: https://opentelemetry-collector-production.service.iad.github.net/v1/traces
+            - name: OTEL_EXPORTER_OTLP_TRACES_HEADERS
+              valueFrom:
+                secretKeyRef:
+                  key: OTEL_EXPORTER_OTLP_TRACES_HEADERS
+                  name: vault-secrets
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  containerName: api-server
+                  resource: limits.cpu
+            - name: API_INTERNAL_TWIRP_HMAC_KEYS_FOR_ACTIONS_USAGE_METRICS
+              valueFrom:
+                secretKeyRef:
+                  key: API_INTERNAL_TWIRP_HMAC_KEYS_FOR_ACTIONS_USAGE_METRICS
+                  name: vault-secrets

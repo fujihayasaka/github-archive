@@ -1,0 +1,144 @@
+name: Test Deployments
+
+on:
+  deployment_status:
+
+permissions:
+  contents: read
+
+jobs:
+  log-event:
+    name: log-deployment-event
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summary
+        env:
+          DEPLOY_CREATOR: ${{ github.event.deployment.creator.login }}
+          DEPLOY_ENVIRONMENT: ${{ github.event.deployment.environment }}
+          DEPLOY_STATUS: ${{ github.event.deployment_status.state }}
+          GITHUB_SHA: ${{ github.event.deployment.sha }}
+        run: |
+          echo "Deploy creator '$DEPLOY_CREATOR'"
+          echo "Deploy environment '$DEPLOY_ENVIRONMENT'"
+          echo "Deploy status '$DEPLOY_STATUS'"
+          echo "GitHub SHA '$GITHUB_SHA'"
+      - name: Full event JSON
+        run: cat $GITHUB_EVENT_PATH
+
+  trigger-lab-run:
+    name: trigger-lab-run
+    if: ${{ github.event.deployment.environment == 'lab' && github.event.deployment_status.state == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout canary repository
+        uses: actions/checkout@v4
+        with:
+          repository: bbq-beets/actions-canary
+          ssh-key: ${{ secrets.ACTIONS_CANARY_SSH_KEY }}
+          ref: main
+      - name: Wait for tests to get current data
+        run: sleep 10s
+      - name: Trigger lab runs
+        run: |
+          set -x
+          set -e
+          git config --global user.email "actions-usage-metrics@example.com"
+          git config --global user.name "actions usage metrics"
+          git fetch origin
+          git pull
+          cd ./actions-usage-metrics/lab
+          echo -e "\nactions-usage-metrics from ${{github.event_name}} event: https://github.com/github/actions-usage-metrics/actions/runs/${{github.run_id}} " >> RUNS.md
+          git add .
+          git commit -am "Triggered from actions-usage-metrics"
+          git push
+          echo "CANARY_COMMIT_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
+
+  test-lab-usage:
+    name: test-lab-usage
+    if: ${{ github.event.deployment.environment == 'lab' && github.event.deployment_status.state == 'success' }}
+    runs-on: self-hosted
+    env:
+      HMAC_KEY: ${{ secrets.ACTIONS_USAGE_METRICS_LAB_HMAC_KEY }}
+      AUM_URL: "actions-usage-metrics-lab.service.iad.github.net"
+      ORG_ID: 33435682 # bbq-beets
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Run tests
+        run: tests/deployment/usage-summary.sh
+
+  test-lab-job:
+    name: test-lab-job
+    if: ${{ github.event.deployment.environment == 'lab' && github.event.deployment_status.state == 'success' }}
+    runs-on: self-hosted
+    env:
+      HMAC_KEY: ${{ secrets.ACTIONS_USAGE_METRICS_LAB_HMAC_KEY }}
+      AUM_URL: "actions-usage-metrics-lab.service.iad.github.net"
+      ORG_ID: 33435682 # bbq-beets
+      AUM_GET_LIMIT: 10000
+      REPOSITORY_ID: 202997509 # actions-canary
+      WORKFLOW_FILE_PATH: ".github/workflows-lab/aum-sleep-lab.yml"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Run tests
+        run: tests/deployment/job.sh
+
+  trigger-production-run:
+    name: trigger-production-run
+    if: ${{ github.event.deployment.environment == 'production' && github.event.deployment_status.state == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout canary repository
+        uses: actions/checkout@v4
+        with:
+          repository: bbq-beets/actions-canary
+          ssh-key: ${{ secrets.ACTIONS_CANARY_SSH_KEY }}
+          ref: main
+      - name: Wait for tests to get current data
+        run: sleep 10s
+      - name: Trigger production runs
+        run: |
+          set -x
+          set -e
+          git config --global user.email "actions-usage-metrics@example.com"
+          git config --global user.name "actions usage metrics"
+          git fetch origin
+          git pull
+          cd ./actions-usage-metrics/production
+          echo -e "\nactions-usage-metrics from ${{github.event_name}} event: https://github.com/github/actions-usage-metrics/actions/runs/${{github.run_id}} " >> RUNS.md
+          git add .
+          git commit -am "Triggered from actions-usage-metrics"
+          git push
+          echo "CANARY_COMMIT_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
+
+  test-production-usage:
+    name: test-production-usage
+    if: ${{ github.event.deployment.environment == 'production' && github.event.deployment_status.state == 'success' }}
+    runs-on: self-hosted
+    env:
+      HMAC_KEY: ${{ secrets.ACTIONS_USAGE_METRICS_PRODUCTION_HMAC_KEY }}
+      AUM_URL: "actions-usage-metrics-production.service.iad.github.net"
+      ORG_ID: 33435682 # bbq-beets
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Run tests
+        run: tests/deployment/usage-summary.sh
+
+  test-production-job:
+    name: test-production-job
+    if: ${{ github.event.deployment.environment == 'production' && github.event.deployment_status.state == 'success' }}
+    runs-on: self-hosted
+    env:
+      HMAC_KEY: ${{ secrets.ACTIONS_USAGE_METRICS_PRODUCTION_HMAC_KEY }}
+      AUM_URL: "actions-usage-metrics-production.service.iad.github.net"
+      ORG_ID: 33435682 # bbq-beets
+      AUM_GET_LIMIT: 10000
+      REPOSITORY_ID: 202997509 # actions-canary
+      WORKFLOW_FILE_PATH: ".github/workflows/aum-sleep-production.yml"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Run tests
+        run: tests/deployment/job.sh

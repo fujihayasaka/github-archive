@@ -1,0 +1,1 @@
+ALTER TABLE `ts_analyses` ADD COLUMN `archival_state` tinyint(3) unsigned NOT NULL DEFAULT '0', ADD COLUMN `archival_data_url` text, ADD COLUMN `archival_data_version` int(10) unsigned NOT NULL DEFAULT '0';

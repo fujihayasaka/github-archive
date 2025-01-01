@@ -1,0 +1,41 @@
+name: "Check generated"
+
+on:
+  pull_request:
+    branches: [main]
+  merge_group:
+  workflow_dispatch: # for testing
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  Check-generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+
+      - name: Install Bundler
+        run: gem install bundler
+
+      - name: Bootstrap
+        env:
+          GITHUB_USER: ${{ secrets.OCTOFACTORY_USER }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN}}
+        run: bash ./script/bootstrap --ci
+
+      - name: Install dependencies
+        run: make install-gems
+
+      - name: Generate vexi with sorbet erased
+        run: make erasesrb
+
+      - name: Check generated files for diffs
+        run: ./script/check-generated

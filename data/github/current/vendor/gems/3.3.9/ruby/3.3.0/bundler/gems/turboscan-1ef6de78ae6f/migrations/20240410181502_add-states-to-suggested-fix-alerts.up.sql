@@ -1,0 +1,1 @@
+ALTER TABLE `ts_suggested_fix_alerts` ADD COLUMN `state` varchar(50) COLLATE utf8mb4_general_ci DEFAULT NULL, ADD COLUMN `state_updated_at` datetime(6) DEFAULT NULL, ADD COLUMN `state_updated_actor_id` bigint unsigned DEFAULT NULL, ADD COLUMN `rule` varchar(255) COLLATE utf8mb4_general_ci DEFAULT NULL, ADD COLUMN `ref_bytes` varbinary(1024) DEFAULT NULL;

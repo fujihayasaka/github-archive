@@ -1,0 +1,84 @@
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+  packages: write
+
+name: release-please
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get app token
+        id: generate_token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: ${{ secrets.FEATURE_MANAGEMENT_BOT_APP_ID }}
+          private_key: ${{ secrets.FEATURE_MANAGEMENT_BOT_APP_PEM }}
+
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ steps.generate_token.outputs.token }}
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.generate_token.outputs.token }}
+        if: ${{ steps.release.outputs.vexi--release_created== 'true' || steps.release.outputs.vexi-management--release_created== 'true'|| steps.release.outputs.prs_created  == 'true' }}
+
+      - name: Setup ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+        if: ${{ steps.release.outputs.vexi--release_created== 'true' || steps.release.outputs.vexi-management--release_created== 'true' || steps.release.outputs.prs_created == 'true' }}
+
+      - name: Update Pull Requests with bundle changes
+        run: |
+          git config --global user.name "feature-management-bot[bot]"
+          git config --global user.email "157984660+feature-management-bot[bot]@users.noreply.github.com"
+
+          echo "${PRS_JSON}" | jq -r '.[] | .headBranchName' |
+          while IFS=$"\n" read -r prbranch; do
+            echo "Updating PR branch: $prbranch"
+            git fetch origin "${prbranch}"
+            git checkout "${prbranch}"
+            
+            # Copy the version file from vexi/lib/vexi folder to the generated/vexi/lib/vexi folder
+            cp vexi/lib/vexi/version.rb generated/vexi/lib/vexi/version.rb
+            git add .
+            git commit --message "chore: copy updated version file to generated folder"
+            git push
+
+            bundle install
+            git add .
+            git commit --message "chore: update bundle"
+            git push
+          done
+        env:
+          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+          BUNDLE_RUBYGEMS__PKG__GITHUB__COM: "nobody:${{ secrets.GITHUB_TOKEN}}"
+          PRS_JSON: ${{ steps.release.outputs.prs }}
+        if: ${{ steps.release.outputs.prs_created  == 'true'}}
+
+      - name: Run bundle install
+        run: bundle install
+        env:
+          BUNDLE_RUBYGEMS__PKG__GITHUB__COM: "nobody:${{ secrets.GITHUB_TOKEN}}"
+        if: ${{ steps.release.outputs.vexi--release_created== 'true' || steps.release.outputs.vexi-management--release_created== 'true' }}
+
+      - name: Build gems
+        run: bash ./script/build-gems --release
+        if: ${{ steps.release.outputs.vexi--release_created== 'true' || steps.release.outputs.vexi-management--release_created== 'true' }}
+
+      - name: Publish gems
+        env:
+          RUBY_GEM_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN}}
+        run: echo '${{ steps.release.outputs.paths_released }}' | jq ".[]" | xargs -I'{}' ./script/publish-gem -p '{}'
+        if: ${{ steps.release.outputs.vexi--release_created== 'true' || steps.release.outputs.vexi-management--release_created== 'true' }}

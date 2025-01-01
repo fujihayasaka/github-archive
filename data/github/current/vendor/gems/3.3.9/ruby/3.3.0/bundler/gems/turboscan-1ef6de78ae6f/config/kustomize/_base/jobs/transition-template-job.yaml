@@ -1,0 +1,53 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: transition-template-job
+spec:
+  template:
+    metadata:
+      labels:
+        app: turboscan
+        role: transition-job
+      annotations:
+        observability.github.com/logger: fluent-bit
+        fluentbit.io/parser: logfmt
+        observability.github.com/splunk_index: turboscan
+    spec:
+      dnsPolicy: ClusterFirst
+      containers:
+        - name: transition
+          image: turboscan
+          env:
+            - name: KAFKA_GROUP
+              value: "turboscan-consumer-prod"
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  containerName: transition
+                  resource: limits.cpu
+          envFrom:
+            - configMapRef:
+                name: environment
+            - configMapRef:
+                name: background-environment
+            - configMapRef:
+                name: kube-cluster-metadata
+            - secretRef:
+                name: vault-secrets
+          command:
+            - /app/script/istio-job-wrapper
+            - /app/bin/turboscan
+            - util
+            - migratorctl
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "250m"
+            limits:
+              memory: "256Mi"
+              cpu: "1000m"
+      restartPolicy: Never
+  backoffLimit: 0
+  # This deadline is not used when instantiating this template to run
+  # transitions. It only applies here in the "no-op" case.
+  activeDeadlineSeconds: 100

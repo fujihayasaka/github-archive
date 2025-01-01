@@ -1,0 +1,1 @@
+ALTER TABLE `ts_codeql_configs` MODIFY COLUMN `template_version` varchar(255) NOT NULL, DROP KEY `index_codeql_configs_on_repository_id`, ADD UNIQUE KEY `index_codeql_configs_on_repository_id_tag` (`repository_id`,`tag`);

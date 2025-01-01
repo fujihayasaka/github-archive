@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    reuse-previous-outcome: true
+  pull_request:
+    branches: [main]
+    reuse-previous-outcome: true
+  merge_group:
+    reuse-previous-outcome: true
+
+permissions:
+  id-token: write # for setup-goproxy OIDC and SPN auth
+  contents: read
+
+env:
+  client-id: 98ad5ef2-064e-4b9f-9d46-9035e67f5ca1 # spn-nonprod-actions-usage-metrics-ci
+  tenant-id: 398a6654-997b-47e9-b12b-9515b896b4de # GITHUB INC
+  subscription-id: 6cce5ec9-a487-4144-be96-f1a8f55ace8f # GitHub - NonProd - actions-usage-metrics-nonprod
+
+jobs:
+  buildAndUnitTest:
+    name: Build + Unit Test
+    runs-on: ubuntu-20.04-xl
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: OIDC Setup for goproxy
+        uses: github/setup-goproxy@v1.1.0
+
+      - name: Bootstrap
+        run: ./script/bootstrap --no-auth --no-proto
+        env:
+          CONTAINER_BUILDER_TOKEN: ${{ secrets.CONTAINER_BUILDER_TOKEN }}
+
+      - name: Download modules
+        run: go mod download -x
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Run Unit Tests
+        run: go test -v $(go list ./... | grep -v github.com/github/actions-usage-metrics/tests) --count=1 # excludes functional tests in ./tests
+
+  containerizedBuildAndFunctionalTest:
+    name: Containerized Build + Deploy + Functional Test
+    runs-on: ubuntu-20.04-xl
+    environment: ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Bootstrap
+        run: ./script/bootstrap --no-auth --no-proto
+        env:
+          CONTAINER_BUILDER_TOKEN: ${{ secrets.CONTAINER_BUILDER_TOKEN }}
+
+      - name: az login
+        uses: azure/login@a65d910e8af852a8061c627c456678983e180302 #v2.2.0
+        with:
+          client-id: ${{ env.client-id}}
+          tenant-id: ${{ env.tenant-id}}
+          subscription-id: ${{ env.subscription-id }}
+
+      - name: Setup
+        run: ./script/setup --no-bootstrap
+        env:
+          GITHUB_USER: ci
+          SERVICE_PRINCIPAL_CLIENT_SECRET: ${{ secrets.SERVICE_PRINCIPAL_CLIENT_SECRET_CI }}
+          KUSTO_CONNECTION_STRING: https://ghaumlab.eastus.kusto.windows.net
+
+      - name: Setup Go Proxy / .netrc
+        uses: github/setup-goproxy@v1.1.0
+
+      - name: Build
+        run: skaffold build
+
+      - name: Deploy
+        run: skaffold run
+
+      - name: Update Hosts
+        run: ./script/update-hosts
+
+      - name: Run Functional Tests
+        run: |
+          go test -v $(go list ./tests/...) --count=1

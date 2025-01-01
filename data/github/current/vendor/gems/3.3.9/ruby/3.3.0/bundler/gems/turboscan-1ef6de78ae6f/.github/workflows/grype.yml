@@ -1,0 +1,43 @@
+name: Grype Container Scan
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - .github/workflows/grype.yml
+      - .github/workflows/grype/**
+
+permissions:
+  contents: read
+
+jobs:
+  grype:
+    runs-on: ubuntu-latest-xl
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+      - name: Login to Docker Registry
+        run: |
+          echo "${{ secrets.CONTAINER_BUILDER_TOKEN }}" | docker login containers.pkg.github.com --username gh-containers-bot --password-stdin
+      - name: Setup Go
+        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491
+        with:
+          go-version-file: ./.github/workflows/grype/go.mod
+      - name: Scan
+        env:
+          GITHUB_TOKEN: "${{ secrets.DSP_CODE_SCANNING_TOKEN }}"
+        run: |
+          mkdir "$GITHUB_WORKSPACE/debug/"
+          cd ./.github/workflows/grype/
+          dry_run_flag=""
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            dry_run_flag="--dry-run"
+          fi
+          go run ./main.go --verbose --debug-path "$GITHUB_WORKSPACE/debug/" $dry_run_flag
+      - name: Upload Debug Artifacts
+        uses: actions/upload-artifact@c24449f33cd45d4826c6702db7e49f7cdb9b551d
+        with:
+          name: debug
+          path: ./debug/

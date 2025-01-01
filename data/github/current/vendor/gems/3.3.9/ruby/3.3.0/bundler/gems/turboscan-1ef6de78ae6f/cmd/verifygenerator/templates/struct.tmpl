@@ -1,0 +1,58 @@
+// Verify will check this {{ .Name }} is equivalent to an existing {{ .Name }}
+func ({{ .Receiver }} *{{ .Name }}) Verify(other *{{ .Name }}) error {
+    if {{ .Receiver }} == other {
+        return nil
+    }
+    if {{ .Receiver }} == nil || other == nil {
+        return errors.New("mismatched nil pointer for {{ .Name }}")
+    }
+    {
+        {{- if .BeforeVerify }}
+            a, b := {{ .Receiver }}.beforeVerify(), other.beforeVerify()
+        {{- else }}
+            a, b := {{ .Receiver }}, other
+        {{- end }}
+        {{- range .Fields -}}
+            {{- if .IsMap }}
+                if len(a.{{ .Name }}) != len(b.{{ .Name }}) {
+                    return errors.New("map lens not equal for {{ .Name }}")
+                }
+                for k, vA := range a.{{ .Name }} {
+                    vB, ok := b.{{ .Name }}[k]
+                    if !ok {
+                        return errors.New("key missing for {{ .Name }}")
+                    }
+                    if err := {{ printf .Compare "vA" "vB" }} {
+                        return err
+                    }
+                }
+            {{- else }}
+                {{- if .IsArray }}
+                    {{- if eq .Type "[]byte" }}
+                        if !bytes.Equal(a.{{ .Name }}, b.{{ .Name }}) {
+                            return errors.New("bytes not equal for {{ .Name }}")
+                        }
+                    {{ else }}
+                        if len(a.{{ .Name }}) != len(b.{{ .Name }}) {
+                            return errors.New("slice lens not equal for {{ .Name }}")
+                        }
+                        {
+                            sA := a.{{ .Name }}
+                            sB := b.{{ .Name }}
+                            for i := range sA {
+                                if err := {{ printf .Compare "sA[i]" "sB[i]" }} {
+                                    return err
+                                }
+                            }
+                        }
+                    {{- end }}
+                {{- else }}
+                    if err := {{ printf .Compare (print "a." .Name) (print "b." .Name) }} {
+                        return err
+                    }
+                {{- end -}}
+            {{- end -}}
+        {{- end }}
+    }
+    return nil
+}

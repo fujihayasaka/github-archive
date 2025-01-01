@@ -1,0 +1,27 @@
+#!/bin/bash
+set -euo pipefail
+
+if [ -z "${CODESPACES:-}${DEVCONTAINER:-}" ]; then
+  TTY_ARG=""
+  if [ -t 1 ]; then
+      TTY_ARG="--tty"
+  fi
+
+  ID="$( docker build --build-arg BUILDKIT_INLINE_CACHE=1 --platform "$( docker system info --format '{{.OSType}}/{{.Architecture}}' )" --cache-from ghcr.io/github/turboghas/turboghas:tools --quiet --target tools . )"
+	exec docker run \
+	  --interactive \
+	  $TTY_ARG \
+	  -e GOCACHE=/tmp/gocache \
+	  -e GOFLAGS='-buildvcs=false' \
+		--rm \
+		--network host \
+		--user "$(id -u):$(id -g)" \
+		--volume "$(pwd):/work/" \
+		--mount type=tmpfs,destination=/tmp/gocache \
+		--mount type=tmpfs,destination=/.config/go \
+		--workdir /work/ \
+		-e DEVCONTAINER=true \
+    "${ID}" "$0" "$@"
+fi
+
+exec "$@"

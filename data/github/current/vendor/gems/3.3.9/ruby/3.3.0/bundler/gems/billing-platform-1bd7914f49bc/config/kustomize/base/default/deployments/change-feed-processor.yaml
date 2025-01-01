@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: change-feed-processor
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: change-feed-processor
+  template:
+    metadata:
+      labels:
+        app: change-feed-processor
+      annotations:
+        observability.github.com/logger: fluent-bit
+        observability.github.com/splunk_index: billing
+        fluentbit.io/parser: logfmt
+    spec:
+      dnsPolicy: ClusterFirst
+      containers:
+      - name: change-feed-processor
+        image: billing-platform
+        command: ["./bin/ChangeFeedProcessor/ChangeFeedProcessor"]
+        lifecycle:
+          preStop:
+            exec:
+              command: ["sleep", "5"]
+        env:
+        - name: STATS_ADDR
+          value: "$(KUBE_NODE_HOSTNAME):28125"
+        - name: APP_SHA
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.annotations['heaven.githubapp.com/sha']
+        - name: APP_REF
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.annotations['heaven.githubapp.com/ref']
+        - name: DOTNET_SYSTEM_GLOBALIZATION_INVARIANT
+          value: "1"
+        envFrom:
+          - configMapRef:
+              name: environment
+          - configMapRef:
+              name: kube-cluster-metadata
+          - secretRef:
+              name: vault-secrets
+        readinessProbe:
+          exec:
+            command:
+             - cat
+             - /tmp/console-running
+        resources:
+          requests:
+            cpu: "512m"
+            memory: "1536Mi"
+          limits:
+            cpu: "768m"
+            memory: "2048Mi"

@@ -1,0 +1,82 @@
+auto_start_pipeline: production_rollout
+environments:
+  - name: staging
+    auto_deploy: true
+    cluster_selector:
+      profile: general
+      region: iad
+    required_builds: []
+    required_review_tasks: []
+    skip_auto_merge: true
+    timeout: 300 # 5 minutes
+  - name: staff-wus2-01
+    auto_deploy: true
+    service_mesh:
+      enabled: true
+    cluster_selector:
+      profile: proxima
+      stamp: staff-wus2-01
+    required_review_tasks: []
+    skip_auto_merge: true
+    timeout: 300 # 5 minutes
+  - name: production
+    cluster_selector:
+      profile: general
+      region: iad
+    require_pipeline: true
+  - name: prod-weu-01
+    service_mesh:
+      enabled: true
+    cluster_selector:
+      profile: proxima
+      stamp: prod-weu-01
+    require_pipeline: true
+    required_review_tasks: []
+    skip_auto_merge: true
+  - name: prod-sdc-01
+    service_mesh:
+      enabled: true
+    cluster_selector:
+      profile: proxima
+      stamp: prod-sdc-01
+    required_review_tasks: []
+    skip_auto_merge: true
+notifications:
+  slack_channels:
+    - "#package-security-ops"
+pipelines:
+  production_rollout:
+    append_proxima_stamps: true
+    rollback_in_parallel: true
+    timeout: 2100
+    thread_notifications: true
+    stages:
+      - name: staging
+        kind: deployment
+        config:
+          environment: staging
+          timeout: 300
+      - name: staff-wus2-01
+        kind: deployment
+        config:
+          environment: staff-wus2-01
+          timeout: 300
+      - name: full_production
+        kind: deployment
+        start_message: We are now going to deploy {{app}}/{{ref}} to {{environment}}! Please pause or cancel the pipeline after the deploy if you want more time before your pull request(s) auto merges.
+        config:
+          environment: production
+          timeout: 300
+        gates:
+          - kind: timer
+            duration: 300
+proxima:
+  environment_pattern:
+    service_mesh:
+      enabled: true
+    timeout: 300
+  rollout_pattern:
+    - kind: deployment
+      start_message: We are now going to deploy {{app}}/{{ref}}! Please pause or cancel the pipeline after the deploy if you want more time before your pull request(s) auto merges.
+      config:
+        timeout: 300

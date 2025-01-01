@@ -1,0 +1,28 @@
+#!/bin/bash
+
+set -e
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$DIR/ensure-devcontainer.sh"
+
+echo "==> running linters ..."
+if [ -z "${CI-}" ]; then
+    golangci-lint run
+else
+    golangci-lint run --out-format=github-actions
+fi
+
+echo "==> running batch ..."
+go vet -vettool="$(pwd)/.github/workflows/batch/run.sh" ./migrations/...
+
+echo "  ==> running check-flags ..."
+go run ./.github/workflows/check-flags/main.go --janky config/kustomize/_base/cronjobs/*
+
+go install github.com/fatih/faillint
+
+echo "==> running faillint ..."
+# fail for the following import path and usages:
+# 1. errors. We use github.com/pkg/errors
+# 2. fmt.Errorf. We should use github.com/pkg/errors.Errorf
+# 3. github.com/github/go/.... packages. We should use the splitted packages listed in https://github.com/github/go#composable-go-libraries
+faillint -paths "github.com/github/go/...,errors=github.com/pkg/errors,fmt.{Errorf}=github.com/pkg/errors.Errorf" ./...

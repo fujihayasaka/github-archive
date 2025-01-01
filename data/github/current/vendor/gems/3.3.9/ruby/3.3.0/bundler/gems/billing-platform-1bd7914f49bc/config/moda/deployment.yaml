@@ -1,0 +1,113 @@
+notifications:
+  slack_channels:
+    - "#billing-platform-ops"
+auto_start_pipeline: production_rollout
+sentry:
+  projects:
+    - billing-platform
+required_builds:
+  - ruby-client-specs
+  - billing-platform-docker-image / billing-platform-docker-image
+  - billing-platform-docker-security / billing-platform-docker-security
+  - billing-platform-moda-config-bundle / billing-platform-moda-config-bundle
+  - check_for_go_file_changes
+  - run_unit
+environments:
+- name: production
+  require_pipeline: true
+  auto_deploy: true
+  timeout: 7200
+  canaryable: true
+  cluster_selector:
+    profile: general
+    region: iad
+  service_mesh:
+    enabled: true
+  extra_start_message: |
+    Check out the [Datadog dashboard](https://app.datadoghq.com/dashboard/646-msn-qic) and [Sentry issues](https://sentry.io/organizations/github/releases/{{RELEASE_SHA}}/?environment=production&environment=canary&environment=prod-weu-01&environment=staff-wus2-01&project=4504834072117248&pageStatsPeriod=1h) so you're the first to know if anything is broken.
+  extra_completed_message: |
+      - Please keep an eye on:
+      - [Sentry](https://github.sentry.io/projects/billing-platform/?issuesType=new&project=4504834072117248)
+      - [Datadog](https://app.datadoghq.com/dashboard/646-msn-qic)
+      - [Splunk logs](https://splunk.githubapp.com/en-US/app/gh_reference_app/search?q=search%20index%3Dbilling%20kube_namespace%3Dbilling-platform*&earliest=-15m&latest=now)
+      - [Moda Resources](https://moda.githubapp.com/apps/billing-platform/deployments/production/)
+- name: staff-wus2-01
+  require_pipeline: true
+  cluster_selector:
+    profile: proxima
+    stamp: staff-wus2-01
+  service_mesh:
+    enabled: true
+  extra_start_message: |
+    Check out the [Datadog dashboard](https://app.datadoghq.com/dashboard/646-msn-qic) and [Sentry issues](https://sentry.io/organizations/github/releases/{{RELEASE_SHA}}/?environment=production&environment=canary&environment=prod-weu-01&environment=staff-wus2-01&project=4504834072117248&pageStatsPeriod=1h) so you're the first to know if anything is broken.
+  extra_completed_message: |
+    - Please keep an eye on:
+    - [Sentry](https://github.sentry.io/projects/billing-platform/?issuesType=new&project=4504834072117248)
+    - [Datadog](https://app.datadoghq.com/dashboard/646-msn-qic)
+    - [Splunk logs](https://splunk.githubapp.com/en-US/app/gh_reference_app/search?q=search%20index%3Dbilling%20kube_namespace%3Dbilling-platform*&earliest=-15m&latest=now)
+    - [Moda Resources](https://moda.githubapp.com/apps/billing-platform/deployments/staff-wus2-01/)
+
+proxima:
+  environment_pattern:
+    extra_completed_message: |
+      - Please keep an eye on:
+      - [Sentry](https://github.sentry.io/projects/billing-platform/?issuesType=new&project=4504834072117248)
+      - [Datadog](https://app.datadoghq.com/dashboard/646-msn-qic)
+      - [Splunk logs](https://splunk.githubapp.com/en-US/app/gh_reference_app/search?q=search%20index%3Dbilling%20kube_namespace%3Dbilling-platform*&earliest=-15m&latest=now)
+      - [Moda Resources](https://moda.githubapp.com/apps/billing-platform/deployments/prod-weu-01/)
+    service_mesh:
+      enabled: true
+  rollout_pattern:
+    - kind: deployment
+      start_message: We are deploying to the Proxima {{stamp}} environment now with {{app}}/{{ref}}!
+      config:
+        timeout: 1200
+
+pipelines:
+  production_rollout:
+    append_proxima_stamps: true
+    notify_support_on_invalid_queue_state: false
+    auto_start_wait: false
+    notify_users_via_dm: false
+    timeout: 3600
+    stages:
+      - name: canary
+        start_message: We are deploying to the production canary environment now with {{app}}/{{ref}}!
+        kind: canary_deployment
+        config:
+          environment: production
+          hosts: canary
+          timeout: 300
+        gates:
+          - kind: timer
+            duration: 300
+      - name: staff-wus2-01
+        kind: deployment
+        ignore_errors: false
+        start_message: We are deploying to the Proxima Staffship environment now with {{app}}/{{ref}}!
+        config:
+          environment: staff-wus2-01
+          timeout: 1200
+        gates:
+          - kind: timer
+            duration: 150
+      - name: va3-iad
+        kind: deployment
+        start_message: We are deploying to production but only to va3-iad sites now with {{app}}/{{ref}}! Please pause or cancel the pipeline after the deploy if you want more time before your pull request auto merges.
+        ignore_errors: false
+        config:
+          environment: production
+          sites: ["va3-iad"]
+        gates:
+          - kind: timer
+            duration: 300
+      - name: full_production
+        kind: deployment
+        start_message: We are going to production with {{app}}/{{ref}}! Please pause or cancel the pipeline after the deploy if you want more time before your pull request auto merges.
+        config:
+          environment: production
+          timeout: 1200
+          skip_sites: ["va3-iad"]
+        gates:
+          - kind: timer
+            duration: 150

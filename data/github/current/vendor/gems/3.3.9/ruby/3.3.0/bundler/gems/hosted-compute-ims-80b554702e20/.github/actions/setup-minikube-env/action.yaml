@@ -1,0 +1,40 @@
+name: Setup Minikube environment
+description: Setup Minikube environment and related dependencies
+inputs:
+  minikube-version: # Ex: v1.34.0
+    description: Version of minikube
+    default: 'v1.34.0'
+  skaffold-version: # Ex: v2.13.2
+    description: Version of skaffold
+    default: 'latest'
+  docker-token:
+    description: Token for Docker login
+    default: ''
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install minikube
+      shell: bash
+      id: install-minikube
+      run: |
+        curl -LO https://storage.googleapis.com/minikube/releases/${{ inputs.minikube-version }}/minikube-linux-amd64
+        sudo install minikube-linux-amd64 /usr/local/bin/minikube
+        rm minikube-linux-amd64
+        echo "version=$(minikube version --short)" >> $GITHUB_OUTPUT
+    - name: Install skaffold
+      shell: bash
+      run: |
+          curl -Lo skaffold "https://storage.googleapis.com/skaffold/releases/${{ inputs.skaffold-version }}/skaffold-linux-amd64"
+          sudo install skaffold /usr/local/bin/skaffold
+          rm -f skaffold
+    - name: Start minikube
+      shell: bash
+      run: script/helpers/ensure-minikube-is-running
+    - name: Login to GHCR
+      uses: docker/login-action@v3.0.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.docker-token }}

@@ -1,0 +1,79 @@
+name: "CodeQL"
+run-name: ${{ github.event.inputs.code_scanning_run_name }}
+on: dynamic
+
+env:
+  CODE_SCANNING_REF: ${{ github.event.inputs.code_scanning_ref }}
+  CODE_SCANNING_IS_ANALYZING_DEFAULT_BRANCH: ${{ github.event.inputs.code_scanning_is_analyzing_default_branch }}
+  CODE_SCANNING_WORKFLOW_FILE: ${{ github.event.inputs.code_scanning_workflow_file }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+      security-events: write
+    continue-on-error: false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript
+            category: /language:javascript
+            build-mode: none
+            runner: '["ubuntu-latest"]'
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@default-setup-testing
+      with:
+        languages: ${{ matrix.language }}
+        build-mode: ${{ matrix.build-mode }}
+        dependency-caching: ${{ runner.environment == 'github-hosted' && github.event.repository.visibility == 'public' }}
+        queries: "" # Default query suite
+        config: |
+          default-setup:
+            org:
+              model-packs: [ ${{ github.event.inputs.code_scanning_codeql_packs }} ]
+          threat-models: [  ]
+
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@default-setup-testing
+      with:
+        category: ${{ matrix.category }}
+## VALIDATION RUN ONLY
+        upload: false
+        output: 'results'
+
+    - name: Upload Sarif Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: sarif-artifact-${{ matrix.language }}
+        path: 'results'
+
+  upload:
+    name: Upload Results
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    needs: analyze
+    steps:
+      - name: Download Sarifs
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/results
+          pattern: sarif-artifact-*
+          merge-multiple: true
+
+      - name: Upload Results
+        uses: github/codeql-action/upload-sarif@default-setup-testing
+        with:
+          sarif_file: ${{ runner.temp }}/results

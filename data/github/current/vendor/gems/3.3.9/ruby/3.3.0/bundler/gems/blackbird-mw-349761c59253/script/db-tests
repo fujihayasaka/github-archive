@@ -1,0 +1,30 @@
+#! /usr/bin/env bash
+set -euo pipefail
+IFS=$'\n\t'
+
+cd "$(dirname "$0")/.."
+
+# Run mysql and wait for it to come up
+docker compose run -e env=test -d bootstrap-skeema
+
+attempts=0
+until docker compose exec -T mysql mysql -u root -h localhost --database blackbird_test --execute "select version(), count(*) from blackbird_repositories;"
+do
+    if [[ $attempts -gt 5 ]]; then
+        echo "gave up waiting for mysql after $attempts attempts"
+        echo "::group::mysql logs"
+        docker compose logs mysql
+        echo "::endgroup::"
+        echo "::group::bootstrap-skeema logs"
+        docker compose logs bootstrap-skeema
+        echo "::endgroup::"
+
+        exit 1
+    fi
+    echo "waiting for MySQL..."
+    sleep 5
+    attempts=$(( attempts+1 ))
+done
+
+# Run the db tests
+RUN_DB_TESTS=1 go test -timeout 60s -p 1 ./internal/db/mysql

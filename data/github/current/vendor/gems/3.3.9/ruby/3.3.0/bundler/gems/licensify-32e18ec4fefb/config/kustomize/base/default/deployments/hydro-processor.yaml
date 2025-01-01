@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hydro-processor
+  annotations:
+    moda.github.net/inject-unified-service-tag-env-var: hydro-processor
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hydro-processor
+  template:
+    metadata:
+      labels:
+        app: hydro-processor
+      annotations:
+        fluentbit.io/parser: logfmt
+        observability.github.com/logger: fluent-bit
+        observability.github.com/splunk_index: licensify
+    spec:
+      dnsPolicy: ClusterFirst
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: hydro-processor
+          image: licensify
+          command: ["./bin/hydro-processor"]
+          env:
+            - name: APP_SHA
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['heaven.githubapp.com/sha']
+            - name: APP_REF
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['heaven.githubapp.com/ref']
+            - name: GOMAXPROCS
+              value: "2"
+            - name: STATS_ADDR
+              value: $(KUBE_NODE_HOSTNAME):28125
+          envFrom:
+            - configMapRef:
+                name: environment
+            - configMapRef:
+                name: kafka
+            - configMapRef:
+                name: kube-cluster-metadata
+            - secretRef:
+                name: vault-secrets
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          readinessProbe:
+            exec:
+              command:
+                - cat
+                - /tmp/consumer_healthy
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            limits:
+                cpu: 3
+                memory: 500Mi
+            requests:
+                cpu: 35m
+                memory: 100Mi

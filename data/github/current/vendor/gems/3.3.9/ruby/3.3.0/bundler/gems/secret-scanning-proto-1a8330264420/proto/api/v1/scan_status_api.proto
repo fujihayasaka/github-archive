@@ -1,0 +1,95 @@
+syntax = "proto3";
+
+package github.secretscanning.v1;
+
+option go_package = "github.com/github/secret-scanning-proto/gen/go/v1/api";
+option ruby_package = "GitHub::Proto::SecretScanning::Api::V1";
+
+import "api/v1/shared.proto";
+import "types/v1/scans.proto";
+import "types/v1/owners.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+service ScanStatusAPI {
+  // GetLatestRepositoryScans
+  rpc GetLatestRepositoryScans(GetLatestRepositoryScansRequest) returns (GetLatestRepositoryScansResponse);
+}
+
+
+message GetLatestRepositoryScansRequest {
+  uint64 repository_id = 1;
+}
+
+message GetLatestRepositoryScansResponse {
+  repeated ScanEvent scan_events = 1;
+}
+
+// ScanEvent represents the customer-facing view of a scan; it embeds the TSS internal scan details
+message ScanEvent {
+  // ScanType is the general type of scan; it is adjacent, but not identical to a trigger/reason
+  // that the scan occurred.
+  enum Type {
+    TYPE_UNKNOWN = 0;
+    // SCAN_TYPE_BACKFILL is for backfills which occur for _all_ possible patterns
+    TYPE_BACKFILL = 1;
+    // SCAN_TYPE_CUSTOM_PATTERN_BACKFILL is for backfills which occurred due to publishing a custom pattern
+    TYPE_CUSTOM_PATTERN_BACKFILL = 2;
+    // SCAN_TYPE_PATTERN_VERSION_BACKFILL is for backfills which occurred due due to a release of new/updated built-in pattern(s)
+    TYPE_PATTERN_VERSION_BACKFILL = 3;
+    // SCAN_TYPE_INCREMENTAL is for incremental scans
+    TYPE_INCREMENTAL = 4;
+  }
+
+  // ScanSource is the type of content that was scanned
+  enum Source {
+    SOURCE_UNKNOWN = 0;
+    SOURCE_GIT = 1;
+    SOURCE_ISSUES = 2;
+    SOURCE_PULL_REQUESTS = 3;
+    SOURCE_DISCUSSIONS = 4;
+    SOURCE_WIKI = 5;
+  }
+
+  // ScanMethod is the method (e.g., engine) which the content was scanned for.
+  enum Method {
+    METHOD_UNKNOWN = 0;
+    // SCAN_METHOD_HYPERCREDSCAN is for scans which were performed by the HyperCredScan regex engine
+    METHOD_HYPERCREDSCAN = 1;
+  }
+
+  message CustomPatternDetails {
+    // the internal custom pattern ID; viewers of this message may not have access to this pattern, so it
+    // be careful exposing it.
+    uint64 id = 1;
+    // the owner scope of the custom pattern, used to disambiguate the slug.
+    github.secretscanning.types.v1.OwnerScope owner_scope = 2;
+    // this is the internal representation of the custom pattern name; it is not guaranteed to be unique
+    // per repository, as customers are able to define a custom pattern that resolves to an identical slug at the
+    // repo, org and enterprise levels.
+    string slug = 3;
+    // the customer-facing name of the custom pattern
+    string name = 4;
+  }
+
+  // the TSS internal scan details
+  github.secretscanning.types.v1.Scan scan = 1;
+
+  Type type = 2;
+  // scan_category_slug is the customer-facing version static version of the scan_category enum
+  string type_slug = 3;
+
+  Source source = 4;
+  // scan_source_slug is the customer-facing version static version of the scan_source enum
+  string source_slug = 5;
+
+  Method method = 6;
+  // scan_method_slug is the customer-facing version static version of the scan_method enum
+  string method_slug = 7;
+
+  // if this scan was for a custom pattern, this will be populated
+  CustomPatternDetails custom_pattern = 8;
+}
+
+
+

@@ -1,0 +1,632 @@
+syntax = "proto3";
+
+package blackbirdmw.query.v1;
+
+import "query/v1/aleph.proto";
+import "query/v1/git_document_match.proto";
+import "query/v1/search_result.proto";
+import "query/v1/facets.proto";
+import "query/v1/shard.proto";
+import "query/v1/symbol.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+option go_package = "query/v1";
+option ruby_package = "Blackbird::Query::V1";
+
+service QueryAPI {
+  // Query executes a search query against the blackbird shards.
+  rpc Query(QueryRequest) returns (QueryResponse);
+  // Suggest executes a suggest query against the blackbird shards.
+  rpc Suggest(SuggestRequest) returns (SuggestResponse);
+  // Similar to the query endpoint, but returns results suitable for direct use in the frontend
+  rpc FrontendQuery(FrontendQueryRequest) returns (FrontendQueryResponse);
+  // Estimates the number of results for a query
+  rpc Count(CountRequest) returns (CountResponse);
+  // LegacyQuery executs a search query with legacy query translation.
+  rpc LegacyQuery(LegacyQueryRequest) returns (LegacyQueryResponse);
+
+  // TextDocumentDefinition executes a code-navigation style jump-to-definition search
+  // suitable for use in the dotcom code view.
+  rpc TextDocumentDefinition(TextDocumentDefinitionRequest) returns (TextDocumentDefinitionResponse);
+  // TextDocumentReferences executes a code-navigation style find-all-references search
+  // suitable for use in the dotcom code view.
+  rpc TextDocumentReferences(TextDocumentReferencesRequest) returns (TextDocumentReferencesResponse);
+
+  // RefreshCaches recalculates and replaces the authentication cache
+  rpc RefreshAuthCaches(RefreshAuthCachesRequest) returns (RefreshAuthCachesResponse);
+  // WarmCaches warms the middleware caches for accessible_repo_ids for the
+  // given actor.
+  rpc WarmCaches(WarmCachesRequest) returns (WarmCachesResponse);
+
+  // Get the indexing status of a repository.
+  //
+  // WARNING: This is an admin-level rpc, callers are responsible for validating the display of any data related to this
+  // repository_id. Unlike the search endpoints, no actor information is required to call this endpoint and no
+  // enforcement of repository access happens in blackbird-mw.
+  rpc GetRepositoryStatus(GetRepositoryStatusRequest) returns (GetRepositoryStatusResponse);
+}
+
+enum QueryParser {
+  // Unspecified, will use default behavior
+  QUERY_PARSER_UNKNOWN = 0;
+  // Explicitly use the blackbird parser.
+  QUERY_PARSER_BLACKBIRD_V0 = 1;
+  // Parse the query with Geyser
+  QUERY_PARSER_GEYSER = 2;
+}
+
+message QueryRequest {
+  string query = 1;
+  // allow graceful changes to the query syntax
+  QueryParser query_parser = 14;
+  // max documents
+  uint32 document_limit = 3;
+  // max locations in a single document to return
+  uint32 document_location_limit = 4;
+  // A query that is used to implicitly restrict the scope of the query. Won't
+  // show up in error messages or query suggestions
+  string scoping_query = 6;
+  // The actor making the query
+  Actor actor = 7;
+  // Optional epoch_id to force a query to use a specific epoch instead of the
+  // latest serving epoch.
+  uint32 epoch_id = 9;
+  repeated CustomScope custom_scopes = 10;
+  SnippetOptions snippet_options = 11;
+  // Type of the query. Used for logging and quota management.
+  QueryType query_type = 12;
+  // Request timeout. This is just a suggestion to the middleware since apps
+  // like github.com can't cancel across the http request boundary and have
+  // strict request timeouts of their own.
+  google.protobuf.Duration request_timeout = 13;
+
+  // Source of this query. Used for attribution of queries.
+  QuerySource query_source = 15;
+
+  uint32 page_number = 16;
+  uint32 results_per_page = 17;
+
+  // Optional set of experiments. Each experiment is defined by a unique key,
+  // and optionally a value. Setting experiment flags may alter query behavior.
+  map<string, string> experiments = 18;
+
+  // Whether to return enclosing symbols for all matches
+  bool return_enclosing_symbols = 19;
+
+  // Optional tenant for this query.
+  Tenant tenant = 20;
+
+  reserved 2; // string query_version
+  reserved 5; // repeated uint32 accessible_repo_ids
+  reserved 8; // repeated uint32 experiment_ids
+}
+
+message QueryResponse {
+  repeated GitDocumentMatch documents = 1;
+  repeated QueryError query_errors = 3;
+  // A list of organizations for which access was blocked due to SSO requirements
+  repeated int64 protected_organization_ids = 4;
+  Metadata metadata = 5;
+  int64 serving_offset_queried = 6; // The serving offset that was queried
+
+  CountMode count_mode = 7;
+  uint64 result_count = 8;
+
+  reserved 2; // repeated ShardMetadata shard_metadata
+}
+
+message CountRequest {
+  string query = 1;
+  string scoping_query = 6;
+  Actor actor = 7;
+  uint32 epoch_id = 9;
+  repeated CustomScope custom_scopes = 10;
+  // Request timeout. This is just a suggestion to the middleware since apps
+  // like github.com can't cancel across the http request boundary and have
+  // strict request timeouts of their own.
+  google.protobuf.Duration request_timeout = 11;
+
+  // Optional set of experiments. Each experiment is defined by a unique key,
+  // and optionally a value. Setting experiment flags may alter query behavior.
+  map<string, string> experiments = 12;
+
+  // Optional tenant for this query.
+  Tenant tenant = 13;
+
+  reserved 8; // repeated uint32 experiment_ids = 8;
+}
+
+enum CountMode {
+  COUNT_MODE_EXACT = 0;
+  COUNT_MODE_APPROXIMATE = 1;
+  COUNT_MODE_LOWER_BOUND = 2;
+}
+
+message CountResponse {
+  uint32 count = 1;
+  CountMode mode = 2;
+  repeated ShardMetadata shard_metadata = 3;
+  repeated QueryError query_errors = 4;
+  // A list of organizations for which access was blocked due to SSO requirements
+  repeated int64 protected_organization_ids = 5;
+  Metadata metadata = 6;
+  int64 serving_offset_queried = 7; // The serving offset that was queried
+}
+
+message FrontendQueryRequest {
+  string query = 1;
+  // allow graceful changes to the query syntax
+  QueryParser query_parser = 16;
+  // max documents
+  uint32 document_limit = 3;
+  // max locations in a single document to return
+  uint32 document_location_limit = 4;
+  // A query that is used to implicitly restrict the scope of the query. Won't
+  // show up in error messages or query suggestions
+  string scoping_query = 6;
+  // The actor making the query
+  Actor actor = 7;
+  // Pagination info
+  string page_token = 9;
+  int32 page_number = 10;
+  int32 results_per_page = 11;
+  // SHA format
+  SHAFormat sha_format = 12;
+  repeated CustomScope custom_scopes = 13;
+  SnippetOptions snippet_options = 14;
+  // Request timeout. This is just a suggestion to the middleware since apps
+  // like github.com can't cancel across the http request boundary and have
+  // strict request timeouts of their own.
+  google.protobuf.Duration request_timeout = 15;
+
+  // Optional set of experiments. Each experiment is defined by a unique key,
+  // and optionally a value. Setting experiment flags may alter query behavior.
+  map<string, string> experiments = 17;
+
+  // Whether to return enclosing symbols for all matches
+  bool return_enclosing_symbols = 18;
+
+    // Type of the query. Used for logging and quota management.
+  QueryType query_type = 19;
+  // Source of this query. Used for attribution of queries.
+  QuerySource query_source = 20;
+
+  // Optional tenant for this query.
+  Tenant tenant = 21;
+
+  reserved 2; // string query_version
+  reserved 8; // /repeated uint32 experiment_ids = 8;
+}
+
+message FrontendQueryResponse {
+  repeated SearchResult results = 1;
+  repeated QueryError query_errors = 2;
+  uint32 page = 3;
+  uint32 page_count = 4;
+  uint32 result_count = 5;
+  repeated Facet facets = 6;
+  // A list of organizations for which access was blocked due to SSO requirements
+  repeated int64 protected_organization_ids = 7;
+  // Query metadata
+  Metadata metadata = 9;
+
+  reserved 8; // repeated ShardMetadata shard_metadata
+}
+
+message LegacyQueryRequest {
+  string query = 1;
+  // max documents
+  uint32 document_limit = 2;
+  // max locations in a single document to return
+  uint32 document_location_limit = 3;
+  // The actor making the query
+  Actor actor = 4;
+  int32 page_number = 6;
+  int32 results_per_page = 7;
+
+  SnippetOptions snippet_options = 8;
+  // Request timeout. This is just a suggestion to the middleware since apps
+  // like github.com can't cancel across the http request boundary and have
+  // strict request timeouts of their own.
+  google.protobuf.Duration request_timeout = 9;
+
+  // Optional set of experiments. Each experiment is defined by a unique key,
+  // and optionally a value. Setting experiment flags may alter query behavior.
+  map<string, string> experiments = 10;
+
+  // Optional tenant for this query.
+  Tenant tenant = 11;
+
+  reserved 5; // repeated uint32 experiment_ids = 5;
+}
+
+message LegacyQueryResponse {
+  repeated SearchResult results = 1;
+  repeated QueryError query_errors = 2;
+  uint32 page = 3;
+  uint32 page_count = 4;
+  uint32 result_count = 5;
+  // Query metadata
+  Metadata metadata = 6;
+}
+
+enum QueryType {
+  QUERY_TYPE_UNSPECIFIED = 0;
+  QUERY_TYPE_USER_QUERY = 1;
+  QUERY_TYPE_FIND_REFERENCES = 2;
+  QUERY_TYPE_FIND_DEFINITIONS = 3;
+  QUERY_TYPE_SIMILARITY = 4;
+}
+
+enum QuerySource {
+  QUERY_SOURCE_UNSPECIFIED = 0;
+  QUERY_SOURCE_FRONTEND = 1;
+  QUERY_SOURCE_LEGACY_API = 2;
+  QUERY_SOURCE_PROBER = 3;
+  QUERY_SOURCE_COPILOT_API = 4;
+  QUERY_SOURCE_GRAPHQL_API = 5;
+  QUERY_SOURCE_COPILOT_IDE = 6;
+  QUERY_SOURCE_BING = 7;
+  QUERY_SOURCE_ALEPH = 8;
+}
+
+message CustomScope {
+  string name = 1;
+  string query = 2;
+}
+
+enum SHAFormat {
+   SHA_FORMAT_INVALID = 0;
+   SHA_FORMAT_SHA1 = 1;
+}
+
+enum SnippetMode {
+  SNIPPET_MODE_DEFAULT = 0;
+  SNIPPET_MODE_CONTEXT = 1;
+  SNIPPET_MODE_HIGH_DENSITY = 2;
+  SNIPPET_MODE_AUTO = 3;
+  SNIPPET_MODE_UNIFIED = 4;
+  SNIPPET_MODE_RAW_MATCHES = 5;   // Every match is reported as a separate snippet (even if they overlap or occur on the same line!)
+  SNIPPET_MODE_LLM = 6;
+}
+
+message SnippetOptions {
+  SnippetMode mode = 1;
+  uint32 desired_width = 2;
+  uint32 high_density_snippet_max_lines = 3;
+  SnippetFormat format = 4;
+
+ // For AUTO mode, the max number of extra snippet lines generated by lines
+  // that are longer than the desired_width before converting to .
+  uint32 max_overflows = 5;
+
+  uint32 single_snippet_context_lines = 6;
+  uint32 double_snippet_context_lines = 7;
+
+  // Maximum number of lines that should be created in total.
+  uint32 max_total_lines = 8;
+
+  // The max number of tokens to include in the snippet (only applies in LLM snippet mode)
+  uint32 max_tokens = 9;
+}
+
+message TextDocumentDefinitionRequest {
+  AlephLocationRequest body = 1;
+  Actor actor = 2;
+  Tenant tenant = 3;
+}
+
+message TextDocumentDefinitionResponse {
+  AlephLocationResponse body = 1;
+}
+
+message TextDocumentReferencesRequest {
+  AlephLocationRequest body = 1;
+  Actor actor = 2;
+  Tenant tenant = 3;
+}
+
+message TextDocumentReferencesResponse {
+  AlephLocationResponse body = 1;
+}
+
+message Metadata {
+  // Cluster name used to serve this query
+  string cluster_name = 1;
+  // The cluster's corpus.
+  string corpus_name = 2;
+  // Query AST as text.
+  //
+  // NOTE: Doing this as protobuf would require copying or reimplementing
+  // blackbird's query AST messages.
+  string query_ast = 4;
+  // Total cost of all shard requests (including retries).
+  float total_cost = 5;
+  // Number of times the blackbird-query service retried before it got a
+  // response or errored out
+  uint32 retries = 6;
+  // The number of documents excluded due to middleware/shard data mismatch (for
+  // example, repository visibility or ownership).
+  uint32 num_filtered_documents = 7;
+  // A query is satisfied if we return the number of documents that the user
+	// requested.
+  bool satisfied = 8;
+  // The query limit is reached if we hit one of the return, retrieve, or location limits.
+  bool limit_reached = 9;
+  // True if there was an error querying a shard, any shard paniced, or there was a shard timeout.
+  bool had_shard_failure = 10;
+  // A query is a failure if all shards fail.
+  bool is_failure = 11;
+  // Timing details for query execution.
+  Timing timing = 12;
+  // Debug information from each shard.
+  repeated ShardMetadata shards = 13;
+  // Number of documents returned from all shards.
+  uint32 docs_returned = 14;
+  // Unique ID for the query
+  string query_id = 15;
+  // Experiments that were used for this request.
+  map<string, string> experiments = 16;
+
+  reserved 3; // repeated uint32 experiments_enabled = 3;
+}
+
+message Timing {
+  // Total time taken by query execution within the application code. It does
+  // include serialization/deserialization or other framework overhead.
+  google.protobuf.Duration overall = 1;
+  // Time spent before sending query to shards. Does not include request
+  // protobuf deserialization.
+  google.protobuf.Duration pre_search = 2;
+
+  // These fields add up to the pre_search duration, but identify the time
+  // spent during more finely grained steps.
+  google.protobuf.Duration context_preparation = 6;
+  google.protobuf.Duration cluster_selection = 7;
+  google.protobuf.Duration query_parsing = 8;
+  google.protobuf.Duration query_rewriting = 9;
+  google.protobuf.Duration query_linting = 10;
+
+  // Time spent sending query to shards and awaiting all results.
+  google.protobuf.Duration search = 3;
+  // Time spent sending fetching missing doc content.
+  google.protobuf.Duration fetch_missing_content = 5;
+  // Time spent after receiving all responses from shards. Does not include
+  // response protobuf serialization.
+  google.protobuf.Duration post_search = 4;
+}
+
+message QueryError {
+  ErrorType type = 1;
+  string message = 2;
+  repeated ErrorRange ranges = 3;
+  string suggestion = 4;
+  // If an org or repo was missing or inaccessible, reports the name of that org/repo
+  string missing_or_inaccessible_repo_org_nwo = 5;
+}
+
+message ErrorRange {
+  uint32 start = 1;
+  uint32 end = 2;
+}
+
+enum ErrorType {
+  // type of error that's not covered by the rest of error types
+  ERROR_TYPE_UNSPECIFIED = 0;
+  // there was an error in parsing user's query
+  ERROR_TYPE_QUERY_PARSING_FATAL = 1;
+  ERROR_TYPE_QUERY_PARSING_WARNING = 2;
+  // the entire query timed out
+  ERROR_TYPE_TIMEOUT = 3;
+  // indicates that the results returned as part of this response cannot guarantee repo@sha
+  // consistency.
+  ERROR_TYPE_SEARCH_RESULTS_INCONSISTENT_WARNING = 4;
+  // The request actor is not authorized to perform this action.
+  ERROR_TYPE_ACTOR_NOT_AUTHORIZED = 5;
+  // The current query scope causes the query to be unsatisfiable
+  ERROR_TYPE_SCOPE_UNSATISFIABLE = 6;
+  // Results are incomplete (due to timeouts, panic, shard unavailability...)
+  ERROR_TYPE_RESULTS_INCOMPLETE = 7;
+  // Missing or inaccessible repository or organization
+  ERROR_TYPE_MISSING_INACCESSIBLE_REPO_ORG = 8;
+  // Code embeddings unavailable for this repository
+  ERROR_TYPE_CODE_EMBEDDINGS_UNAVAILABLE = 9;
+  // Docs embeddings unavailable for this repository
+  ERROR_TYPE_DOCS_EMBEDDINGS_UNAVAILABLE = 10;
+  // Repository is not indexed due to a system limit.
+  ERROR_TYPE_PERMANENT_ERROR_SYSTEM_LIMIT = 11;
+  // Repository is not indexed because it failed too many times.
+  ERROR_TYPE_PERMANENT_ERROR_RETRIES_EXHAUSTED = 12;
+  // Repository is not indexed because the default ref isn't UTF-8.
+  ERROR_TYPE_PERMANENT_ERROR_INVALID_DEFAULT_REF = 13;
+  // Repository is not indexed because the HEAD commit couldn't be loaded.
+  ERROR_TYPE_PERMANENT_ERROR_BAD_COMMIT = 14;
+}
+
+message SuggestRequest {
+  string query = 1;
+  string scoping_query = 2;
+  uint32 cursor_position = 3;
+  // The actor making the query
+  Actor actor = 5;
+  repeated CustomScope custom_scopes = 7;
+  // Request timeout. This is just a suggestion to the middleware since apps
+  // like github.com can't cancel across the http request boundary and have
+  // strict request timeouts of their own.
+  google.protobuf.Duration request_timeout = 8;
+
+  // Optional set of experiments. Each experiment is defined by a unique key,
+  // and optionally a value. Setting experiment flags may alter query behavior.
+  map<string, string> experiments = 9;
+
+  // Optional tenant for this query.
+  Tenant tenant = 10;
+
+  reserved 4; // repeated uint32 accessible_repo_ids
+  reserved 6; // repeated uint32 experiment_ids = 6;
+}
+
+message SuggestResponse {
+  repeated Suggestion suggestions = 1;
+  repeated QueryError query_errors = 2;
+  Metadata metadata = 3;
+}
+
+message Suggestion {
+  SuggestionKind kind = 1;
+  string query = 2;
+  string repository_nwo = 3;
+  uint32 language_id = 4;
+  string path = 6;
+  uint32 repository_id = 7;
+  string commit_sha = 9;
+  uint32 line_number = 10;
+  Symbol symbol = 13;
+
+  reserved 11; // symbol_name is deprecated, use symbol instead.
+  reserved 12; // symbol_kind is deprecated, use symbol instead.
+}
+
+enum SuggestionKind {
+   SUGGESTION_KIND_UNKNOWN = 0;
+   SUGGESTION_KIND_QUERY = 1;
+   SUGGESTION_KIND_REPOSITORY = 2;
+   SUGGESTION_KIND_PATH = 3;
+   SUGGESTION_KIND_SYMBOL = 4;
+}
+
+message RefreshAuthCachesRequest {
+  Actor actor = 1;
+
+  // Optional set of experiments. Each experiment is defined by a unique key,
+  // and optionally a value. Setting experiment flags may alter behavior.
+  map<string, string> experiments = 2;
+}
+
+message RefreshAuthCachesResponse {
+  // When the user ACL cache expires.
+  google.protobuf.Timestamp user_cache_expires_at = 1;
+}
+
+message WarmCachesRequest {
+  Actor actor = 1;
+
+  // Optional set of experiments. Each experiment is defined by a unique key,
+  // and optionally a value. Setting experiment flags may alter behavior.
+  map<string, string> experiments = 2;
+}
+
+message WarmCachesResponse {
+  // When the user ACL cache expires.
+  google.protobuf.Timestamp user_cache_expires_at = 1;
+}
+
+// The actor making the query
+message Actor {
+  // The github user_id of the actor making the request.
+  uint32 actor_id = 1;
+  // An opaque access token
+  string access_token = 2;
+  // The user's ip address.
+  string request_ip = 3;
+  // Unix time for when this access_token expires.
+  int64 access_token_expires = 4;
+  // A string that uniquely identifies this user's access method, such as their
+  // session ID, used to shard the authentication cache. For API requests, it's
+  // a hash of their API token.
+  string session_id = 5;
+  string access_token_kind = 6;
+}
+
+message Repository {
+  uint32 id = 1;
+  uint32 owner_id = 2;
+  string owner_login = 3;
+  string name = 4;
+  bool is_public = 5;
+  int32 repo_score = 6;
+}
+
+message GetRepositoryStatusRequest {
+  repeated uint32 repository_ids = 1;
+}
+
+message GetRepositoryStatusResponse {
+  // The set of clusters/corpora that make up blackbird and the status of each repository in them.
+  //
+  // When you issue a query to blackbird, the serving cluster is dynamically selected (per query) based on the
+  // healthiest cluster at that moment in time. This means that checking the status of a repository is a bit complex.
+  repeated CorpusStatus corpora = 1;
+
+  // The aggregate status of each repository (does not include commit level detail) that tells you if the repo is ok to
+  // search in **all** serving clusters.
+  //
+  // The repositories in this field are returned in the same order as the request repository_ids.
+  repeated RepositoryStatus repositories = 2;
+}
+
+message CorpusStatus {
+  // The name of the corpus (these are colors, e.g. 'Blue')
+  string corpus_name = 1;
+
+  // The name of the cluster (e.g. 'zeta')
+  string cluster_name = 2;
+
+  // True if the cluster is actively serving queries. Multiple clusters can be configured to serve queries, blackbird-mw
+  // routes each query automatically to the healthiest cluster. If a cluster isn't serving, you can still query it by
+  // including the `corpus=<corpus>` experiment in your query request.
+  bool cluster_is_serving = 3;
+
+  // The epoch mode of this cluster (e.g. `EMBEDDINGS`, `LEXICAL`, `HYBRID`).
+  string cluster_epoch_mode = 4;
+
+  // The state of the requested repositories in this cluster/corpus (includes commit level detail).
+  //
+  // The repositories in this field are returned in the same order as the request repository_ids.
+  repeated RepositoryStatus repositories = 5;
+}
+
+message RepositoryStatus {
+  uint32 repository_id = 1;
+
+  // Is the repo available for search?
+  bool lexical_search_ok = 2; // can you do lexical code search on this repo in this cluster?
+  bool semantic_code_search_ok = 3; // can you do a semantic code search on this repo in this cluster?
+  bool semantic_doc_search_ok = 4; // can you do a semantic doc search on this repo in this cluster?
+  bool bm25_search_ok = 5; // can you do a bm25 search on this repo in this cluster?
+
+  // Commit level detail of what's indexed and searchable (only included in the CorpusStatus level response).
+  repeated RepositoryCommitStatus commits = 6;
+}
+
+message RepositoryCommitStatus {
+  string commit_sha = 1;
+  map<string, string> experiments = 2; // experiments that are set on the repo in the cluster's index.
+  IndexStatus status = 3;
+  PermanentError permanent_error = 4;
+
+  enum IndexStatus {
+    // Not indexed and not being indexed.
+    INDEX_STATUS_UNKNOWN = 0;
+    // Indexed and searchable.
+    INDEX_STATUS_INDEXED = 1;
+    // Currently being indexed.
+    INDEX_STATUS_INDEXING = 2;
+    // Crawling and indexing complete, waiting for this offset to serve
+    INDEX_STATUS_WAITING_TO_SERVE = 3;
+    // There was a permanent error indexing this repository. See the permanent_error field for details.
+    INDEX_STATUS_PERMANENT_ERROR = 4;
+  }
+
+  message PermanentError {
+    string error_msg = 1;
+    string error_type = 2;
+  }
+}
+
+message Tenant {
+  int64 tenant_id = 1;
+  string slug = 2;
+  string shortcode = 3;
+}

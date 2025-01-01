@@ -1,0 +1,56 @@
+environments:
+  - name: production
+    service_mesh:
+      enabled: true
+    extra_start_message: Make sure you keep an eye on the [Turboghas dashboard](https://app.datadoghq.com/dashboard/wt4-hn9-ft2/turbo-gha-s?live=true). If anything seems to be going wrong look at [Sentry](https://github.sentry.io/issues/?query=is%3Aunresolved+gh.exception.catalog_service%3Agithub%2Fturboghas&referrer=issue-list&statsPeriod=1h) to see if it's related to your change.
+    cluster_selector:
+      profile: general
+      region: iad
+  - name: staff-wus2-01
+    service_mesh:
+      enabled: true
+    cluster_selector:
+      profile: proxima
+      stamp: staff-wus2-01
+    proxima: true
+required_builds:
+  - Config Bundle / turboghas-moda-config-bundle
+  - Docker Image
+notifications:
+  slack_channels:
+    - "#dsp-code-scanning-ops"
+auto_start_pipeline: production_rollout
+proxima:
+  environment_pattern:
+    service_mesh:
+      enabled: true
+  rollout_pattern:
+    - kind: deployment
+      config: {}
+  rings:
+    timeout: 600
+pipelines:
+  production_rollout:
+    append_proxima_stamps: true
+    # thread_notifications is an experimental feature to group Slack notifications about the deploy in a thread
+    # See https://github.com/github/heaven/discussions/11819
+    thread_notifications: true
+    rollback_in_parallel: true
+    timeout: 1800
+    stages:
+      - name: staff-wus2-01
+        kind: deployment
+        config:
+          environment: staff-wus2-01
+          timeout: 600
+        gates:
+          - kind: timer
+            duration: 10
+      - name: dotcom
+        kind: deployment
+        config:
+          environment: production
+          timeout: 600
+        gates:
+          - kind: timer
+            duration: 300

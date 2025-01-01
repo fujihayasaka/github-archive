@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20210415095748_update_analysis_category_non_default_empty_env.go on GHES

@@ -1,0 +1,108 @@
+# This docker compose file defines an overlay for running the blackbird-mw
+# services. See docker-compose.yml for the base compose environment.
+services:
+  blackbird-mw-admin:
+    build:
+      context: .
+      args:
+        - FRONTEND_MODE=without-frontend
+    restart: on-failure
+    environment:
+      - BLACKBIRD_MW_LOG_LEVEL=info
+      - BLACKBIRD_MW_MYSQL_ADDR=mysql:3306
+      - BLACKBIRD_MW_ACCESSIBLE_RESOURCES_REDIS_ADDR=redis:6379
+      - SHARED_KAFKA_BROKERS=blackbird-mw-kafka:29096
+      - BLACKBIRD_KAFKA_BROKERS=blackbird-mw-kafka:29096
+      - BLACKBIRD_MW_SPOKESD_URL=${BLACKBIRD_MW_SPOKESD_URL:-http://spokesd:8080}
+      - RUST_LOG=${RUST_LOG:-warn}
+    entrypoint:
+      - "/script/setup-spokes-client-keys"
+      - "/blackbird-admin"
+    expose:
+      - 8080
+    ports:
+      - 9889:8080
+    depends_on:
+      bootstrap-skeema:
+        condition: service_healthy
+    networks:
+      - default
+      - spokes-proto_default
+    volumes:
+      - "./script:/script:rw"
+      - "./deps/spokes-proto/certs:/certs:rw"
+      - "./config/blackbird:/config/blackbird:ro"
+
+  blackbird-mw-ingest:
+    build:
+      context: .
+      args:
+        - FRONTEND_MODE=without-frontend
+    restart: always
+    environment:
+      - BLACKBIRD_MW_LOG_LEVEL=info
+      - BLACKBIRD_MW_MYSQL_ADDR=mysql:3306
+      - SHARED_KAFKA_BROKERS=blackbird-mw-kafka:29096
+      - BLACKBIRD_KAFKA_BROKERS=blackbird-mw-kafka:29096
+      - BLACKBIRD_MW_OUTPUT_CORPUS=${BLACKBIRD_MW_OUTPUT_CORPUS:-Blue}
+      - BLACKBIRD_MW_SPOKESD_URL=${BLACKBIRD_MW_SPOKESD_URL:-http://spokesd:8080}
+      - BLACKBIRD_MW_DEBOUNCE_FLUSH_INTERVAL=${BLACKBIRD_MW_DEBOUNCE_FLUSH_INTERVAL:-5ms}
+    entrypoint:
+      - "/script/setup-spokes-client-keys"
+      - "/blackbird-ingest"
+    ports:
+      - 9887:8080
+    depends_on:
+      kafka:
+        condition: service_healthy
+      bootstrap-kafka:
+        condition: service_healthy
+      bootstrap-skeema:
+        condition: service_healthy
+    networks:
+      - default
+      - spokes-proto_default
+    extra_hosts:
+      - "github.localhost:host-gateway"
+    volumes:
+      - "./script:/script:rw"
+      - "./deps/spokes-proto/certs:/certs:rw"
+      - "./config/blackbird:/config/blackbird:ro"
+
+  blackbird-mw-query:
+    build:
+      context: .
+      args:
+        - FRONTEND_MODE=without-frontend
+    restart: on-failure
+    environment:
+      - BLACKBIRD_MW_LOG_LEVEL=info
+      - BLACKBIRD_MW_MYSQL_ADDR=mysql:3306
+      - BLACKBIRD_MW_ACCESSIBLE_RESOURCES_REDIS_ADDR=redis:6379
+      - BLACKBIRD_MW_SPOKESD_URL=${BLACKBIRD_MW_SPOKESD_URL:-http://spokesd:8080}
+      - RUST_LOG=${RUST_LOG:-warn}
+    entrypoint:
+      - "/script/setup-spokes-client-keys"
+      - "/blackbird-query"
+    ports:
+      - 9888:8080
+    depends_on:
+      bootstrap-skeema:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      blackbird-1:
+        condition: service_healthy
+      blackbird-2:
+        condition: service_healthy
+    networks:
+      - default
+      - spokes-proto_default
+    volumes:
+      - "./script:/script:rw"
+      - "./deps/spokes-proto/certs:/certs:rw"
+      - "./config/blackbird:/config/blackbird:ro"
+
+networks:
+  spokes-proto_default:
+    external: true

@@ -1,0 +1,101 @@
+name: Automatic Dependabot PR Approval
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  id-token: write
+  pull-requests: write
+  packages: read
+
+jobs:
+  approve:
+    name: Approve Dependabot PR
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get app token
+        id: generate_token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: ${{ secrets.FEATURE_MANAGEMENT_BOT_APP_ID }}
+          private_key: ${{ secrets.FEATURE_MANAGEMENT_BOT_APP_PEM }}
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.generate_token.outputs.token }}
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Check if approval required
+        id: check
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          if [[ $(gh pr view --json "author" "${PR_NUMBER}" | jq -r 'select(.author.login == "app/dependabot") | length') == 1 ]]; then
+            if [[ $(gh pr view --json "reviews" "${PR_NUMBER}" | jq -r '[.reviews[] | select(.author.login == "feature-management-approver-bot" and .state == "APPROVED")] | length') > 0 ]]; then
+              echo "PR ${PR_NUMBER} has already been approved by feature-management-approver-bot"
+              echo "APPROVAL_REQUIRED=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            for commit_author in $(gh api repos/${{ github.repository }}/pulls/${PR_NUMBER}/commits | jq -r '.[].author.login' ); do
+              if [[ ${commit_author} != "dependabot[bot]" && ${commit_author} != "feature-management-bot[bot]" ]]; then
+                echo "Not all commits from allowed bots, will not auto approve."
+                echo "APPROVAL_REQUIRED=false" >> $GITHUB_OUTPUT
+                exit 0
+              fi
+            done
+            echo "APPROVAL_REQUIRED=true" >> $GITHUB_OUTPUT
+          else
+            echo "PR ${PR_NUMBER} was not authored by dependabot"
+            echo "APPROVAL_REQUIRED=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+        if: ${{ steps.check.outputs.APPROVAL_REQUIRED == 'true' }}
+
+      - name: Run bundle install
+        run: bundle install
+        env:
+          BUNDLE_RUBYGEMS__PKG__GITHUB__COM: "nobody:${{ secrets.GITHUB_TOKEN}}"
+        if: ${{ steps.check.outputs.APPROVAL_REQUIRED == 'true' }}
+
+      - name: Update generated files
+        id: update
+        run: |
+          git config --global user.name "feature-management-bot[bot]"
+          git config --global user.email "157984660+feature-management-bot[bot]@users.noreply.github.com"
+
+          make install-gems
+
+          rbiFileChanges=$(git status | grep -i -c sorbet/ || true) # grep returns an error if no match
+          if [[ $rbiFileChanges -gt 0 ]]; then
+            echo "Found updates in generated sorbet files."
+            echo "Pushing changes and skipping approval for this workflow run since the push will trigger a new synchronize event."
+            git add sorbet/
+            git commit --message "chore: make install-gems to update rbi files"
+            git push
+            echo "GENERATED_FILES_UPDATED=true" >> $GITHUB_OUTPUT
+          else
+            echo "No updates in generated sorbet files found"
+            echo "GENERATED_FILES_UPDATED=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+        if: ${{ steps.check.outputs.APPROVAL_REQUIRED == 'true' }}
+
+      - name: Approve Dependabot PR
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          echo "Approving PR ${PR_NUMBER}"
+          gh pr review --approve --body "This **dependabot** PR has been automatically approved and merged." "${PR_NUMBER}"
+          gh pr merge --auto --squash "${PR_NUMBER}"
+        env:
+          GH_TOKEN: ${{ secrets.FEATURE_MANAGEMENT_APPROVER_BOT_PAT }}
+        if: ${{ steps.check.outputs.APPROVAL_REQUIRED == 'true' && steps.update.outputs.GENERATED_FILES_UPDATED == 'false' }}

@@ -1,0 +1,1 @@
+ALTER TABLE `ts_analysis_extracted_files_messages` DROP KEY `idx_analysis_extracted_files_messages_analysis_id`, ADD KEY `idx_analysis_extracted_files_messages_repository_analysis_id` (`repository_id`,`analysis_id`);

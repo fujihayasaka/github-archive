@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: low-priority-queue-worker
+  annotations:
+    moda.github.net/inject-unified-service-tag-env-var: low-priority-queue-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: low-priority-queue-worker
+  template:
+    metadata:
+      labels:
+        app: low-priority-queue-worker
+      annotations:
+        fluentbit.io/parser: logfmt
+        observability.github.com/logger: fluent-bit
+        observability.github.com/splunk_index: licensify
+    spec:
+      dnsPolicy: ClusterFirst
+      terminationGracePeriodSeconds: 50
+      containers:
+        - name: low-priority-queue-worker
+          image: licensify
+          command: ["./bin/queue-worker"]
+          env:
+            - name: APP_SHA
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['heaven.githubapp.com/sha']
+            - name: APP_REF
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['heaven.githubapp.com/ref']
+            - name: AQUEDUCT_WORKER_TYPE
+              value: "low-priority"
+            - name: GOMAXPROCS
+              value: "2"
+            - name: STATS_ADDR
+              value: $(KUBE_NODE_HOSTNAME):28125
+          envFrom:
+            - configMapRef:
+                name: environment
+            - configMapRef:
+                name: kube-cluster-metadata
+            - secretRef:
+                name: vault-secrets
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          readinessProbe:
+            exec:
+              command:
+                - cat
+                - /tmp/worker_healthy
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            limits:
+                cpu: 3
+                memory: 500Mi
+            requests:
+                cpu: 35m
+                memory: 100Mi

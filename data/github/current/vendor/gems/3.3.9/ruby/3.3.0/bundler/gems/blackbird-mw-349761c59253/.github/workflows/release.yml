@@ -1,0 +1,83 @@
+name: Publish To GHCR
+
+on:
+  push:
+    # Publish `main` as Docker image.
+    branches:
+      - main
+    # Publish `v1.2.3` tags as releases.
+    tags:
+      - v*
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Build and publish release
+    permissions:
+      id-token: write # for setup-goproxy OIDC
+      contents: read
+      packages: write
+
+    runs-on: ubuntu-22.04-16core
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/setup-goproxy@v1.1.0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - uses: actions/cache@v4.1.1
+        with:
+          path: vendor
+          key: ${{ runner.os }}-go-vendor-${{ hashFiles('go.sum') }}
+
+      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349
+        name: Set up Docker Buildx
+
+      - uses: actions/cache@v4.1.1
+        name: Cache Docker layers
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Generate Docker Tags
+        id: tags
+        run: |
+          DOCKER_IMAGE=ghcr.io/${{ github.repository }}/blackbird-mw
+          VERSION=edge
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+          elif [[ $GITHUB_REF == refs/heads/* ]]; then
+            VERSION=$(echo ${GITHUB_REF#refs/heads/} | sed -r 's#/+#-#g')
+          elif [[ $GITHUB_REF == refs/pull/* ]]; then
+            VERSION=pr-${{ github.event.number }}
+          fi
+          TAGS="${DOCKER_IMAGE}:${VERSION}"
+          TAGS="$TAGS,${DOCKER_IMAGE}:${GITHUB_REF##*/}"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAGS="$TAGS,${DOCKER_IMAGE}:sha-${GITHUB_SHA::8}"
+          fi
+          echo ::set-output name=version::${VERSION}
+          echo ::set-output name=tags::${TAGS}
+          echo ::set-output name=created::$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+
+      - run: make bootstrap
+        env:
+          CONTAINER_BUILDER_TOKEN: ${{ secrets.CONTAINER_BUILDER_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+
+      - uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75
+        name: Push to GitHub Container Registry
+        with:
+          context: .
+          file: ./Dockerfile
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.event.repository.html_url }}
+            org.opencontainers.image.created=${{ steps.tags.outputs.created }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          push: true
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache

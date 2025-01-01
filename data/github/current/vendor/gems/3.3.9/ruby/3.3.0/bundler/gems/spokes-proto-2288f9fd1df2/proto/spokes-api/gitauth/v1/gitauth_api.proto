@@ -1,0 +1,158 @@
+syntax = "proto3";
+
+package github.spokes.gitauth.v1;
+
+option go_package = "github.com/github/spokes-proto/gen/go/v1/gitauth";
+option ruby_package = "GitHub::Spokes::Proto::Gitauth::V1";
+
+import "google/protobuf/empty.proto";
+import "spokes-api/repositories/v1/replica_item.proto";
+import "spokes-api/types/v1/repository.proto";
+import "spokes-api/types/v1/request_context.proto";
+
+// This API is the interface that the gitauth service uses to talk to spokesd
+// during a Git request.
+service GitauthAPI {
+  // ListRoutes provides the list of routes and a quarantine ID. The routes are
+  // sorted based on the action requested.
+  rpc ListRoutes(ListRoutesRequest) returns (ListRoutesResponse) {}
+
+  // SetUpPushState accepts a list of babeld host statuses and a quarantine ID
+  // and returns a push state for use in RequestContext in subsequent Spokes
+  // Access API calls.
+  rpc SetUpPushState(SetUpPushStateRequest) returns (SetUpPushStateResponse) {}
+
+  // CommitQuarantine moves objects from the quarantine into a repository's object directory
+  rpc CommitQuarantine(CommitQuarantineRequest) returns (CommitQuarantineResponse) {}
+
+  // RemoveQuarantine the quarantine directory
+  rpc RemoveQuarantine(RemoveQuarantineRequest) returns (google.protobuf.Empty) {}
+}
+
+message ListRoutesRequest {
+  enum Action {
+    ACTION_INVALID = 0;
+    ACTION_READ = 1;
+    ACTION_WRITE = 2;
+  }
+
+  enum Protocol {
+    PROTOCOL_INVALID = 0;
+    PROTOCOL_SSH = 1;
+    PROTOCOL_HTTP = 2;
+    PROTOCOL_SVN = 3;
+    PROTOCOL_GIT = 4;
+  }
+
+  // repository is the repository to operate on.
+  github.spokes.types.v1.Repository repository = 1;
+
+  // what action is being is being requested for.
+  // We expect the list of routes being returned to map to the action being taken.
+  Action action = 2;
+
+  // the protocol for the incoming request being made to babeld from the customer.
+  // We expected the list of routes being returned to map to the protocol being taken.
+  Protocol protocol = 3;
+}
+
+message ListRoutesResponse {
+  // the list of routes to replicas based on the action requested.
+  repeated github.spokes.repositories.v1.ReplicaItem replicas = 1;
+
+  // quarantine id to add to sockstat, if this is a push.
+  string quarantine_id = 4;
+
+  reserved 2;
+  reserved 3;
+}
+
+message SetUpPushStateRequest {
+  // repository is the repository to operate on.
+  github.spokes.types.v1.Repository repository = 1;
+
+  // the quarantine ID for this push.
+  string quarantine_id = 2;
+
+  // the status of each replica in the push.
+  repeated HostStatus hosts = 3;
+}
+
+// HostStatus is a protobuf representation of a host status entry in the
+// _commit_refs payload that babeld passes to the monolith.
+// The commit_refs host status looks like this:
+//   "host_status": {
+//      "$ip_or_hostname:$path": { "result": "ok"|$error_message, "ipv4": "$ip" },
+//      ...
+//   }
+// See https://github.com/github/babeld/blob/b2703c176b92e824a44c006422b8656afe57e15e/doc/commit-refs.md
+message HostStatus {
+  // the name of the replica (short name of the fileserver), if available.
+  // If this is provided, spokesd will use it like a primary key to match this
+  // HostStatus entry against the repository's replicas.
+  string replica_name = 1;
+
+  // the ip_or_hostname part of a host_status key.
+  // If replica_name is blank and this is not "127.0.0.1" or "localhost",
+  // spokesd will use this to match against the list of replicas.
+  string host = 2;
+
+  // the path part of a host_status key.
+  // If replica_name is blank and host is "127.0.0.1" or "localhost", spokesd will use this to match against the list of replicas. (This should only happen in github/github dev, where all replicas are named "dgitNNN" and available on localhost.)
+  string path = 3;
+
+  // the result.
+  oneof result {
+    // ok_result is used if babeld's result was "ok".
+    OkResult ok_result = 4;
+
+    // err_result is used if babeld's result was not "ok".
+    ErrorResult error_result = 5;
+  }
+}
+
+message OkResult {
+  // this type is a marker type and so it has no fields.
+}
+
+message ErrorResult {
+  // the error message from babeld.
+  string error_message = 1;
+}
+
+message SetUpPushStateResponse {
+  // the updated push state. This value should be added to the RequestContext
+  // of all Spokes Access API calls that happen while the quarantine is still
+  // active.
+  bytes push_state = 1;
+}
+
+message CommitQuarantineRequest {
+  // repository is the repository to operate on.
+  github.spokes.types.v1.Repository repository = 1;
+
+  // request context must include push state, which identifies the quarantine
+  // to commit.
+  github.spokes.types.v1.RequestContext request_context = 2;
+
+  // Controls whether or not to clear the quarantine directory after committing. By default, quarantine is cleared after committing.
+  bool preserve_quarantine = 3;
+}
+
+message CommitQuarantineResponse {
+  // updated push state. clients should stop using the prior push state and use this one instead.
+  bytes push_state = 1;
+}
+
+message RemoveQuarantineRequest {
+  // repository is the repository to operate on.
+  github.spokes.types.v1.Repository repository = 1;
+
+  // request context may include push state, which identifies the quarantine
+  // to remove.
+  github.spokes.types.v1.RequestContext request_context = 2;
+
+  // an identifier to uniquely map a quarantine path for the pack in the push.
+  // if this is unavailable, we will look at the push state in the request context.
+  string quarantine_id = 3;
+}

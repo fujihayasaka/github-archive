@@ -1,0 +1,63 @@
+name: Update TUF root
+
+on:
+  # run every monday
+  schedule:
+    - cron:  '0 0 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  update-tuf-root:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v3
+      - name: Setup node
+        uses: actions/setup-node@0a44ba7841725637a19e28fa30b79a866c81b0a6 # v3
+        with:
+          node-version: 18.17.0
+      - name: Install tufjs/cli
+        run: npm install -g @tufjs/cli
+      - name: Update TUF root.json
+        run: |
+          ./script/updateTUFRootJson.sh https://tuf-repo.github.com pkg/attestation/embed/tuf-repo.github.com
+          ./script/updateTUFRootJson.sh https://tuf-repo-cdn.sigstore.dev pkg/attestation/embed/tuf-repo-cdn.sigstore.dev
+      # check if any root.json is changed
+      # if yes, commit and send PR to main branch
+      - name: Check for changes
+        id: git-check
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "changed::true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit files and push changes
+        if: steps.git-check.outputs.changed == 'true'
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          BRANCH_NAME=tuf-root-update-$(date +%Y-%m-%d)
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+          git checkout -b $BRANCH_NAME
+          git push --set-upstream origin $BRANCH_NAME
+          git add -A
+          git commit -m "Update TUF root files"
+          git push
+
+      - name: Create Pull Request
+        if: steps.git-check.outputs.changed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create \
+            --base main \
+            --title "Update TUF root files ${{ env.BRANCH_NAME }}" \
+            --body "This PR updates the TUF root files with the latest root version."

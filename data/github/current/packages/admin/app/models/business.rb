@@ -2844,7 +2844,7 @@ class Business < ApplicationRecord::Domain::Users
     # Only find members in a subset of orgs if specified.
     subject_ids = if org_ids.present?
       org_ids & organization_ids
-    else
+    elsif !GitHub.single_business_environment?
       organization_ids
     end
 
@@ -2852,10 +2852,14 @@ class Business < ApplicationRecord::Domain::Users
     subject_types << "Organization::BillingManagement" if include_billing_managers
     criteria = {
       "actor_type"   => "User",
-      "subject_id"   => subject_ids,
       "subject_type" => subject_types,
       "priority"     => Ability.priorities[:direct],
     }
+
+    # Skip setting subject_id as part of the criteria only when subject_ids is nil
+    unless subject_ids.nil?
+      criteria["subject_id"] = subject_ids
+    end
 
     if action.present?
       raise ArgumentError, "invalid action" unless Ability.actions.include?(action)

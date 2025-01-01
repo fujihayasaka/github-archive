@@ -1,0 +1,86 @@
+name: "CodeQL"
+run-name: ${{ github.event.inputs.code_scanning_run_name }}
+on: dynamic
+
+env:
+  CODE_SCANNING_REF: ${{ github.event.inputs.code_scanning_ref }}
+  CODE_SCANNING_IS_ANALYZING_DEFAULT_BRANCH: ${{ github.event.inputs.code_scanning_is_analyzing_default_branch }}
+  CODE_SCANNING_IS_STEADY_STATE_DEFAULT_SETUP: true
+  CODE_SCANNING_WORKFLOW_FILE: ${{ github.event.inputs.code_scanning_workflow_file }}
+
+jobs:
+  analyze-actions-yml:
+    # Experimental job for Actions YML analysis
+    # Before shipping more widely, we might want to consider making this into a proper
+    # language for default setup and include it in the matrix.
+    # The reason this is outside the matrix is that we have a quite a few specific options to provide.
+    name: Analyze (YML)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+      security-events: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: javascript-typescript # We use the JS extractor for YML
+        build-mode: none
+        packs: github/actions-queries
+        # Speed up things and avoid duplicated alerts by skipping JS queries and only looking into the .github folder
+        # Consider all yml files because composite actions can live outside the `.github` folder.
+        config: |
+          disable-default-queries: true
+          paths:
+            - '**/*.yml'
+            - '**/*.yaml'
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:actions-yml"
+
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+      security-events: write
+    continue-on-error: false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript-typescript
+            category: /language:javascript-typescript
+            build-mode: none
+            runner: '["ubuntu-latest"]'
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+        build-mode: ${{ matrix.build-mode }}
+        dependency-caching: ${{ runner.environment == 'github-hosted' && github.event.repository.visibility == 'public' }}
+        queries: "" # Default query suite
+        config: |
+          default-setup:
+            org:
+              model-packs: [ ${{ github.event.inputs.code_scanning_codeql_packs }} ]
+          threat-models: [  ]
+
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: ${{ matrix.category }}

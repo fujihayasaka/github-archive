@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20240129122217_copy_java_extraction_options_to_codeqlrepo.go on GHES

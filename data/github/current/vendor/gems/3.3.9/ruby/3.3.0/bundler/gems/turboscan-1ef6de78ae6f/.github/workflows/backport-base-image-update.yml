@@ -1,0 +1,120 @@
+name: Backport Base Image Update
+on:
+  issue_comment:
+    types:
+      - created
+
+permissions:
+  pull-requests: write
+
+jobs:
+  backport-base-image-update:
+    name: Backport Base Image Update
+    runs-on: ubuntu-22.04
+    if: |-
+      ${{ 
+        github.event.issue.pull_request &&
+        github.event.comment.user.login == 'release-controller[bot]' &&
+        contains(github.event.issue.labels.*.name, 'dependencies') &&
+        contains(github.event.issue.labels.*.name, 'docker') &&
+        contains(github.event.comment.body, '### Merge Conflict:')
+      }}
+    steps:
+      - name: Get Comment Details
+        uses: actions/github-script@e69ef5462fd455e02edcaf4dd7708eda96b9eda0
+        id: comment-details
+        with:
+          script: |
+            // Parse the comment that reports a merge conflict (e.g. https://github.com/github/turboscan/pull/3598#issuecomment-1344137942).
+            const targetVersion = context.payload.comment.body.match(/### Merge Conflict: enterprise-(\d+\.\d+)-release/)[1];
+            core.setOutput('target-version', targetVersion);
+            console.log(`Target version is ${targetVersion}.`);
+            const branchName = context.payload.comment.body.match(/git push --set-upstream origin ([^\s]+)/)[1];
+            core.setOutput('branch-name', branchName);
+            console.log(`Branch name is ${branchName}.`);
+            const mergeCommit = context.payload.comment.body.match(/git cherry-pick -m 1 ([a-f0-9]+)/)[1];
+            core.setOutput('merge-commit', mergeCommit);
+            console.log(`Merge commit is ${mergeCommit}.`);
+
+      - name: Configure Git
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "GitHub Actions"
+
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          token: ${{ secrets.DSP_CODE_SCANNING_TOKEN }}
+          ref: refs/heads/${{ steps.comment-details.outputs.branch-name }}
+
+      - name: Backport
+        uses: actions/github-script@e69ef5462fd455e02edcaf4dd7708eda96b9eda0
+        env:
+          MERGE_COMMIT: ${{ steps.comment-details.outputs.merge-commit }}
+          BRANCH_NAME: ${{ steps.comment-details.outputs.branch-name }}
+          TARGET_VERSION: ${{ steps.comment-details.outputs.target-version }}
+        with:
+          github-token: ${{ secrets.DSP_CODE_SCANNING_TOKEN }}
+          script: |
+            const fs = require("fs");
+            const dockerImageRegex = /FROM ([^:\n]+):([^@\n]+)@sha256:([a-z0-9]+)/;
+
+            // Extract the new image from the merge commit.
+            await exec.exec("git", ["fetch", "origin", process.env.MERGE_COMMIT]);
+            let diff = "";
+            await exec.exec(
+              "git", ["show", "--unified=0", "--first-parent", process.env.MERGE_COMMIT],
+              {
+                silent: true,
+                listeners: {
+                  stdout: (data) => {
+                    diff += data.toString();
+                  },
+                },
+              },
+            );
+            const filePath = diff.match(/^diff --git a\/(.*) b\/.*$/m)[1];
+            console.log(`Updating ${filePath}.`)
+            const updatedImage = diff.match(new RegExp(`^\\+${dockerImageRegex.source}.*`, "m"));
+            const imageName = updatedImage[1];
+            const imageTag = updatedImage[2];
+            const imageDigest = updatedImage[3];
+            console.log(`New image is ${imageName}:${imageTag}@sha256:${imageDigest}.`)
+
+            // Update the Dockerfile with the new image.
+            const fileContents = await fs.promises.readFile(filePath, { encoding: "utf8" });
+            const updatedFileContents = fileContents.replaceAll(new RegExp(`^${dockerImageRegex.source}(.*)`, "gm"), (match, currentImageName, currentImageTag, currentImageDigest, suffix, offset, string) => {
+              if (currentImageName !== imageName || currentImageTag !== imageTag) {
+                console.log(`Not replacing image at offset ${offset}, because it is ${currentImageName}:${currentImageTag}.`);
+                return match;
+              }
+              console.log(`Replacing image at offset ${offset}.`);
+              return `FROM ${imageName}:${imageTag}@sha256:${imageDigest}${suffix}`;
+            });
+            await fs.promises.writeFile(filePath, updatedFileContents);
+            await exec.exec("git", ["add", filePath]);
+            await exec.exec("git", ["commit", "-m", `Manual backport of #${context.payload.issue.number} - resolved conflict`]);
+            await exec.exec("git", ["push", "--set-upstream", "origin", process.env.BRANCH_NAME]);
+
+            // Create the backport pull request.
+            const { data: pullRequest } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Backport #${context.payload.issue.number} for ${process.env.TARGET_VERSION}: ${context.payload.issue.title}`,
+              head: process.env.BRANCH_NAME,
+              base: `enterprise-${process.env.TARGET_VERSION}-release`,
+              body: `Manual backport of #${context.payload.issue.number}\n\n---\n/cc: github/ghes-releases-team`,
+            });
+
+      - name: Remove Backport Label
+        uses: actions/github-script@e69ef5462fd455e02edcaf4dd7708eda96b9eda0
+        env:
+          TARGET_VERSION: ${{ steps.comment-details.outputs.target-version }}
+        with:
+          script: |
+            github.rest.issues.removeLabel({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: `enterprise-${process.env.TARGET_VERSION}-backport`,
+            });

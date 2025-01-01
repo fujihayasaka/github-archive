@@ -1,0 +1,59 @@
+#!/bin/bash
+root="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." >/dev/null 2>&1 && pwd )"
+cd "$root"
+
+CI=false
+while (( "$#" )); do
+  case "$1" in
+    --ci)
+      CI=true
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+set -e
+
+echo "Bootstrapping Feature Management Client for Ruby"
+
+if [[ "$(uname -s)" = "Darwin" ]] && [[ "$CI" = false ]]; then
+  echo "==> Installing dependencies..."
+  mkdir -p tmp
+  brew bundle --no-lock &> tmp/brew-bundle.log || (
+    echo "==> Failed to brew bundle:"
+    cat tmp/brew-bundle.log
+  )
+fi
+
+# if on a codespace, install dependencies using linux homebrew
+if [[ "$(uname -s)" = "Linux" ]] && [[ "$CI" = false ]]; then
+  echo "==> Installing codespace dependencies..."
+  mkdir -p tmp
+  /home/linuxbrew/.linuxbrew/bin/brew bundle --no-lock &> tmp/brew-bundle.log || (
+    echo "==> Failed to brew bundle:"
+    cat tmp/brew-bundle.log
+  )
+fi
+
+if [[ "$CI" = false ]]; then
+  rm -rf tmp
+fi
+
+if [[ "$CI" = false ]]; then
+  echo "==> Running rbenv install..."
+  rbenv install
+fi
+
+echo "==> Configuring Ruby package manager..."
+$root/script/setup-gem-credentials
+
+echo "==> Installing packages..."
+bundle install
+
+echo "==> Installing vexi gem..."
+make gem
+
+echo "Finished bootstrapping Feature Management Client for Ruby"

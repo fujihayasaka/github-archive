@@ -1,0 +1,142 @@
+syntax = "proto3";
+
+package github.spokes.objects.v1;
+
+option go_package = "github.com/github/spokes-proto/gen/go/v1/objects";
+option ruby_package = "GitHub::Spokes::Proto::Objects::V1";
+
+import "spokes-api/types/selectors/v1/object_selector.proto";
+import "spokes-api/types/v1/object.proto";
+import "spokes-api/types/v1/object_id.proto";
+import "spokes-api/types/v1/object_type.proto";
+import "spokes-api/types/v1/repository.proto";
+import "spokes-api/types/v1/request_context.proto";
+import "spokes-api/types/v1/revision.proto";
+
+// ObjectsAPI contains APIs for object-related Git operations.
+service ObjectsAPI {
+    // ResolveObject returns a single resolved object by revision.
+    //
+    // If the input 'object_name' is ambiguous and could refer to multiple
+    // objects, an InvalidArgument error (e.g. "object_name is an ambiguous
+    // short object ID") will be returned.
+    rpc ResolveObject(ResolveObjectRequest) returns (ResolveObjectResponse);
+
+    // ResolveObjects returns multiple resolved objects.
+    // The entries in the response are in the same order as the items in the request.
+    rpc ResolveObjects(ResolveObjectsRequest) returns (ResolveObjectsResponse);
+
+    // ExpandOids returns the full oid for a list of abbreviated oids.
+    rpc ExpandOids(ExpandOidsRequest) returns (ExpandOidsResponse);
+}
+
+message ExpandOidsRequest {
+    message RevisionAndType {
+        github.spokes.types.v1.Revision revision = 1;
+        github.spokes.types.v1.ObjectType object_type = 2;
+    }
+
+    // repository is the repository to scope the object lookup to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    // oids is the list of abbreviated oids and their corresponding types to expand.
+    // The users of this API can specify the long version of the OID, but it would
+    // not make sense to perform this RPC if you already have the long version of the OID.
+    // At most 1000 elements are allowed.
+    repeated RevisionAndType oids = 2;
+
+    github.spokes.types.v1.RequestContext request_context = 3;
+}
+
+message ExpandOidsResponse {
+    message ErrorResult {
+        enum ErrorReason {
+            ERROR_REASON_INVALID = 0;
+            ERROR_REASON_MISSING = 1;
+            ERROR_REASON_AMBIGUOUS = 2;
+            ERROR_REASON_TYPE_MISMATCH = 3;
+        }
+
+        // error_reason is a machine-readable error code.
+        ErrorReason error_reason = 1;
+
+        // error contains a description of the error
+        string error = 2;
+    }
+
+    message ExpandedOid {
+        // short_oid is the object ID the user provided
+        github.spokes.types.v1.Revision short_oid = 1;
+
+        oneof item {
+            // error contains a description of the error if the object is not 
+            ErrorResult error = 2;
+
+            // long_oid is the longer version of the object ID
+            github.spokes.types.v1.ObjectID long_oid = 3;
+        }
+    }
+
+    // oids is the list of expanded OIDs.
+    repeated ExpandedOid oids = 1;
+}
+
+message ResolveObjectRequest {
+    // repository is the repository to scope the object lookup to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    // object_name is the revision which will be used to look up the object.
+    github.spokes.types.v1.Revision object_name = 2;
+
+    github.spokes.types.v1.RequestContext request_context = 3;
+}
+
+message ResolveObjectResponse {
+    // oid is the resolve object ID.
+    github.spokes.types.v1.ObjectID oid = 1;
+}
+
+message ResolveObjectsRequest {
+    // repository is the repository to scope the object lookup to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.RequestContext request_context = 3;
+
+    // selectors defines the objects to select.
+    //
+    // Reference names passed here must be valid ref, branch, or tag names and
+    // follow the rules in
+    // https://git-scm.com/docs/git-check-ref-format#_description. For example,
+    // "main", "refs/heads/main", "v1.0", "refs/tags/v1.0" are all valid ref
+    // names. In particular, ref names may not include NUL (\0), NL (\n), or
+    // colon (:). If a selector includes an invalid reference name, the
+    // corresponding response item will be the error "unprocessable".
+    //
+    // Path names passed here may not include a NUL (\0) or NL (\n) character.
+    // If a path includes a forbidden character, even if it is valid, the
+    // corresponding response item will be the error "unprocessable".
+    repeated github.spokes.types.selectors.v1.ObjectSelector selectors = 2;
+}
+
+message ResolveObjectsResponse {
+    // items is the list of resolved objects, in the same order that they
+    // appear in the request.
+    repeated ResolvedItem items = 1;
+
+    message ResolvedItem {
+        oneof item {
+            // error is set to one of the following values if the object is not
+            // available.
+            // - "unprocessable" - there is an error in the input and the
+            //   server did not attempt to look up this object.
+            // - "missing" - the object could not be found.
+            // - "ambiguous" - the input is abbreviated (e.g. the first 7
+            //   characters of an object ID) and could refer to more than one
+            //   thing when expanded.
+            string error = 1;
+
+            // The object's information.
+            github.spokes.types.v1.Object object = 2;
+        }
+    }
+}

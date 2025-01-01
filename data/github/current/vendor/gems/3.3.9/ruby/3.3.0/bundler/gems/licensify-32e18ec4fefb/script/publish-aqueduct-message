@@ -1,0 +1,64 @@
+#!/bin/bash
+
+# Usage: script/publish-aqueduct-message [PAYLOAD]
+
+# this payload can be just about anything as long as it properly unmarshals when it comes
+# time to run the job
+
+# Product enablement updated job
+# QUEUE="licensify_product_enablement_updated"
+# JOB_NAME="product-enablement-updated"
+# PAYLOAD='{"id": "ghas:user:1", "partitionKey": "1/ProductEnablement"}'
+
+# Sync org memberships job
+# QUEUE="licensify_sync_org_memberships"
+# JOB_NAME="sync-org-memberships"
+# PAYLOAD='{"entityId": 1, "entityType": "Customer"}'
+# PAYLOAD='{"entityId": 149, "entityType": "Organization"}'
+
+# Delete enablement job
+# QUEUE="licensify_delete_enablements"
+# JOB_NAME="delete-enablements"
+# PAYLOAD='{"enablementId": 172, "enablementReason": "organizationMembership", "customerId": 14}'
+
+# Backfill license status job
+# QUEUE="licensify_backfill_license_status"
+# JOB_NAME="backfill-license-status"
+# PAYLOAD='{"customerId": 2}'
+
+QUEUE="licensify_schedule_emissions"
+JOB_NAME="schedule-emissions"
+PAYLOAD='{"usageTime": 100}'
+
+# QUEUE="licensify_publish_emission"
+# JOB_NAME="publish-emission"
+# PAYLOAD='{"usageTime": 100, "customerId": 2}'
+
+AQUEDUCT_URL=http://localhost:18081
+APP=licensify-development
+
+while getopts "p:j:" option; do
+  case $option in
+    p) PAYLOAD=${OPTARG} ;;
+    j) JOB_NAME=${OPTARG} ;;
+    q) QUEUE=${OPTARG} ;;
+    \?)
+      echo "Usage:"
+      echo "  ./script/publish-aqueduct-message   Publish an aqueduct message"
+      echo ""
+      echo "Options:"
+      echo "-p --payload                          Supply a payload to the ingestion message"
+      echo "-q --queue                            Supply the queue"
+      echo "-j --job_name                         Supply the job name"
+
+      exit 0;;
+  esac
+done
+
+# copied from https://github.com/github/insights-code/blob/main/script/publish-aqueduct-message#L35
+hashed_payload=$(echo -n "$PAYLOAD" | base64 | tr -d '[:space:]')
+job_headers='{"job-name":"'$JOB_NAME'"}'
+curl \
+  --header "Content-Type:application/json" \
+  --data '{"app": "'$APP'", "queue":"'$QUEUE'", "headers":'$job_headers', "payload":"'$hashed_payload'"}' \
+  "$AQUEDUCT_URL/twirp/aqueduct.api.v1.JobQueueService/Send"

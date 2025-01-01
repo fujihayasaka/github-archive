@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -e
+
+dir=$(dirname $0)
+
+# Verify that the user has the JIT role assignment.
+DEV_AAD_GROUP="azure-actions-usage-metrics-nonprod-contributor-jit"
+DEV_AAD_GROUP_DISPLAY="Azure - actions-usage-metrics-nonprod - Contributor"
+
+user_id=$(az ad signed-in-user show --query id --output tsv)
+has_access=$(az ad group member check --group $DEV_AAD_GROUP --member-id $user_id --query value --output tsv)
+
+if [[ $has_access == "false" ]]; then
+  Yellow='\033[0;33m'
+  NC='\033[0m' # No Color
+  printf "${Yellow}To JIT, open https://github-grid.enterprise.slack.com/archives/C024A8H6T8T and paste \".jit me to azure-actions-usage-metrics-nonprod-contributor in azure for 6h because I need access to dev\".\n${NC}"
+
+  # Wait for enter key
+  while :; do
+    read -s -n 1 -p "Press Enter after you have JIT access: " key
+    [[ $key != "" ]] || break
+  done
+
+  echo "Refreshing az login..."
+  az logout
+  $dir/ensure-az-login
+fi

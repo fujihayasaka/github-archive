@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -e
+
+echo "==> Testing... <=="
+SCRIPT_DIR=$(cd -P -- "$(dirname -- "$0")" && pwd -P)
+
+source ${SCRIPT_DIR}/../dev.env
+TEST_NAME="$1"
+
+if [ ! -n "$CI" ]; then
+  echo "Running integration tests in codespace"
+  if [[ $GITHUB_REPOSITORY == "github/billing-platform" ]]; then
+    ## Looks like we need to start these services here, otherwise tests in repo_metadata_sync_integration_test.go fail,
+    ## our integration workflow does this via a step, so only doing this for codespace billing-platform env
+    # (dotcom one is handled by ./script/server in dotcom)
+    script/dc up -d aqueduct-lite kafka-lite
+  fi
+fi
+
+CGO_ENABLED=1 gotestsum --format short-verbose --packages=github.com/github/billing-platform/testing/integration-tests -- -tags=integration -timeout 45m -parallel=8 -v -failfast -run "$TEST_NAME"

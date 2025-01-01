@@ -16519,6 +16519,9 @@ module GeneratedUrlHelpersModule
   def stop_billing_check_stafftools_user_url(*args); end
 
   sig { params(args: T.untyped).returns(String) }
+  def stop_stafftools_repository_pull_requests_url(*args); end
+
+  sig { params(args: T.untyped).returns(String) }
   def stripe_customers_stafftools_sponsors_url(*args); end
 
   sig { params(args: T.untyped).returns(String) }

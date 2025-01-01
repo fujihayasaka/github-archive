@@ -1,0 +1,49 @@
+name: migration-changes-safe
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/migration-changes-safe.yml
+      - migrations/**
+
+permissions:
+  contents: read
+
+env:
+  GH_TOKEN: ${{ secrets.DSP_CODE_SCANNING_TOKEN }}
+  SHELLOPTS: 'errexit:nounset:pipefail'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest-xl
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          fetch-depth: 0
+      - name: Check Migration Ordering
+        shell: bash
+        run: |
+          LATEST_MIGRATION="$(grep -E '^[0-9]+$' migrations/LATEST)"
+
+          if ! ls migrations/"${LATEST_MIGRATION}"_*.up.sql 1>/dev/null 2>&1; then
+            >&2 echo -e "Please ensure that migrations/LATEST points to a migration"
+            exit 1
+          fi
+
+          CHANGED_MIGRATIONS="$(git diff --name-only --diff-filter=A 'HEAD^1...HEAD^2' -- 'migrations/*.up.sql')"
+
+          echo "Latest migration is ${LATEST_MIGRATION}"
+
+          for migration in ${CHANGED_MIGRATIONS}; do
+            echo "Verifying new migration: ${migration}"
+
+            migration_timestamp="$(basename "${migration}" | cut -d'_' -f1)"
+
+            if [ "${LATEST_MIGRATION}" -gt "${migration_timestamp}" ]; then
+              >&2 echo -e "Please ensure all new migrations are added after ${LATEST_MIGRATION} and migrations/LATEST is updated, see:\n$migration"
+              exit 1
+            fi
+          done

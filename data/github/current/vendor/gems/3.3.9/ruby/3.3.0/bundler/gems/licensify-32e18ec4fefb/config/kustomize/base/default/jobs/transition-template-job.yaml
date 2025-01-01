@@ -1,0 +1,54 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: transition-template-job
+spec:
+  template:
+    metadata:
+      labels:
+        app: transition-template-job
+        role: internal-service
+      annotations:
+        fluentbit.io/parser: logfmt
+        observability.github.com/logger: fluent-bit
+        observability.github.com/splunk_index: licensify
+    spec:
+      containers:
+        - name: transition
+          image: licensify
+          command: 
+            - /usr/bin/tools/istio-job-wrapper
+            - ./bin/transition
+          env:
+            - name: APP_SHA
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['heaven.githubapp.com/sha']
+            - name: APP_REF
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['heaven.githubapp.com/ref']
+            - name: GOMAXPROCS
+              value: "2"
+            - name: STATS_ADDR
+              value: $(KUBE_NODE_HOSTNAME):28125
+          envFrom:
+            - configMapRef:
+                name: environment
+            - configMapRef:
+                name: kube-cluster-metadata
+            - secretRef:
+                name: vault-secrets
+          resources:
+            limits:
+              cpu: 3
+              memory: 500Mi
+            requests:
+              cpu: 35m
+              memory: 100Mi
+      # Set restartPolicy: Never and backoffLimit: 0 to avoid the job from 
+      # being restarted in case of failure or eviction. This is important 
+      # to avoid restarting a long-running transition automatically if it already made progress.
+      restartPolicy: Never
+  backoffLimit: 0
+  activeDeadlineSeconds: 100

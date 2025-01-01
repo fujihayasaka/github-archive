@@ -1,0 +1,66 @@
+name: Migration changes ready to be applied
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+
+jobs:
+  check-migration-tags:
+    if: |-
+      ${{
+        github.event.review.state == 'approved' &&
+        github.event.pull_request.user.login != 'chrisgavin'
+      }}
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Check for migration tags
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.DSP_CODE_SCANNING_TOKEN}}
+        script: |         
+          const prNumber = context.payload.pull_request.number;
+          const owner = context.repo.owner;
+          const repo = context.repo.repo;
+
+          const { data: labels } = await github.rest.issues.listLabelsOnIssue({
+            owner: owner,
+            repo: repo,
+            issue_number: prNumber,
+          });
+
+          const labelNames = labels.map(label => label.name);
+
+          if (!labelNames.includes('migration:skeema:diff')){
+            core.notice('No migration tags added to PR');
+            return;
+          }
+
+          const { data: reviews } = await github.rest.pulls.listReviews({
+            owner: owner,
+            repo: repo,
+            pull_number: prNumber,
+          });
+
+          const { data: teammates } = await github.rest.teams.listMembersInOrg({
+            org: 'github',
+            team_slug: 'code-scanning-experiences-reviewers',
+          });
+
+          const teamMemberLogins = teammates.map(member => member.login);
+          const approvedByTeam = reviews.some(review => 
+            review.state === 'APPROVED' && teamMemberLogins.includes(review.user.login)
+          );
+
+          if (approvedByTeam) {
+            const requiredTag = 'migration:ready:to_run';
+            if (!labelNames.includes(requiredTag)) {
+              core.setFailed(`The PR is missing the required tag: ${requiredTag}`);
+            }
+          } 

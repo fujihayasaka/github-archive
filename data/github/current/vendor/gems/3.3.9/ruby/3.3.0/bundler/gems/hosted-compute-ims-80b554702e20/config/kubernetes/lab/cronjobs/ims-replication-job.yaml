@@ -1,0 +1,75 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    annotations:
+        moda.github.net/cluster-preferences: |
+            {
+              "general-3-va3-iad":  {
+                "spec": {
+                  "suspend": false
+                }
+              }
+            }
+    name: ims-replication-job
+spec:
+    concurrencyPolicy: Forbid
+    jobTemplate:
+        metadata:
+            labels:
+                app: ims-replication-job
+        spec:
+            activeDeadlineSeconds: 3600
+            backoffLimit: 0
+            template:
+                metadata:
+                    annotations:
+                        fluentbit.io/parser: logfmt
+                        observability.github.com/kafka_topic: launch
+                        observability.github.com/logger: fluent-bit
+                        observability.github.com/splunk_index: hosted_compute_ims
+                spec:
+                    containers:
+                        - command:
+                            - /app/bin/hosted-compute-ims-cronjobs
+                            - replication
+                          env:
+                            - name: GOMAXPROCS
+                              valueFrom:
+                                resourceFieldRef:
+                                    containerName: ims-replication-job
+                                    resource: limits.cpu
+                            - name: STATSD_ADDR
+                              value: $(KUBE_NODE_HOSTNAME):28125
+                            - name: STATS_ADDR
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: spec.nodeName
+                            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                              value: http://otelcol-mesh.otelcol-production.svc.cluster.local:14318/v1/traces
+                            - name: GITHUB_TELEMETRY_LOGS_LEVEL
+                              value: info
+                            - name: ENVIRONMENT
+                              value: lab
+                            - name: DOTCOM_INTERNAL_TWIRP_URL
+                              value: https://internal-api.service.iad.github.net/internal
+                            - name: RUNNER_INSTANCE_NAMES
+                              value: runnerghubeus21
+                            - name: TOKEN_URL
+                              value: https://vstoken.actions.githubusercontent.com/
+                          envFrom:
+                            - secretRef:
+                                name: vault-secrets
+                          image: hosted-compute-ims
+                          name: ims-replication-job
+                          resources:
+                            limits:
+                                cpu: "2"
+                                memory: 512Mi
+                            requests:
+                                cpu: "1"
+                                memory: 256Mi
+                    restartPolicy: Never
+            ttlSecondsAfterFinished: 60
+    schedule: '*/30 * * * *'
+    suspend: true

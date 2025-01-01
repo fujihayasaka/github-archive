@@ -1,0 +1,27 @@
+ALTER TABLE `ts_analyses` ADD COLUMN `delivery_id` bigint(20) unsigned DEFAULT NULL;
+CREATE TABLE `ts_deliveries` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `repository_id` bigint(20) unsigned NOT NULL,
+  `repository_nwo` varchar(140) DEFAULT NULL,
+  `ref` varbinary(1024) NOT NULL,
+  `commit_oid` varchar(40) NOT NULL,
+  `environment` json NOT NULL,
+  `checkout_uri` varchar(1024) NOT NULL,
+  `analysis_key` varchar(255) DEFAULT NULL,
+  `source_repository_id` bigint(20) unsigned NOT NULL,
+  `complete` tinyint(1) NOT NULL DEFAULT '1',
+  `failed` tinyint(1) NOT NULL DEFAULT '0',
+  `build_started_at` datetime(6) DEFAULT NULL,
+  `workflow_run_id` bigint(20) unsigned DEFAULT NULL,
+  `upload_started_at` datetime(6) DEFAULT NULL,
+  `upload_finished_at` datetime(6) DEFAULT NULL,
+  `hydro_enqueued_at` datetime(6) DEFAULT NULL,
+  `processing_started_at` datetime(6) DEFAULT NULL,
+  `processing_completed_at` datetime(6) DEFAULT NULL,
+  `sarif_path` text NOT NULL,
+  `sarif_id` varchar(255) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_deliveries_on_repo_id_sarif_id` (`repository_id`,`sarif_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

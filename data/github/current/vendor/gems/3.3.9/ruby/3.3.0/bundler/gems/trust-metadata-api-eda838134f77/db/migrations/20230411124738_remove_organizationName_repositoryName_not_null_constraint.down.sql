@@ -1,0 +1,2 @@
+alter table attestations modify column organization_name  varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL;
+alter table attestations modify column repository_name  varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL;

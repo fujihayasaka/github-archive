@@ -1,0 +1,42 @@
+# This workflow is run in CI to ensure we do not break benchmarks or profiles.
+name: Run Benchmarks
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  merge_group:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+
+      - name: Install Bundler
+        run: gem install bundler
+
+      - name: Bootstrap
+        env:
+          GITHUB_USER: ${{ secrets.OCTOFACTORY_USER }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN}}
+        run: bash ./script/bootstrap --ci
+
+      - name: Install dependencies
+        run: bundle install
+  
+      - name: Run benchmarks
+        run: make bench
+
+      - name: Run profiler
+        run: make profile

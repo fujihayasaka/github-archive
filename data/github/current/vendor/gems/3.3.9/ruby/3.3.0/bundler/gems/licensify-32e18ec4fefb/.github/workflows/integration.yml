@@ -1,0 +1,40 @@
+name: integration
+permissions:
+  id-token: write
+  contents: read
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  merge_group:
+  workflow_dispatch:
+
+jobs:
+  run_integration:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set Up Go Proxy & Private Module Access
+        uses: github/setup-goproxy@v1.1.0
+      
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.LICENSIFY_AZURE_SPN_CLIENT_ID }}","clientSecret":"${{ secrets.LICENSIFY_AZURE_SPN_CLIENT_SECRET }}","subscriptionId":"fd626d78-6746-4a4e-82e2-644426366e2d","tenantId":"${{ secrets.LICENSIFY_AZURE_SPN_TENANT_ID }}"}'
+
+      - name: SetRemote
+        run: script/set-remote
+      
+      - name: Run integration tests
+        env:
+          GITHUB_USER: ${{github.actor}}
+        run: script/integration-test

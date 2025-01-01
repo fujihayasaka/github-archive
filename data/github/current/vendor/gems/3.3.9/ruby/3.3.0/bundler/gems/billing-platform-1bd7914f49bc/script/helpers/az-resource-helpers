@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+USER_NAME=${GITHUB_USER}
+
+COLLECTION_NAME="${USER_NAME}-${1:-"$(git symbolic-ref --short HEAD | sed 's/\//-/g')"}"
+DATABASE_NAME="${COLLECTION_NAME}"
+
+# env var CI is set by github actions:
+# https://docs.github.com/en/actions/learn-github-actions/environment-variables#default-environment-variables
+if [ "$CI" = true ]
+then
+  echo "Running in CI collection name: ${COLLECTION_NAME}"
+  DATABASE_NAME="billing-platform-ci"
+  ACTIONS_RUN_NUMBER=${ACTIONS_RUN_NUMBER:-"0"}
+  SQL_ACCOUNT_NAME=${SQL_ACCOUNT_NAME:-"billing-platform-ci-${ACTIONS_RUN_NUMBER: -1}"}
+else
+  SQL_ACCOUNT_NAME=${SQL_ACCOUNT_NAME:-"billing-platform-dev"}
+fi
+
+RESOURCE_GROUP=${RESOURCE_GROUP:-"billing-platform-dev"}
+
+SUBSCRIPTION=${SUBSCRIPTION:-"GitHub - NonProd - PandE - Billing/testing"}
+
+ENV_FILE="dev.env"
+SCRIPT_DIR=$(cd -P -- "$(dirname -- "$0")" && pwd -P)
+
+function getEnvironment() {
+  getEndpoints
+
+  #  NOTE: If you add any additional environment variables into the exports here,
+  #  make sure those environment variable names get reflected into docker-compose.yml
+  cat <<EOF >> "$ENV_FILE"
+export COSMOS_CONN_STR="${ACCOUNT_ENDPOINT}"
+export COSMOS_GATEWAY_CONN_STR="${ACCOUNT_GATEWAY_ENDPOINT}"
+export COSMOS_READ_ONLY_CONN_STR="${READ_ONLY_ACCOUNT_ENDPOINT}"
+export COSMOS_READ_ONLY_GATEWAY_CONN_STR="${READ_ONLY_ACCOUNT_GATEWAY_ENDPOINT}"
+export COSMOS_DB="${DATABASE_NAME}"
+export COSMOS_CONTAINER="${COLLECTION_NAME}"
+export HEAVEN_DEPLOYED_ENV="development"
+export HMAC_KEY=billing-platform
+export SKIP_HMAC=true
+export GITHUB_TELEMETRY_LOGS_CONSOLE_ENCODING=console
+export AZURE_COMMERCE_SPN_CLIENT_SECRET=${AZURE_COMMERCE_SPN_CLIENT_SECRET}
+export ZUORA_CLIENT_SECRET=${ZUORA_CLIENT_SECRET}
+export ZUORA_CLIENT_ID=${ZUORA_CLIENT_ID}
+export HMAC_SECRET_BILLING_PLATFORM_ADMIN_GITHUBAPP_COM=billing-platform
+export READ_ONLY_SPN_TENANT_ID=${READ_ONLY_SPN_TENANT_ID}
+export READ_ONLY_SPN_CLIENT_ID=${READ_ONLY_SPN_CLIENT_ID}
+export READ_ONLY_SPN_CLIENT_SECRET=${READ_ONLY_SPN_CLIENT_SECRET}
+export ADMIN_TCP_ADDRESS=http://admin:8888
+export OKTA_PROXY_TCP_ADDRESS=oktaproxy:8899
+export OKTA_TEST_USERNAME=monalisa
+export OKTA_PROXY_HMAC_SECRET=billing-platform
+export ADMIN_CSRF_SECRET=supersecrettoken
+export KUSTO_BLOB_EXPORT_STORAGE_ACCOUNT_ENDPOINT=${KUSTO_BLOB_EXPORT_STORAGE_ACCOUNT_ENDPOINT}
+export KUSTO_ENDPOINT=${KUSTO_ENDPOINT}
+export KUSTO_SPN_TENANT_ID=${KUSTO_SPN_TENANT_ID}
+export KUSTO_SPN_CLIENT_ID=${KUSTO_SPN_CLIENT_ID}
+export KUSTO_SPN_CLIENT_SECRET=${KUSTO_SPN_CLIENT_SECRET}
+EOF
+}
+
+function getEndpoints() {
+  if [ -z "${DEV_COSMOS_KEY}" ]; then
+    echo "AZURE_COMMERCE_SPN_CLIENT_SECRET is not set, logging into Azure"
+    export ACCOUNT_ENDPOINT=$(az cosmosdb keys list \
+                --resource-group ${RESOURCE_GROUP} \
+                --name ${SQL_ACCOUNT_NAME} \
+                --subscription "${SUBSCRIPTION}" \
+                --type connection-strings \
+                --query connectionStrings[0].connectionString \
+                --output tsv)
+    export READ_ONLY_ACCOUNT_ENDPOINT=$(az cosmosdb keys list \
+                --resource-group ${RESOURCE_GROUP} \
+                --name ${SQL_ACCOUNT_NAME} \
+                --subscription "${SUBSCRIPTION}" \
+                --type connection-strings \
+                --query connectionStrings[2].connectionString \
+                --output tsv)
+    # The 5th connection string is Primary Sql Dedicated Gateway Connection String
+    export ACCOUNT_GATEWAY_ENDPOINT=$(az cosmosdb keys list \
+              --resource-group ${RESOURCE_GROUP} \
+              --name ${SQL_ACCOUNT_NAME} \
+              --subscription "${SUBSCRIPTION}" \
+              --type connection-strings \
+              --query connectionStrings[4].connectionString \
+              --output tsv)
+    export READ_ONLY_ACCOUNT_GATEWAY_ENDPOINT=$(az cosmosdb keys list \
+              --resource-group ${RESOURCE_GROUP} \
+              --name ${SQL_ACCOUNT_NAME} \
+              --subscription "${SUBSCRIPTION}" \
+              --type connection-strings \
+              --query connectionStrings[6].connectionString \
+              --output tsv)
+  else
+    export ACCOUNT_ENDPOINT=$DEV_COSMOS_KEY
+    export ACCOUNT_GATEWAY_ENDPOINT=$DEV_COSMOS_KEY
+    # TODO: This has to be replaced with READ_ONLY_DEV_COSMOS_KEY when it's generally available in org secrets
+    export READ_ONLY_ACCOUNT_ENDPOINT=$DEV_COSMOS_KEY
+    export READ_ONLY_ACCOUNT_GATEWAY_ENDPOINT=$DEV_COSMOS_KEY
+  fi
+}
+
+function exportPrimaryKey() {
+  echo $(az cosmosdb keys list --query primaryMasterKey --output tsv \
+              --resource-group ${RESOURCE_GROUP} \
+              --name ${SQL_ACCOUNT_NAME} \
+              --subscription "${SUBSCRIPTION}")
+
+}
+
+function logIntoAzure() {
+  if ! az account show &> /dev/null
+  then
+    echo "Logging in to Azure"
+    az login --use-device-code > /dev/null
+  fi
+  az account set --subscription "${SUBSCRIPTION}"
+}
+
+function getCosmosFirewall() {
+  echo
+  echo "getting network rules for cosmosdb account:${SQL_ACCOUNT_NAME}, resource group:${RESOURCE_GROUP}, subscription:${SUBSCRIPTION}"
+  az cosmosdb network-rule list \
+    --name ${SQL_ACCOUNT_NAME} \
+    --resource-group ${RESOURCE_GROUP}
+}
+
+function getCosmosDatabaseList(){
+  az cosmosdb sql database list \
+    --account-name ${SQL_ACCOUNT_NAME} \
+    --resource-group ${RESOURCE_GROUP} \
+    --query [].name \
+    --output tsv
+}
+
+function disablePublicAccess() {
+  echo "Disabling public access for cosmosdb account:${SQL_ACCOUNT_NAME}, resource group:${RESOURCE_GROUP}, subscription:${SUBSCRIPTION}"
+  echo "This will take a while..."
+  echo "You can look at the portal for status, updates"
+
+  az cosmosdb update \
+    --name ${SQL_ACCOUNT_NAME} \
+    --resource-group ${RESOURCE_GROUP} \
+    --public-network-access Disabled
+}

@@ -1,0 +1,156 @@
+version: "3"
+services:
+  cosmos-db:
+    container_name: cosmos-db
+    image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
+    ports:
+      - "8081:8081"
+      - "10250-10255:10250-10255"
+    environment:
+      - AZURE_COSMOS_EMULATOR_PARTITION_COUNT=10
+      - AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE=true
+  redis-server:
+    container_name: redis-server
+    image: redis
+    ports:
+      - "6379:6379"
+
+  aqueduct-lite:
+    container_name: aqueduct-lite
+    image: ghcr.io/github/aqueduct-lite/aqueduct-lite
+    ports:
+      - 18081:18081
+    command:
+      [
+        "./bin/aqueduct-lite",
+        "--redis-address",
+        "redis://redis-server:6379/0",
+        "--listen-address",
+        "0.0.0.0:18081",
+      ]
+    depends_on:
+      - redis-server
+
+  kafka-lite:
+    container_name: kafka-lite
+    image: ghcr.io/github/kafka-lite/kafka-lite:ef76e63091c87149df0c45b40d3bad2cbe4b4117
+    ports:
+      - "9092:9092"
+    expose:
+      - 9092
+    command:
+      [
+        "/kafka-lite",
+        "--listen-address",
+        "0.0.0.0:9092",
+        "--redis-address",
+        "redis://redis-server:6379/0",
+        "--advertised-listener-address",
+        "kafka-lite.localhost:9092",
+        "--store",
+        "redis",
+        "--log-format",
+        "production",
+        "--max-message-age-ms",
+        "86400000",
+        "--seed-topic",
+        "github.repositories.v1.VisibilityChanged:1",
+      ]
+    depends_on:
+      - redis-server
+
+  api:
+    environment:
+      - AQUEDUCT_ADDRESS=http://aqueduct-lite:18081
+    depends_on:
+      - aqueduct-lite
+
+  usage-ingestion:
+    environment:
+      - AQUEDUCT_ADDRESS=http://aqueduct-lite:18081
+    depends_on:
+      - aqueduct-lite
+
+  customer-daily-rollup:
+    environment:
+      - AQUEDUCT_ADDRESS=http://aqueduct-lite:18081
+    depends_on:
+      - aqueduct-lite
+
+  customer-monthly-rollup:
+    environment:
+      - AQUEDUCT_ADDRESS=http://aqueduct-lite:18081
+    depends_on:
+      - aqueduct-lite
+
+  customer-yearly-rollup:
+    environment:
+      - AQUEDUCT_ADDRESS=http://aqueduct-lite:18081
+    depends_on:
+      - aqueduct-lite
+
+  failed-rollups-handler:
+    environment:
+      - AQUEDUCT_ADDRESS=http://aqueduct-lite:18081
+    depends_on:
+      - aqueduct-lite
+
+  azure-emission:
+    environment:
+      - AQUEDUCT_ADDRESS=http://aqueduct-lite:18081
+    depends_on:
+      - aqueduct-lite
+
+  emission-handler:
+    environment:
+      - AQUEDUCT_ADDRESS=http://aqueduct-lite:18081
+      - DAILY_EMISSION_CUSTOMER_IDS=9576408,10296845,5068038,1344544
+      - MONTHLY_EMISSION_CUSTOMER_IDS=9576408,10296845,5068038,1344544
+      - DAILY_EMISSION_ACTIVE_DATE=2024-09-02
+    depends_on:
+      - aqueduct-lite
+
+  invoice-generation:
+    environment:
+      - AQUEDUCT_ADDRESS=http://aqueduct-lite:18081
+      - DAILY_EMISSION_CUSTOMER_IDS=9576408,10296845,5068038,1344544
+      - MONTHLY_EMISSION_CUSTOMER_IDS=9576408,10296845,5068038,1344544
+      - DAILY_EMISSION_ACTIVE_DATE=2024-09-02
+    depends_on:
+      - aqueduct-lite
+
+  request-handler:
+    environment:
+      - AQUEDUCT_ADDRESS=http://aqueduct-lite:18081
+    depends_on:
+      - aqueduct-lite
+
+  watermark-handler:
+    environment:
+      - AQUEDUCT_ADDRESS=http://aqueduct-lite:18081
+    depends_on:
+      - aqueduct-lite
+
+  zero-out-quantities-handler:
+    environment:
+      - AQUEDUCT_ADDRESS=http://aqueduct-lite:18081
+    depends_on:
+      - aqueduct-lite
+
+  usage-report:
+    environment:
+      - AQUEDUCT_ADDRESS=http://aqueduct-lite:18081
+    depends_on:
+      - aqueduct-lite
+
+  high-watermark-rollover-handler:
+    environment:
+      - AQUEDUCT_ADDRESS=http://aqueduct-lite:18081
+    depends_on:
+      - aqueduct-lite
+
+  scheduler:
+    environment:
+      - AQUEDUCT_ADDRESS=http://aqueduct-lite:18081
+    depends_on:
+      - aqueduct-lite

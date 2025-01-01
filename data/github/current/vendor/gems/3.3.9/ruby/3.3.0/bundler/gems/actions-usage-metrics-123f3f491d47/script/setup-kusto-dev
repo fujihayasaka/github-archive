@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+dir=$(dirname $0)
+
+GITHUB_ACTIONS="${GITHUB_ACTIONS:-}"
+CI="${CI:-}"
+STORAGE_ACCOUNT_NAME="${STORAGE_ACCOUNT_NAME:="actionsmetricsinnerloop"}"
+SERVICE_PRINCIPAL_CLIENT_SECRET="${SERVICE_PRINCIPAL_CLIENT_SECRET:-}"
+KUSTO_CONNECTION_STRING="${KUSTO_CONNECTION_STRING:="https://ghdwprod.eastus.kusto.windows.net"}"
+
+if [[ !($GITHUB_ACTIONS || $CI) ]]; then
+  $dir/ensure-az-login
+  $dir/ensure-jit-access
+fi
+
+# Populate k8s secrets
+if ! kubectl cluster-info >/dev/null 2>&1; then
+  echo "❌ Kubernetes cluster not found. Re-run this script once the cluster is created to configure secrets."
+  exit 1
+fi
+
+if ! kubectl get ns actions-usage-metrics-dev >/dev/null 2>&1; then
+  echo "📦 Creating namespace actions-usage-metrics-dev since it doesn't appear to exist yet..."
+  kubectl create ns actions-usage-metrics-dev --save-config
+fi
+
+echo "🔑 Creating or updating k8s secret kusto-connection-string..."
+kubectl create secret generic --namespace actions-usage-metrics-dev kusto-connection-string --save-config --from-literal="KUSTO_CONNECTION_STRING=$KUSTO_CONNECTION_STRING" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+echo "✅ Kubernetes secret updated!"
+
+echo "🔑 Creating or updating k8s secret service-principal-client-secret..."
+kubectl create secret generic --namespace actions-usage-metrics-dev service-principal-client-secret --save-config --from-literal="SERVICE_PRINCIPAL_CLIENT_SECRET=$SERVICE_PRINCIPAL_CLIENT_SECRET" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+echo "✅ Kubernetes secret updated!"

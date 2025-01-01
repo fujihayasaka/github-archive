@@ -687,6 +687,7 @@ namespace :stafftools do
       collection do
         post :purge
         post :reindex
+        post :stop
       end
 
       member do

@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+
+set -e
+
+function usage() {
+    cat <<EOF
+Usage: script/server [--dev] [--debug] [--restart] [--stop]
+  Builds and deploys application
+
+  Optional parameters:
+    --dev                           Enables continuous local development. Skaffold will watch source files and re-deploy application on any changes.
+    --debug                         Deploy application and forward ports for debugging. This mode is required for using VSCode debug targets.
+    --restart                       Clean up any exising resources and re-deploy application from scratch.
+    --stop                          Stops application and clean up existing resources
+
+Examples:
+    script/server
+    script/server --dev
+    script/server --debug
+    script/server --restart
+    script/server --stop
+
+EOF
+}
+
+PROFILE="dev"
+RUN_MODE=""
+RESTART=false
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --debug)
+      RUN_MODE="debug"; shift ;;
+    --dev)
+      RUN_MODE="dev"; shift ;;
+    --stop)
+      RUN_MODE="stop"; shift ;;
+    --restart)
+      RESTART=true; shift ;;
+    --help)
+      usage; exit 0 ;;
+    *)
+      echo "Unknown option $1"; usage; exit 1 ;;
+  esac
+done
+
+if [[ $RUN_MODE == "stop" ]]; then
+    skaffold delete --profile $PROFILE
+    exit 0
+fi
+
+script/helpers/ensure-azure-auth
+script/helpers/ensure-runner-auth
+
+echo "Deploying dependencies"
+script/setup
+
+echo "Prepare database"
+script/db-setup
+
+if [[ $RESTART == true ]]; then
+    skaffold delete --profile $PROFILE
+fi
+
+source script/helpers/setup-run-variables $GITHUB_USER
+script/helpers/kube-set-dynamic-env "GITHUB_USER=$GITHUB_USER" "AQUEDUCT_APP=$AQUEDUCT_APP"
+
+if [[ $RUN_MODE == "debug" ]]; then
+    echo "Building and applying resources in DEBUG mode. After startup, use the appropriate VSCode debug configuration under 'Run and Debug' to attach to the app."
+    skaffold debug --profile $PROFILE --cleanup=false --port-forward=user $@
+elif [[ $RUN_MODE == "dev" ]]; then
+    echo "Building and applying resources in dev mode (watching file changes)..."
+    skaffold dev --profile $PROFILE $@
+else
+    echo "Building and applying resources..."
+    skaffold run --profile $PROFILE $@
+fi

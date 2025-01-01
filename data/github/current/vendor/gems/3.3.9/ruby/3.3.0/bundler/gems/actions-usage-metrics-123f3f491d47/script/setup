@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+dir=$(dirname $0)
+MINIKUBE_PROFILE=aum
+
+BOOTSTRAP=true
+RESET_K8S=false
+RECREATE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+    --no-bootstrap)
+        BOOTSTRAP=false
+        shift
+        ;;
+    --reset-k8s)
+        RESET_K8S=true
+        shift
+        ;;
+    --recreate)
+        RECREATE=true
+        shift
+        ;;
+    -* | --*)
+        echo "Unknown option $1"
+        exit 1
+        ;;
+    esac
+done
+
+if "$RECREATE"; then
+    minikube delete -p $MINIKUBE_PROFILE
+fi
+
+if "$BOOTSTRAP"; then
+    $dir/bootstrap
+fi
+
+echo "🧊 Ensuring k8s cluster exists..."
+if ! kubectl cluster-info --context $MINIKUBE_PROFILE >/dev/null 2>&1; then
+    echo "Creating k8s cluster..."
+    minikube start -p $MINIKUBE_PROFILE --mount --mount-string ~/.azure:/azurecliconfig
+fi
+
+if "$RESET_K8S"; then
+    echo "Deleting existing k8s resources..."
+    kubectl delete --ignore-not-found ns/actions-usage-metrics-dev
+else
+    echo "Not deleting existing k8s resources because --reset-k8s was not specified"
+fi
+
+kubectl config use-context $MINIKUBE_PROFILE
+kubectl config set-context --current --namespace=actions-usage-metrics-dev
+
+$dir/setup-kusto-dev
+
+if "$RECREATE"; then
+    sleep 30
+    $dir/server
+fi

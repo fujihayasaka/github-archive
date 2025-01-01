@@ -1,0 +1,95 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    annotations:
+        heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: hosted-compute-ims-worker
+        moda.github.net/canary-label: role
+        moda.github.net/canary-replicas: "1"
+        moda.github.net/canary-v2: "true"
+    name: hosted-compute-ims-worker
+spec:
+    replicas: 2
+    selector:
+        matchLabels:
+            app: hosted-compute-ims-worker
+            role: lab
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt
+                observability.github.com/kafka_topic: launch
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: hosted_compute_ims
+            labels:
+                app: hosted-compute-ims-worker
+                role: lab
+        spec:
+            containers:
+                - command:
+                    - /app/bin/hosted-compute-ims-worker
+                  env:
+                    - name: GOMAXPROCS
+                      valueFrom:
+                        resourceFieldRef:
+                            containerName: hosted-compute-ims-worker
+                            resource: limits.cpu
+                    - name: STATSD_ADDR
+                      value: $(KUBE_NODE_HOSTNAME):28125
+                    - name: STATS_ADDR
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                      value: http://otelcol-mesh.otelcol-production.svc.cluster.local:14318/v1/traces
+                    - name: MAX_IMAGE_DEFINITIONS_PER_SUBSCRIPTION
+                      value: "100"
+                    - name: AZURE_LOCATION
+                      value: eastus
+                    - name: WORKER_POOL_SIZE
+                      value: "15"
+                    - name: GITHUB_TELEMETRY_LOGS_LEVEL
+                      value: info
+                    - name: ENVIRONMENT
+                      value: lab
+                    - name: HTTP_PROXY
+                      value: network-proxy.service.github.net:3128
+                    - name: HTTPS_PROXY
+                      value: network-proxy.service.github.net:3128
+                    - name: NO_PROXY
+                      value: '*.github.net,*.cluster.local'
+                    - name: AQUEDUCT_API_KEY_VERSION
+                      value: "0"
+                    - name: AQUEDUCT_APP
+                      value: hosted-compute-ims-lab
+                    - name: AQUEDUCT_URL
+                      value: https://aqueduct-gateway-production.service.iad.github.net
+                    - name: DOTCOM_INTERNAL_TWIRP_URL
+                      value: https://internal-api.service.iad.github.net/internal
+                  envFrom:
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  image: hosted-compute-ims
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command:
+                                - sleep
+                                - "5"
+                  name: hosted-compute-ims-worker
+                  readinessProbe:
+                    exec:
+                        command:
+                            - pgrep
+                            - -f
+                            - hosted-compute-ims-worker
+                  resources:
+                    limits:
+                        cpu: 1000m
+                        memory: 500Mi
+                    requests:
+                        cpu: 250m
+                        memory: 100Mi
+            dnsPolicy: ClusterFirst

@@ -1,0 +1,33 @@
+# This dockerfile defines the protobuf tooling used by blackbird-mw to generate
+# twirp and protobuf code.
+#
+# Use script/proto to build and run
+
+FROM ghcr.io/github/gh-base-image/gh-builder-focal:20241008-231400-gb9e19cfd6@sha256:f15934696aed8bfcd07ab0eea648114872d9d0395686fd6b9c3b85b85b5d1d1e as protoc
+
+WORKDIR /workspace
+
+# Install protoc
+RUN apt-get -qq update && apt-get -qq install -y unzip
+ENV PROTOC_VERSION=3.17.0
+RUN set -ex \
+  && zip="protoc-${PROTOC_VERSION}-$(uname -s | tr A-Z a-z)-$(uname -m).zip" \
+  && curl -s -L "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/${zip}" -o "/tmp/${zip}" \
+  && unzip -o "/tmp/${zip}" -d /usr/local bin/protoc \
+  && unzip -o "/tmp/${zip}" -d /usr/local 'include/*' \
+  && rm -f "/tmp/${zip}" \
+  && apt-get -qq remove -y unzip
+
+# Bootstrap protobuf tools
+ENV GO111MODULE on
+ENV TWIRP_VERSION=v8.1.2
+RUN  go install github.com/bufbuild/buf/cmd/buf@v1.1.1 \
+  && go install github.com/bufbuild/buf/cmd/protoc-gen-buf-breaking@v1.1.1 \
+  && go install github.com/bufbuild/buf/cmd/protoc-gen-buf-lint@v1.1.1 \
+  && go install github.com/golang/protobuf/protoc-gen-go@v1.5.2 \
+  && go install github.com/twitchtv/twirp/protoc-gen-twirp@${TWIRP_VERSION} \
+  && go install github.com/twitchtv/twirp-ruby/protoc-gen-twirp_ruby@v1.9.0
+
+ADD ./script/protoc-generate.sh /
+
+ENTRYPOINT [ "/protoc-generate.sh" ]

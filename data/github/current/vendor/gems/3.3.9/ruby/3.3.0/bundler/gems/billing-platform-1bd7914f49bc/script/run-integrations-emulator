@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -e
+
+echo "==> Testing via Emulator... <=="
+SCRIPT_DIR=$(cd -P -- "$(dirname -- "$0")" && pwd -P)
+
+source ${SCRIPT_DIR}/../dev.env
+TEST_NAME="$1"
+
+
+# trap exit and kill api processes
+trap 'pkill -f bin/api' EXIT
+
+if [ ! -n "$CI" ]; then
+  echo "Running integration tests in codespace via emulator..."
+  script/dc up -d aqueduct-lite kafka-lite cosmos-db
+  script/wait-for-cosmos
+  echo "Setting up env vars, overwriting dev.env..."
+  script/set-remote-emulator
+  echo "Importing emulator certificate..."
+  script/set-emulator-cert
+fi
+
+#CGO_ENABLED=1 gotestsum --format standard-verbose --packages=github.com/github/billing-platform/testing/integration-tests -- -tags=integration -timeout 45m -parallel=2 -v -run "$TEST_NAME"
+go test -tags=integration -timeout 45m -parallel=2 -v -run "$TEST_NAME" github.com/github/billing-platform/testing/integration-tests -json | tparse -all

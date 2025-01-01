@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20201123105439_populate_sarif_id_empty.go on GHES

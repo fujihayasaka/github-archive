@@ -1,0 +1,169 @@
+syntax = "proto3";
+
+package github.dependency_graph_platform.repo_insights.v1;
+
+option go_package = "github.com/github/dependency-graph-platform-proto/gen/go/repo-insights/v1";
+
+import "google/protobuf/timestamp.proto";
+
+service RepoInsightsAPI {
+    rpc GetDependenciesForRepository(GetDependenciesForRepositoryRequest) returns (GetDependenciesForRepositoryResponse);
+    rpc GetRootAncestorsForDependencies(GetRootAncestorsForDependenciesRequest) returns (GetRootAncestorsForDependenciesResponse);
+}
+
+message GetDependenciesForRepositoryRequest {
+  // GitHub repository ID
+  uint64 repository_id = 1;
+
+  // Specifies how to paginate the results
+  Pagination pagination = 2;
+
+  // The package name to search for, using substring matching to find partial matches
+  string package_name_filter = 3;
+
+  // Filters the results based on the presence of vulnerabilities
+  VulnerabilityFilter vulnerability_filter = 4;
+
+  // Vulnerable version ranges relevant to the repository
+  repeated VulnerableVersionRange vulnerable_version_ranges = 5;
+
+  // Filters the results based on the relationship of the dependency
+  optional Relationship relationship_filter = 6;
+
+  // Filters the results based on the ecosystem of the dependency
+  repeated Ecosystem ecosystem_filter = 7;
+}
+
+message GetDependenciesForRepositoryResponse {
+  // List of dependencies
+  repeated Dependency dependencies = 1;
+
+  // Total number of dependencies before paginating, i.e. the total size of the result set
+  // with filters applied, but before paginating
+  uint64 total_dependencies = 2;
+
+  // List of ecosystems in the repository
+  repeated Ecosystem ecosystems = 3;
+}
+
+message GetRootAncestorsForDependenciesRequest {
+  // GitHub repository ID
+  uint64 repository_id = 1;
+
+  // A list of dependencies, typically transitive, to fetch direct dependencies for
+  repeated int64 dependency_ids = 2;
+}
+
+message GetRootAncestorsForDependenciesResponse {
+  // A list of all direct dependencies for the given dependencies in the request
+  repeated DependencyWithAncestors dependencies = 1;
+}
+
+message DependencyWithAncestors {
+  // The transitive dependency ID
+  uint64 id = 1;
+
+  // The list of distinct, direct/root dependencies for the given transitive dependency
+  repeated RootAncestor root_ancestors = 2;
+}
+
+message RootAncestor {
+  // The name of the root ancestor package
+  string package_name = 1;
+
+  // The version requirements of the package
+  string requirements = 2;
+
+  reserved "distance"; reserved 3;
+
+  // Indicates what the relationship of the root ancestor is to the transitive dependency
+  AncestorRelationship relationship = 4;
+}
+
+message Dependency {
+  // The ecosystem of the Dependency (e.g. NPM, RubyGems, etc.)
+  Ecosystem ecosystem = 1;
+
+  // The name of the package
+  string package_name = 2;
+
+  // The version requirements of the package
+  string requirements = 3;
+
+  // The path to the manifest file that declares the dependency
+  string manifest_path = 4;
+
+  // The scope of the dependency (e.g. runtime, development, etc.)
+  Scope scope = 5;
+
+  // Specifies whether the dependency is direct or transitive
+  Relationship relationship = 6;
+
+  // The time at which the dependency was last scanned (i.e. last push time)
+  google.protobuf.Timestamp scanned_at = 7;
+
+  // A list of vulnerable_version_range_ids that apply to the dependency
+  repeated uint64 vulnerable_version_range_ids = 8;
+
+  // license associated with the exact version of the package
+  string package_license = 9;
+
+  // The ID of the dependency
+  int64 id = 10;
+}
+
+// Offset-based Pagination
+message Pagination {
+  uint64 offset = 1;
+  uint64 limit = 2;
+}
+
+// - VULNERABILITY_FILTER_UNSPECIFIED: No filter applied
+// - VULNERABILITY_FILTER_VULNERABLE: Return only results with vulnerabilities
+// - VULNERABILITY_FILTER_NOT_VULNERABLE: Return only results without vulnerabilities
+enum VulnerabilityFilter {
+  VULNERABILITY_FILTER_UNSPECIFIED = 0;
+  VULNERABILITY_FILTER_VULNERABLE = 1;
+  VULNERABILITY_FILTER_NOT_VULNERABLE = 2;
+}
+
+// Vulnerable version ranges relevant to the repository. These correspond to Dependabot Alerts
+message VulnerableVersionRange {
+  // VVR ID
+  uint64 id = 1;
+  // Package name
+  string affects = 2;
+  // Version range affected by the vulnerability
+  string requirements = 3;
+  // Ecosystem
+  Ecosystem ecosystem = 4;
+}
+
+enum Ecosystem {
+    ECOSYSTEM_UNKNOWN = 0;
+    ECOSYSTEM_NPM = 1;
+}
+
+enum Scope {
+    SCOPE_UNKNOWN = 0;
+    SCOPE_RUNTIME = 1;
+    SCOPE_DEVELOPMENT = 2;
+}
+
+// - RELATIONSHIP_UNKNOWN: Relationship is not known
+// - RELATIONSHIP_DIRECT: Dependency is a direct dependency
+// - RELATIONSHIP_INDIRECT: Dependency is a transitive dependency
+enum Relationship {
+    RELATIONSHIP_UNKNOWN = 0;
+    RELATIONSHIP_DIRECT = 1;
+    RELATIONSHIP_INDIRECT = 2;
+}
+
+// - ANCESTOR_RELATIONSHIP_UNKNOWN: Relationship is not known
+// - ANCESTOR_RELATIONSHIP_PARENT: The root ancestor is a parent of the transitive dependency (i.e. 1 level deep)
+// - ANCESTOR_RELATIONSHIP_ANCESTOR: The root ancestor is an ancestor of the transitive dependency (i.e. 2 or more levels deep)
+enum AncestorRelationship {
+    ANCESTOR_RELATIONSHIP_UNKNOWN = 0;
+    ANCESTOR_RELATIONSHIP_PARENT = 1;
+    ANCESTOR_RELATIONSHIP_ANCESTOR = 2;
+}

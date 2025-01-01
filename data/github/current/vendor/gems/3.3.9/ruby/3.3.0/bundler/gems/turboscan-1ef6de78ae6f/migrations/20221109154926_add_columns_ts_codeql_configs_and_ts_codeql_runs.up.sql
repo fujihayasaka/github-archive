@@ -1,0 +1,2 @@
+ALTER TABLE `ts_codeql_configs` ADD COLUMN `repository_grid` varchar(50) DEFAULT NULL, ADD COLUMN `onboarded_by_actor_grid` varchar(50) DEFAULT NULL, ADD COLUMN `onboarded_by_actor_login` varchar(255) DEFAULT NULL;
+ALTER TABLE `ts_codeql_runs` ADD COLUMN `actor_login` varchar(255) DEFAULT NULL, ADD COLUMN `actor_grid` varchar(50) DEFAULT NULL, ADD COLUMN `triggering_event` tinyint(3) unsigned NOT NULL DEFAULT '0';

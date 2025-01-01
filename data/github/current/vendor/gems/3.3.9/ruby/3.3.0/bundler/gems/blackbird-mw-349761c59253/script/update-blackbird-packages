@@ -1,0 +1,78 @@
+#!/bin/bash
+#
+#/ Usage: script/update-blackbird-packages [sha|branch/name]
+#/
+#/ Update blackbird packages and Go modules, including references to the
+#/ Blackbird image.
+#/
+#/ If no argument is provided, the main branch will be fetched.
+#/ Otherwise, update to the sha or branch name provided.
+
+set -eu
+
+function usage {
+    grep "^#/" "${BASH_SOURCE[0]}" | cut -c 4-
+}
+
+cd "$(dirname "$0")/.."
+
+command -v gh >/dev/null 2>&1 || { echo >&2 "Error: gh is not installed."; exit 1; }
+
+bb_version=""
+tag=""
+
+case "${1-}" in
+    "--help" )
+        usage
+        exit 0
+        ;;
+    "" )
+        # No argument provided: Find the sha on main to generate the tag
+        sha=$(gh api /repos/github/blackbird/git/refs/heads/main --jq ".object.sha")
+        tag="sha-${sha:0:8}"
+        ;;
+    *[!0-9a-f]*)
+
+        # String argument provided, assume tag
+        tag="$(echo "$1" | tr '/' '-')"
+        echo "Updating blackbird image to '$tag'."
+        echo "WARNING: This must exist for CI to pass. Run the Release build manually in github/blackbird."
+
+        # But go mod can't handle slashes, so let's look up the branch
+        sha=$(gh api /repos/github/blackbird/git/refs/heads/"$1" --jq ".object.sha")
+
+        bb_version=$sha
+        ;;
+    *)
+        # It's hex, assume commit SHA
+        echo $1
+        tag="sha-${1:0:8}"
+        bb_version=$1
+        sha=$1
+        ;;
+esac
+
+if [[ -z "$bb_version" ]]; then
+    go get -u github.com/github/blackbird/crates/client
+    go get -u github.com/github/blackbird/crates/core
+    go get -u github.com/github/blackbird/crates/linguist
+else
+    go get -u "github.com/github/blackbird/crates/client@$bb_version"
+    go get -u "github.com/github/blackbird/crates/core@$bb_version"
+    go get -u "github.com/github/blackbird/crates/linguist@$bb_version"
+fi
+
+script/vendor
+
+if ! sed --version >/dev/null 2>&1; then
+    # Off-brand sed
+    sed -i '' -e "s#ghcr.io/github/blackbird/blackbird:.*\$#ghcr.io/github/blackbird/blackbird:$tag#" script/bootstrap Dockerfile
+else
+    # The one true sed
+    sed -i "s#ghcr.io/github/blackbird/blackbird:.*\$#ghcr.io/github/blackbird/blackbird:$tag#" script/bootstrap Dockerfile
+fi
+
+echo ""
+echo "Please run script/bootstrap to build and install the latest clibs locally."
+echo ""
+git diff

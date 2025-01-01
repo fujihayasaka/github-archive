@@ -1,0 +1,367 @@
+# This docker compose file defines the core services blackbird-mw depends on.
+# See also deps/spokes-proto/docker-compose.yml for the spokes compose
+# environment.
+services:
+  # version 5.2.4 is the latest version of the confluent platform container
+  # images that include the version of Kafka we run in production (2.2)
+  #
+  # See: https://docs.confluent.io/platform/current/installation/versions-interoperability.html
+  zookeeper:
+    image: confluentinc/cp-zookeeper:5.2.4
+    container_name: blackbird-mw-zookeeper
+    restart: on-failure
+    expose:
+      - 2182
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2182
+      ZOOKEEPER_TICK_TIME: 2000
+    healthcheck:
+      start_period: 10s
+      interval: 10s
+      timeout: 1s
+      retries: 10
+      test: ["CMD", "echo", "ruok", "|", "nc", "127.0.0.1", "5111"]
+
+  kafka:
+    # Check the version of Kafka included here: https://docs.confluent.io/platform/current/installation/versions-interoperability.html
+    # Match it to what we run in production.
+    image: confluentinc/cp-kafka:6.0.4
+    container_name: blackbird-mw-kafka
+    restart: on-failure
+    expose:
+      - 29094
+      - 29095
+      - 29096
+    ports:
+      - 29094:29094
+      - 29095:29095
+      - 29096:29096
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: blackbird-mw-zookeeper:2182
+      # Unpleasantness due to seed brokers vs. advertised listeners impedence mismatch
+      # see also: https://rmoff.net/2018/08/02/kafka-listeners-explained/
+      KAFKA_LISTENERS: EXTERNAL://:29094,INTERNAL://:29095,COMPOSE://:29096
+      KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:29094,INTERNAL://blackbird-mw-kafka:29095,COMPOSE://blackbird-mw-kafka:29096
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: EXTERNAL:PLAINTEXT,INTERNAL:PLAINTEXT,COMPOSE:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_LOG_MESSAGE_TIMESTAMP_TYPE: LogAppendTime
+    healthcheck:
+      start_period: 10s
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      test: ["CMD", "kafka-topics", "--zookeeper", "blackbird-mw-zookeeper:2182", "--list", "&>/dev/null"]
+
+  mysql:
+    image: mysql:8.0
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --information_schema_stats_expiry=0
+    restart: on-failure
+    environment:
+      - MYSQL_ALLOW_EMPTY_PASSWORD=yes
+      # GitHub's MySql servers run in Pacific timezone. By setting this TZ here we ensure that our local environment
+      # matches our production and catch any timezone related errors early in our integration tests.
+      - TZ=America/Los_Angeles
+    expose:
+      - 3306
+    ports:
+      - 9945:3306
+    healthcheck:
+      start_period: 10s
+      interval: 10s
+      timeout: 1s
+      retries: 10
+      test: ["CMD-SHELL", "mysql --host=mysql --user root --execute \"SHOW DATABASES;\""]
+
+  redis:
+    image: redis:6.2.5
+    environment:
+      ALLOW_EMPTY_PASSWORD: 1
+    expose:
+      - 6379
+    ports:
+      - 6380:6379
+    healthcheck:
+      start_period: 10s
+      interval: 5s
+      timeout: 1s
+      retries: 10
+      test: ["CMD", "redis-cli","ping"]
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    command: azurite -l /data --loose --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0
+    ports:
+      - 10000:10000 # Blob
+      - 10001:10001 # Queue
+      - 10002:10002 # Table
+    healthcheck:
+            test: nc 127.0.0.1 10000 -z
+            interval: 1s
+            retries: 30
+
+  azurite-storage-init:
+    image: mcr.microsoft.com/azure-cli:latest
+    command:
+        - /bin/sh
+        - -c
+        - |
+            az storage container create --name int-test-idx
+            touch finished
+            sleep infinity
+    depends_on:
+        azurite:
+            condition: service_healthy
+    environment:
+        # https://github.com/Azure/Azurite/blob/main/README.md#usage-with-azure-storage-sdks-or-tools
+        AZURE_STORAGE_CONNECTION_STRING: DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;
+    healthcheck:
+      start_period: 10s
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      test: test -f finished
+
+  blackbird-cache-1:
+    image: ${BLACKBIRD_IMAGE:-ghcr.io/github/blackbird/blackbird:main}
+    command: blackbird-cache --disable-hmac --config /config/blackbird/test/blackbird-cache.toml --listen 0.0.0.0:4443
+    user: root
+    hostname: "blackbird-cache-001" # NB: Report as blackbird-cache-001 so that the right hostname gets published for DSA
+    environment:
+      RUST_LOG: ${RUST_LOG:-info},librdkafka=warn,rdkafka::client=warn,warp::filters::trace=warn,blackbird_runtime::twirp::server=warn,blackbird_runtime::twirp::service_builder=warn
+      RUST_BACKTRACE: full
+      BLACKBIRD_ENV: production
+      BLACKBIRD_CLUSTERNAME: cache-001
+      EMBEDDINGS_REDIS_PASSWORD: unused
+    volumes:
+      - blackbird_cache_1:/data/blackbird/idx:rw
+      - ./config/blackbird:/config/blackbird:ro
+    expose:
+      - 4443
+    ports:
+      - 9947:4443
+    depends_on:
+      kafka:
+        condition: service_healthy
+      bootstrap-kafka:
+        condition: service_healthy
+    healthcheck:
+      start_period: 5s
+      interval: 5s
+      timeout: 1s
+      retries: 40
+      test: [ "CMD-SHELL", "curl --fail http://localhost:4443/_ping || exit 1" ]
+
+  blackbird-1:
+    image: ${BLACKBIRD_IMAGE:-ghcr.io/github/blackbird/blackbird:main}
+    command: ultraman start --procfile /config/blackbird/test/Procfile
+    user: root
+    hostname: "blackbird-1"
+    environment:
+      # NOTE: SHELL is needed for ultraman
+      SHELL: /usr/bin/bash
+      RUST_LOG: ${RUST_LOG:-info},librdkafka=warn,rdkafka::client=warn,warp::filters::trace=warn,blackbird_runtime::twirp::server=warn,blackbird_runtime::twirp::service_builder=warn
+      RUST_BACKTRACE: full
+      BLACKBIRD_ENV: production
+      BLACKBIRD_CLUSTERNAME: ${BLACKBIRD_CLUSTERNAME:-zeta}
+      BLACKBIRD_KAFKA_BROKERS: blackbird-mw-kafka:29096
+    volumes:
+      - blackbird_index_1:/data/blackbird/idx:rw
+      - ./config/blackbird:/config/blackbird:ro
+    expose:
+      - 4443
+      - 4444
+    ports:
+      - 9943:4443
+      - 9904:4444
+    depends_on:
+      kafka:
+        condition: service_healthy
+      bootstrap-kafka:
+        condition: service_healthy
+    healthcheck:
+      start_period: 5s
+      interval: 5s
+      timeout: 1s
+      retries: 40
+      test: [ "CMD-SHELL", "(curl --fail http://localhost:4443/_ping && curl --fail http://localhost:4444/_ping) || exit 1" ]
+
+  blackbird-2:
+    image: ${BLACKBIRD_IMAGE:-ghcr.io/github/blackbird/blackbird:main}
+    command: ultraman start --procfile /config/blackbird/test/Procfile
+    user: root
+    hostname: "blackbird-2"
+    environment:
+      # NOTE: SHELL is needed for ultraman
+      SHELL: /usr/bin/bash
+      RUST_LOG: ${RUST_LOG:-info},librdkafka=warn,rdkafka::client=warn,warp::filters::trace=warn,blackbird_runtime::twirp::server=warn,blackbird_runtime::twirp::service_builder=warn
+      RUST_BACKTRACE: full
+      BLACKBIRD_ENV: production
+      BLACKBIRD_CLUSTERNAME: ${BLACKBIRD_CLUSTERNAME:-zeta}
+      BLACKBIRD_KAFKA_BROKERS: blackbird-mw-kafka:29096
+    volumes:
+      - blackbird_index_2:/data/blackbird/idx:rw
+      - ./config/blackbird:/config/blackbird:ro
+    expose:
+      - 4443
+      - 4444
+    ports:
+      - 9944:4443
+      - 9905:4444
+    depends_on:
+       kafka:
+         condition: service_healthy
+       bootstrap-kafka:
+         condition: service_healthy
+    healthcheck:
+      start_period: 5s
+      interval: 5s
+      timeout: 1s
+      retries: 40
+      test: [ "CMD-SHELL", "(curl --fail http://localhost:4443/_ping && curl --fail http://localhost:4444/_ping) || exit 1" ]
+
+# Bootstrapping "services", these never exit because then compose might try to run them again.
+  bootstrap-kafka:
+    image: confluentinc/cp-kafka:6.0.4
+    tty: false
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      start_period: 20s
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      test: test -f finished
+    # NOTE: The CLI says that the `--zookeeper` option is deprecated, but it's also the only way to use --if-not-exists/--if-exists.
+    #
+    # To check the status of a topic, run:
+    #    docker compose exec kafka /usr/bin/kafka-topics --describe --topic blackbird.v1.GitDocument.Yellow --bootstrap-server blackbird-mw-kafka:29094
+    #
+    # To delete a topic, run:
+    #    docker compose exec kafka /usr/bin/kafka-topics --delete --topic blackbird.v1.GitDocument.Yellow --bootstrap-server blackbird-mw-kafka:29094
+    #
+    # This uses --delete and --create to ensure the desired partition settings are applied.
+    command: >
+      bash -c "echo 'Creating placeholder document and snapshot topics'
+      && /usr/bin/kafka-topics --delete --if-exists --topic 'blackbird.v1.*' --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v1.GitDocument.Yellow.0 --partitions 2 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v1.SnapshotTreeUpdate.Yellow.0 --partitions 1  --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v1.GitDocument.Green.0 --partitions 2 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v1.SnapshotTreeUpdate.Green.0 --partitions 1  --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v1.GitDocument.Blue.0 --partitions 2 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v1.SnapshotTreeUpdate.Blue.0 --partitions 1  --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v1.GitDocument.Red.0 --partitions 2 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v1.SnapshotTreeUpdate.Red.0 --partitions 1  --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v1.GitDocument.Orange.0 --partitions 2 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v1.SnapshotTreeUpdate.Orange.0 --partitions 1  --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && echo 'Creating lambda/violet topics'
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.BlackbirdBackfillViolet --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.BlackbirdBackfillViolet --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.lambda.ShardAssignment --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.lambda.ShardAssignment --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.lambda.ShardAssignmentSnapshot --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.lambda.ShardAssignmentSnapshot --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && echo 'Creating orange/kappa topics'
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.BlackbirdBackfillOrange --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.BlackbirdBackfillOrange --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.kappa.ShardAssignment --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.kappa.ShardAssignment --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.kappa.ShardAssignmentSnapshot --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.kappa.ShardAssignmentSnapshot --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && echo 'Creating red/iota topics'
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.BlackbirdBackfillRed --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.BlackbirdBackfillRed --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.iota.ShardAssignment --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.iota.ShardAssignment --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.iota.ShardAssignmentSnapshot --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.iota.ShardAssignmentSnapshot --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && echo 'Creating yellow/theta topics'
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.BlackbirdBackfillYellow --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.BlackbirdBackfillYellow --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.theta.ShardAssignment --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.theta.ShardAssignment --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.theta.ShardAssignmentSnapshot --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.theta.ShardAssignmentSnapshot --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && echo 'Creating green/eta topics'
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.BlackbirdBackfillGreen --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.BlackbirdBackfillGreen --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.eta.ShardAssignment --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.eta.ShardAssignment --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.eta.ShardAssignmentSnapshot --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.eta.ShardAssignmentSnapshot --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && echo 'Creating blue/zeta topics'
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.BlackbirdBackfillBlue --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.BlackbirdBackfillBlue --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.zeta.ShardAssignment --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.zeta.ShardAssignment --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.zeta.ShardAssignmentSnapshot --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.zeta.ShardAssignmentSnapshot --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && echo 'Creating cache assignment topics'
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.cache001.ShardAssignment --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.cache001.ShardAssignment --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.cache001.ShardAssignmentSnapshot --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.cache001.ShardAssignmentSnapshot --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.cache002.ShardAssignment --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.cache002.ShardAssignment --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.cache002.ShardAssignmentSnapshot --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.cache002.ShardAssignmentSnapshot --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.cache003.ShardAssignment --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.cache003.ShardAssignment --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.cache003.ShardAssignmentSnapshot --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.cache003.ShardAssignmentSnapshot --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.cache004.ShardAssignment --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.cache004.ShardAssignment --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --delete --if-exists --topic blackbird.v0.cache004.ShardAssignmentSnapshot --zookeeper blackbird-mw-zookeeper:2182
+      && /usr/bin/kafka-topics --create --if-not-exists --topic blackbird.v0.cache004.ShardAssignmentSnapshot --partitions 1 --replication-factor 1 --zookeeper blackbird-mw-zookeeper:2182
+      && touch finished
+      && sleep infinity
+      "
+
+  bootstrap-skeema:
+    platform: linux/amd64
+    build:
+      args:
+        - FRONTEND_MODE=without-frontend
+      context: .
+      dockerfile: Dockerfile
+      target: build
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      start_period: 15s
+      interval: 5s
+      timeout: 1s
+      retries: 40
+      test: test -f finished
+    environment:
+      env: development
+    command: >
+      bash -c "
+      ./script/skeema push $$env --debug --allow-unsafe
+      && touch finished
+      && sleep infinity
+      "
+
+volumes:
+  blackbird_index_1:
+  blackbird_index_2:
+  blackbird_cache_1:
+
+networks:
+  default:
+    ipam:
+      driver: default
+      config:
+        - subnet: "10.1.11.0/24"

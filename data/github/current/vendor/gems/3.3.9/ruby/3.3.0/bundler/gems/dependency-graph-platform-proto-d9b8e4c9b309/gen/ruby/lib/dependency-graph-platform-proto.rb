@@ -1,0 +1,9 @@
+# Auto-generated file. Do not edit!
+require 'health/v1/health_api_twirp'
+require 'reachability/v1/dependencies_api_twirp'
+require 'types/v1/dependency_twirp'
+require 'types/v1/manifest_twirp'
+require 'sbom/v1/sbom_api_twirp'
+require 'v1/experimental/dependencies_twirp'
+require 'alerting/v1/alerting_api_twirp'
+require 'repo-insights/v1/repo_insights_api_twirp'

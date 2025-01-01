@@ -286,6 +286,14 @@ module Elastomer
 
       type_param = index.client.version_support.es_version_8_plus? ? nil : es_type
       results = T.let(nil, T.untyped)
+
+      log_tags = {
+        "gh.elasticsearch.action": :index,
+        "db.elasticsearch.path_parts.index": index.name,
+        "gh.elasticsearch.document.type": es_type,
+      }
+
+      upsert_start = Time.now
       results = index.bulk(request_size: request_size) do |bulk|
         upsert.each do |id|
           begin
@@ -306,6 +314,14 @@ module Elastomer
           end
         end
 
+        upsert_end = Time.now
+        upsert_duration = ((upsert_end - upsert_start) * 1000).round(2)
+        GitHub.logger.info(
+          "Elastomer::Reconciler indexed #{upsert.size} documents for #{@type} in index #{index.name}, ending with ID #{upsert.last} (#{upsert_duration}ms)",
+          log_tags
+        ) if upsert.any?
+
+        remove_start = Time.now
         remove.each do |id|
           begin
             routing = metadata[id] && metadata[id][:routing]
@@ -321,6 +337,13 @@ module Elastomer
               "gh.elasticsearch.document.id": id
           end
         end
+        remove_end = Time.now
+        remove_duration = ((remove_end - remove_start) * 1000).round(2)
+
+        GitHub.logger.info(
+          "Elastomer::Reconciler removed #{remove.size} documents for #{@type} in index #{index.name}, ending with ID #{remove.last} (#{remove_duration}ms)",
+          log_tags
+        ) if remove.any?
       end
       check_for_errors(results)
     end
@@ -492,7 +515,10 @@ module Elastomer
         order = "#{model_class.table_name}.id ASC"
         if conditions.present?
           if conditions.respond_to?(:call)
-            conds << " AND #{conditions.call(self, *proc_args)}"
+            condition = conditions.call(self, *proc_args)
+            if condition.present?
+              conds << " AND #{condition}"
+            end
           else
             conds << " AND #{conditions}"
           end

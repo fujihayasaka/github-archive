@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: hosted-compute-ims-worker
+    annotations:
+        heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: "hosted-compute-ims-worker"
+        moda.github.net/canary-v2: "true"
+        # Indicate which label's value should be changed to "canary" during a canary deploy
+        moda.github.net/canary-label: "role"
+        moda.github.net/canary-replicas: "1"
+spec:
+    selector:
+        matchLabels:
+            app: hosted-compute-ims-worker
+    template:
+        metadata:
+            labels:
+                app: hosted-compute-ims-worker
+            annotations:
+                fluentbit.io/parser: logfmt
+                observability.github.com/logger: fluent-bit
+                observability.github.com/kafka_topic: launch
+                observability.github.com/splunk_index: hosted_compute_ims
+        spec:
+            dnsPolicy: ClusterFirst
+            containers:
+                - name: hosted-compute-ims-worker
+                  image: hosted-compute-ims
+                  # If you adjust CPU resources, adjust GOMAXPROCS accordingly
+                  resources:
+                    requests:
+                        cpu: 250m
+                        memory: 100Mi
+                    limits:
+                        cpu: 1000m
+                        memory: 500Mi
+                  command: ["/app/bin/hosted-compute-ims-worker"]
+                  readinessProbe:
+                    exec:
+                        command: ["pgrep", "-f", "hosted-compute-ims-worker"]
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command: ["sleep", "5"]
+                  envFrom:
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: GOMAXPROCS
+                      valueFrom:
+                        resourceFieldRef:
+                            containerName: hosted-compute-ims-worker
+                            resource: limits.cpu
+                    - name: STATSD_ADDR
+                      value: "$(KUBE_NODE_HOSTNAME):28125"
+                    - name: STATS_ADDR
+                      valueFrom:
+                        fieldRef:
+                          fieldPath: spec.nodeName
+                    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                      value: http://otelcol-mesh.otelcol-production.svc.cluster.local:14318/v1/traces
+                    - name: MAX_IMAGE_DEFINITIONS_PER_SUBSCRIPTION
+                      value: "100"
+                    - name: AZURE_LOCATION
+                      value: eastus
+                    - name: WORKER_POOL_SIZE
+                      value: "15"
+                    - name: GITHUB_TELEMETRY_LOGS_LEVEL
+                      value: info

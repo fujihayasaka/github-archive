@@ -1,0 +1,36 @@
+# TODO: This workflow can be deleted (along with the turboscan-docker-image Janky job) when Enterprise Server 3.14 is no longer supported.
+name: Mirror Docker Image
+on:
+  check_run:
+    types:
+      - completed
+
+jobs:
+  mirror:
+    permissions: {}
+
+    if: ${{ github.event.check_run.name == 'turboscan-docker-image' && github.event.check_run.conclusion == 'success' }}
+    name: Mirror Docker Image
+    runs-on: self-hosted
+    steps:
+      - name: Login to Docker Registry
+        run: |
+          echo "${{ secrets.OCTOFACTORY_TOKEN }}" | docker login octofactory.githubapp.com --username "${{ secrets.OCTOFACTORY_USER }}" --password-stdin
+          echo "${{ secrets.CONTAINER_BUILDER_TOKEN }}" | docker login containers.pkg.github.com --username gh-containers-bot --password-stdin
+
+      - name: Mirror Image
+        run: |
+          tag="${{ github.event.check_run.head_sha }}"
+
+          sync_image() {
+            octofactory_image="$1"
+            containers_image="$2"
+            >&2 echo "::group::Copying $octofactory_image to $containers_image..."
+            docker pull "$octofactory_image"
+            docker tag "$octofactory_image" "$containers_image"
+            docker push "$containers_image"
+            >&2 echo "::endgroup::"
+          }
+
+          sync_image "octofactory.githubapp.com/moda-artifacts-docker/turboscan:$tag" "containers.pkg.github.com/github/turboscan/turboscan:$tag"
+          sync_image "octofactory.githubapp.com/moda-artifacts-docker/turboscan:$tag-shell" "containers.pkg.github.com/github/turboscan/shell:$tag"

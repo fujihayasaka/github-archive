@@ -1,0 +1,69 @@
+name: "Check embedded rules"
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ts/sarif/ruledata/*.sarif
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ts/sarif/ruledata/*.sarif
+
+jobs:
+  check:
+    name: Diff ruledata with HEAD^2
+    runs-on: self-hosted
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          fetch-depth: 0
+
+      - name: Login to Octofactory
+        run: |
+          echo "${{ secrets.OCTOFACTORY_TOKEN }}" | docker login octofactory.githubapp.com --username "${{ secrets.OCTOFACTORY_USER }}" --password-stdin || true
+
+      - shell: bash
+        name: diff rules
+        run: |
+          set -eu
+
+          echo 'Listing rules...'
+
+          script/list-rules > "$RUNNER_TEMP/new-rules.json"
+
+          wc -l "$RUNNER_TEMP/new-rules.json"
+
+          duplicates=`uniq -d "$RUNNER_TEMP/new-rules.json"`
+
+          if [ ! -z "$duplicates" ]; then
+              >&2 echo -e "Multiple rules with the same id. The id must be unique, please remove duplicates.\n$duplicates"
+              exit 1
+          fi
+
+          GITHUB_BASE_REF="${GITHUB_BASE_REF:-main}"
+
+          echo "Switching to origin/$GITHUB_BASE_REF"
+
+          git checkout "origin/$GITHUB_BASE_REF" -- ts/sarif/ruledata
+
+          echo 'Listing rules...'
+
+          script/list-rules > "$RUNNER_TEMP/current-rules.json"
+
+          wc -l "$RUNNER_TEMP/current-rules.json"
+
+          echo "Diffing rules using $(which diff)..."
+
+          removed=`diff --suppress-common-lines <(sed 's/,$//' "$RUNNER_TEMP/current-rules.json") <(sed 's/,$//' "$RUNNER_TEMP/new-rules.json") | grep '^<' || true`
+
+          if [ ! -z "$removed" ]; then
+              >&2 echo -e "Please add the following rules to ts/sarif/ruledata/<TOOL NAME>-deleted.sarif:\n$removed"
+              exit 1
+          fi

@@ -1,0 +1,70 @@
+#! /usr/bin/env bash
+set -euo pipefail
+IFS=$'\n\t'
+
+cd "$(dirname "$0")/.."
+
+# Install the blackbird static C libraries:
+#   - client: dynamic shard assignment client
+#   - core: tree_path, geometric filter
+#   - linguist: language detection
+mkdir -p ./lib
+if [[ "${CI:-false}" == "true" ]]; then
+
+    # Authenticate with ghcr.io
+    echo $CONTAINER_BUILDER_TOKEN | docker login ghcr.io -u $GITHUB_ACTOR --password-stdin
+
+    # Install ubuntu libraries (required for CGO bindings).
+    sudo apt-get -qq update > /dev/null && \
+        sudo apt-get -qq install -y --no-install-recommends libzstd-dev > /dev/null
+
+    # Install the blackbird static libs from an existing Docker image. For
+    # end-to-end tests to be consistent it's important that this is pinned to a
+    # SHA and that this matches the SHA configured in ./Dockerfile.
+    clib_image=ghcr.io/github/blackbird/blackbird:sha-69e051e7
+    echo "Installing libblackbird_core.a and libblackbird_client.a from this docker image: ${clib_image}"
+    docker cp $(docker create --quiet --rm "${clib_image}"):/usr/local/lib/libblackbird_core.a ./lib/libblackbird_core.a
+    docker cp $(docker create --quiet --rm "${clib_image}"):/usr/local/lib/libblackbird_client.a ./lib/libblackbird_client.a
+    docker cp $(docker create --quiet --rm "${clib_image}"):/usr/local/lib/liblinguist.a ./lib/liblinguist.a
+else
+    # Local development build (including codespaces): the library is built from source.
+    if [[ -z "${BLACKBIRD_SRCDIR:+x}" ]]; then
+        if [[ -d ../blackbird ]]; then
+            BLACKBIRD_SRCDIR=$(cd ../blackbird; pwd)
+        else
+            echo "Could not find the blackbird repo. Please clone github/blackbird and set BLACKBIRD_SRCDIR to that directory, then try again."
+            exit 1
+        fi
+    fi
+
+    clib_sha=$(cd "${BLACKBIRD_SRCDIR}" && git rev-parse HEAD)
+    if [[ -f ./lib/.version && $(cat ./lib/.version) == ${clib_sha} ]]; then
+        echo "Skipping bootstrap process (nothing to do)"
+        echo "The blackbird c libs are already installed from github/blackbird@${clib_sha}."
+        echo "Remove the file './lib/.version' to force a reinstall and do a full bootstrap."
+        exit
+    fi
+
+    if [[ $OSTYPE == "darwin"* ]]; then
+        brew bundle
+    fi
+
+    dest=$(pwd)/lib
+
+    # If the local blackbird repo is on branch main then do a git pull to get the latest clibs.
+    if [[ $(cd "${BLACKBIRD_SRCDIR}" && git rev-parse --abbrev-ref HEAD) == "main" ]]; then
+        (cd "${BLACKBIRD_SRCDIR}" && git pull)
+    fi
+
+    (cd "${BLACKBIRD_SRCDIR}" \
+        && git status \
+        && script/bootstrap \
+        && script/install-blackbird-clibs $dest \
+        && git rev-parse HEAD >"$dest/.version")
+
+    echo "Installed $(printf "%s " $(ls "$dest")) to $dest from source ${BLACKBIRD_SRCDIR}"
+    (cd "${BLACKBIRD_SRCDIR}" && echo "Built with: $(git rev-parse --abbrev-ref HEAD)@$(git rev-parse --short HEAD)")
+fi
+
+# Vendor
+script/vendor

@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+root="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." >/dev/null 2>&1 && pwd )"
+cd "$root"
+
+gems_dir="$root/gems"
+mkdir -p $gems_dir
+
+echo $gems_dir
+
+rm -f $gems_dir/*.gem
+rm -rf /usr/local/rvm/gems/default/gems/vexi-*
+rm -rf /usr/local/rvm/gems/default/gems/vexi_management-*
+
+files=$(find . -name '*.gemspec')
+
+# Convert the output to an array
+gem_array=($files)
+# Loop through the array and build each gem per gemspec
+for gem in "${gem_array[@]}"
+do
+  gem_name=$(basename $gem ".gemspec")
+  gem_spec=$(basename $gem)
+  gem_dir=$(dirname $gem)
+  
+  pushd $gem_dir
+
+  # build gem
+  echo "----- Building gem: $gem -----"
+  version=$(gem build $gem_spec --output "$gems_dir/$gem_name.gem" | grep Version | cut -d':' -f 2 | tr -d " \t\n\r")
+  if [ -n "$version" ]; then
+    echo "Successfully built gem: $gem_name-$version"
+  else
+    echo "Failed to build gem: $gem"
+    exit 1
+  fi
+
+  popd
+done

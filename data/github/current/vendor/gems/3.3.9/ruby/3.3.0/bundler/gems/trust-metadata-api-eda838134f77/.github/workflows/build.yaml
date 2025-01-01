@@ -1,0 +1,46 @@
+name: "Build and test"
+
+on:
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: [main]
+  pull_request: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      GOPROXY: https://goproxy.githubapp.com/mod,https://proxy.golang.org/,direct
+      GOPRIVATE: ''
+      GONOPROXY: ''
+      GONOSUMDB: github.com/github/*
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Configure Go private module access
+        run: |
+          echo "machine goproxy.githubapp.com login nobody password ${{ secrets.GOPROXY_TOKEN }}" >> $HOME/.netrc
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Setup .env
+        run: make .env
+      # TODO: Remove later when docker-compose pull works for mysql:8
+      - name: Pull MySQL
+        run: docker pull mysql:8
+      - name: Start MySQL
+        run: make dev-start
+      - name: Install golang-migrate
+        run: |
+          cd $(mktemp -d)
+          curl -L https://github.com/golang-migrate/migrate/releases/download/v4.15.2/migrate.linux-amd64.tar.gz | tar xvz
+          sudo mv migrate /usr/local/bin/migrate
+      - name: Run migrations
+        run: make dev-migrate-up
+      - name: Run tests with coverage
+        run: make test
+      - name: Check Coverage Threshold
+        run: make verify-package-test-coverage

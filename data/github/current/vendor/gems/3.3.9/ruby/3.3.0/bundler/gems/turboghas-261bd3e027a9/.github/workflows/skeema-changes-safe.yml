@@ -1,0 +1,60 @@
+name: schema-changes-safe
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/schema-changes-safe.yml
+      - schemas/**
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      content: read
+
+    env:
+      GOPROXY: https://goproxy.githubapp.com/mod,https://proxy.golang.org,direct
+      GOPRIVATE: ''
+      GONOPROXY: ''
+      GONOSUMDB: github.com/github/*
+
+    steps:
+      - name: Login to Docker Registry
+        run: |
+          echo "${{ secrets.CONTAINER_BUILDER_TOKEN }}" | docker login containers.pkg.github.com --username gh-containers-bot --password-stdin
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - run: curl -s -L https://github.com/github/skeema/releases/download/v1.4.2-gh/skeema_1.4.2_linux_amd64.tar.gz | sudo tar -C /usr/bin -xvzp skeema
+
+      - name: Authenticate with goproxy
+        run: |
+          echo "machine goproxy.githubapp.com login nobody password ${{ secrets.GOPROXY_TOKEN }}" >> $HOME/.netrc
+
+      - name: Setup Database
+        run: |
+          docker compose up --wait --quiet-pull
+          script/migrate
+
+      - name: Checkout Default Branch
+        # Note: We assume it is ok to only refer to the major version here and get automatic updates since actions/checkout is a GitHub-owned repo
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Run Tests
+        run: |
+          set -exuo pipefail
+          cleanup() {
+            docker compose down
+          }
+          trap cleanup EXIT
+          go test ./...

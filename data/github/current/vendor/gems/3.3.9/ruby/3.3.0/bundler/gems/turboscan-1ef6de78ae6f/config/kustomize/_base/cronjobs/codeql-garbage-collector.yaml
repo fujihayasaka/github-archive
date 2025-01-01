@@ -1,0 +1,53 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: turboscan-codeql-garbage-collector
+    annotations:
+        turboscan.github.net/single-cluster: "true"
+spec:
+    schedule: "22 1 * * *"
+    # we use cluster-preferences to override this for a single cluster only
+    suspend: true
+    concurrencyPolicy: Forbid
+    jobTemplate:
+        spec:
+            template:
+                metadata:
+                    labels:
+                        app: turboscan
+                        role: codeql-garbage-collector
+                    annotations:
+                        observability.github.com/logger: fluent-bit
+                        fluentbit.io/parser: logfmt
+                        observability.github.com/splunk_index: turboscan
+                spec:
+                    dnsPolicy: ClusterFirst
+                    containers:
+                        - name: turboscan
+                          image: turboscan
+                          envFrom:
+                            - configMapRef:
+                                name: environment
+                            - configMapRef:
+                                name: background-environment
+                            - configMapRef:
+                                name: kube-cluster-metadata
+                            - secretRef:
+                                name: vault-secrets
+                          env:
+                            - name: STATS_ADDR
+                              value: "$(KUBE_NODE_HOSTNAME):28125"
+                            - name: GOMAXPROCS
+                              valueFrom:
+                                resourceFieldRef:
+                                  containerName: turboscan
+                                  resource: limits.cpu
+                          command:
+                            - /app/script/istio-job-wrapper
+                            - /app/bin/turboscan
+                            - cronjobs
+                            - exec
+                            - codeql-garbage-collector
+                    restartPolicy: OnFailure
+            activeDeadlineSeconds: 15000
+            ttlSecondsAfterFinished: 60

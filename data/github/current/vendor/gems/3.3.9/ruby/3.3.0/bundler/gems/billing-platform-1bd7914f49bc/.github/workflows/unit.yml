@@ -1,0 +1,72 @@
+name: unit
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '.vscode/**'
+      - 'config/**'
+      - 'docs/**'
+      - 'proto/**'
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+defaults:
+  run:
+    # This is important for enabling the pipefail option
+    shell: bash
+
+jobs:
+  run_unit:
+    runs-on: ubuntu-latest
+    env:
+      GOPROXY: https://goproxy.githubapp.com/mod,https://proxy.golang.org/,direct
+      GOPRIVATE: ""
+      GONOPROXY: ""
+      GONOSUMDB: github.com/github/*
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v4
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_SPN_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_SPN_CLIENT_SECRET }}","subscriptionId":"57997474-7983-4d65-a2e3-83410c0e43b3","tenantId":"${{ secrets.AZURE_SPN_TENANT_ID }}"}'
+
+      # From https://github.com/github/goproxy/blob/main/doc/user.md#set-up:
+      - name: Configure Go private module access
+        run: |
+          echo "machine goproxy.githubapp.com login nobody password ${{ secrets.CONTAINER_BUILDER_TOKEN }}" >> $HOME/.netrc
+
+      - name: Configure NuGet private package access
+        run: |
+          dotnet nuget add source --username PAT --password ${{ secrets.CONTAINER_BUILDER_TOKEN }} --store-password-in-clear-text --name github "https://nuget.pkg.github.com/github/index.json"
+
+      - name: Configure ghcr.io access
+        env:
+          CONTAINER_BUILDER_TOKEN: ${{ secrets.CONTAINER_BUILDER_TOKEN }}
+        run: |
+          docker login -u token -p "${CONTAINER_BUILDER_TOKEN}" ghcr.io
+
+      - name: Run unit tests
+        run: |
+          go install github.com/mfridman/tparse@fc3d090a0d91440f85901f684962db218c4bf0a9
+          CGO_ENABLED=1 go test -json -p 64 -race -cover ./... | tparse -all -format=markdown | tee coverage.md
+
+      - name: write coverage report to job summary
+        run: cat coverage.md >> $GITHUB_STEP_SUMMARY
+        if: success() || failure()

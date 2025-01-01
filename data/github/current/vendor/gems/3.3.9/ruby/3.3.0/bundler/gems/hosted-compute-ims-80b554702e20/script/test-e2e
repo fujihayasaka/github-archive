@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+
+set -e -o pipefail
+
+function usage() {
+    cat <<EOF
+Usage: script/test-e2e [--short] [--full] [--suite <suite_name>] [--debug-app] [--debug-tests]
+  Deploys application in E2E mode and runs e2e tests
+
+  Note: Keep on mind that this script overrides dev environment.
+        Use "script/server" to re-deploy dev environment back after e2e tests execution
+
+  One of the following parameters must be passed to specify test mode:
+    --short                         Running all e2e tests excluding image uploading scenarios which might take 20-30 minutes
+    --full                          Running all e2e tests
+    --suite <suite>                 Running the single test suite
+
+  Optional parameters:
+    --debug-app                     Configure debugger to support attaching to ims-api or ims-worker
+    --debug-tests                   Configure debugger to support attaching to e2e tests
+
+Examples:
+    script/test-e2e --short
+    script/test-e2e --full
+    script/test-e2e --suite TestImagesInvalidScenariosE2ETestSuite
+    script/test-e2e --short --debug-app
+    script/test-e2e --short --debug-tests
+
+EOF
+}
+
+function cleanup() {
+    echo "Saving logs for all deployments"
+    script/helpers/kube-save-logs || true
+
+    echo "Killing background processes"
+    jobs -p | xargs -r kill
+
+    echo "Shutdown application and dependencies"
+    skaffold delete --profile $PROFILE || true
+
+    echo "Delete azure resources created during e2e tests"
+    script/delete-dev-resources --no-wait --subscription $SEED_AZURE_SUBSCRIPTION --resource-group $AZURE_RESOURCE_GROUP
+}
+
+function start-debugger-and-wait-for-ready() {
+    skaffold debug --profile $PROFILE --port-forward=user > /tmp/ims-test-e2e-run.log 2>&1 &
+    local deploy_pid=$!
+    while IFS= read -r line; do
+        echo $line
+        if [[ $line == "Cleaning up..." ]]; then
+          echo "Deployment failed"
+          exit 1
+        fi
+        if [[ $line == "Press Ctrl+C to exit" ]]; then
+          echo "Deployment is ready"
+          break
+        fi
+    done < <(tail -f -n0 /tmp/ims-test-e2e-run.log)
+}
+
+TEST_MODE=""
+DEBUG_APP=false
+DEBUG_TESTS=false
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --short)
+      TEST_MODE="short"; shift; ;;
+    --full)
+      TEST_MODE="full"; shift ;;
+    --suite)
+      TEST_MODE="suite"; SUITE=$2; shift; shift; ;;
+    --debug-app)
+      DEBUG_APP=true; shift; ;;
+    --debug-tests)
+      DEBUG_TESTS=true; shift; ;;
+    --help)
+        usage; exit 0; ;;
+    *)
+      echo "Unknown option $1"; usage; exit 1; ;;
+  esac
+done
+
+PROFILE="e2e-tests"
+GOTEST_PATH="./internal/e2e"
+GOTEST_PARAMS="-timeout 40m -parallel 15"
+GOTEST_DEBUG_PARAMS="-test.v"
+
+if [[ $TEST_MODE == "short" ]]; then
+    echo "Preparing to run e2e tests in short mode"
+    GOTEST_PARAMS="$GOTEST_PARAMS --short"
+elif [[ $TEST_MODE == "full" ]]; then
+    echo "Preparing to run e2e tests in full mode"
+    # No additional parameters. Full test mode is invoked by default
+elif [[ $TEST_MODE == "suite" ]]; then
+    echo "Preparing to run e2e tests from the single test suite $SUITE"
+    GOTEST_PARAMS="$GOTEST_PARAMS -run $SUITE"
+    GOTEST_DEBUG_PARAMS="$GOTEST_DEBUG_PARAMS -test.run $SUITE"
+else
+    echo "Unknown test mode. script/test-e2e should be invoked with one of the following parameters: --short, --long, --suite"
+    usage
+    exit 1
+fi
+
+export E2E_TWIRP_AUTH_HMAC_KEY="hmac-e2e"
+export SEED_AZURE_SUBSCRIPTION="d4ec39fa-c14d-4485-a6c1-b66698d5abf6" # GitHub - NonProd - Dev E2E - Hosted Compute IMS - 001
+export MY_SQL_DATABASE=hosted_compute_ims_test_e2e
+
+script/helpers/ensure-azure-auth
+
+echo "Deploying e2e-tests dependencies"
+script/setup
+
+echo "Preparing database for e2e-tests"
+script/db-setup --recreate 1> /dev/null
+
+echo "Override dev environment with e2e environment"
+skaffold delete --profile $PROFILE
+
+RUN_PREFIX="e2e"
+if [[ ( $GITHUB_ACTIONS || $CI ) ]]; then
+  RUN_PREFIX="e2eci"
+fi
+echo "Setting up unique resource names for e2e tests"
+source script/helpers/setup-run-variables $RUN_PREFIX
+script/helpers/kube-set-dynamic-env "GITHUB_USER=$RUN_PREFIX" "AQUEDUCT_APP=$AQUEDUCT_APP"
+
+trap cleanup EXIT
+
+if [[ $DEBUG_APP = true ]]; then
+    echo "Deploying e2e environment in debug mode"
+    start-debugger-and-wait-for-ready
+else
+    echo "Deploying e2e environment"
+    skaffold run --profile $PROFILE
+fi
+
+go clean -testcache
+
+if [[ $DEBUG_APP = true ]]; then
+    echo "Attach to debugger using 'Attach twirp' or 'Attach worker' in VSCode"
+    read -p "Press enter to continue after attaching debugger"
+fi
+
+if [[ ($GITHUB_ACTIONS || $CI) ]]; then
+    echo "Running e2e tests in CI"
+    echo "# E2E tests" > tests-output.md
+    go test $GOTEST_PARAMS $GOTEST_PATH -json | tee "tests-output-raw.json" && GOTEST_EXIT_CODE=$? || GOTEST_EXIT_CODE=$?
+    cat "tests-output-raw.json" | tparse -all -format=markdown >> tests-output.md
+    (exit $GOTEST_EXIT_CODE) # Fail only if exit code is not 0
+elif [ "$DEBUG_TESTS" = true ]; then
+    echo "Enabled tests debugging"
+    echo "Run 'Debug tests' debug target in vscode to start debugging"
+    dlv test $GOTEST_PATH --headless --listen=127.0.0.1:13800 --log --api-version=2 -- $GOTEST_DEBUG_PARAMS
+else
+    echo "Running e2e tests"
+    go test -v $GOTEST_PARAMS $GOTEST_PATH
+fi

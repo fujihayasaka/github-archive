@@ -1,0 +1,66 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    annotations:
+        moda.github.net/vpa-updater-enabled: "true"
+    name: usage-ingestionv1
+spec:
+    replicas: 5
+    selector:
+        matchLabels:
+            app: usage-ingestionv1
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: billing
+            labels:
+                app: usage-ingestionv1
+        spec:
+            containers:
+                - command:
+                    - ./bin/queue-worker
+                  env:
+                    - name: HYDRO_CONSUMER_GROUP_ID
+                      value: usage-ingestion-production-consumerV2-prod-sdc-01
+                    - name: script
+                      value: build
+                    - name: WORKER_TYPE
+                      value: usage-ingestion
+                    - name: STATS_ADDR
+                      value: $(KUBE_NODE_HOSTNAME):28125
+                    - name: APP_SHA
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.annotations['heaven.githubapp.com/sha']
+                    - name: APP_REF
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.annotations['heaven.githubapp.com/ref']
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  image: billing-platform
+                  name: usage-ingestionv1
+                  readinessProbe:
+                    exec:
+                        command:
+                            - cat
+                            - /tmp/consumer_healthy
+                    initialDelaySeconds: 5
+                    periodSeconds: 5
+                  resources:
+                    limits:
+                        cpu: 2
+                        memory: 4096Mi
+                    requests:
+                        cpu: 0.4
+                        memory: 1024Mi
+            dnsPolicy: ClusterFirst
+            terminationGracePeriodSeconds: 80

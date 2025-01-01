@@ -1,0 +1,63 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ims-replication-job
+spec:
+  # Runs every 30 minutes
+  schedule: "*/30 * * * *"
+  # Prevent multiple jobs from running at the same time
+  concurrencyPolicy: Forbid
+  # suspend is overwritten for a single cluster
+  suspend: true
+  jobTemplate:
+    metadata:
+      labels:
+        app: ims-replication-job
+    spec:
+      # Will cleanup and delete resources after N seconds when job completed
+      ttlSecondsAfterFinished: 60
+      # Will terminate the job after N seconds
+      activeDeadlineSeconds: 3600
+      # Will attempt to run job N times before marking as failed
+      backoffLimit: 0
+      template:
+        metadata:
+          annotations:
+            fluentbit.io/parser: logfmt
+            observability.github.com/logger: fluent-bit
+            observability.github.com/kafka_topic: launch
+            observability.github.com/splunk_index: hosted_compute_ims
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: ims-replication-job
+            image: hosted-compute-ims
+            command:
+              - /app/bin/hosted-compute-ims-cronjobs
+              - replication
+            envFrom:
+              - secretRef:
+                  name: vault-secrets
+            env:
+              - name: GOMAXPROCS
+                valueFrom:
+                  resourceFieldRef:
+                    containerName: ims-replication-job
+                    resource: limits.cpu
+              - name: STATSD_ADDR
+                value: "$(KUBE_NODE_HOSTNAME):28125"
+              - name: STATS_ADDR
+                valueFrom:
+                  fieldRef:
+                    fieldPath: spec.nodeName
+              - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                value: http://otelcol-mesh.otelcol-production.svc.cluster.local:14318/v1/traces
+              - name: GITHUB_TELEMETRY_LOGS_LEVEL
+                value: info
+            resources:
+              requests:
+                cpu: "1"
+                memory: "256Mi"
+              limits:
+                cpu: "2"
+                memory: "512Mi"

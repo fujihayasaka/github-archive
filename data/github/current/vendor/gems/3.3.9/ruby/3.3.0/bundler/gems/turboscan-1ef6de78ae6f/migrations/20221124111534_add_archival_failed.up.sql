@@ -1,0 +1,1 @@
+ALTER TABLE `ts_analyses` ADD COLUMN `archival_failed` tinyint(1) DEFAULT '0', DROP KEY `idx_analyses_on_archival_state_created_at`, ADD KEY `idx_analyses_on_archival_created_at` (`most_recent`,`archival_state`,`archival_failed`,`created_at`);

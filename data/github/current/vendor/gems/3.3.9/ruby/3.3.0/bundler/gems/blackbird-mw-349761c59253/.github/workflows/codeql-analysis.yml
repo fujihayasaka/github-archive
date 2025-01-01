@@ -1,0 +1,69 @@
+name: "CodeQL"
+
+on:
+  push:
+    branches: [ main ]
+    reuse-previous-outcome: true
+  pull_request:
+    # The branches below must be a subset of the branches above
+    branches: [ main ]
+    reuse-previous-outcome: true
+  schedule:
+    - cron: '22 3 * * 3'
+
+# In the event that there is a new push to the head_ref (only defined on PR
+# events), cancel any running jobs because there are now obsolete, and wasting
+# resources.
+#
+# Via: https://docs.github.com/en/actions/using-jobs/using-concurrency#example-using-a-fallback-value
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-20.04 # Must match OS where blackbird c libs are built
+    permissions:
+      id-token: write # for setup-goproxy OIDC
+      actions: read
+      packages: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'go' ]
+        # CodeQL supports [ 'cpp', 'csharp', 'go', 'java', 'javascript', 'python' ]
+        # Learn more:
+        # https://docs.github.com/en/free-pro-team@latest/github/finding-security-vulnerabilities-and-errors-in-your-code/configuring-code-scanning#changing-the-languages-that-are-analyzed
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@b015f7e3f2938ad3a5ed6e5111a8c6c7c1d6db6e
+      - uses: github/setup-goproxy@v1.1.0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - uses: actions/cache@v4.1.1
+        with:
+          path: vendor
+          key: ${{ runner.os }}-go-vendor-${{ hashFiles('go.sum') }}
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # If you wish to specify custom queries, you can do so here or in a config file.
+          # By default, queries listed here will override any specified in a config file.
+          # Prefix the list here with "+" to use these queries and those in the config file.
+          # queries: ./path/to/local/query, your-org/your-repo/queries@main
+
+      # Manually build the Go code due to private module dependencies.
+      - run: make build
+        env:
+          CONTAINER_BUILDER_TOKEN: ${{ secrets.CONTAINER_BUILDER_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3

@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+USER_NAME=${GITHUB_USER}
+
+COLLECTION_NAME="${USER_NAME}_${1:-"$(git symbolic-ref --short HEAD | sed 's/\//-/g')"}"
+DATABASE_NAME="${COLLECTION_NAME}"
+
+# env var CI is set by github actions:
+# https://docs.github.com/en/actions/learn-github-actions/environment-variables#default-environment-variables
+if [ "$CI" = true ]
+then
+  echo "Running in CI collection name: ${COLLECTION_NAME}"
+  DATABASE_NAME="licensify-ci"
+fi
+
+RESOURCE_GROUP=${RESOURCE_GROUP:-"licensing-dev"}
+SQL_ACCOUNT_NAME=${SQL_ACCOUNT_NAME:-"licensify-dev"}
+
+SUBSCRIPTION=${SUBSCRIPTION:-"GitHub - NonProd - Platform and Enterprise - Licensing"}
+
+ENV_FILE="dev.env"
+SCRIPT_DIR=$(cd -P -- "$(dirname -- "$0")" && pwd -P)
+
+function getEnvironment() {
+  export ACCOUNT_ENDPOINT=$(az cosmosdb keys list \
+              --resource-group ${RESOURCE_GROUP} \
+              --name ${SQL_ACCOUNT_NAME} \
+              --subscription "${SUBSCRIPTION}" \
+              --type connection-strings \
+              --query connectionStrings[0].connectionString \
+              --output tsv)
+
+  #  NOTE: If you add any additional environment variables into the exports here,
+  #  make sure those environment variable names get reflected into docker-compose.yml
+  #  TODO: Add any additional environment variables you'd like exposed in dev.env here.
+  cat <<EOF >> "$ENV_FILE"
+export DB_CONNECTION_STR="${ACCOUNT_ENDPOINT}"
+export DB_NAME="${DATABASE_NAME}"
+export CONTAINER_NAME="${COLLECTION_NAME}"
+export SKIP_HMAC=true
+EOF
+}
+
+function logIntoAzure() {
+  if ! az account show &> /dev/null
+  then
+    echo "Logging in to Azure"
+    az login --service-principal -u "${LICENSIFY_AZURE_SPN_CLIENT_ID}" -p "${LICENSIFY_AZURE_SPN_CLIENT_SECRET}" --tenant "${LICENSIFY_AZURE_SPN_TENANT_ID}" > /dev/null
+  fi
+  az account set --subscription "${SUBSCRIPTION}"
+}

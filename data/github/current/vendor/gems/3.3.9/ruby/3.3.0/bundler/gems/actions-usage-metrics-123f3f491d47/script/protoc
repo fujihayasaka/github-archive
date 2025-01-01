@@ -1,0 +1,62 @@
+#!/bin/bash
+set -e
+
+SCRIPT_DIR=$(cd -P -- "$(dirname -- "$0")" && pwd -P)
+ROOT_DIR=${SCRIPT_DIR}/..
+COMPARE_AGAINST="${ROOT_DIR}/.git#branch=origin/main,subdir=proto"
+
+echo "🔎 Wire backwards compatibility checks..."
+if ! buf breaking proto/ --against "$COMPARE_AGAINST"; then
+    echo "❌ Wire backwards compatibility checks failed. Protobufs are not wire safe and may break production. Please check your changes." >&2
+    exit 1
+else
+    echo "✅ Wire backwards compatibility checks passed."
+fi
+
+echo
+echo "🔎 File backwards compatibility checks..."
+if ! buf breaking --config "{version: v1, breaking: { use: [FILE] } }}" proto/ --against "$COMPARE_AGAINST"; then
+    echo "🟨 File backwards compatibility checks failed. Changes are wire safe for production, but may require compile-time reaction work when clients (e.g. monolith) consume the updates."
+    echo "🙏 Please update clients if needed so that someone else doesn't have to later!"
+else
+    echo "✅ File backwards compatibility checks passed."
+fi
+
+echo
+echo "🔎 Linting..."
+if ! buf lint proto/; then
+    echo "🟨 Linting failed. Currently warning only, will eventually be required." >&2
+else
+    echo "✅ Linting passed."
+fi
+
+echo
+echo "🔎 Formatting..."
+if ! buf format -w proto/; then
+    echo "🟨 Formatting failed. Please investigate." >&2
+else
+    echo "✅ Formatting passed."
+fi
+
+echo
+echo "💬 Generating Go code from protos..."
+buf generate --template ${ROOT_DIR}/proto/buf.gen.go.yaml
+echo "✅ Generated Go code."
+
+# Currently not using buf for ruby gen due to an incompatibility with google-protobuf on the monolith
+echo
+RUBY_CLIENT_PATH=${ROOT_DIR}/ruby/lib
+mkdir -p ${RUBY_CLIENT_PATH}
+protoc \
+    --proto_path=${ROOT_DIR} \
+    --ruby_out="$RUBY_CLIENT_PATH" \
+    --twirp_ruby_out="$RUBY_CLIENT_PATH" \
+    ${ROOT_DIR}/proto/*.proto
+
+echo
+echo "💬 Generating docs from protos..."
+buf generate --template ${ROOT_DIR}/proto/buf.gen.doc.yaml
+echo "✅ Generated docs."
+
+echo
+echo "🏁 Enjoy your protobufs, and remember to check in any changes!"

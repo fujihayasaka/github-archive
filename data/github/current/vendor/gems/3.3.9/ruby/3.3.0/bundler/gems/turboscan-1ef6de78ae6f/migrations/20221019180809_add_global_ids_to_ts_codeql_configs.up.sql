@@ -1,0 +1,1 @@
+ALTER TABLE `ts_codeql_configs` ADD COLUMN `global_repository_id` varchar(50) DEFAULT NULL, ADD COLUMN `global_actor_id` varchar(50) DEFAULT NULL, ADD COLUMN `actor_login` varchar(255) DEFAULT NULL, ADD COLUMN `actions_installation_id` bigint(20) DEFAULT NULL;

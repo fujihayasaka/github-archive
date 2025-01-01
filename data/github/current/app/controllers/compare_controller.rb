@@ -382,6 +382,8 @@ class CompareController < GitContentController
     @comparison = GitHub::Comparison.from_range_or_ref(current_repository, range, limit: 250, user: current_user)
     GitHub.dogstats.increment("compare.show.rescued_timeout", tags: ["repo:#{repo_stats_key}", "branch:#{branch_stats_key}"])
 
+    return render_404 unless @comparison.viewable_by?(current_user)
+
     render "compare/timeout"
   end
 
@@ -394,6 +396,8 @@ class CompareController < GitContentController
 
     comparison = GitHub::Comparison.from_range_or_ref(current_repository, range, limit: 250, user: current_user)
     stats.entity = comparison
+
+    return render_404 unless comparison.viewable_by?(current_user)
 
     respond_to do |format|
       format.html do
@@ -413,6 +417,8 @@ class CompareController < GitContentController
     range = params[:range] || current_repository.default_branch
     comparison = GitHub::Comparison.from_range_or_ref(current_repository, range, limit: 250, user: current_user)
 
+    return render_404 unless comparison.viewable_by?(current_user)
+
     respond_to do |format|
       format.html do
         render Compare::PullRequestTemplateListComponent.new(current_repository: current_repository, range: range, current_user: current_user, comparison: comparison), layout: component_fragment_layout
@@ -429,6 +435,8 @@ class CompareController < GitContentController
       use_summary:       true,
       ignore_whitespace: %w[1 true].include?(params[:w]),
     )
+
+    return render_404 unless @comparison.viewable_by?(current_user)
 
     diffs = @comparison.diffs
     stats.entity = @comparison
@@ -450,6 +458,8 @@ class CompareController < GitContentController
     @comparison = GitHub::Comparison.from_range_or_ref(current_repository, range, user: current_user)
     stats.entity = @comparison
 
+    return render_404 unless @comparison.viewable_by?(current_user)
+
     respond_to do |format|
       format.html do
         stats.record_distribution("render_commits_list") do
@@ -465,6 +475,8 @@ class CompareController < GitContentController
     range = params[:range] || current_repository.default_branch
     comparison = GitHub::Comparison.from_range_or_ref(current_repository, range, limit: 250, user: current_user)
     stats.entity = comparison
+
+    return render_404 unless comparison.viewable_by?(current_user)
 
     respond_to do |format|
       format.html do
@@ -486,6 +498,8 @@ class CompareController < GitContentController
     comparison = GitHub::Comparison.from_range_or_ref(current_repository, range, limit: 250, user: current_user)
     target_repo = params[:type] == "head" ? comparison.head_repo : comparison.base_repo
     target_repo ||= comparison.repo
+
+    return render_404 unless target_repo.pullable_by?(current_user)
 
     tags = target_repo.tags.substring_filter(substring: search_query, limit: TAGS_LIMIT)
 

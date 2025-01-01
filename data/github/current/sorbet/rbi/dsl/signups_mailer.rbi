@@ -1364,6 +1364,9 @@ class SignupsMailer
     sig { params(repo: T.untyped).returns(::ActionMailer::MessageDelivery) }
     def gh_status_stafftools_repository_pages_path(repo); end
 
+    sig { params(repo: T.untyped).returns(::ActionMailer::MessageDelivery) }
+    def gh_stop_stafftools_repository_pull_requests_path(repo); end
+
     sig { params(issue: T.untyped).returns(::ActionMailer::MessageDelivery) }
     def gh_subscribe_issue_path(issue); end
 

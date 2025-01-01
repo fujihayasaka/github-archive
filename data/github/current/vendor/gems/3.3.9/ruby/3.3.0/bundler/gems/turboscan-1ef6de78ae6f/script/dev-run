@@ -1,0 +1,45 @@
+#!/bin/bash
+set -eu
+
+if [ -n "${IN_TURBOSCAN_DEVCONTAINER-}" ]; then
+    exec $@
+fi
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$DIR/.."
+
+TTY_ARG=""
+if [ -t 1 ]; then
+    TTY_ARG="-t"
+fi
+
+if [[ ! -x "$(which docker)" ]]; then
+  echo >&2 "requires an installation of docker to run dependencies."
+  exit 1
+fi
+
+[[ -z "${SKIP_BUILD-}" ]] && time script/build-devcontainer-image --cache-from octofactory.githubapp.com/github-golden-docker/github-turboscan:turboscan-dev -t turboscan-dev
+
+HOME_INSIDE=$HOME
+if [ "$HOME_INSIDE" = "/home/devuser" ]; then
+  HOME_INSIDE="/home/devuser-codespace";
+fi
+
+exec docker run --rm -i $TTY_ARG \
+       --init \
+       -v "$(pwd)":/workspaces/turboscan \
+       --workdir /workspaces/turboscan \
+       --name turboscan-dev \
+       --network host \
+       --user devuser \
+       --env GOFLAGS \
+       --env GH_TOKEN \
+       --env GITHUB_APP_TOKEN \
+       --env COPILOT_ADVANCED_SECURITY_HMAC_KEY_DEV \
+       --env CI \
+       --volume "$HOME/.ssh/:/home/devuser/.ssh/:ro" \
+       --volume "$HOME/.config/gh/:/home/devuser/.config/gh/:ro" \
+       --volume "$HOME:$HOME_INSIDE:ro" \
+       --volume "turboscan-commandhistory:/commandhistory" \
+       turboscan-dev \
+       "$@"

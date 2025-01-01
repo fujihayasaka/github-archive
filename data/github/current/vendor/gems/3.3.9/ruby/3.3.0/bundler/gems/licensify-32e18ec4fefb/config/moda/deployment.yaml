@@ -1,0 +1,91 @@
+notifications:
+  slack_channels:
+    - "#licensing-ops"
+auto_start_pipeline: production_rollout
+required_builds:
+  - licensify-moda-config-bundle / licensify-moda-config-bundle
+  - licensify-docker-image / licensify-docker-image
+  - licensify-docker-security / licensify-docker-security
+environments:
+- name: production
+  require_pipeline: true
+  auto_deploy: true
+  timeout: 4800
+  cluster_selector:
+    profile: general
+    region: iad
+  service_mesh:
+    enabled: true
+  canaryable: true
+  require_canary: true
+  extra_start_message: "You can monitor this deployment with the [Datadog dashboard](https://app.datadoghq.com/dashboard/cky-nxt-sq4/licensify), [Sentry release issues](https://github.sentry.io/releases/{{RELEASE_SHA}}/?project=4506701748568064), and [Splunk](https://splunk.githubapp.com/en-US/app/gh_reference_app/search?q=search%20index%3Dlicensify%20service.version%3D{{RELEASE_SHA}})"
+  extra_completed_message: |
+    - Please keep an eye on:
+    - [Splunk logs](https://splunk.githubapp.com/en-US/app/gh_reference_app/search?q=search%20index%3Dlicensify%20kube_namespace%3Dlicensify-*%20&earliest=-15m&latest=now)
+    - [Moda Resources](https://devportal.githubapp.com/apps/licensify)
+- name: staff-wus2-01
+  require_pipeline: true
+  cluster_selector:
+    profile: proxima
+    stamp: staff-wus2-01
+  service_mesh:
+    enabled: true
+  extra_completed_message: |
+    - Please keep an eye on:
+    - [Splunk logs](https://splunk.githubapp.com/en-US/app/gh_reference_app/search?q=search%20index%3Dlicensify%20kube_namespace%3Dlicensify-*%20&earliest=-15m&latest=now)
+    - [Moda Resources](https://devportal.githubapp.com/apps/licensify)
+proxima:
+  environment_pattern:
+    service_mesh:
+      enabled: true
+    extra_completed_message: |
+      - Please keep an eye on:
+      - [Splunk logs](https://splunk-eu.githubapp.com/en-US/app/gh_reference_app/search?q=search%20index%3Dlicensify%20kube_namespace%3Dlicensify-*%20&earliest=-15m&latest=now)
+      - [Moda Resources](https://devportal.githubapp.com/apps/licensify)
+  rollout_pattern:
+    - kind: deployment
+      start_message: We are deploying to the Proxima {{stamp}} environment now with {{app}}/{{ref}}!
+      config:
+        timeout: 1200
+
+pipelines:
+  production_rollout:
+    append_proxima_stamps: true
+    notify_support_on_invalid_queue_state: false
+    auto_start_wait: false
+    notify_users_via_dm: false
+    timeout: 2400
+    stages:
+      - name: ring-0
+        kind: concurrent_group
+        start_message: We are deploying to Canary and the Proxima Staffship environment now with {{app}}/{{ref}}!
+        config:
+          timeout: 1200
+        stages:
+          - name: canary
+            kind: canary_deployment
+            config:
+              environment: production
+              hosts: canary
+          - name: staff-wus2-01
+            kind: deployment
+            config:
+              environment: staff-wus2-01
+        gates:
+          - kind: datadog
+            monitor_id: "153408158" # https://app.datadoghq.com/monitors/153408158
+            execution_mode: continuous
+            display_name: Datadog Monitor Gate
+            evaluation_period: 300
+      - name: full_production
+        kind: deployment
+        start_message: We are going to production with {{app}}/{{ref}}! Please pause or cancel the pipeline after the deploy if you want more time before your pull request auto merges.
+        config:
+          environment: production
+          timeout: 1200
+        gates:
+          - kind: datadog
+            monitor_id: "153408158" # https://app.datadoghq.com/monitors/153408158
+            execution_mode: continuous
+            display_name: Datadog Monitor Gate
+            evaluation_period: 300

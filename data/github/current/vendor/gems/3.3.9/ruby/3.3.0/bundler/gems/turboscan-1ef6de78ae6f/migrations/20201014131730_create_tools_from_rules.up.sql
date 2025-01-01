@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20201014131730_create_tools_from_rules.go on GHES

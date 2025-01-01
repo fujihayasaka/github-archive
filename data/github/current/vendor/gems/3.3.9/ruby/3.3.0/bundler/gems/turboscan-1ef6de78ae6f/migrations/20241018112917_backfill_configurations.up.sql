@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20241018112917_backfill_configurations.go on GHES

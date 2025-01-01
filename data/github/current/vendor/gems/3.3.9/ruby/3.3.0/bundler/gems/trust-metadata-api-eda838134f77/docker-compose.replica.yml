@@ -1,0 +1,74 @@
+services:
+  # MySQL Server Primary
+  mysql-primary:
+    image: mysql:8.0.36
+    platform: linux/amd64
+    container_name: tma-dev-db
+    ports:
+      - "${TMA_MYSQL_PORT}:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=${TMA_MYSQL_ROOT_PASSWORD}
+      - MYSQL_USER=${TMA_MYSQL_USER}
+      - MYSQL_PASSWORD=${TMA_MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${TMA_MYSQL_DATABASE}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max_allowed_packet=3232505856505856 # Set max_allowed_packet to 32M
+      # replication
+      - --server-id=1
+      - --log-bin=mysql-bin
+      - --binlog-format=ROW
+    volumes:
+      - mysql-primary-data:/var/lib/mysql
+      - ./script/dev/mysql/init:/docker-entrypoint-initdb.d
+    networks:
+      - tma-mysql-replication
+    healthcheck:
+      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 3
+  # MySQL Server Replica
+  mysql-replica:
+    image: mysql:8.0.36
+    platform: linux/amd64
+    container_name: tma-dev-db-replica
+    ports:
+      - "${TMA_MYSQL_RO_PORT}:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=${TMA_MYSQL_RO_ROOT_PASSWORD}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max_allowed_packet=3232505856505856 # Set max_allowed_packet to 32M
+      # replication
+      - --server-id=2
+      - --read-only=1
+      - --log-bin=mysql-bin
+      - --binlog-format=ROW
+    depends_on:
+      - mysql-primary
+    volumes:
+      - mysql-replica-data:/var/lib/mysql
+    networks:
+      - tma-mysql-replication
+    healthcheck:
+      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 3
+  # Azure Storage Emulator
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.31.0
+    container_name: "azurite"
+    hostname: azurite
+    restart: always
+    ports:
+      # The blob service listenes on port 10000
+      - "10000:10000"
+
+volumes:
+  mysql-primary-data:
+  mysql-replica-data:
+networks:
+  tma-mysql-replication:
+    driver: bridge

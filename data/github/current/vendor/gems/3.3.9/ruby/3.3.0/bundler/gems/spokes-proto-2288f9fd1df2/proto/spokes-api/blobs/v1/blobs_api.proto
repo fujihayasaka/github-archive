@@ -1,0 +1,248 @@
+syntax = "proto3";
+
+package github.spokes.blobs.v1;
+
+option go_package = "github.com/github/spokes-proto/gen/go/v1/blobs";
+option ruby_package = "GitHub::Spokes::Proto::Blobs::V1";
+
+import "spokes-api/types/v1/cursor.proto";
+import "spokes-api/types/v1/object_id.proto";
+import "spokes-api/types/v1/path.proto";
+import "spokes-api/types/v1/reference.proto";
+import "spokes-api/types/v1/repository.proto";
+import "spokes-api/types/v1/request_context.proto";
+
+import "spokes-api/types/selectors/v1/fork_push_selector.proto";
+import "spokes-api/types/selectors/v1/object_id_selector.proto";
+import "spokes-api/types/selectors/v1/push_selector.proto";
+import "spokes-api/types/selectors/v1/universal_selector.proto";
+import "spokes-api/types/selectors/v1/quarantine_objects_selector.proto";
+import "spokes-api/types/selectors/v1/historical_push_selector.proto";
+
+import "spokes-api/blobs/v1/blob_origin_item.proto";
+import "spokes-api/blobs/v1/changed_blob_item.proto";
+import "spokes-api/blobs/v1/reachable_blob_item.proto";
+import "spokes-api/blobs/v1/pushed_blob_item.proto";
+
+// BlobsAPI contains APIs for blob-related Git operations.
+service BlobsAPI {
+    // GetBlobContents returns the first megabyte of a blob specified by its oid.
+    rpc GetBlobContents(GetBlobContentsRequest) returns (GetBlobContentsResponse);
+
+    // ListChangedBlobs returns the blobs oids (with the first tree path associated with it) reachable by a
+    // commit excluding the blobs already reachable from other refs.
+    rpc ListChangedBlobs(ListChangedBlobsRequest) returns (ListChangedBlobsResponse);
+
+    // ListReachableBlobs returns a list of tree deltas within the scope of a ref update.
+    // Delta entries include a tuple of path, commit oid, and blob oid information.
+    rpc ListReachableBlobs(ListReachableBlobsRequest) returns (ListReachableBlobsResponse);
+
+    // ListBlobOrigin searches through the repository and locates blobs matching the requested oids, and
+    // returns the commit oid that the blob was introduced, and the first tree path encountered with that blob.
+    rpc ListBlobOrigin(ListBlobOriginRequest) returns (ListBlobOriginResponse);
+
+    // ListPushedBlobs returns a list of blobs reachable by a commit excluding the blobs reachable
+    // from other refs.
+    rpc ListPushedBlobs(ListPushedBlobsRequest) returns (ListPushedBlobsResponse);
+}
+
+message GetBlobContentsRequest {
+    // repository is the repository to scope the blob to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.RequestContext request_context = 5;
+
+    oneof blob {
+        // by_id is the object id of the blob.
+        github.spokes.types.v1.ObjectID by_id = 2;
+        // by_ref_path is a ref and path to select.
+        RefPath by_ref_path = 3;
+        // by_object_id_path is an object ID and path to select. The Object ID
+        // must be resolvable to a tree (commit ID, tree ID, or tag ID).
+        ObjectIDPath by_object_id_path = 4;
+    }
+
+    message RefPath {
+        // reference is the ref name.
+        github.spokes.types.v1.Reference reference = 1;
+        // path is the path to a blob.
+        github.spokes.types.v1.Path path = 2;
+    }
+
+    message ObjectIDPath {
+        // oid is an object ID which can be resolved to a tree (a commit ID, tree ID, or tag ID).
+        github.spokes.types.v1.ObjectID oid = 1;
+        // path is the path to a blob.
+        github.spokes.types.v1.Path path = 2;
+    }
+}
+
+// GetBlobContentsResponse includes the full contents of the blob.
+message GetBlobContentsResponse {
+    // contents is up to the first megabyte of the blob contents.
+    bytes contents = 1;
+
+    // size is the full size of the blob contents.
+    uint64 size = 2;
+
+    // truncated is used to indicate whether the blob contents were truncated.
+    bool truncated = 3;
+}
+
+// ListChangedBlobsRequest includes the repository and the list of refs that have been updated.
+message ListChangedBlobsRequest {
+    // CommitOrder encapsulates options for commit graph traversal. 
+    // These options tie to rev-list commit ordering options, see https://git-scm.com/docs/git-rev-list#Documentation/git-rev-list.txt
+    enum CommitOrder {
+        COMMIT_ORDER_INVALID = 0;
+        COMMIT_ORDER_TOPO = 1; // topo order, ensures that no parent commit is traversed before its children have been traversed
+        COMMIT_ORDER_REVERSE_CHRONOLOGICAL = 2; // reverse chronological order (rev-list default)
+    }
+
+    // repository is the repository to scope the blobs to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    // field used to be reference_scopes.
+    reserved 2;
+
+    github.spokes.types.v1.Cursor cursor = 3;
+
+    github.spokes.types.v1.RequestContext request_context = 7;
+
+    oneof selector {
+        // push_selector is a push to select. Only use this in root repositories.
+        github.spokes.types.selectors.v1.PushSelector push_selector = 4;
+        // fork_push_selector is a push to select in a fork repository.
+        github.spokes.types.selectors.v1.ForkPushSelector fork_push_selector = 5;
+        // universal_selector selects all blobs in the repository that are reachable from any
+        // reference, including our hidden bookkeeping references.
+        github.spokes.types.selectors.v1.UniversalSelector universal_selector = 6;
+        // quarantine_objects_selector selects blobs in a push, when its in quarantine.
+        github.spokes.types.selectors.v1.QuarantineObjectsSelector quarantine_objects_selector = 8;
+    }
+
+    // sets the commit order for graph traversal. 
+    CommitOrder commit_order = 9;
+}
+
+// ListChangedBlobsResponse includes the blob with path and oid details
+message ListChangedBlobsResponse {
+    // changed_blobs are the blobs that have changed for the request
+    repeated ChangedBlobItem changed_blobs = 1;
+
+    github.spokes.types.v1.Cursor next_cursor = 2;
+}
+
+// ListReachableBlobsRequest returns a list of tree deltas within the scope of a ref update.
+message ListReachableBlobsRequest {
+    // repository is the repository to scope the blobs to
+    github.spokes.types.v1.Repository repository = 1;
+
+    // field used to be reference_scopes.
+    reserved 2;
+
+    github.spokes.types.v1.Cursor cursor = 3;
+
+    github.spokes.types.v1.RequestContext request_context = 7;
+
+    oneof selector {
+        // push_selector is a push to select. Only use this in root repositories.
+        github.spokes.types.selectors.v1.PushSelector push_selector = 4;
+        // fork_push_selector is a push to select in a fork repository.
+        github.spokes.types.selectors.v1.ForkPushSelector fork_push_selector = 5;
+        // universal_selector selects all blobs in the repository that are reachable from any
+        // reference, including our hidden bookkeeping references.
+        github.spokes.types.selectors.v1.UniversalSelector universal_selector = 6;
+        // historical_push_selector is a selector for selecting picking commits from past pushes based on (ref, before, after) tuples.
+        github.spokes.types.selectors.v1.HistoricalPushSelector historical_push_selector = 8;
+    }
+}
+
+// ListReachableBlobsResponse includes the blobs with blob oid, commit oid and path.
+message ListReachableBlobsResponse {
+    // reachable_blobs are the blobs that a reachable for the request.
+    repeated ReachableBlobItem reachable_blobs = 1;
+
+    github.spokes.types.v1.Cursor next_cursor = 2;
+}
+
+// ListBlobOriginRequest specifies the repository and a list of blob oids to return origin data for.
+message ListBlobOriginRequest {
+    // CommitOrder encapsulates options for commit graph traversal. 
+    // These options tie to rev-list commit ordering options, see https://git-scm.com/docs/git-rev-list#Documentation/git-rev-list.txt
+    enum CommitOrder {
+        COMMIT_ORDER_INVALID = 0;
+         // topo order, ensures that no parent commit is traversed before its children have been traversed (default)
+        COMMIT_ORDER_TOPO = 1;
+         // reverse chronological order (rev-list default)
+        COMMIT_ORDER_REVERSE_CHRONOLOGICAL = 2;
+    }
+
+    // repository is the repository to scope the request to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.Cursor cursor = 3;
+
+    github.spokes.types.v1.RequestContext request_context = 7;
+
+    // selector filters the blobs which an origin is returned in the response, if any.
+    oneof selector {
+        // object_id_selector is a selector for picking individual blobs to fetch originating info for
+        github.spokes.types.selectors.v1.ObjectIDSelector object_id_selector = 2;
+    }
+
+    // ref_selector allows filtering of refs to look in for blob origins. universal_selector is implied if ref_selector is nil/unset.
+    oneof ref_selector {
+        // push_selector is a push to select. Only use this in root repositories.
+        github.spokes.types.selectors.v1.PushSelector push_selector = 4;
+        // fork_push_selector is a push to select in a fork repository.
+        github.spokes.types.selectors.v1.ForkPushSelector fork_push_selector = 5;
+        // universal_selector selects all blobs in the repository that are reachable from any
+        // reference, including our hidden bookkeeping references.
+        github.spokes.types.selectors.v1.UniversalSelector universal_selector = 6;
+    }
+
+    // sets the commit order for graph traversal. 
+    CommitOrder commit_order = 8;
+
+    // max_commit_count is the maximum number of commits to read and send to diff-tree;
+    // defaults to 2500
+    // max is also 2500
+    uint32 max_commit_count = 9;
+}
+
+// ListBlobOriginResponse contains the individual blob origin items
+message ListBlobOriginResponse {
+    // Blob origin Items
+    repeated BlobOriginItem blob_items = 1;
+
+    github.spokes.types.v1.Cursor next_cursor = 2;
+}
+
+// ListPushedBlobsRequest includes the repository and the list of refs that have been updated.
+message ListPushedBlobsRequest {
+    // repository is the repository to scope the blobs to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    // field used to be reference_scopes.
+    reserved 2;
+
+    github.spokes.types.v1.Cursor cursor = 3;
+
+    github.spokes.types.v1.RequestContext request_context = 7;
+
+    oneof selector {
+        // push_selector is a push to select. Only use this in root repositories.
+        github.spokes.types.selectors.v1.PushSelector push_selector = 4;
+        // fork_push_selector is a push to select in a fork repository.
+        github.spokes.types.selectors.v1.ForkPushSelector fork_push_selector = 5;
+    }
+}
+
+// ListPushedBlobsResponse contains a list of blobs with path, oid, and size details.
+message ListPushedBlobsResponse {
+    // pushed_blobs are the blobs that have been pushed for the request
+    repeated PushedBlobItem pushed_blobs = 1;
+
+    github.spokes.types.v1.Cursor next_cursor = 2;
+}

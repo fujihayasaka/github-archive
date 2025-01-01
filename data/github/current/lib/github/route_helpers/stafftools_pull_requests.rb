@@ -16,6 +16,10 @@ module GitHub
       expand_nwo_from :reindex_stafftools_repository_pull_requests_path, repo
     end
 
+    def gh_stop_stafftools_repository_pull_requests_path(repo)
+      expand_nwo_from :stop_stafftools_repository_pull_requests_path, repo
+    end
+
     def gh_sync_search_index_stafftools_repository_pull_request(pr)
       expand_from_pr :sync_search_index_stafftools_repository_pull_request_path, pr
     end

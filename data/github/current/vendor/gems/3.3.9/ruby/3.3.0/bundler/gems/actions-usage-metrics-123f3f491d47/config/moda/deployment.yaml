@@ -1,0 +1,65 @@
+environments:
+  - name: lab
+    cluster_selector:
+      profile: general
+      region: iad
+    required_builds:
+      - "actions-usage-metrics-docker-image"
+      - "actions-usage-metrics-docker-security"
+      - "actions-usage-metrics-moda-config-bundle"
+    require_pipeline: false
+  - name: production
+    cluster_selector:
+      profile: general
+      region: iad
+    required_builds:
+      - "actions-usage-metrics-docker-image"
+      - "actions-usage-metrics-docker-security"
+      - "actions-usage-metrics-moda-config-bundle"
+    require_pipeline: true
+
+notifications:
+  slack_channels:
+    - "#actions-usage-metrics-ops"
+
+auto_start_pipeline: production_rollout
+
+pipelines:
+  production_rollout:
+    timeout: 600
+    stages:
+      - name: lab
+        kind: deployment
+        ignore_errors: true
+        start_message: We are now going to do a best-effort deploy {{app}}/{{ref}} to lab!
+        config:
+          environment: lab
+          timeout: 240
+        gates:
+          - kind: timer
+            duration: 180
+          - kind: check_build
+            build_name: test-lab-usage
+            notification_delay: 300
+            blocking: true
+          - kind: check_build
+            build_name: test-lab-job
+            notification_delay: 300
+            blocking: true
+      - name: production
+        kind: deployment
+        start_message: We are now going to deploy {{app}}/{{ref}}!
+        config:
+          environment: production
+          timeout: 300
+        gates:
+          - kind: timer
+            duration: 180
+          - kind: check_build
+            build_name: test-production-usage
+            notification_delay: 300
+            blocking: true
+          - kind: check_build
+            build_name: test-production-job
+            notification_delay: 300
+            blocking: true
