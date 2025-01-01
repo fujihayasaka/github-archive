@@ -171,4 +171,80 @@ class StatusesDomainTest < GitHub::TestCase
       end
     end
   end
+
+  context "#list_for_export and #count_for_export" do
+    test "basic functionality" do
+      status1 = create_export_status(sha: @commit.sha)
+      commit2 = create(:commit, repository: @repo)
+      status2 = create_export_status(sha: commit2.sha, state: "pending")
+
+      # Test list_for_export
+      result = domain.list_for_export(repository_id: @repo.id, limit: 10, offset: 0)
+      assert_equal 2, result.size
+      assert_includes result, status1
+      assert_includes result, status2
+      assert_instance_of Array, result
+
+      # Test count_for_export
+      count = domain.count_for_export(repository_id: @repo.id)
+      assert_equal 2, count
+    end
+
+    test "empty repository" do
+      empty_repo = create(:repository, owner: @user, from_example: :simple)
+
+      assert_equal [], domain.list_for_export(repository_id: empty_repo.id, limit: 10, offset: 0)
+      assert_equal 0, domain.count_for_export(repository_id: empty_repo.id)
+    end
+
+    test "repository isolation" do
+      other_repo = create(:repository, owner: @user, from_example: :simple)
+      other_commit = create(:commit, repository: other_repo)
+
+      our_status = create_export_status(sha: @commit.sha)
+      other_status = create(:status, repository: other_repo, sha: other_commit.sha, creator: @user)
+
+      result = domain.list_for_export(repository_id: @repo.id, limit: 10, offset: 0)
+      count = domain.count_for_export(repository_id: @repo.id)
+
+      assert_equal 1, result.size
+      assert_equal 1, count
+      assert_includes result, our_status
+      refute_includes result, other_status
+    end
+
+    test "filter_shas parameter" do
+      commit1 = create(:commit, repository: @repo)
+      commit2 = create(:commit, repository: @repo)
+      commit3 = create(:commit, repository: @repo)
+
+      status1 = create_export_status(sha: commit1.sha)
+      status2 = create_export_status(sha: commit2.sha, state: "pending")
+      status3 = create_export_status(sha: commit3.sha, state: "failure")
+
+      # Filter to specific SHAs
+      filtered_result = domain.list_for_export(repository_id: @repo.id, filter_shas: [commit1.sha, commit3.sha], limit: 10, offset: 0)
+      filtered_count = domain.count_for_export(repository_id: @repo.id, filter_shas: [commit1.sha, commit3.sha])
+
+      assert_equal 2, filtered_result.size
+      assert_equal 2, filtered_count
+      assert_includes filtered_result, status1
+      assert_includes filtered_result, status3
+      refute_includes filtered_result, status2
+
+      # Empty filter_shas should return no results
+      empty_result = domain.list_for_export(repository_id: @repo.id, filter_shas: [], limit: 10, offset: 0)
+      empty_count = domain.count_for_export(repository_id: @repo.id, filter_shas: [])
+
+      assert_equal 0, empty_result.size
+      assert_equal 0, empty_count
+    end
+  end
+
+  private
+
+  def create_export_status(**attributes)
+    defaults = { repository: @repo, creator: @user, state: "success" }
+    create(:status, defaults.merge(attributes))
+  end
 end

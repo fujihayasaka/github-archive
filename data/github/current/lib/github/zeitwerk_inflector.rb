@@ -89,6 +89,8 @@ module GitHub
       "environments_api_handler" => "EnvironmentsAPIHandler",
       "policies_api_handler" => "PoliciesAPIHandler",
       "octocat_api_handler" => "OctocatAPIHandler",
+      "export_commit_status_checks_api_handler" => "ExportCommitStatusChecksAPIHandler",
+      "export_settings_api_handler" => "ExportSettingsAPIHandler",
       "models_log_api_handler" => "ModelsLogAPIHandler",
       "edit_pull_request_review_comment_api_handler" => "EditPullRequestReviewCommentAPIHandler",
       "edit_pull_request_review_thread_api_handler" => "EditPullRequestReviewThreadAPIHandler",

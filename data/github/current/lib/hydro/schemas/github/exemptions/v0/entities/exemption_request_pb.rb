@@ -38,6 +38,7 @@ Google::Protobuf::DescriptorPool.generated_pool.build do
     value :REJECTED, 2
     value :CANCELLED, 3
     value :COMPLETED, 4
+    value :APPROVED, 5
   end
 end
 

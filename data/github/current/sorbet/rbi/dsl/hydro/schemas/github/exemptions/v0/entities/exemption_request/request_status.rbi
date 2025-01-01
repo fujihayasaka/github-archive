@@ -18,6 +18,7 @@ module Hydro::Schemas::Github::Exemptions::V0::Entities::ExemptionRequest::Reque
   end
 end
 
+Hydro::Schemas::Github::Exemptions::V0::Entities::ExemptionRequest::RequestStatus::APPROVED = 5
 Hydro::Schemas::Github::Exemptions::V0::Entities::ExemptionRequest::RequestStatus::CANCELLED = 3
 Hydro::Schemas::Github::Exemptions::V0::Entities::ExemptionRequest::RequestStatus::COMPLETED = 4
 Hydro::Schemas::Github::Exemptions::V0::Entities::ExemptionRequest::RequestStatus::PENDING = 1

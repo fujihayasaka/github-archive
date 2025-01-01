@@ -2107,7 +2107,30 @@ Alternatively, for proxima login experience run `script/multi-tenant/toggle-feat
       # to the homepage instead.
       return redirect_to home_path
     end
-    redirect_to_return_to(fallback: fallback)
+
+    if !GitHub.saml_legacy_pages_redirect_enabled? && ghes_saml_request? && GitHub.pages_enabled? && GitHub.subdomain_isolation?
+      parsed_url = Addressable::URI.parse(return_to)
+
+      allow_meta_redirect = parsed_url &&
+        parsed_url.absolute? &&
+        %w[https http].include?(parsed_url.scheme) &&
+        parsed_url.userinfo.nil? &&
+        safe_redirect_hosts.include?(parsed_url.host) &&
+        parsed_url.port.nil?
+
+      if allow_meta_redirect
+        render "site/post_saml_pages_meta_redirect", locals: { redirect_url: parsed_url.to_s }, layout: "layouts/redirect"
+      else
+        safe_redirect_to(
+          fallback,
+          allow_query: true,
+          allow_fragment: true,
+          allow_hosts: safe_redirect_hosts,
+        )
+      end
+    else
+      redirect_to_return_to(fallback: fallback)
+    end
   end
 
   def upsell_enabled?(user)

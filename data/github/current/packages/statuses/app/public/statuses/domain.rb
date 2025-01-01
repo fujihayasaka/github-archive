@@ -94,5 +94,47 @@ module Statuses
       # We employ a "double nesting" trick that forces the subquery to be materialized first.
       Status.where(repository_id: repository_id).where(id: Status.from(subquery).select("*")).order(id: :desc).to_a
     end
+
+    # Given a repository ID, returns statuses for export with optional filtering.
+    # @param repository_id [Integer, nil] The repository ID to check for statuses.
+    # @param filter_shas [Array<String>, nil] Optional list of SHAs to filter statuses to (e.g., PR head SHAs)
+    # @param limit [Integer, nil] Optional limit on number of results to return
+    # @param offset [Integer, nil] Optional offset for pagination
+    # @return [Array<Status>] The statuses for export from the repository.
+    sig { params(repository_id: T.nilable(Integer), filter_shas: T.nilable(T::Array[String]), limit: T.nilable(Integer), offset: T.nilable(Integer)).returns(T::Array[Status]).checked(:always).on_failure(:raise) }
+    def list_for_export(repository_id:, filter_shas: nil, limit: nil, offset: nil)
+      ActiveRecord::Base.connected_to(role: :reading) do
+        build_export_relation(repository_id: repository_id, filter_shas: filter_shas)
+          .order(id: :desc)
+          .limit(limit)
+          .offset(offset)
+          .to_a
+      end
+    end
+
+    # Given a repository ID, returns the total count of statuses for export with optional filtering.
+    # @param repository_id [Integer, nil] The repository ID to check for statuses.
+    # @param filter_shas [Array<String>, nil] Optional list of SHAs to filter statuses to (e.g., PR head SHAs)
+    # @return [Integer] The total count of statuses for export from the repository.
+    sig { params(repository_id: T.nilable(Integer), filter_shas: T.nilable(T::Array[String])).returns(Integer).checked(:always).on_failure(:raise) }
+    def count_for_export(repository_id:, filter_shas: nil)
+      ActiveRecord::Base.connected_to(role: :reading) do
+        build_export_relation(repository_id: repository_id, filter_shas: filter_shas).count
+      end
+    end
+
+    private
+
+    # [Private] Build the base relation for export methods with optional SHA filtering.
+    # @param repository_id [Integer, nil] The repository ID to filter by.
+    # @param filter_shas [Array<String>, nil] Optional list of SHAs to filter to.
+    # @return [ActiveRecord::Relation<Status>] The base relation for export queries.
+    sig { params(repository_id: T.nilable(Integer), filter_shas: T.nilable(T::Array[String])).returns(ActiveRecord::Relation).checked(:always).on_failure(:raise) }
+    def build_export_relation(repository_id:, filter_shas:)
+      relation = Status.where(repository_id: repository_id)
+      return relation.none if filter_shas == []
+      return relation.where(sha: filter_shas) if filter_shas
+      relation
+    end
   end
 end

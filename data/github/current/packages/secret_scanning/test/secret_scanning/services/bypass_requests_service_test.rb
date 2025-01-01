@@ -63,6 +63,7 @@ class BypassRequestsServiceTest < GitHub::TestCase
       )
       assert_nil fail_reason
       assert_equal "approved", res&.status
+      assert_equal "approved", @exemption_request.reload.status
     end
 
     test "rejects" do

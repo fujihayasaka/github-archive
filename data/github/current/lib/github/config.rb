@@ -3315,7 +3315,8 @@ module GitHub
                   :saml_profile_ssh_key,   # attribute name in saml response for user public keys. Default: 'public_keys'
                   :saml_profile_gpg_key,   # attribute name in saml response for user GPG keys. Default: 'gpg_keys'
                   :saml_default_session_expiration, # default SAML::Session expiration in seconds, if not sent from IdP. Default: 1 week
-                  :saml_legacy_validation_enabled # if this is on, SAML responses will only include legacy encrypted assertions
+                  :saml_legacy_validation_enabled, # if this is on, SAML responses will only include legacy encrypted assertions
+                  :saml_legacy_pages_redirect_enabled # if this is on, SAML pages will not use meta refresh to redirect users
 
     # Public: Returns the verify_mode value used for SSL communications with
     # LDAP server.
@@ -3518,6 +3519,10 @@ module GitHub
     def iam_with_saml_sso_help_url
       @iam_with_saml_sso_help_url ||= GitHub.environment["GITHUB_IAM_WITH_SAML_SSO_HELP_URL"] ||
         GitHub.help_url
+    end
+
+    def saml_legacy_pages_redirect_enabled?
+      !!saml_legacy_pages_redirect_enabled
     end
 
     def ldap_base=(ldap_base)
@@ -3908,6 +3913,16 @@ module GitHub
         GitHub.environment.fetch("ENTERPRISE_REPO_SEARCH_FILTER_ENABLED", nil).to_s
       )
     end
+
+    # Whether or not we want to use the channel event builder for PRs live updates
+    # This is specifically for GHES, and populated by the env var ENTERPRISE_USE_CHANNEL_EVENT_BUILDER
+    # GHES admins disable the channel event builder by running this:
+    # ghe-config app.github.pull-requests-channel-event-builder-enabled false && ghe-config-apply
+    def use_channel_event_builder?
+      return @use_channel_event_builder if defined?(@use_channel_event_builder)
+      true
+    end
+    attr_writer :use_channel_event_builder
 
     # Determines whether or not we want to guard actions performed through
     # stafftools under an dedicated staff user.
@@ -6418,6 +6433,9 @@ module GitHub
 
     attr_accessor :octoshift_importable_creation_rate_limit_configuration
     attr_accessor :octoshift_freno_max_replication_delay_ms
+
+    # MigrationsVNext (ELM) configuration
+    attr_accessor :migrations_vnext_hmac_key
 
     # GitHub Source Migrator
     attr_accessor :git_src_migrator_url

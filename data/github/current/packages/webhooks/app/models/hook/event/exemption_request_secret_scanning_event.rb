@@ -12,8 +12,6 @@ class Hook::Event::ExemptionRequestSecretScanningEvent < Hook::Event
   # which may be when the secret_scanning_delegated_bypass feature flag is removed.
   description <<~DESC
     Secret scanning push protection bypass request was created, cancelled, completed, received a response, or a response was dismissed.
-
-    Note: Delegated bypass for push protection is currently in beta and subject to change.
   DESC
 
   event_attr :action, :exemption_request_id, required: true

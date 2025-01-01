@@ -17,6 +17,7 @@ module SecretScanning
       def self.review_exemption_request!(exemption_request:, status:, message:, user:, repo:)
         if status == "approve"
           res = Exemptions::ExemptionResponse.approve!(exemption_request, user, message: message)
+          exemption_request.approved!
           GitHub.instrument("secret_scanning_push_protection_request.approve", {
             actor: user,
             repository: repo,
