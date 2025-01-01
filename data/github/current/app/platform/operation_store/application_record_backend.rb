@@ -361,19 +361,10 @@ module Platform
       def upsert_client(name, secret)
         ar_client = get_ar_client_by_name(name) || GraphqlClient.new(name: name)
 
-        if GitHub.flipper[:graphql_rescue_not_unique_client].enabled?
-          # in get_operation method, if operation is not found in cache or DB, we kick off background job to sync
-          # all missing clients and their operations. But we also want client for a current operation be available
-          # immediately, so we also try to save it manually here.
-          # It can happen that the job has inserted missing clients faster, than we could save it here, and we can get
-          # `ActiveRecord::RecordNotUnique` error. For this case it's safe to rescue and re-read client from DB.
-          begin
-            ar_client.save!
-          rescue ActiveRecord::RecordNotUnique
-            ar_client = get_ar_client_by_name(name)
-          end
-        else
+        begin
           ar_client.save!
+        rescue ActiveRecord::RecordNotUnique
+          ar_client = get_ar_client_by_name(name)
         end
 
         Platform::OperationStore::ClientRecord.new(

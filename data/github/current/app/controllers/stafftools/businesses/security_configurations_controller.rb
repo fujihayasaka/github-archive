@@ -51,6 +51,7 @@ class Stafftools::Businesses::SecurityConfigurationsController < Stafftools::Bus
         owner: this_business,
         security_configuration:,
         repo_application_counts:,
+        billable_entity: this_business,
       }
   end
 end

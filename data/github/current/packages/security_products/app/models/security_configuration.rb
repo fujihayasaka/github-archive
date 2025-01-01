@@ -673,6 +673,12 @@ class SecurityConfiguration < ApplicationRecord::Notify
     true
   end
 
+  sig { params(feature: Symbol).returns(T::Boolean) }
+  def feature_nil_or_disabled?(feature)
+    feature = self[feature]
+    feature.nil? || feature == "disabled"
+  end
+
   private
 
   # You probably want to use #enforced? instead of this method.

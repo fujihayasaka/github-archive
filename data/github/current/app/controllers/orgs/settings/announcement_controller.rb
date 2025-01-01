@@ -61,12 +61,12 @@ class Orgs::Settings::AnnouncementController < Orgs::Controller
       return redirect_to edit_org_announcement_path
     end
 
-    banner.upsert_for(current_organization)
+    banner.upsert_for(current_organization, current_user)
     redirect_to edit_org_announcement_path, notice: "The announcement was successfully published. It will be displayed to all users of this organization."
   end
 
   def destroy
-    EnterpriseBanner.clear_for(current_organization)
+    EnterpriseBanner.clear_for(current_organization, current_user)
     redirect_to edit_org_announcement_path, notice: "Unpublished the announcement."
   end
 

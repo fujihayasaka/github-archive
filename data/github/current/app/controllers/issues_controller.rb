@@ -440,7 +440,6 @@ class IssuesController < AbstractRepositoryController
     :business_team_in_permit_and_access_level_for,
     :issues_react_disabled,
     :issues_react_ga,
-    :graphql_rescue_not_unique_client,
     :check_business_team_in_associated_repository_ids,
     :run_authzd_cap_experiment,
     :run_authzd_cap_filter_experiment,

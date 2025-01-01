@@ -68,6 +68,7 @@ class Stafftools::SecurityConfigurationsController < StafftoolsController
         owner: this_user,
         security_configuration:,
         repo_application_counts:,
+        billable_entity: this_user.billable_owner,
       }
   end
 end

@@ -7,6 +7,7 @@ class AuditLogS3SinkConfiguration < AuditLogSinkConfiguration
 
   REGIONS = %w[us-east-1 us-east-2
     us-gov-east-1 us-gov-west-1
+    us-west-1 us-west-2
     eu-west-1 eu-west-2 eu-west-3
     eu-central-1 eu-central-2 eu-south-1 eu-south-2 eu-north-1
     af-south-1

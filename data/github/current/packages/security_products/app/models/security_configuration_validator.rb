@@ -47,9 +47,9 @@ class SecurityConfigurationValidator < ActiveModel::Validator
       config.errors.add :secret_scanning_push_protection, "Push protection must be disabled when secret scanning is disabled"
     end
 
-    # Secret scanning disabled and non provider patterns enabled or not_set
+    # Secret scanning disabled and non provider patterns enabled or not_set and not nil, if feature flag enabled
     # Secret scanning not_set and non provider patterns enabled
-    if (config.secret_scanning_disabled? && !config.secret_scanning_non_provider_patterns_disabled?) || (config.secret_scanning_not_set? && config.secret_scanning_non_provider_patterns_enabled?)
+    if (config.secret_scanning_disabled? && !config.secret_scanning_non_provider_patterns_disabled? && !config.secret_scanning_non_provider_patterns.nil?) || (config.secret_scanning_not_set? && config.secret_scanning_non_provider_patterns_enabled?)
       config.errors.add :secret_scanning_non_provider_patterns, "Non-provider patterns must be disabled when secret scanning is disabled"
     end
 
@@ -79,7 +79,8 @@ class SecurityConfigurationValidator < ActiveModel::Validator
 
     # Move to BundledSecurityConfigurationValidator at some point
     if config.instance_of?(SecurityConfiguration)
-      if !config.enable_ghas && SecurityConfiguration::GHAS_FEATURES.any? { |feature| !config.send("#{feature}_disabled?") }
+
+      if !config.enable_ghas && SecurityConfiguration::GHAS_FEATURES.any? { |feature| !config.feature_nil_or_disabled?(feature) }
         config.errors.add :enable_ghas, self.class.ghas_features_unavailable_error_message
       end
 

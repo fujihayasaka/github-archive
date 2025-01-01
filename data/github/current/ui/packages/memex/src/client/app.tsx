@@ -84,6 +84,10 @@ import {ViewOptionsMenuRefContextProvider} from './state-providers/view-options/
 import {ArchiveStatusProvider} from './state-providers/workflows/archive-status-state-provider'
 import {WorkflowsStateProvider} from './state-providers/workflows/workflows-state-provider'
 
+// Temporary fix hopefully until can be resolved: https://github.com/github/primer/issues/5201
+// The staffbar z-index is 36, so we are choosing 37 to be above it.
+const PORTAL_Z_INDEX_ABOVE_STAFF_BAR = 37
+
 /**
  * CSS that makes scrollbars black
  */
@@ -380,7 +384,11 @@ export const AppContainer: React.FC<{children: React.ReactNode; environment?: En
   return (
     <>
       <GlobalStyle $colorScheme={colorScheme} />
-      <div role="region" id="__primerPortalRoot__" style={{zIndex: 10, position: 'absolute', width: '100%'}} />
+      <div
+        role="region"
+        id="__primerPortalRoot__"
+        style={{zIndex: PORTAL_Z_INDEX_ABOVE_STAFF_BAR, position: 'absolute', width: '100%'}}
+      />
       <RelayProvider environment={environment}>
         <ToastContainer>
           <PresenceUsersProvider>

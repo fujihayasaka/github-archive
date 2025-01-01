@@ -1289,6 +1289,58 @@ class SecurityConfigurationTest < GitHub::TestCase
       assert_equal "enabled", unbundled_config.code_scanning
     end
 
+    test "a config without secret_scanning with null NPP can be unbundled" do
+      config = T.let(create(
+        :security_configuration,
+        target: @org,
+        enable_ghas: true,
+        secret_scanning: :disabled,
+        secret_scanning_push_protection: :disabled,
+        secret_scanning_non_provider_patterns: nil
+      ), SecurityConfiguration)
+
+      assert config.enable_ghas
+      assert_equal "disabled", config.secret_scanning
+      assert_nil config.secret_scanning_non_provider_patterns
+
+      unbundled_config = config.unbundle!
+
+      assert_equal config.id, unbundled_config.id
+      assert_instance_of UnbundledSecurityConfiguration, unbundled_config
+
+      refute unbundled_config.enable_ghas
+      assert unbundled_config.secret_protection_sku_enabled
+
+      assert_equal "disabled", unbundled_config.secret_scanning
+      assert_nil unbundled_config.secret_scanning_non_provider_patterns
+    end
+
+    test "a ghas disabled config without secret_scanning with null NPP can be unbundled" do
+      config = T.let(create(
+          :security_configuration,
+          :disabled,
+          target: @org,
+          enable_ghas: false,
+          secret_scanning_non_provider_patterns: nil
+        ), SecurityConfiguration)
+
+      refute config.enable_ghas
+      assert_equal "disabled", config.secret_scanning
+      assert_nil config.secret_scanning_non_provider_patterns
+
+      unbundled_config = config.unbundle!
+      unbundled_config.save!
+
+      assert_equal config.id, unbundled_config.id
+      assert_instance_of UnbundledSecurityConfiguration, unbundled_config
+
+      refute unbundled_config.enable_ghas
+      refute unbundled_config.secret_protection_sku_enabled
+
+      assert_equal "disabled", unbundled_config.secret_scanning
+      assert_nil unbundled_config.secret_scanning_non_provider_patterns
+    end
+
     test "a non-GHAS enabled config can be unbundled" do
       config = create(:security_configuration, :disabled, target: @org, enable_ghas: false)
 

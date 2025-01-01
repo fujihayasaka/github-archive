@@ -95,7 +95,7 @@ class EnterpriseBanner < ApplicationRecord::Collab
     SQL
   end
 
-  def upsert_for(owner)
+  def upsert_for(owner, actor = nil)
     current_announcement = self.class.find_by(owner: owner)
     transaction do
       # "Reset" dismissals when updating banner
@@ -103,6 +103,7 @@ class EnterpriseBanner < ApplicationRecord::Collab
         current_announcement.destroy
         instrument(
           :update,
+          actor: actor,
           message: message,
           old_message: current_announcement.message,
           dismissibility: dismissible,
@@ -111,27 +112,40 @@ class EnterpriseBanner < ApplicationRecord::Collab
           old_expiry: current_announcement.expires_at&.strftime("%Y-%m-%d")
         )
       else
-        instrument(:create, message: message, dismissibility: dismissible, expiry: expires_at&.strftime("%Y-%m-%d"))
+        instrument(:create, actor: actor, message: message, dismissibility: dismissible, expiry: expires_at&.strftime("%Y-%m-%d"))
       end
 
       save
     end
   end
 
-  def self.clear_for(owner)
+  def self.clear_for(owner, actor = nil)
     current_announcement = find_by(owner: owner)
     if current_announcement
       current_announcement.destroy
-      current_announcement.instrument(:destroy)
+      current_announcement.instrument(:destroy, actor: actor)
     end
   end
 
   def event_payload
-    {
-      owner: owner_type == "Repository" ? owner.nwo : owner.name,
+    payload = {
       owner_type: user_facing_owner_type,
-      business_id: owning_business_id
+      business: owning_business
     }
+
+    case owner_type
+    when "Repository"
+      payload[:owner] = owner.name_with_display_owner
+      payload[:repo] = owner
+      payload[:org] = owner.organization if owner.organization
+    when "User" # Organization
+      payload[:owner] = owner.display_login
+      payload[:org] = owner
+    when "Business"
+      payload[:owner] = owner.name
+    end
+
+    payload
   end
 
   def event_prefix
@@ -149,12 +163,12 @@ class EnterpriseBanner < ApplicationRecord::Collab
     end
   end
 
-  def owning_business_id
+  def owning_business
     case owner_type
     when "Repository", "User"
-      owner.business&.id
+      owner.business
     when "Business"
-      owner.id
+      owner
     end
   end
 
@@ -165,7 +179,6 @@ class EnterpriseBanner < ApplicationRecord::Collab
   private
 
   def handle_metrics
-    GitHub.dogstats.increment("repos.enterprise_announcements.save", tags: [owner_type])
     GlobalInstrumenter.instrument("announcement_banners.publish", {
       announcement_id: id,
       user_facing_owner_type: user_facing_owner_type,
