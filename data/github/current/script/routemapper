@@ -1,0 +1,49 @@
+#!/usr/bin/env safe-ruby
+# typed: true
+# frozen_string_literal: true
+
+# ROUTEMAPPER
+#
+# Routemapper is a tool for identifying the controller and action that will serve a specific request.
+# To see usage information, run `bin/routemapper --help`.
+
+require "optparse"
+require "uri"
+
+VALID_METHODS = %w(GET HEAD POST PUT PATCH DELETE OPTIONS).freeze
+request_method = T.let("GET", String)
+
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: bin/routemapper [options] https://github.com/some/route"
+  opts.separator ""
+
+  opts.on("-m", "--method METHOD", "HTTP method of the request") do |m|
+    normalized = m.upcase
+    raise ArgumentError, "Invalid method: #{m}" unless VALID_METHODS.include?(normalized)
+    request_method = normalized
+  end
+
+  opts.on("-h", "--help", "Prints this help") do
+    puts opts
+    exit 0
+  end
+
+  opts.separator ""
+  opts.separator "Sorry, API routes are not supported at this time."
+end
+parser.parse!
+
+raw_url = ARGV.shift
+unless raw_url
+  $stderr.puts "URL is required"
+  $stderr.puts parser
+  exit 1
+end
+url = URI.parse(raw_url)
+if ARGV.any?
+  $stderr.puts "Ignoring extra arguments: #{ARGV.inspect}"
+end
+
+require_relative "./routemapper"
+mapper = Routemapper.new(request_method, url)
+mapper.report

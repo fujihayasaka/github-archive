@@ -1,0 +1,101 @@
+<div <%= test_selector("development-section") %>>
+  <% if user_can_edit_alert_links? %>
+    <react-partial-anchor class="d-block">
+      <%= render Primer::Beta::Button.new(
+        classes: "cursor-wait mb-2",
+        align_content: :start,
+        disabled: true,
+        data: {
+          target: "react-partial-anchor.anchor",
+        },
+        test_selector: "development-section-picker-button",
+        scheme: :invisible,
+        bg: :transparent,
+        p: 0,
+        block: true,
+        aria: { label: "Open development menu" },
+        ) do |button| %>
+          <h3 class="h6 color-fg-muted">Development</h3>
+          <% button.with_trailing_action_icon(icon: "gear") %>
+      <% end %>
+      <template data-target="react-partial-anchor.template">
+        <%= render_react_partial(
+          name: "code-scanning-development-picker",
+          props: development_picker_props,
+          disable_ssr: true,
+        )%>
+      </template>
+    </react-partial-anchor>
+  <% else %>
+    <h3 class="h6 color-fg-muted mb-2">Development</h3>
+  <% end %>
+  <% if alert_links? %>
+    <%# Display linked branches or pull requests %>
+    <div <%= test_selector("development-section-alert-links") %> class="d-flex flex-column gap-2">
+      <% alert_links.each do |alert_link| %>
+        <% alert_link_title = alert_link_title(alert_link) %>
+        <div class="d-flex flex-column gap-1">
+          <%= render(Primer::Beta::Link.new(
+            href: alert_link_url(alert_link),
+            aria: { label: "Open #{alert_link_title} #{alert_link.pull_request? ? "pull request" : "branch"} in a new tab" },
+            target: "_blank",
+            classes: "d-flex flex-items-center",
+            test_selector: "development-section-alert-link",
+            scheme: :primary)) do |component| %>
+            <% component.with_leading_visual_icon(mr: 1, **alert_link_icon(alert_link)) %>
+            <%= alert_link_title %>
+          <% end %>
+          <div class="ml-4 color-fg-muted">
+            <%= alert_link_subtitle(alert_link) %>
+          </div>
+        </div>
+      <% end %>
+    </div>
+  <% elsif pushable_by_current_user? && alert_open? %>
+    <% if suggested_fix? %>
+      <%# Copilot Autofix has generated a fix for the alert %>
+      <div>
+        <span>
+          <commit-autofix-action>
+            <%= render(Primer::Beta::Button.new(
+              scheme: :link,
+              aria: { label: "Commit Copilot Autofix to a new branch" },
+              test_selector: "development-section-commit-autofix-button",
+              data: { action: "click:commit-autofix-action#openCreateBranchDialog"})) { "Commit Copilot Autofix to a new branch" } %>
+          </commit-autofix-action>
+        </span>
+        or link a branch or pull request to address this alert.
+      </div>
+    <% else %>
+        <div>
+          Link a branch, pull request, or
+            <react-partial-anchor class="d-inline">
+              <%= render(Primer::Beta::Button.new(
+                scheme: :link,
+                id: "development-section-component-anchor",
+                classes: "cursor-wait",
+                data: {
+                  "target": "react-partial-anchor.anchor",
+                  "branch-type": "new",
+                  "inital-disabled": disabled_create_branch_button?
+                },
+                disabled: disabled_create_branch_button?,
+                style: ("cursor: not-allowed;" if disabled_create_branch_button?),
+                test_selector: "development-section-create-branch-button"
+                )) { "create a branch" } %>
+            <template data-target="react-partial-anchor.template">
+              <%= render_react_partial(
+                name: "create-branch-dialog",
+                props: create_branch_dialog_props
+              ) %>
+            </template>
+          </react-partial-anchor>
+          to start working on this alert.
+        </div>
+    <% end %>
+  <% else %>
+    <div>
+      No linked branches or pull requests.
+    </div>
+  <% end %>
+</div>

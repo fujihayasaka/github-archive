@@ -1,0 +1,61 @@
+<%#
+  `user_login` is a string (required)
+  `two_factor_enabled` is a boolean (required)
+  `active_account_two_factor_requirement` is a boolean (required)
+  `pending_account_two_factor_requirement` is a boolean (required)
+  `account_two_factor_required_by_date` is a Time (required)
+  `show_user_2fa_warning_state` is a boolean (required)
+  `org_or_enterprise_has_2fa_disallowed_methods_configured` is a boolean (required)
+%>
+
+<div class="text-center color-fg-muted  py-3 f5 flex-shrink-0 pr-3" <%= test_selector "two-factor-status-#{user_login}" %>>
+  <% if two_factor_enabled %>
+    <% if show_user_2fa_warning_state && org_or_enterprise_has_2fa_disallowed_methods_configured %>
+      <%= render Primer::Beta::Octicon.new(icon: "shield") %> 2FA
+    <% else %>
+      <%= render Primer::Beta::Octicon.new(icon: "shield-check") %> 2FA
+    <% end %>
+  <% elsif active_account_two_factor_requirement || pending_account_two_factor_requirement %>
+    <%
+      icon_color = active_account_two_factor_requirement ? :danger : :muted
+      flash_scheme = active_account_two_factor_requirement ? :danger : :warning
+      flash_icon = active_account_two_factor_requirement ? :stop : :alert
+      required_by = account_two_factor_required_by_date&.strftime('%Y-%m-%d')
+    %>
+
+    <%= render(Primer::Alpha::Dialog.new(title: "Two-factor security required", size: :large, text_align: :left)) do |dialog| %>
+
+      <% dialog.with_show_button(scheme: :invisible, p: 0, font_weight: :normal, color: :muted) do |button| %>
+        <% button.with_leading_visual_icon(icon: :clock) %>
+        2FA
+      <% end %>
+
+      <% dialog.with_header(show_divider: true, bg: :inset ) do %>
+        <span class="fgColor-muted text-bold">Two-factor security required</span>
+      <% end %>
+      <% dialog.with_body(pt: 3) do %>
+        <div>
+          <p>
+            <strong><%= user_login %></strong> is required to enable two-factor authentication for their account by <strong><%= required_by %></strong>.
+          </p>
+
+          <%= render(Primer::Alpha::Banner.new(icon: flash_icon, scheme: flash_scheme, px: 3, py: 3, mx: 0, my: 2, display: :flex, classes: "flex-items-center")) do %>
+            <p>
+              Once active after <%= required_by %>, they will have 7 days to enable two-factor authentication before <strong>their access will be restricted</strong>.
+            </p>
+          <% end %>
+        </div>
+      <% end %>
+
+      <% dialog.with_footer(show_divider: true) do %>
+        <div class="text-small lh-condensed-ultra color-fg-muted">
+          Learn more about
+          <%= render(Primer::Beta::Link.new(href: "#{GitHub.blog_url}/2023-03-09-raising-the-bar-for-software-security-github-2fa-begins-march-13", tabindex: "0", classes: "Link--inTextBlock")) { "2FA requirements for GitHub contributors." } %>
+        </div>
+      <% end %>
+    <% end %>
+
+  <% else %>
+    <%= render Primer::Beta::Octicon.new(icon: "shield-x") %> 2FA
+  <% end %>
+</div>

@@ -1,0 +1,32 @@
+declare const styles: {
+  readonly "CopilotActivationProgressBar": string;
+  readonly "CopilotActivationProgressBar--hidden": string;
+  readonly "CopilotActivationProgressBar__bar": string;
+  readonly "CopilotActivationProgressBar__barBase": string;
+  readonly "CopilotActivationProgressBar__barFill": string;
+  readonly "CopilotActivationProgressBar__barFill--gradient": string;
+  readonly "CopilotActivationProgressBar__barFill--purple": string;
+  readonly "CopilotActivationProgressBar__copilot": string;
+  readonly "CopilotActivationProgressBar__copilot--lastStep": string;
+  readonly "CopilotActivationProgressBar__copilot--running": string;
+  readonly "CopilotActivationProgressBar__copilot--stopped": string;
+  readonly "CopilotActivationProgressBar__copilotPath--filled": string;
+  readonly "CopilotActivationProgressBar__copilotWrapper": string;
+  readonly "CopilotActivationProgressBar__point": string;
+  readonly "CopilotActivationProgressBar__sparkle": string;
+  readonly "CopilotActivationProgressBar__sparkle--anim-0": string;
+  readonly "CopilotActivationProgressBar__sparkle--anim-1": string;
+  readonly "CopilotActivationProgressBar__sparkle--anim-2": string;
+  readonly "CopilotActivationProgressBar__sparkle--anim-3": string;
+  readonly "CopilotActivationProgressBar__sparkle--anim-4": string;
+  readonly "CopilotActivationProgressBar__sparkle--anim-5": string;
+  readonly "CopilotActivationProgressBar__sparklesWrapper": string;
+  readonly "sparkle-running_0": string;
+  readonly "sparkle-running_1": string;
+  readonly "sparkle-running_2": string;
+  readonly "sparkle-running_3": string;
+  readonly "sparkle-running_4": string;
+  readonly "sparkle-running_5": string;
+};
+export = styles;
+

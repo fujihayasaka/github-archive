@@ -1,0 +1,77 @@
+#!/bin/bash
+
+SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+
+# Ensure vschema directory exists
+mkdir -p /workspaces/github/tmp/vtcombo
+
+echo "Starting vtcombo: waiting for MySQL to be ready"
+command="mysql --user=root -h '127.0.0.1' -e 'SELECT 1' &>/dev/null"
+if ! timeout 10s bash -c "while ! $command; do sleep 1; done"
+then
+  echo "MySQL is not ready after 10 seconds, aborting"
+  exit 1
+fi
+
+MYSQL_VERSION=$(mysqld --version | awk '{ print $3 }')
+
+VTCOMBO_ARGS=(
+  --logtostderr=true
+  --proto_topo "$(cat /workspaces/github/db/topology)"
+  --schema_dir /workspaces/github/tmp/vtcombo
+  --mysql_server_port 15306
+  --mysql_server_bind_address 0.0.0.0
+  --mysql_auth_server_impl none
+  --db_socket /var/run/mysqld/mysqld.sock
+  --db_host localhost
+  --mycnf-file /etc/mysql/mysql.cnf
+  --db_app_user root
+  --db_allprivs_user root
+  --db_appdebug_user root
+  --db_dba_user root
+  --db_repl_user root
+  --dbddl_plugin vttest
+  --health_check_interval 1s
+  --tablet_refresh_interval 1s
+  --queryserver-config-transaction-timeout 300s
+  --queryserver-config-transaction-cap 10
+  --queryserver-config-pool-size 10
+  --queryserver-enable-settings-pool
+  --enforce_strict_trans_tables=false
+  --port 15000
+  --grpc_port 15001
+  --tablet_types_to_wait 'PRIMARY'
+  --service_map 'grpc-vtgateservice,grpc-vtctl,grpc-vtctld'
+  --db_charset utf8mb4_unicode_520_ci
+  --vschema_ddl_authorized_users='%'
+  --planner-version=gen4
+  --mysql_server_version=$MYSQL_VERSION
+)
+
+# If mysql is below 8.0, set `--enable_set_var` to `false`
+if [[ "$MYSQL_VERSION" < "8.0" ]]; then
+  VTCOMBO_ARGS+=("--enable_set_var=false")
+fi
+
+if [[ "$DX_EDGE" = true ]] && [[ "$DX_FEATURE_SUBPROJECT_CONTAINERS" = true ]]; then
+  source "$SCRIPT_DIR/dx/lib/subproject-containers"
+  # Get the -version of vitess from `config/`
+  SUBPROJECT_VERSION=$(subproject_version "vitess")
+  # Run vitess (i.e. vtcombo) in a container
+  GHCR_VITESS="ghcr.io/github/vitess-build"
+  docker stop vitess &> /dev/null || true
+  docker rm vitess &> /dev/null || true
+  docker run -d --name vitess --network host \
+    --user github \
+    --entrypoint "/vt/bin/vtcombo" \
+    -v /workspaces/github/tmp:/workspaces/github/tmp \
+    -v /var/run/mysqld:/var/run/mysqld \
+    -v /etc/mysql:/etc/mysql \
+    -v /etc/localtime:/etc/localtime:ro \
+    "${GHCR_VITESS}:${SUBPROJECT_VERSION}" \
+    "${VTCOMBO_ARGS[@]}"
+  docker logs --follow vitess &
+  wait
+else
+  exec /workspaces/github/vendor/vitess/bin/vtcombo "${VTCOMBO_ARGS[@]}"
+fi

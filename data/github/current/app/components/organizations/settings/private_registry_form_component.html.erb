@@ -1,0 +1,148 @@
+<private-registry-form>
+  <%= form_with url: create_form? ? settings_org_secrets_create_secret_path : settings_org_secrets_update_secret_path(name: secret.name),
+    class: "d-flex flex-column js-encrypt-submit",
+    html: {"data-public-key": public_key[1], "data-test-selector": "edit-private-registry"},
+    method: create_form? ? :post : :put do |form| %>
+    <div class="form-group">
+      <div class="form-group-header">
+        <label for="url">URL</label>
+      </div>
+
+      <div class="form-group-body">
+        <%= form.text_field(
+          :url,
+          required: true,
+          placeholder: "URL",
+          class: "form-control",
+          value: registry_url,
+          data: { "test-selector": "private-registry-url" })
+        %>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <div class="form-group-header">
+        <label for="type">Type</label>
+      </div>
+
+      <div class="form-group-body">
+        <%= render(Primer::Alpha::ActionMenu.new(
+          select_variant: :single,
+          dynamic_label: true,
+          form_arguments: { builder: form, name: "registry_type", value: "maven_repository"},
+          test_selector: "private-registry-action-menu"
+        )) do |menu| %>
+          <% menu.with_show_button do |button|
+            button.with_trailing_action_icon(icon: :"triangle-down")
+            "Select registry type"
+          end %>
+
+          <% PrivateRegistry::Configuration::HUMAN_READABLE_REGISTRY_TYPES.each do |type, readable_type| %>
+            <% menu.with_item(
+              label: readable_type,
+              data: { value: type,
+                action: "click:private-registry-form#showSecretFields",
+               },
+              active: registry_type == type.to_s,
+            ) %>
+          <% end %>
+        <% end %>
+      </div>
+    </div>
+
+    <span data-target="private-registry-form.SecretFields" hidden>
+      <div class="form-group">
+
+        <div class="form-checkbox">
+          <%= radio_button_tag :form_type, "", !updating_username_and_password?, id: 'token',
+            data: {
+              value: "token",
+              action: "click:private-registry-form#changeSecretFields",
+            }
+          %>
+          <%= label_tag :token, "Token" %>
+        </div>
+
+        <div class="form-checkbox">
+          <%= radio_button_tag :form_type, "", updating_username_and_password?, id: 'username_and_password',
+              data: {
+                value: "username_and_password",
+                action: "click:private-registry-form#changeSecretFields",
+              }
+          %>
+          <%= label_tag :username_and_password, "Username and password" %>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <span data-target="private-registry-form.secretField">
+          <% if updating_username_and_password?%>
+            <%= render partial: "settings/organization/secrets/private_registry/username_and_password_fields", locals: {
+              registry_username: registry_username,
+              public_key: public_key,
+              }
+            %>
+          <% else %>
+            <%= render partial: "settings/organization/secrets/private_registry/token_field", locals: {
+              public_key: public_key,
+              }
+            %>
+          <% end %>
+        </span>
+      </div>
+    </span>
+    <span data-target="private-registry-form.updateSecretMsg">
+      <% if update_form? %>
+        <div class="form-group-body" >
+          <p class="color-fg-muted mb-0">Secret values are encrypted and cannot be displayed, but you can
+          <%= render Primer::Beta::Button.new(scheme: :link, data: {
+            action: "click:private-registry-form#showSecretFields",
+          }) do %>enter a new value.<% end %></p>
+        </div>
+      <% end %>
+    </span>
+
+    <%= render partial: "settings/organization/secrets/repository_access_select", locals: {
+      visibilities: visibilities,
+      default_visibility: secret&.visibility || default_visibility,
+      total_count: total_count,
+      selected_repositories: secret&.selected_repositories,
+      repository_items_data_url: view.repository_items_data_url(secret_name: secret&.name),
+      repository_items_aria_id_prefix: view.repository_items_aria_id_prefix,
+      }
+    %>
+
+    <div class="form-group">
+      <% if create_form? %>
+        <%= render Primer::Beta::Button.new(
+          type: :submit,
+          scheme: :primary,
+          "data-disable-with": "Adding…",
+          "data-test-selector": "private-registry-new-submit-button"
+        ).with_content("Add Registry") %>
+      <% elsif update_form? %>
+        <%= render Primer::Beta::Button.new(
+          "data-disable-with": "Updating…",
+          "data-sudo-required": true,
+          "data-test-selector": "private-registry-edit-submit-button",
+          type: :submit,
+          scheme: :primary
+        ).with_content("Save changes") %>
+      <% end %>
+    </div>
+  <% end %>
+  <template data-target="private-registry-form.secretTemplate">
+    <%= render partial: "settings/organization/secrets/private_registry/token_field", locals: {
+      public_key: public_key,
+      }
+    %>
+  </template>
+
+  <template data-target="private-registry-form.passwordTemplate">
+    <%= render partial: "settings/organization/secrets/private_registry/username_and_password_fields", locals: {
+      registry_username: registry_username,
+      public_key: public_key,
+      }
+    %>
+  </template>
+</private-registry-form>

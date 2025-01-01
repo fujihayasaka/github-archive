@@ -1,0 +1,223 @@
+# typed: true
+# frozen_string_literal: true
+
+require "test_helper"
+
+class Integration::VisibilityDependencyTest < GitHub::TestCase
+
+  fixtures do
+    @user = create(:user)
+    @integration = create :integration, :with_active_hook, owner: @user
+  end
+
+  context "visibility" do
+    test "internal_visibility" do
+      business = create(:business, name: "Busy Biz")
+      integration = create(:integration, owner: business, visibility: "internal_visibility")
+      refute_predicate integration, :public_visibility?
+    end
+
+    test "private_visibility" do
+      integration = create(:integration, visibility: "private_visibility")
+      refute_predicate integration, :public_visibility?
+    end
+
+    test "public_visibility" do
+      integration = create(:integration, visibility: "public_visibility")
+      assert_predicate integration, :public_visibility?
+    end
+  end
+
+  context "#internal_visibility" do
+    test "asserts the integration has internal visibility" do
+      business = create(:business, name: "Busy Biz")
+      integration = create(:integration, owner: business, visibility: "internal_visibility")
+
+      refute_predicate integration, :public_visibility?
+      refute_predicate integration, :private_visibility?
+      assert_predicate integration, :internal_visibility?
+    end
+  end
+
+  context "#can_make_private?" do
+    test "returns true if there are no installations", skip_with_all_emus: true do
+      refute @integration.installations.any?
+
+      assert_predicate @integration, :can_make_private?
+    end
+
+    test "returns true if the integration is only installed on the owning account", skip_with_all_emus: true do
+      @integration.install_on(@user, repositories: [create(:repository, :minimal, owner: @user)], installer: @user, entry_point: :test_case)
+
+      assert_predicate @integration, :can_make_private?
+    end
+
+    test "returns false if the integration is already installed on an external account", skip_with_all_emus: true do
+      other_account = create(:user)
+      @integration.install_on(other_account, repositories: [create(:repository, :minimal, owner: other_account)], installer: other_account, entry_point: :test_case)
+
+      refute_predicate @integration, :can_make_private?
+    end
+
+    test "returns false if the integration has a listing", skip_with_all_emus: true do
+      create(:integration_listing, integration: @integration)
+      refute_predicate @integration, :can_make_private?
+    end
+
+    test "returns false if the integration owner is enterprise managed" do
+      @integration.owner.stubs(:is_enterprise_managed?).returns(true)
+      refute_predicate @integration, :can_make_private?
+    end
+
+    test "returns false if the integration owner is an enterprise" do
+      integration = create :enterprise_owned_integration
+      refute_predicate integration, :can_make_private?
+    end
+  end
+
+  context "#can_make_public?" do
+    test "is false for internal_visibility" do
+      @integration.visibility = "internal_visibility"
+      refute_predicate @integration, :can_make_public?
+    end
+
+    test "is false when already has public visibility" do
+      assert_predicate @integration, :public_visibility?
+      refute_predicate @integration, :can_make_public?
+    end
+
+    test "is false when owner is an EMU" do
+      @integration.owner.stubs(:is_enterprise_managed?).returns(true)
+      refute_predicate @integration, :can_make_public?
+    end
+
+    test "is false when owner is an enterprise" do
+      integration = create :enterprise_owned_integration
+      refute_predicate integration, :can_make_public?
+    end
+
+    test "is true when owner is a user" do
+      assert_equal User, @integration.owner.class
+      @integration.visibility = "private_visibility"
+      assert_predicate @integration, :can_make_public?
+    end
+
+    test "is true when owner is an organization" do
+      @integration.owner = create :organization
+      @integration.visibility = "private_visibility"
+      assert_predicate @integration, :can_make_public?
+    end
+
+    test "is true when owner is an organization with EMUs" do
+      @integration.owner = create :organization
+      @integration.owner.stubs(:enterprise_managed_user_enabled?).returns(true)
+      @integration.visibility = "private_visibility"
+
+      assert_predicate @integration, :can_make_public?
+    end
+  end
+
+  context "#validate_visibility" do
+    test "validates that enterprise_owned integrations cannout be public" do
+      integration = create :enterprise_owned_integration
+
+      integration.visibility = "public_visibility"
+      refute integration.valid?
+      assert_equal ["cannot be public"], integration.errors[:visibility]
+    end
+
+    test "validates that EMU-owned integrations must be public" do
+      @integration.owner.stubs(:is_enterprise_managed?).returns(true)
+      @integration.visibility = "private_visibility"
+
+      refute @integration.valid?
+      assert_equal ["cannot be private"], @integration.errors[:public]
+    end if TestEnv.test_with_all_emus?
+
+    test "validates non-EMU-owned integrations when making private", skip_with_all_emus: true do
+      # for non-EMU owned integrations only validate if
+      # the app is being made private
+      # https://github.com/github/ecosystem-apps/issues/5426
+      @integration.install_on(@user, repositories: [], installer: @user, entry_point: :test_case)
+      other_account = create(:user)
+      @integration.install_on(other_account, repositories: [], installer: other_account, entry_point: :test_case)
+      @integration.visibility = "private_visibility"
+
+      refute @integration.valid?
+      assert_equal ["A private app cannot have multiple installations. Please uninstall from all but one account to proceed."], @integration.errors[:base]
+    end
+
+    test "skips validating non-EMU-owned integrations when updating non-public attributes", skip_with_all_emus: true do
+      # for non-EMU owned integrations only validate if
+      # the app is being made private
+      # https://github.com/github/ecosystem-apps/issues/5426
+      @integration.install_on(@user, repositories: [], installer: @user, entry_point: :test_case)
+      other_account = create(:user)
+      @integration.install_on(other_account, repositories: [], installer: other_account, entry_point: :test_case)
+      @integration.update_attribute!(:visibility, "private_visibility")
+
+      @integration.update(description: "new description")
+      assert @integration.valid?
+      assert_empty @integration.errors[:public]
+    end
+  end
+
+  context "#make_public" do
+    test "updates the integration to be public" do
+      @integration.update_attribute :visibility, "private_visibility"
+      refute_predicate @integration, :public_visibility?
+
+      @integration.make_public
+
+      assert_predicate @integration, :public_visibility?
+      assert_predicate @integration.reload, :public_visibility?
+    end
+
+    test "is idempotent" do
+      @integration.update_attribute :visibility, "private_visibility"
+      refute_predicate @integration, :public_visibility?
+
+      @integration.make_public
+      assert_predicate @integration, :public_visibility?
+
+      @integration.make_public
+      assert_predicate @integration, :public_visibility?
+    end
+  end
+
+  context "#make_private" do
+    test "updates the integration to be private" do
+      assert_predicate @integration, :public_visibility?
+
+      @integration.make_private
+
+      refute_predicate @integration, :public_visibility?
+      refute_predicate @integration.reload, :public_visibility?
+    end
+
+    test "is idempotent" do
+      assert_predicate @integration, :public_visibility?
+
+      @integration.make_private
+      refute_predicate @integration, :public_visibility?
+
+      @integration.make_private
+      refute_predicate @integration, :public_visibility?
+    end
+
+    test "is not allowed if integration already installed on external accounts" do
+      external_account = create(:user)
+      @integration.install_on external_account,
+        installer: external_account,
+        repositories: [create(:repository, :minimal, owner: external_account)],
+        entry_point: :test_case
+
+      assert_predicate @integration, :public_visibility?
+      refute_predicate @integration, :can_make_private?
+
+      refute @integration.make_private
+
+      assert_predicate @integration.reload, :public_visibility?
+    end
+  end
+end

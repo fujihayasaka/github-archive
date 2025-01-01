@@ -1,0 +1,31 @@
+declare const styles: {
+  readonly "container": string;
+  readonly "content": string;
+  readonly "description": string;
+  readonly "itemIcon": string;
+  readonly "labelAuburn": string;
+  readonly "labelBlue": string;
+  readonly "labelBrown": string;
+  readonly "labelCoral": string;
+  readonly "labelCyan": string;
+  readonly "labelGray": string;
+  readonly "labelGreen": string;
+  readonly "labelIndigo": string;
+  readonly "labelLemon": string;
+  readonly "labelLime": string;
+  readonly "labelOlive": string;
+  readonly "labelOrange": string;
+  readonly "labelPine": string;
+  readonly "labelPink": string;
+  readonly "labelPlum": string;
+  readonly "labelPurple": string;
+  readonly "labelRed": string;
+  readonly "labelTeal": string;
+  readonly "labelYellow": string;
+  readonly "metadata": string;
+  readonly "metadataIcon": string;
+  readonly "metadataItem": string;
+  readonly "title": string;
+};
+export = styles;
+

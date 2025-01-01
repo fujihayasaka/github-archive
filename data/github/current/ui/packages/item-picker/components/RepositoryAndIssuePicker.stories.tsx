@@ -1,0 +1,117 @@
+import {relayDecorator, type RelayStoryObj} from '@github-ui/relay-test-utils/storybook'
+import type {Meta} from '@storybook/react'
+import {RepositoryAndIssuePicker} from './RepositoryAndIssuePicker'
+import {CurrentRepository, TopRepositories} from './RepositoryPicker'
+import type {RepositoryPickerTopRepositoriesQuery} from './__generated__/RepositoryPickerTopRepositoriesQuery.graphql'
+import type {RepositoryPickerCurrentRepoQuery} from './__generated__/RepositoryPickerCurrentRepoQuery.graphql'
+import PRELOAD_CURRENT_REPOSITORY_QUERY from './__generated__/RepositoryPickerCurrentRepoQuery.graphql'
+import {useIssueFilteringQueryGraphQLQuery} from '../hooks/useIssueFiltering'
+import type {useIssueFilteringQuery} from '../hooks/__generated__/useIssueFilteringQuery.graphql'
+import {buildRepository} from '../test-utils/RepositoryPickerHelpers'
+import {buildIssue} from '../test-utils/IssuePickerHelpers'
+
+const meta = {
+  title: 'RepositoryAndIssuePicker',
+  component: RepositoryAndIssuePicker,
+} satisfies Meta<typeof RepositoryAndIssuePicker>
+
+export default meta
+
+type Queries = {
+  topRepositories: RepositoryPickerTopRepositoriesQuery
+  issuePickerSearchGraphQLQuery: useIssueFilteringQuery
+  repositoryPickerCurrentRepoQuery: RepositoryPickerCurrentRepoQuery
+  preloadCurrentRepositoryQuery: RepositoryPickerCurrentRepoQuery
+  repositoryPickerCurrentRepoQueryB: RepositoryPickerCurrentRepoQuery
+  preloadCurrentRepositoryQueryB: RepositoryPickerCurrentRepoQuery
+}
+
+export const PickerWithDefaultOrganizationExample = {
+  decorators: [relayDecorator<typeof RepositoryAndIssuePicker, Queries>],
+  args: {
+    defaultRepositoryNameWithOwner: 'orgA/repoA',
+    organization: 'orgA',
+    anchorElement: props => <button {...props}>Click me</button>,
+  },
+  parameters: {
+    actions: {argTypesRegex: '^on.*'},
+    relay: {
+      queries: {
+        topRepositories: {
+          type: 'preloaded',
+          query: TopRepositories,
+          variables: {topRepositoriesFirst: 5, hasIssuesEnabled: true, owner: null},
+        },
+        issuePickerSearchGraphQLQuery: {
+          type: 'preloaded',
+          query: useIssueFilteringQueryGraphQLQuery,
+          variables: {
+            commenters: `commenter:@me`,
+            mentions: `mentions:@me`,
+            assignee: `assignee:@me`,
+            author: `author:@me`,
+            other: `state:open`,
+            resource: '',
+            queryIsUrl: false,
+          },
+        },
+        repositoryPickerCurrentRepoQuery: {
+          type: 'preloaded',
+          query: CurrentRepository,
+          variables: {owner: 'orgA', name: 'repoA'},
+        },
+        preloadCurrentRepositoryQuery: {
+          type: 'preloaded',
+          query: PRELOAD_CURRENT_REPOSITORY_QUERY,
+          variables: {owner: 'orgA', name: 'repoA'},
+        },
+        repositoryPickerCurrentRepoQueryB: {
+          type: 'preloaded',
+          query: CurrentRepository,
+          variables: {owner: 'orgA', name: 'repoB'},
+        },
+        preloadCurrentRepositoryQueryB: {
+          type: 'preloaded',
+          query: PRELOAD_CURRENT_REPOSITORY_QUERY,
+          variables: {owner: 'orgA', name: 'repoB'},
+        },
+      },
+      mockResolvers: {
+        Repository({args}) {
+          if (!args?.name || !args?.owner) {
+            return {}
+          }
+          return buildRepository({name: args.name as string, owner: args.owner as string})
+        },
+        RepositoryConnection() {
+          return {
+            edges: [
+              {node: buildRepository({owner: 'orgA', name: 'repoA'})},
+              {node: buildRepository({owner: 'orgA', name: 'repoB'})},
+              {node: buildRepository({owner: 'orgB', name: 'repoC'})},
+            ],
+          }
+        },
+        Query() {
+          return {
+            commenters: {
+              nodes: [buildIssue({title: 'issueA'})],
+            },
+            mentions: {
+              nodes: [buildIssue({title: 'mentions'})],
+            },
+            assignee: {
+              nodes: [buildIssue({title: 'assignee'})],
+            },
+            author: {
+              nodes: [buildIssue({title: 'author'})],
+            },
+            other: {
+              nodes: [buildIssue({title: 'open'})],
+            },
+          }
+        },
+      },
+    },
+  },
+} satisfies RelayStoryObj<typeof RepositoryAndIssuePicker, Queries>

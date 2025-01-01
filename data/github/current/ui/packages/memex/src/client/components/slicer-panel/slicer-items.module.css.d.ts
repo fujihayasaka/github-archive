@@ -1,0 +1,31 @@
+declare const styles: {
+  readonly "ProgressBarPosition": string;
+  readonly "SlicerPanel": string;
+  readonly "Wide": string;
+  readonly "WritePermissions": string;
+  readonly "actionListItem": string;
+  readonly "actionListItemActive": string;
+  readonly "actionListItemContainer": string;
+  readonly "addMissingItemsButton": string;
+  readonly "completedIterationHeading": string;
+  readonly "description": string;
+  readonly "icon": string;
+  readonly "itemFullWidth": string;
+  readonly "itemRight": string;
+  readonly "leadingContent": string;
+  readonly "leadingVisual": string;
+  readonly "link": string;
+  readonly "listContainerBase": string;
+  readonly "mainContent": string;
+  readonly "noIcons": string;
+  readonly "parentIssueTitle": string;
+  readonly "title": string;
+  readonly "todayLabel": string;
+  readonly "toggleEmptyButton": string;
+  readonly "tracks": string;
+  readonly "trailingContent": string;
+  readonly "trailingVisual": string;
+  readonly "withIcons": string;
+};
+export = styles;
+

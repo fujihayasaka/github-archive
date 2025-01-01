@@ -1,0 +1,21 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative "../config/environment"
+if ARGV.include?("--review-lab")
+  group_id = "copilot_java_upgrade_agent_processor_#{GitHub.current_ref.parameterize.underscore}"
+end
+processor = GitHub::StreamProcessors::CopilotJavaUpgradeAgent.new(group_id: group_id)
+consumer = GitHub.hydro_consumer(processor.options)
+
+CopilotJavaUpgradeAgentError = Class.new(StandardError)
+
+begin
+  GitHub.logger.info("start", { "code.namespace" => processor.class.name })
+  GitHub.hydro_client.run(processor, consumer: consumer, shutdown_signals: [:INT, :TERM])
+  GitHub.logger.info("finish", { "code.namespace" => processor.class.name })
+rescue => e
+  GitHub.logger.error("failed to run stream processor", { "code.namespace" => processor.class.name, :exception => e })
+  Failbot.report(CopilotJavaUpgradeAgentError.new(e))
+  raise
+end

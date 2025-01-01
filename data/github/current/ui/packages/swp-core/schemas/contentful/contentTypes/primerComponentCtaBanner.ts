@@ -1,0 +1,23 @@
+import {z} from 'zod'
+import {buildEntrySchemaFor} from '../entry'
+import {RichTextSchema} from '../richText'
+import {LinkSchema} from './link'
+import {AppStoreButtonSchema} from './appStoreButton'
+import {BackgroundImageSchema} from './backgroundImage'
+
+export const PrimerComponentCtaBannerSchema = buildEntrySchemaFor('primerComponentCtaBanner', {
+  fields: z.object({
+    align: z.enum(['start', 'center']),
+    heading: z.string(),
+    description: RichTextSchema.optional(),
+    hasBorder: z.boolean().optional(),
+    hasShadow: z.boolean().optional(),
+    backgroundImage: BackgroundImageSchema.optional(),
+    hasBackground: z.boolean().optional(),
+    callToActionPrimary: LinkSchema,
+    callToActionSecondary: LinkSchema.optional(),
+    trailingComponent: z.array(AppStoreButtonSchema).optional(),
+  }),
+})
+
+export type PrimerComponentCtaBanner = z.infer<typeof PrimerComponentCtaBannerSchema>

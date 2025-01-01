@@ -1,0 +1,207 @@
+<%# view is an instance of Integrations::ShowView %>
+<% page_info\
+  responsive: true,
+  title: "GitHub Apps - #{view.integration.name}",
+  selected_link: view.selected_link,
+  stafftools: gh_stafftools_app_path(view.integration.owner, view.integration)
+%>
+<% content = capture do %>
+  <%= render "integrations/settings/integration_header", :view => view %>
+  <div class="container-lg px-3">
+   <div class="gutter clearfix">
+      <div class="col-12 col-md-3 float-left">
+        <%= render "integrations/settings/integration_menu", :view => view %>
+      </div>
+      <div class="col-12 col-md-9 float-left">
+        <%= render Primer::Beta::Subhead.new do |component| %>
+          <% component.with_heading(tag: :h2) do %>
+            Copilot
+          <% end %>
+
+          <% component.with_description do %>
+            A Copilot configuration allows your GitHub App to integrate with Copilot. Learn more about building GitHub Copilot Extensions in the <a class="Link--inTextBlock" href="https://docs.github.com/en/copilot/building-copilot-extensions">documentation</a>.
+          <% end %>
+        <% end %>
+        <%
+        agreement_needs_signed = !Copilot::ExtensionsAgreementSignature.signed_by?(view.integration.owner)
+        has_permissions = view.integration.copilot_messages_enabled?
+        configurable_copilot_extension = !agreement_needs_signed && has_permissions
+        %>
+        <% agent = view.integration.integration_agent || view.integration.build_integration_agent %>
+        <% if agreement_needs_signed %>
+          <div class="mb-4">
+            <%= render(Copilot::ExtensionsAgreementComponent.new(view.integration)) %>
+          </div>
+        <% end %>
+
+        <integration-agent-form>
+          <%= primer_form_with(
+            url: gh_settings_app_update_integration_agent_path(view.integration),
+            method: :put,
+            model: agent,
+          ) do |f| %>
+            <div class="FormControl-spacingWrapper" style="gap: 1rem;">
+              <% if agreement_needs_signed %>
+                <%= render Primer::Alpha::Banner.new(scheme: :warning, mt: 3) do %>
+                  To enable Copilot functionality, you must first accept the Marketplace Developer agreement
+                <% end %>
+              <% end %>
+              <% if !has_permissions %>
+                <%= render Primer::Alpha::Banner.new(scheme: :warning, mt: 3) do %>
+                  To enable Copilot functionality, you must first grant your app permission to read Copilot Messages. To do so, navigate to Permissions & Events > Account Permissions > Read-only for Copilot Chat
+                <% end %>
+              <% end %>
+
+              <% if configurable_copilot_extension %>
+                <%= render Primer::Alpha::Select.new(
+                  name: "integration_agent[app_type]",
+                  required: true,
+                  label: "App Type",
+                  data: { target: "integration-agent-form.switcher", action: "change:integration-agent-form#switchForm" },
+                ) do |component| %>
+                  <% component.option label: "Disabled", value: "disabled", selected: agent.app_type == "disabled" %>
+                  <% component.option label: "Agent", value: "agent", selected: agent.app_type == "agent" %>
+                  <% if view.integration.copilot_extension_skills_enabled? %>
+                    <% component.option label: "Skillset", value: "skill", selected: agent.app_type == "skill" %>
+                  <% end %>
+                <% end %>
+
+                <% if view.marketplace_listing_published? %>
+                  <div class="d-flex flex-column" style="gap: 1rem;" data-target="integration-agent-form.disabledBanner">
+                    <%= render(Primer::Alpha::Banner.new(dismiss_scheme: :none, scheme: :warning)) do %>
+                      This app has a published marketplace listing. Disabling Copilot will move it to the "Apps" category.
+                      For pure Copilot Extensions or if you're planning to delist, use the
+                      <%= render(Primer::Beta::Link.new(href: edit_marketplace_listing_path(view.marketplace_listing_slug), underline: true)) { "listing edit page" } %>.
+                      See <%= render(Primer::Beta::Link.new(href: docs_url("marketplace/how-to-delist-a-listing"), underline: true)) { "how to delist" } %>.
+                    <% end %>
+                  </div>
+                <% end %>
+
+                <div data-target="integration-agent-form.common" <%= "hidden" if agent.app_type == "disabled" %> >
+                  <%= render Primer::Beta::Subhead.new do |component| %>
+                    <% component.with_heading(tag: :h3) do %>
+                      Authorization
+                    <% end %>
+
+                    <% component.with_description do %>
+                      Authorization is not required, but is important to connect the user's GitHub account to your product or feature account.
+                    <% end %>
+                  <% end %>
+                  <%= render Primer::Alpha::TextField.new(
+                    id: "client_authorization_url",
+                    name: "integration_agent[client_authorization_url]",
+                    required: false,
+                    label: "Pre-authorization URL",
+                    caption: "The URL where users will be redirected to start for authentication.",
+                    value: agent.client_authorization_url,
+                  ) %>
+
+                  <% if view.integration.oidc_settings_enabled? %> <div style="margin-top: 1rem;">
+                      <%= render partial: "integrations/settings/oidc",
+                        locals: { agent: agent, } %>
+                    </div>
+                  <% end %>
+                </div>
+
+                <div class="d-flex flex-column" style="gap: 1rem;" data-target="integration-agent-form.agent" <%= "hidden" unless agent.app_type == "agent" %> >
+                  <%= render Primer::Beta::Subhead.new do |component| %>
+                    <% component.with_heading(tag: :h3) do %>
+                      Agent Definition
+                    <% end %>
+                  <% end %>
+                  <%= render Primer::Alpha::TextField.new(
+                    name: "integration_agent[url]",
+                    required: true,
+                    label: "URL",
+                    caption: "The URL that Copilot will send messages to.",
+                    value: agent.url,
+                  ) %>
+
+                  <%= render Primer::Alpha::TextArea.new(
+                    name: "integration_agent[description]",
+                    required: true,
+                    label: "Inference description",
+                    caption: "A machine-ready description, used to infer your App's capabilities.",
+                    value: agent.description,
+                  ) %>
+                </div>
+
+                <div class="d-flex flex-column" style="gap: 1rem;" data-target="integration-agent-form.skills" <%= "hidden" unless agent.app_type == "skill" %> >
+                  <div>
+                    <div class="float-right" data-target="integration-agent-form.skillsNewButton" <%= "hidden" if agent.skill_data.empty? || agent.skill_data.length >= IntegrationAgent::MAX_SKILLS %> >
+                      <%= render partial: "integrations/settings/skill_dialog",
+                        locals: {
+                          dialog_id: "skills-new-dialog",
+                          title: "New Definition",
+                          button_scheme: :primary,
+                          aria_label: "Add new skill",
+                          submit_id: "skills-new-dialog-add",
+                          submit_label: "Add Definition",
+                          submit_action: "click:integration-agent-form#addSkill",
+                        }
+                      %>
+                    </div>
+                    <%= render Primer::Beta::Subhead.new do |component| %>
+                      <% component.with_heading(tag: :h3) do %>
+                        Skill definitions
+                      <% end %>
+
+                      <% component.with_description do %>
+                        Definitions help the model know when to select the skill. Limited to 5 skill definitions.
+                      <% end %>
+                    <% end %>
+                  </div>
+
+                  <div class="Box" data-target="integration-agent-form.skillsList" <%= "hidden" if agent.skill_data.empty? %> >
+                    <% agent.skill_data.each_with_index do |skill, idx| %>
+                      <%= render partial: "integrations/settings/skill_block",
+                        locals: {
+                          dialog_id: "skills-dialog-#{idx}",
+                          skill: skill,
+                        }
+                      %>
+                    <% end %>
+                  </div>
+                  <div data-target="integration-agent-form.skillsBlankslate" <%= "hidden" unless agent.skill_data.empty? %> >
+                    <%= render Primer::Beta::Blankslate.new(
+                      border: true,
+                    ) do |blankslate| %>
+                      <% blankslate.with_heading(tag: :h2).with_content("Add Your First Skill") %>
+                      <% blankslate.with_description do %>
+                        Click "Add new skill" to define your skill parameters and definition
+                        <br><br>
+                        <%= render partial: "integrations/settings/skill_dialog",
+                          locals: {
+                            title: "New Definition",
+                            dialog_id: "skills-blankslate-dialog",
+                            button_scheme: :primary,
+                            aria_label: "Add new skill",
+                            submit_id: "skills-blankslate-dialog-add",
+                            submit_label: "Add Definition",
+                            submit_action: "click:integration-agent-form#addSkill",
+                          }
+                        %>
+                      <% end %>
+                    <% end %>
+                  </div>
+                </div>
+
+                <div class="flex-self-start">
+                  <%= render Primer::Beta::Button.new(type: :submit) do %>Save<% end %>
+                </div>
+              <% end %>
+            </div>
+          <% end %>
+
+          <%# Render skill card outside of the form and hidden. This gets cloned whenever a new skill is created. %>
+          <div data-target="integration-agent-form.blankSkill" hidden>
+            <%= render partial: "integrations/settings/skill_block", locals: { dialog_id: "skills-dialog-blank" } %>
+          </div>
+        </integration-agent-form>
+      </div>
+    </div>
+  </div>
+<% end %>
+<%= render layout: "settings/settings_focus" do %>
+  <%= content %>
+<% end %>

@@ -1,0 +1,1012 @@
+# typed: true
+# frozen_string_literal: true
+
+require "test_helper"
+
+class SearchQueriesMarketplaceQueryTest < GitHub::TestCase
+  fixtures do
+    setup_search
+    @user  = create(:user)
+
+    @marketplace_listing = create(:marketplace_listing, :verified, name: "Acme, inc", listable: create(:integration, owner: @user))
+    @unverified_listing = create(:marketplace_listing, :unverified, listable: create(:integration, owner: @user), name: "acme unverified")
+    @verification_pending_from_unverified_listing = create(:marketplace_listing, :verification_pending_from_unverified, listable: create(:integration, owner: @user))
+    @repository_action = create(:repository_action, :listed, name: "Acme Actions", repository: create(:repository, owner: @user))
+    @verified_repository_action = create(:repository_action, :verified, :listed, name: "Verified Acme Actions")
+    @sponsorable_listing = create(:marketplace_listing, :verified, listable: create(:integration, owner: @user))
+    @verified_org = create(:organization)
+    @unverified_org = create(:organization)
+    @verified_creator_unverified_listing = create(:marketplace_listing, :unverified, :verified_publisher, listable: create(:integration, owner: @verified_org), name: "vcul")
+    @verified_creator_verified_listing = create(:marketplace_listing, :verified, :verified_publisher, listable: create(:integration, owner: @unverified_org), name: "vcvl")
+    @noncompliant_marketplace_listing = create(:marketplace_listing, :verified, :with_paid_plan, has_eu_compliance_attestation: false)
+
+    @marketplace_listing_recommendation1 = create(:marketplace_listing, :verified, :verified_publisher,  name: "Package, inc")
+    recommended_list = [@marketplace_listing_recommendation1]
+    Marketplace::KV.store.set("marketplace/recommendations", recommended_list.pluck(:id).to_json)
+
+    @org = create(:organization)
+    @marketplace_org_listing = create(:marketplace_listing, :verified, listable: create(:oauth_application, user: @org), name: "Acme org listing")
+    @unverified_org_listing = create(:marketplace_listing, :unverified, listable: create(:integration, owner: @org))
+    @verification_pending_from_unverified_org_listing = create(:marketplace_listing, :verification_pending_from_unverified, listable: create(:oauth_application, user: @org))
+    @repository_org_action = create(:repository_action, :listed, repository: create(:repository, owner: @org))
+
+    mock_azure_model_gpt4 = GitHubModels::Types::Static::GPT4
+    @model_catalog_item_gpt4 = GitHubModels::CatalogItem.create(key: "gpt4", value: { model: mock_azure_model_gpt4 }.to_json)
+    @model_catalog_item_gpt4o = create(:github_models_catalog_item, :gpt_4o)
+  end
+
+  setup do
+    reset_cache
+    make_searchable(@marketplace_listing, type: "marketplace_listing")
+    make_searchable(@unverified_listing, type: "marketplace_listing")
+    make_searchable(@verification_pending_from_unverified_listing, type: "marketplace_listing")
+    make_searchable(@repository_action, type: "repository_action")
+    make_searchable(@verified_repository_action, type: "repository_action")
+    make_searchable(@sponsorable_listing, type: "marketplace_listing")
+    make_searchable(@verified_creator_unverified_listing, type: "marketplace_listing")
+    make_searchable(@verified_creator_verified_listing, type: "marketplace_listing")
+
+    make_searchable(@marketplace_listing_recommendation1, type: "marketplace_listing")
+
+    make_searchable(@marketplace_org_listing, type: "marketplace_listing")
+    make_searchable(@unverified_org_listing, type: "marketplace_listing")
+    make_searchable(@verification_pending_from_unverified_org_listing, type: "marketplace_listing")
+    make_searchable(@noncompliant_marketplace_listing, type: "marketplace_listing")
+    make_searchable(@repository_org_action, type: "repository_action")
+
+    make_searchable(@model_catalog_item_gpt4, type: "azure_model")
+    make_searchable(@model_catalog_item_gpt4o, type: "azure_model")
+
+    disable_feature_flag(:dependents_count_marketplace)
+  end
+
+  teardown do
+    teardown_search
+  end
+
+  def publisher_user_query
+    "owner_login.raw:#{@user.login}"
+  end
+
+  def publisher_org_query
+    "owner_login.raw:#{@org.login}"
+  end
+
+  context "Search scoped by type", skip_enterprise: true do
+    test "marketplace-tools type returns marketplace listings, actions, and models" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "marketplace-tools", per_page: 20)
+
+      results = query.execute.results.map { |result| result["_model"] }
+
+      assert_includes results, @marketplace_listing
+      assert_includes results, @repository_action
+      assert_includes results, @verified_repository_action
+      assert_includes results, @model_catalog_item_gpt4
+    end
+
+    test "marketplace type only returns marketplace listings" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "marketplace")
+
+      results = query.execute.results.map { |result| result["_model"] }
+
+      assert_includes results, @marketplace_listing
+      refute_includes results, @repository_action
+      refute_includes results, @verified_repository_action
+      refute_includes results, @model_catalog_item_gpt4
+    end
+
+    test "type is case insensitive" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "marketplace")
+      query2 = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "Marketplace")
+
+      assert_equal(query.search_type_filter, query2.search_type_filter)
+    end
+
+    test "can search for models by name" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "marketplace-tools")
+      query.phrase = "gpt"
+
+      results = query.execute.results.map { |result| result["_model"] }
+
+      assert_includes results, @model_catalog_item_gpt4
+    end
+
+    test "can search for models by license" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.phrase = "custom"
+
+      results = query.execute.results.map { |result| result["_model"] }
+
+      assert_includes results, @model_catalog_item_gpt4o
+    end
+
+    test "can query for Marketplace listings only" do
+
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "Marketplace")
+
+      results = query.execute.results.map { |result| result["_model"] }
+
+      assert_includes results, @marketplace_listing
+    end
+
+    test "returns unverified marketplace listings" do
+
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "Marketplace", per_page: 20)
+
+      results = query.execute.results.map { |result| result["_model"] }
+
+      assert_includes results, @marketplace_listing
+      assert_includes results, @unverified_listing
+      assert_includes results, @verification_pending_from_unverified_listing
+    end
+
+    test "returns verified marketplace listings" do
+
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "Marketplace",  verification_state: "verified")
+
+      results = query.execute.results.map { |result| result["_model"] }
+
+      assert_includes results, @marketplace_listing
+      refute_includes results, @unverified_listing
+      refute_includes results, @verification_pending_from_unverified_listing
+
+      # current decision is to give more precedence to verified state
+      assert_includes results, @verified_creator_verified_listing
+      refute_includes results, @verified_creator_unverified_listing
+    end
+
+    test "recommended apps are ordered before others" do
+
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "Marketplace",  verification_state: "verified")
+
+      results = query.execute.results.map { |result| [result["_model"], result["_score"]] }.to_h
+
+      # current decision is to give more precedence to verified state
+      assert_operator results[@marketplace_listing_recommendation1], :>, results[@marketplace_listing]
+    end
+
+    test "returns unverified repository actions" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "repository-action", verification_state: "unverified")
+
+      results = query.execute.results.map { |result| result["_model"] }
+
+      assert_includes results, @repository_action
+    end
+
+    test "prunes actions with private repos" do
+      # nb: this should not be possible but we saw it in the wild
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "repository-action")
+      query.phrase = "Acme"
+      results = query.execute.results.map { |result| result["_model"] }
+      assert_includes results, @repository_action
+
+      # updates directly to avoid running callbacs that would delist action
+      Repository.where(id: @repository_action.repository.id).update_all(public: false)
+
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "repository-action")
+      query.phrase = "Acme"
+      results = query.execute.results.map { |result| result["_model"] }
+      refute_includes results, @repository_action
+    end
+
+    test "can query by repository action by name with feature flag enabled" do
+      other_repository_action = create(:repository_action, :listed, name: "notagoodone")
+      make_searchable(other_repository_action, type: "repository_action")
+
+      delisted_repository_action = create(:repository_action, state: :delisted, name: "Acme action")
+      make_searchable(delisted_repository_action, type: "repository_action")
+
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "repository-action")
+      query.phrase = "Acme"
+
+      results = query.execute.results.map { |result| result["_model"] }
+      assert_includes results, @repository_action
+      refute_includes results, other_repository_action
+      refute_includes results, delisted_repository_action
+      refute_includes results, @marketplace_listing
+    end
+
+    test "repo actions search based on owner login" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "repository-action")
+      query.phrase = @repository_action.owner.login
+
+      results = query.execute.results.map { |result| result["_model"] }
+      assert_equal [
+        @repository_action,
+      ], results
+    end
+
+    test "repo actions search based on owner name" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "repository-action")
+      query.phrase = @repository_action.owner.name
+
+      results = query.execute.results.map { |result| result["_model"] }
+      assert_equal [
+        @repository_action,
+      ], results
+    end
+
+    test "verified repository actions are boosted above non-verified actions if query is not blank" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "repository-action")
+      query.phrase = "Acme"
+
+      results = query.execute.results.map { |result| [result["_model"], result["_score"]] }.to_h
+      assert_same_elements [@verified_repository_action, @repository_action], results.keys
+
+      # Verified score will be greater than the non-verfied score
+      assert_operator results[@verified_repository_action], :>, results[@repository_action]
+    end
+
+    test "verified repository actions are boosted above non-verified actions if query is empty when not microsoft or github owned" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "repository-action")
+      query.phrase = ""
+
+      results = query.execute.results.map { |result| [result["_model"], result["_score"]] }.to_h
+      assert_same_elements [@verified_repository_action, @repository_action, @repository_org_action], results.keys
+
+      # Verified score will be greater than the non-verfied score
+      assert_operator results[@verified_repository_action], :>, results[@repository_action]
+    end
+
+    test "azure and github repository actions are not listed below other verified actions if query is not empty" do
+      azure = create(:organization, login: "azure")
+      github = create(:organization, login: "actions")
+
+      azure_action = create(
+        :repository_action,
+        :verified,
+        :listed,
+        repository: create(:repository, owner: azure),
+        name: "Verified Acme Actions 2",
+      )
+      make_searchable(azure_action, type: "repository_action")
+
+      github_action = create(
+        :repository_action,
+        :verified,
+        :listed,
+        repository: create(:repository, owner: github),
+        name: "Verified Acme Actions 3",
+      )
+      make_searchable(github_action, type: "repository_action")
+
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "repository-action")
+      query.phrase = "Acme"
+
+      results = query.execute.results.map do |result|
+        [result["_model"], result["_score"]]
+      end.to_h
+
+      # Make sure it's the models we expect
+      assert_same_elements [
+        @verified_repository_action,
+        azure_action,
+        github_action,
+        @repository_action,
+      ], results.keys
+
+      # Make sure the verified ones are all relatively equal
+      assert_in_delta results[@verified_repository_action], results[azure_action], 0.175
+      assert_in_delta results[github_action], results[azure_action], 0.175
+
+      # Make sure the unverified one is scored less than the verified ones
+      assert_operator results[@repository_action], :<, results[github_action]
+    ensure
+      # We must delete these because they will pollute the index otherwise and be high ranking as they are verified.
+      # The index is only setup and deleted one for this entire file, so we have to do this manually.
+      RemoveFromSearchIndexJob.perform_now("repository_action", github_action.id)
+      github_action.destroy!
+      RemoveFromSearchIndexJob.perform_now("repository_action", azure_action.id)
+      azure_action.destroy!
+    end
+
+    test "azure and github repository actions are listed below other verified actions with blank query" do
+      azure = create(:organization, login: "azure")
+      github = create(:organization, login: "actions")
+
+      azure_action = create(
+        :repository_action,
+        :verified,
+        :listed,
+        repository: create(:repository, owner: azure),
+        name: "Verified Acme Actions 2",
+      )
+      make_searchable(azure_action, type: "repository_action")
+
+      github_action = create(
+        :repository_action,
+        :verified,
+        :listed,
+        repository: create(:repository, owner: github),
+        name: "Verified Acme Actions 3",
+      )
+      make_searchable(github_action, type: "repository_action")
+
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "repository-action")
+      query.phrase = ""
+
+      results = query.execute.results.map do |result|
+        [result["_model"], result["_score"]]
+      end.to_h
+
+      # Make sure it's the models we expect
+      assert_same_elements [
+        @verified_repository_action,
+        azure_action,
+        github_action,
+        @repository_action,
+        @repository_org_action
+      ], results.keys
+
+      # Verified non-github/azure should have a higher score than azure/github
+      assert_operator results[@verified_repository_action], :>, results[azure_action]
+
+      # GitHub and Azure should have about the same score
+      assert_in_delta results[github_action], results[azure_action], 0.0001
+
+      # Make sure the unverified one is scored less than the github/azure ones
+      assert_operator results[@repository_action], :<, results[github_action]
+    ensure
+      # We must delete these because they will pollute the index otherwise and be high ranking as they are verified.
+      # The index is only setup and deleted one for this entire file, so we have to do this manually.
+      RemoveFromSearchIndexJob.perform_now("repository_action", github_action.id)
+      github_action.destroy!
+      RemoveFromSearchIndexJob.perform_now("repository_action", azure_action.id)
+      azure_action.destroy!
+    end
+
+    test "can query by category for repository action with feature flag enabled" do
+      category = create(:marketplace_category, name: "chat")
+
+      @repository_action.categories << category
+      make_searchable(@repository_action, type: "repository_action")
+
+      unlisted_action = create(:repository_action, state: :unlisted, categories: [category])
+      make_searchable(unlisted_action, type: "repository_action")
+
+      other_category = create(:marketplace_category)
+      other_action = create(:repository_action, :listed, categories: [other_category])
+      make_searchable(other_action, type: "repository_action")
+
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "repository-action")
+      query.phrase = "is:\"#{category.name}\""
+
+      results = query.execute.results.map { |result| result["_model"] }
+      assert_includes results, @repository_action
+      refute_includes results, other_action
+      refute_includes results, unlisted_action
+
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "repository-action")
+      query.phrase = "category:\"#{category.name}\""
+
+      results = query.execute.results.map { |result| result["_model"] }
+      assert_includes results, @repository_action
+      refute_includes results, other_action
+      refute_includes results, unlisted_action
+
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "repository-action")
+      mixed_case_category_name = category.name.scan(/.{1,2}/).map(&:capitalize).join
+      query.phrase = mixed_case_category_name
+
+      results = query.execute.results.map { |result| result["_model"] }
+      assert_includes results, @repository_action
+      refute_includes results, other_action
+      refute_includes results, unlisted_action
+    end
+
+    test "sorting by an invalid parameter defaults to score sort" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "repository-action")
+      query.phrase = 'sort:"invalid_parameter"'
+
+      scores = query.execute.results.map { |result| result["_score"] }
+
+      assert_equal scores, scores.sort.reverse # default is desc order
+    end
+
+    context "publisher search" do
+      test "query qualifiers include owner_login" do
+        query = Search::Queries::MarketplaceQuery.new(current_user: @user, phrase: publisher_user_query, type: "marketplace-tools")
+
+        assert query.qualifiers.include?(:"owner_login.raw")
+      end
+
+      test "apps and actions published by user are listed on publisher search by user login" do
+        query = Search::Queries::MarketplaceQuery.new(current_user: @user, phrase: publisher_user_query, type: "marketplace-tools")
+
+        results = query.execute.results.map { |result| result["_model"] }
+
+        assert_equal results.count, 5
+        assert_includes results, @marketplace_listing
+        assert_includes results, @unverified_listing
+        assert_includes results, @verification_pending_from_unverified_listing
+        assert_includes results, @repository_action
+      end
+
+      test "apps and actions published by org are listed for publisher search by org login" do
+        query = Search::Queries::MarketplaceQuery.new(current_user: @org.admin, phrase: publisher_org_query, type: "marketplace-tools")
+
+        results = query.execute.results.map { |result| result["_model"] }
+
+        assert_equal results.count, 4
+        assert_includes results, @marketplace_org_listing
+        assert_includes results, @unverified_org_listing
+        assert_includes results, @verification_pending_from_unverified_org_listing
+        assert_includes results, @repository_org_action
+      end
+
+      # the following 4 test cases ensure test completeness for case insensitivity during publisher search
+      # case 1: lowercase search qualifier (publisher:testorg), lowercase publisher name (testorg)
+      # case 2: lowercase search qualifier (publisher:testorg), uppercase publisher name (TestOrg)
+      # case 3: uppercase search qualifier (publisher:TestOrg), lowercase publisher name (testorg)
+      # case 4: uppercase search qualifier (publisher:TestOrg), uppercase publisher name (TestOrg)
+
+      test "apps and actions are listed for publisher search when search qualifier is lowercase and publisher name is lowercase" do
+        org = create(:organization, name: "testorg")
+        marketplace_org_listing = create(:marketplace_listing, :verified, listable: create(:oauth_application, user: org))
+        repository_org_action = create(:repository_action, :listed, repository: create(:repository, owner: org))
+
+        make_searchable(marketplace_org_listing, type: "marketplace_listing")
+        make_searchable(repository_org_action, type: "repository_action")
+
+        query = Search::Queries::MarketplaceQuery.new(current_user: org.admin, phrase: "owner_login.raw:testorg", type: "marketplace-tools")
+
+        results = query.execute.results.map { |result| result["_model"] }
+
+        assert_equal results.count, 2
+        assert_includes results, marketplace_org_listing
+        assert_includes results, repository_org_action
+      end
+
+      test "apps and actions are listed for publisher search when search qualifier is lowercase and publisher name is uppercase" do
+        org = create(:organization, name: "TestOrg")
+        marketplace_org_listing = create(:marketplace_listing, :verified, listable: create(:oauth_application, user: org))
+        repository_org_action = create(:repository_action, :listed, repository: create(:repository, owner: org))
+
+        make_searchable(marketplace_org_listing, type: "marketplace_listing")
+        make_searchable(repository_org_action, type: "repository_action")
+
+        query = Search::Queries::MarketplaceQuery.new(current_user: org.admin, phrase: "owner_login.raw:testorg", type: "marketplace-tools")
+
+        results = query.execute.results.map { |result| result["_model"] }
+
+        assert_equal results.count, 2
+        assert_includes results, marketplace_org_listing
+        assert_includes results, repository_org_action
+      end
+
+      test "apps and actions are listed for publisher search when search qualifier is uppercase and publisher name is lowercase" do
+        org = create(:organization, name: "testorg")
+        marketplace_org_listing = create(:marketplace_listing, :verified, listable: create(:oauth_application, user: org))
+        repository_org_action = create(:repository_action, :listed, repository: create(:repository, owner: org))
+
+        make_searchable(marketplace_org_listing, type: "marketplace_listing")
+        make_searchable(repository_org_action, type: "repository_action")
+
+        query = Search::Queries::MarketplaceQuery.new(current_user: org.admin, phrase: "owner_login.raw:TestOrg", type: "marketplace-tools")
+
+        results = query.execute.results.map { |result| result["_model"] }
+
+        assert_equal results.count, 2
+        assert_includes results, marketplace_org_listing
+        assert_includes results, repository_org_action
+      end
+
+      test "apps and actions are listed for publisher search when search qualifier is uppercase and publisher name is uppercase" do
+        org = create(:organization, name: "TestOrg")
+        marketplace_org_listing = create(:marketplace_listing, :verified, listable: create(:oauth_application, user: org))
+        repository_org_action = create(:repository_action, :listed, repository: create(:repository, owner: org))
+
+        make_searchable(marketplace_org_listing, type: "marketplace_listing")
+        make_searchable(repository_org_action, type: "repository_action")
+
+        query = Search::Queries::MarketplaceQuery.new(current_user: org.admin, phrase: "owner_login.raw:TestOrg", type: "marketplace-tools")
+
+        results = query.execute.results.map { |result| result["_model"] }
+
+        assert_equal results.count, 2
+        assert_includes results, marketplace_org_listing
+        assert_includes results, repository_org_action
+      end
+
+      test "only apps published by user are listed for publisher search by user login and apps filter" do
+        query = Search::Queries::MarketplaceQuery.new(current_user: @user, phrase: publisher_user_query, type: "marketplace")
+
+        results = query.execute.results.map { |result| result["_model"] }
+
+        assert_equal results.count, 4
+        assert_includes results, @marketplace_listing
+        assert_includes results, @unverified_listing
+        assert_includes results, @verification_pending_from_unverified_listing
+        refute_includes results, @repository_action
+      end
+
+      test "only actions published by org are listed for publisher search by org login and actions filter" do
+        query = Search::Queries::MarketplaceQuery.new(current_user: @org.admin, phrase: publisher_org_query, type: "repository-action")
+
+        results = query.execute.results.map { |result| result["_model"] }
+
+        assert_equal results.count, 1
+        refute_includes results, @marketplace_org_listing
+        refute_includes results, @unverified_org_listing
+        refute_includes results, @verification_pending_from_unverified_org_listing
+        assert_includes results, @repository_org_action
+      end
+
+      test "apps and actions published by user and only matching search query are listed for publisher search by user login with search query" do
+        query = Search::Queries::MarketplaceQuery.new(current_user: @user, phrase: publisher_user_query + " acm", type: "marketplace-tools")
+
+        results = query.execute.results.map { |result| result["_model"] }
+
+        assert_equal results.count, 3
+        assert_includes results, @marketplace_listing
+        assert_includes results, @unverified_listing
+        assert_includes results, @repository_action
+        refute_includes results, @verification_pending_from_unverified_listing
+        refute_includes results, @marketplace_org_listing
+      end
+
+      test "actions and apps published by org belonging to a category are listed for publisher search by org login and category filter" do
+        category = create(:marketplace_category, name: "chat")
+
+        @marketplace_org_listing.categories << category
+        make_searchable(@marketplace_org_listing, type: "marketplace_listing")
+
+        @repository_org_action.categories << category
+        make_searchable(@repository_org_action, type: "repository_action")
+
+        @unverified_listing.categories << category
+        make_searchable(@unverified_listing, type: "marketplace_listing")
+
+        query = Search::Queries::MarketplaceQuery.new(current_user: @org.admin, phrase: publisher_org_query + " category:\"#{category.name}\"", type: "marketplace-tools")
+
+        results = query.execute.results.map { |result| result["_model"] }
+
+        assert_equal results.count, 2
+        assert_includes results, @marketplace_org_listing
+        assert_includes results, @repository_org_action
+        refute_includes results, @unverified_org_listing
+        refute_includes results, @verification_pending_from_unverified_org_listing
+        refute_includes results, @unverified_listing
+      end
+
+      test "publisher search with login that owns no apps returns 0 results" do
+        no_app_user = create(:user)
+        query = Search::Queries::MarketplaceQuery.new(current_user: no_app_user, phrase: "owner_login:#{no_app_user.login}", type: "marketplace-tools")
+
+        results = query.execute.results.map { |result| result["_model"] }
+
+        assert_equal results.count, 0
+      end
+
+      test "publisher search with invalid login returns 0 results" do
+        query = Search::Queries::MarketplaceQuery.new(current_user: @user, phrase: "owner_login:invalid-login", type: "marketplace-tools")
+
+        results = query.execute.results.map { |result| result["_model"] }
+
+        assert_equal results.count, 0
+      end
+    end
+
+    context "when increase_actions_marketplace_visibility is enabled" do
+      test "verified repository actions are boosted above non-verified actions if query is not blank" do
+        query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "repository-action")
+        query.phrase = "Acme"
+
+        results = query.execute.results.map { |result| [result["_model"], result["_score"]] }.to_h
+        assert_same_elements [@verified_repository_action, @repository_action], results.keys
+
+        # Verified score will be greater than the non-verfied score
+        assert_operator results[@verified_repository_action], :>, results[@repository_action]
+      end
+
+      test "verified partner repository actions are listed above unverified listings and non-verified actions" do
+        azure = create(:organization, login: "Azure")
+        github = create(:organization, login: "actions")
+
+        azure_action = create(
+          :repository_action,
+          :verified,
+          :listed,
+          repository: create(:repository, owner: azure),
+          name: "Verified Acme Actions 2",
+        )
+        make_searchable(azure_action, type: "repository_action")
+
+        github_action = create(
+          :repository_action,
+          :verified,
+          :listed,
+          repository: create(:repository, owner: github),
+          name: "Verified Acme Actions 3",
+        )
+        make_searchable(github_action, type: "repository_action")
+
+        query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "repository-action")
+        query.phrase = ""
+
+        results = query.execute.results.map do |result|
+          [result["_model"], result["_score"]]
+        end.to_h
+
+        # Make sure it's the models we expect
+        assert_same_elements [
+          @verified_repository_action,
+          azure_action,
+          github_action,
+          @repository_action,
+          @repository_org_action,
+        ], results.keys
+
+        # Make sure the unverified one is scored less than the github/azure ones
+        assert_operator results[@repository_action], :<, results[github_action]
+        assert_operator results[@repository_action], :<, results[azure_action]
+      ensure
+        # We must delete these because they will pollute the index otherwise and be high ranking as they are verified.
+        # The index is only setup and deleted one for this entire file, so we have to do this manually.
+        RemoveFromSearchIndexJob.perform_now("repository_action", github_action.id)
+        github_action.destroy!
+        RemoveFromSearchIndexJob.perform_now("repository_action", azure_action.id)
+        azure_action.destroy!
+      end
+    end
+
+    context "dsa compliance" do
+      test "excludes noncompliant apps when the is_dsa_compliant option is true" do
+        query = Search::Queries::MarketplaceQuery.new(current_user: @user,
+                                                      type: "marketplace-tools",
+                                                      per_page: 20,
+                                                      is_dsa_compliant: true)
+
+        results = query.execute.results.map { |result| result["_model"] }
+
+        assert_includes results, @marketplace_listing
+        assert_includes results, @repository_action
+        assert_includes results, @model_catalog_item_gpt4
+        refute_includes results, @noncompliant_marketplace_listing
+      end
+
+      test "includes noncompliant apps when the is_dsa_compliant option is false" do
+        query = Search::Queries::MarketplaceQuery.new(current_user: @user,
+                                                      type: "marketplace-tools",
+                                                      per_page: 20,
+                                                      is_dsa_compliant: false)
+
+        results = query.execute.results.map { |result| result["_model"] }
+
+        assert_includes results, @marketplace_listing
+        assert_includes results, @repository_action
+        assert_includes results, @model_catalog_item_gpt4
+        assert_includes results, @noncompliant_marketplace_listing
+      end
+
+      test "includes noncompliant apps when the is_dsa_compliant option is excluded" do
+        query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "marketplace-tools", per_page: 20)
+
+        results = query.execute.results.map { |result| result["_model"] }
+
+        assert_includes results, @marketplace_listing
+        assert_includes results, @repository_action
+        assert_includes results, @model_catalog_item_gpt4
+        assert_includes results, @noncompliant_marketplace_listing
+      end
+    end
+  end
+
+  context "when building the sort" do
+    test "returns nil when the sort is empty and a query is present" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "marketplace-tools")
+      query.phrase = "foo"
+      assert_nil query.build_sort
+    end
+
+    test "returns nil when the sort is dependents count and the ff is disabled" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "marketplace-tools")
+      query.sort = %w[dependents-count desc]
+      assert_nil query.build_sort
+    end
+
+    test "maps the created sort field for marketplace-tools type" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "marketplace-tools")
+      query.sort = %w[created desc]
+      assert_equal([{ "created_at" => { "order" => "desc", "unmapped_type" => "date" } }], query.build_sort)
+    end
+
+    test "maps the created sort field for azure-models type" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.sort = %w[created desc]
+      assert_equal([{ "created_at" => { "order" => "desc", "unmapped_type" => "date" } }], query.build_sort)
+    end
+
+    test "maps the task sort field for azure-models type" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.sort = %w[task asc]
+      assert_equal([{ "task" => "asc" }], query.build_sort)
+    end
+
+    test "maps the name sort field for azure-models type" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.sort = %w[name asc]
+      assert_equal([{ "name.raw" => "asc" }], query.build_sort)
+    end
+
+    test "maps the sort field for max input tokens for Models" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.sort = %w[input-tokens desc]
+      assert_equal([{ "max_input_tokens" => { "order" => "desc", "unmapped_type" => "integer" } }], query.build_sort)
+    end
+
+    test "maps the sort field for max output tokens for Models" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.sort = %w[output-tokens asc]
+      assert_equal([{ "max_output_tokens" => { "order" => "asc", "unmapped_type" => "integer" } }], query.build_sort)
+    end
+
+    test "maps the popularity field for Models" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.sort = %w[popularity desc]
+      assert_equal([{ "popularity" => "desc" }], query.build_sort)
+    end
+
+    test "maps the popularity sort field to installation_count when searching for apps when the ff is turned on" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "marketplace")
+      query.sort = %w[popularity desc]
+      assert_equal([{ "installation_count" => "desc" }], query.build_sort)
+    end
+
+    test "maps the monthly popularity sort field to installation_count_last_month when searching for apps when the ff is turned on" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "marketplace")
+      query.sort = %w[last-month-popularity desc]
+      assert_equal([{ "installation_count_last_month" => "desc" }], query.build_sort)
+    end
+
+    test "maps the popularity sort field to stars when searching for actions when the ff is turned on" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "repository-action")
+      query.sort = %w[popularity desc]
+      assert_equal([{ "stars" => "desc" }], query.build_sort)
+    end
+
+    test "maps the popularity sort field to _score when no type is provided when the ff is turned on" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "marketplace-tools")
+      query.sort = %w[popularity desc]
+      assert_equal([{ "_score" => "desc" }], query.build_sort)
+    end
+
+    test "maps the dependents count sort field when the ff is turned on" do
+      enable_feature_flag(:dependents_count_marketplace, @user)
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "marketplace-tools")
+      query.sort = %w[dependents-count desc]
+      assert_equal([{ "dependents_count" => { "order" => "desc", "unmapped_type" => "integer" } }], query.build_sort)
+    end
+  end
+
+  context "pruning of search results" do
+    test "repository_action with a disabled repo is removed from the search index" do
+      new_user = create(:user)
+      new_action = create(:repository_action, :listed, name: "Apple Action", repository: create(:repository, owner: new_user))
+      make_searchable(new_action, type: "repository_action")
+
+      repository_access = new_action.repository.access
+      repository_access.disable(
+        "size",
+        @user,
+        instructions: "instructions",
+        disabling_detail: "details",
+        )
+
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "repository-action")
+      results = query.execute.results.map { |result| result["_model"] }
+      refute_includes results, new_action
+    end
+
+    test "marketplace listing whose integration has become private is removed from search index" do
+      new_marketplace_listing = create(:marketplace_listing, :verified, name: "Acme Listing", listable: create(:integration, owner: @user))
+      make_searchable(new_marketplace_listing, type: "marketplace_listing")
+
+      new_marketplace_listing.listable.make_private
+
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "marketplace")
+      results = query.execute.results.map { |result| result["_model"] }
+      refute_includes results, new_marketplace_listing
+    end
+  end
+
+  context "#build_query" do
+    test "generates a max output tokens filter for Models search" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.phrase = "output-tokens:>1000"
+      expected = { range: { max_output_tokens: { gt: "1000" } } }
+
+      actual = query.build_query.dig(:function_score, :query, :bool, :filter).detect { |filter| filter.key?(:bool) }
+
+      refute_nil actual
+      assert_includes actual.dig(:bool, :must), expected
+    end
+
+    test "generates a max input tokens filter for Models search" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.phrase = "input-tokens:10000..20000"
+      expected = { range: { max_input_tokens: { gte: "10000", lte: "20000" } } }
+
+      actual = query.build_query.dig(:function_score, :query, :bool, :filter).detect { |filter| filter.key?(:bool) }
+
+      refute_nil actual
+      assert_includes actual.dig(:bool, :must), expected
+    end
+
+    test "generates a task filter for Models search" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.phrase = "task:chat-completion"
+      expected = { term: { task: "chat-completion" } }
+
+      actual = query.build_query.dig(:function_score, :query, :bool, :filter).detect { |filter| filter.key?(:bool) }
+
+      refute_nil actual
+      assert_includes actual.dig(:bool, :must), expected
+    end
+
+    test "generates a license filter for Models search" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.phrase = "license:MIT"
+      expected = { term: { license: "mit" } }
+
+      actual = query.build_query.dig(:function_score, :query, :bool, :filter).detect { |filter| filter.key?(:bool) }
+
+      refute_nil actual
+      assert_includes actual.dig(:bool, :must), expected
+    end
+
+    test "generates a publisher filter for Models search" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.phrase = 'publisher:"ai21 LAbs"'
+      expected = { term: { publisher: "ai21 labs" } }
+
+      actual = query.build_query.dig(:function_score, :query, :bool, :filter).detect { |filter| filter.key?(:bool) }
+
+      refute_nil actual
+      assert_includes actual.dig(:bool, :must), expected
+    end
+
+    test "generates a supported language filter for Models search for a single language" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.phrase = "language:es"
+      expected = { term: { "supported_languages.raw": "es" } }
+
+      actual = query.build_query.dig(:function_score, :query, :bool, :filter).detect { |filter| filter.key?(:bool) }
+
+      refute_nil actual
+      assert_includes actual.dig(:bool, :must), expected
+    end
+
+    test "generates a supported language filter for Models search for multiple languages" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.phrase = "language:Es,EN"
+      expected = { terms: { "supported_languages.raw": %w(en es) } }
+
+      actual = query.build_query.dig(:function_score, :query, :bool, :filter).detect { |filter| filter.key?(:bool) }
+        &.dig(:bool, :should)
+
+      assert_equal expected, actual
+    end
+
+    test "generates a category filter for Models search for a single category" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.phrase = 'category:"Large Context"'
+      expected = { term: { "categories.raw": "large context" } }
+
+      actual = query.build_query.dig(:function_score, :query, :bool, :filter).detect { |filter| filter.key?(:bool) }
+
+      refute_nil actual
+      assert_includes actual.dig(:bool, :must), expected
+    end
+
+    test "generates a category filter for Models search for multiple categories" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.phrase = "category:RAG,Coding"
+      expected = { terms: { "categories.raw": %w(coding rag) } }
+
+      actual = query.build_query.dig(:function_score, :query, :bool, :filter).detect { |filter| filter.key?(:bool) }
+        &.dig(:bool, :should)
+
+      assert_equal expected, actual
+    end
+
+    test "generates a supported input modality filter for Models search for a single modality" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.phrase = "input-modality:Audio"
+      expected = { term: { "supported_input_modalities.raw": "audio" } }
+
+      actual = query.build_query.dig(:function_score, :query, :bool, :filter).detect { |filter| filter.key?(:bool) }
+
+      refute_nil actual
+      assert_includes actual.dig(:bool, :must), expected
+    end
+
+    test "generates a supported input modality filter for Models search for multiple modalities" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.phrase = "input-modality:Audio,text"
+      expected = { terms: { "supported_input_modalities.raw": %w(audio text) } }
+
+      actual = query.build_query.dig(:function_score, :query, :bool, :filter).detect { |filter| filter.key?(:bool) }
+        &.dig(:bool, :should)
+
+      assert_equal expected, actual
+    end
+
+    test "generates a supported output modality filter for Models search for a single modality" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.phrase = "output-modality:TEXT"
+      expected = { term: { "supported_output_modalities.raw": "text" } }
+
+      actual = query.build_query.dig(:function_score, :query, :bool, :filter).detect { |filter| filter.key?(:bool) }
+
+      refute_nil actual
+      assert_includes actual.dig(:bool, :must), expected
+    end
+
+    test "generates a supported output modality filter for Models search for multiple modalities" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.phrase = "output-modality:EMBEDDINGS,text"
+      expected = { terms: { "supported_output_modalities.raw": %w(embeddings text) } }
+
+      actual = query.build_query.dig(:function_score, :query, :bool, :filter).detect { |filter| filter.key?(:bool) }
+        &.dig(:bool, :should)
+
+      assert_equal expected, actual
+    end
+
+    test "generates a rate limit tier filter for Models search" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.phrase = "rate-limit-tier:High"
+      expected = { term: { rate_limit_tier: "high" } }
+
+      actual = query.build_query.dig(:function_score, :query, :bool, :filter).detect { |filter| filter.key?(:bool) }
+
+      refute_nil actual
+      assert_includes actual.dig(:bool, :must), expected
+    end
+
+    test "allows searching within license description for Models" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.phrase = 'in:license "product terms"'
+
+      query_string = query.build_query.dig(:function_score, :query, :bool, :must, :query_string)
+
+      refute_nil query_string
+      assert_equal %w(license_description), query_string[:fields]
+      assert_equal '"product terms"', query_string[:query]
+    end
+
+    test "allows searching within notes for Models" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.phrase = "in:transparency safety systems"
+
+      query_string = query.build_query.dig(:function_score, :query, :bool, :must, :query_string)
+
+      refute_nil query_string
+      assert_equal %w(notes), query_string[:fields]
+      assert_equal '"safety" "systems"', query_string[:query]
+    end
+
+    test "allows searching within description for Models" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.phrase = "in:description non-English languages"
+
+      query_string = query.build_query.dig(:function_score, :query, :bool, :must, :query_string)
+
+      refute_nil query_string
+      assert_equal %w(description short_description full_description summary), query_string[:fields]
+      assert_equal '"non\\-English" "languages"', query_string[:query]
+    end
+
+    test "allows searching within tags for Models" do
+      query = Search::Queries::MarketplaceQuery.new(current_user: @user, type: "azure-models")
+      query.phrase = "in:tags chat-completion multilingual"
+
+      query_string = query.build_query.dig(:function_score, :query, :bool, :must, :query_string)
+
+      refute_nil query_string
+      assert_equal %w(categories task), query_string[:fields]
+      assert_equal '"chat\\-completion" "multilingual"', query_string[:query]
+    end
+  end
+end

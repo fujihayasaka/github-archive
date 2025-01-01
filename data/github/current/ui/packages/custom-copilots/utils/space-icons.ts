@@ -1,0 +1,52 @@
+import type {Icon} from '@primer/octicons-react'
+import {
+  BeakerIcon,
+  BookIcon,
+  BroadcastIcon,
+  CloudIcon,
+  CodeIcon,
+  DatabaseIcon,
+  DependabotIcon,
+  HubotIcon,
+  OrganizationIcon,
+  ProjectRoadmapIcon,
+  TelescopeIcon,
+  TerminalIcon,
+} from '@primer/octicons-react'
+
+export const spaceIcons: Icon[] = [
+  BeakerIcon,
+  BookIcon,
+  BroadcastIcon,
+  CloudIcon,
+  CodeIcon,
+  DatabaseIcon,
+  DependabotIcon,
+  HubotIcon,
+  OrganizationIcon,
+  ProjectRoadmapIcon,
+  TelescopeIcon,
+  TerminalIcon,
+]
+
+export const spaceIconColors = [
+  'var(--display-auburn-bgColor-emphasis)',
+  'var(--display-blue-bgColor-emphasis)',
+  'var(--display-brown-bgColor-emphasis)',
+  'var(--display-coral-bgColor-emphasis)',
+  'var(--display-cyan-bgColor-emphasis)',
+  'var(--display-gray-bgColor-emphasis)',
+  'var(--display-green-bgColor-emphasis)',
+  'var(--display-indigo-bgColor-emphasis)',
+  'var(--display-lemon-bgColor-emphasis)',
+  'var(--display-lime-bgColor-emphasis)',
+  'var(--display-olive-bgColor-emphasis)',
+  'var(--display-orange-bgColor-emphasis)',
+  'var(--display-pine-bgColor-emphasis)',
+  'var(--display-pink-bgColor-emphasis)',
+  'var(--display-plum-bgColor-emphasis)',
+  'var(--display-purple-bgColor-emphasis)',
+  'var(--display-red-bgColor-emphasis)',
+  'var(--display-teal-bgColor-emphasis)',
+  'var(--display-yellow-bgColor-emphasis)',
+]

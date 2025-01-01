@@ -1,0 +1,183 @@
+<%= render(Primer::Box.new(
+  classes: wrapper_classes,
+  align_self: feeds_v2? ? :center : :end,
+  **system_arguments,
+)) do %>
+  <%= render(Primer::Alpha::ActionMenu.new(
+    position: :relative,
+    display: :flex,
+    align_items: :flex_end,
+    anchor_align: :end,
+    test_selector: "feed-item-heading-menu",
+  )) do |menu| %>
+    <% menu.with_show_button(
+      icon: :"kebab-horizontal",
+      scheme: :invisible,
+      m: feeds_v2? ? nil : 1,
+      ml: feeds_v2? ? nil : 3,
+      mr: feeds_v2? ? 1 : 0,
+      classes: "feed-item-heading-menu-button",
+      aria: { label: "Feed item options" },
+      test_selector: "feed-item-kebab",
+    ) %>
+
+    <% if show_reason? %>
+      <% menu.with_item(
+        tag: :div,
+        content_arguments: {
+          tag: :div,
+          p: 3,
+          bg: :default,
+          style: "cursor: default;",
+        },
+        label_arguments: {
+          color: :muted,
+          font_size: 6,
+          style: "cursor: text;",
+        },
+        test_selector: "feed-item-heading-menu-reason"
+      ) do %>
+        <%= reason_message %>
+      <% end %>
+
+      <% if show_disinterest_option? || show_report_option? || show_delete_option? %>
+        <% menu.with_divider %>
+      <% end %>
+    <% end %>
+
+    <% if show_disinterest_option? %>
+      <% menu.with_item(
+        tag: :button,
+        label: "Show less activity like this",
+        content_arguments: {
+          py: 3,
+          data: disinterest_dialog_item_data,
+        },
+        test_selector: "feed-item-heading-menu-disinterest-button",
+      ) %>
+    <% end %>
+
+    <% if show_report_option? %>
+      <% if actor_is_org? %>
+        <% menu.with_item(
+          label: "Report",
+          href: org_report_path,
+          content_arguments: {
+            py: 3,
+          },
+          test_selector: "feed-item-heading-menu-report-org",
+        ) do |item| %>
+          <% item.with_leading_visual_icon(icon: :report) %>
+        <% end %>
+      <% else %>
+        <% menu.with_item(
+          tag: :button,
+          label: "Report",
+          content_arguments: {
+            py: 3,
+            data: { show_dialog_id: report_user_dialog_id },
+          },
+          test_selector: "feed-item-heading-menu-report-user",
+        ) do |item| %>
+          <% item.with_leading_visual_icon(icon: :report) %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <% if show_unfollowable_actor_option? %>
+      <% menu.with_item(
+        label: "Unfollow this user",
+        href: unfollow_user_path(target: actor),
+        content_arguments: {
+          py: 3,
+          classes: "js-hide-heading-menu-button js-follow-unfollow-submit",
+        },
+        form_arguments: { method: :post },
+        test_selector: "feed-item-heading-menu-unfollow-user-button",
+      ) %>
+    <% end %>
+
+    <% if show_unstarrable_option? %>
+      <% menu.with_item(
+        label: "Unstar this repository",
+        href: unstar_repository_path(item.repository.owner.display_login, item.repository),
+        form_arguments: {
+          method: :post,
+          name: "context",
+          value: "for_you_feed",
+        },
+        content_arguments: {
+          py: 3,
+          classes: "js-hide-heading-menu-button js-follow-unfollow-submit",
+        },
+        test_selector: "feed-item-heading-menu-unstar-repository-button",
+      ) %>
+    <% end %>
+
+    <% if show_delete_option? %>
+      <% menu.with_item(
+        label: "Delete this post",
+        href: feed_post_path(item.subject),
+        form_arguments: { method: :delete },
+        content_arguments: {
+          py: 3,
+        },
+      ) %>
+    <% end %>
+
+    <% if show_hide_option? %>
+      <% menu.with_item(
+        label: hide_label,
+        href: activities_visibility_path(current_user),
+        form_arguments: {
+          method: hide_method,
+          inputs: hide_inputs,
+        },
+        content_arguments: {
+          py: 3,
+        },
+        test_selector: "event-visibility-form",
+      ) %>
+    <% end %>
+
+    <% if show_dismiss_announcement_option? %>
+      <% menu.with_item(
+        label: "Dismiss announcement",
+        href: conduit_register_disinterest_path,
+        form_arguments: {
+          method: :post,
+          inputs: dismiss_announcement_inputs,
+        },
+        content_arguments: {
+          py: 3,
+          classes: "js-feed-disinterest-submit",
+        },
+      ) %>
+    <% end %>
+  <% end %>
+
+  <%# Dialog bodies %>
+
+  <% if show_disinterest_option? %>
+    <%= render(Conduit::RegisterDisinterestModalComponent.new(
+      item: item,
+      dialog_id: disinterest_dialog_id,
+    )) %>
+  <% end %>
+
+  <% if show_report_option? && !actor_is_org? %>
+    <%= render(Profiles::User::BlockButtonComponent.new(
+      user: actor,
+      viewer_is_sponsoring_user: actor_is_sponsored_by_viewer?,
+      viewer_is_sponsored_by_user: viewer_is_sponsored_by_actor?,
+      viewer_is_blocking_user: false,
+      header_classes: "report-dialog-header",
+      title_classes: "m-0 h5",
+      dialog_classes: "overflow-hidden",
+      render_show_button: false,
+      variant: :default,
+      id: report_user_dialog_id,
+      test_selector: "feed-item-heading-menu-user-block-button",
+    )) %>
+  <% end %>
+<% end %>

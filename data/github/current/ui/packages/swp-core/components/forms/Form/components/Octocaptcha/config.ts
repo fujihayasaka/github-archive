@@ -1,0 +1,1 @@
+export const OCTOCAPTCHA_TIMEOUT = 30000

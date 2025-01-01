@@ -1,0 +1,803 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - unicorn/
+  - unicorn-api/
+  - unicorn-performance/
+  - unicorn-api-graphql/
+  - unicorn-api-graphql-performance/
+  - unicorn-gitauth-api/
+  - unicorn-internal-api/
+  - ../../base/commonBase
+  - ../../base/production
+  - ../../base/commonBase/feature-flag-update-processor/feature-flag-update-processor-3
+  - deployments/copilot-trade-compliance-processor.yaml
+
+components:
+  - ../../base/istio-perf-eng
+  - ../../base/metric-attribution
+
+images:
+  - name: octofactory.service.private-us-east-1.github.net/moda-artifacts-docker/docker-nginx
+    digest: sha256:47957b8c0f58b73ab5fb6a4f10215671e7120e2cb38316cfbfc1fb2cc6fe1e1f
+configMapGenerator:
+  - name: elasticsearch
+    behavior: merge
+    literals:
+      - AUDITLOGSEARCH3_URL=https://auditlogsearch3-ssl.service.iad.github.net
+      - COMMIT_SEARCH_1_URL=https://commit-search-1.service.iad.github.net
+      - GENERAL_SEARCH_1_URL=https://general-search-1.service.iad.github.net
+      - GITHUBSEARCH6_URL=https://githubsearch6-ssl.service.iad.github.net
+  - name: observability-config
+    behavior: merge
+    literals:
+      - FAILBOT_HAYSTACK_URL_MESH=http://failbotg.failbotg-production.svc.cluster.local/api/needles
+      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT_INGRESS=https://otelcol-dotcom.service.iad.github.net/v1/traces
+
+replicas:
+  - name: actions-usage-relay
+    count: 4
+  - name: actions-artifact-storage-event-processor
+    count: 2
+  # The unicorn-gitauth-api replicas are set in the patch ./patches/deployments/unicorn-gitauth-api.yaml
+  # The replicas directive cannot filter on labels at this time, so setting it here would set it
+  # for unicorn-gitauth-api-performance as well (which we don't want)
+  # - name: unicorn-gitauth-api
+  #   count: NOT_SET_HERE
+  # If you're decreasing this value, make sure to also update the
+  # corresponding `acl site_dead` configuration in the kube-dotcom-ingress
+  # repo
+  # (https://github.com/github/kube-dotcom-ingress/blob/main/config/helm/production/haproxytech-ingress-dotcom-unicorn-internal-api.yaml)
+  # and deploy that change first. Reach out to #service-mesh for guidance.
+  - name: unicorn-internal-api
+    count: 90
+patches:
+  - target:
+      kind: Deployment
+      name: unicorn-api
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/labels/sidecar.istio.io~1inject
+        value: "true"
+      - op: add
+        path: /spec/template/metadata/labels/istio.io~1rev
+        value: "stable"
+      - op: replace
+        path: /spec/template/spec/dnsPolicy
+        value: "ClusterFirst"
+  - target:
+      kind: Deployment
+      name: unicorn-api-graphql
+    patch: |-
+      - op: remove
+        path: /spec/template/metadata/annotations/traffic.sidecar.istio.io~1excludeOutboundPorts
+  - target:
+      kind: Deployment
+      name: unicorn-api-graphql-performance
+    patch: |-
+      - op: remove
+        path: /spec/template/metadata/annotations/traffic.sidecar.istio.io~1excludeOutboundPorts
+      - op: remove
+        path: /spec/template/metadata/labels/istio.io~1rev
+      - op: replace
+        path: /spec/template/metadata/labels/sidecar.istio.io~1inject
+        value: "false"
+      - op: replace
+        path: /spec/template/spec/dnsPolicy
+        value: Default
+      - op: replace
+        path: /spec/strategy/rollingUpdate/maxUnavailable
+        value: 1
+
+  - target:
+      kind: Service
+      name: unicorn-api-graphql-performance
+    patch: |-
+      - op: replace
+        path: /metadata/annotations/moda.github.net~1cluster-preferences
+        value: ""
+      - op: add
+        path: /metadata/annotations/octomesh.github.com~1paused
+        value: "true"
+  - target:
+      kind: Service
+      name: unicorn-api-performance
+    patch: |-
+      - op: replace
+        path: /metadata/annotations/moda.github.net~1cluster-preferences
+        value: ""
+      - op: add
+        path: /metadata/annotations/octomesh.github.com~1paused
+        value: "true"
+  - target:
+      kind: Service
+      name: unicorn-api-graphql-performance
+    patch: |-
+      - op: replace
+        path: /metadata/annotations/moda.github.net~1cluster-preferences
+        value: ""
+      - op: add
+        path: /metadata/annotations/octomesh.github.com~1paused
+        value: "true"
+  - target:
+      kind: Service
+      name: unicorn-api-performance
+    patch: |-
+      - op: replace
+        path: /metadata/annotations/moda.github.net~1cluster-preferences
+        value: ""
+  - target:
+      kind: Service
+      name: unicorn-internal-api
+    patch: |-
+      - op: add
+        path: /metadata/annotations/haproxy.org~1check-interval
+        value: "5s"
+      - op: add
+        path: /metadata/annotations/kubernetes.io~1ingress.class
+        value: "haproxytech-unicorn-internal-api"
+      - op: add
+        path: /metadata/annotations/haproxy.org~1load-balance
+        value: "leastconn"
+      - op: add
+        path: /metadata/annotations/haproxy.org~1backend-config-snippet
+        value: |-
+          option redispatch 1
+          option httpchk
+          http-check connect
+          http-check send meth GET uri /site/sha ver HTTP/1.1 hdr host github.com
+
+  - target:
+      kind: Job
+      name: transition-template-job
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: GH_HOSTNAME
+          value: github.com
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: SMTP_HOST
+          value: smtp.service.github.net
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: 2
+  - target:
+      kind: Namespace
+      name: base-namespace
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: github-production
+      - op: replace
+        path: "/metadata/labels/github.com~1name"
+        value: github-production
+  - target:
+      kind: Deployment
+      name: code-scanning-alert-event-processor
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: GH_HOSTNAME
+          value: github.com
+  - target:
+      kind: Deployment
+      name: code-scanning-processed-analysis-processor
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: GH_HOSTNAME
+          value: github.com
+  - target:
+      kind: ResourceQuota
+      name: pod-object-count
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: github-production
+  - target:
+      kind: Deployment
+      name: billing-platform-actions-usage-relay
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+  - target:
+      kind: ConfigMap
+      name: elasticsearch
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          moda.github.net/canary-v2: "true"
+  - target:
+      kind: ConfigMap
+      name: observability-config
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          moda.github.net/canary-v2: "true"
+  - target:
+      kind: ConfigMap
+      name: unicorn-api-nginx-conf
+    patch: |-
+      - op: add
+        path: /metadata/annotations/moda.github.net~1canary-v2
+        value: "true"
+  - target:
+      kind: ConfigMap
+      name: unicorn-gitauth-api-nginx-conf
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          moda.github.net/canary-v2: "true"
+  - target:
+      kind: ConfigMap
+      name: unicorn-gitauth-api-nginx-conf-mirror
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          moda.github.net/canary-v2: "true"
+  - target:
+      kind: ConfigMap
+      name: unicorn-internal-api-nginx-conf
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          moda.github.net/canary-v2: "true"
+  - target:
+      kind: ConfigMap
+      name: unicorn-nginx-conf-stafftools-fe
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          moda.github.net/canary-v2: "true"
+  - target:
+      kind: ConfigMap
+      name: unicorn-nginx-conf
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          moda.github.net/canary-v2: "true"
+  - target:
+      kind: Deployment
+      name: unicorn
+    patch: |-
+      - op: add
+        path: /metadata/annotations/heaven.githubapp.com~1deploy-requirement
+        value: true
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: SMTP_HOST
+          value: smtp.service.github.net
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: GH_HOSTNAME
+          value: github.com
+  - target:
+      version: v1
+      kind: Deployment
+      name: unicorn-performance
+    patch: |-
+      - op: replace
+        path: /spec/template/metadata/labels/sidecar.istio.io~1inject
+        value: "true"
+      - op: add
+        path: /spec/template/metadata/labels/istio.io~1rev
+        value: "stable"
+      - op: replace
+        path: /spec/template/spec/dnsPolicy
+        value: "ClusterFirst"
+  - target:
+      kind: Deployment
+      name: unicorn-api-graphql-performance
+    path: ./patches/remove-sidecar-resource-annotations.yaml
+  - target:
+      kind: Deployment
+      name: unicorn-api-graphql
+    path: ./patches/remove-sidecar-resource-annotations.yaml
+  - target:
+      kind: Deployment
+      name: unicorn-performance
+    path: ./patches/net-and-tcp-configuration.yaml
+  - path: ./patches/services/unicorn-gitauth-api.yaml
+    target:
+      labelSelector: 'kustomizeOverlayName=base__commonBase__unicorn-gitauth-api'
+      kind: Service
+      version: v1
+      name: unicorn-gitauth-api
+  - path: ./patches/deployments/unicorn-gitauth-api-common.yaml
+    target:
+      kind: Deployment
+      name: unicorn-gitauth-api
+      group: apps
+      version: v1
+  - path: ./patches/all-clusters-enable-sidecar.yaml
+    target:
+      kind: Deployment
+      name: unicorn-gitauth-api
+      group: apps
+      version: v1
+  - path: ./patches/services/unicorn-gitauth-api-common.yaml
+    target:
+      kind: Service
+      name: unicorn-gitauth-api
+      version: v1
+  - path: ./unicorn-internal-api/deployments/unicorn-internal-api.yaml
+  - target:
+      kind: Service
+      name: unicorn-internal-api
+    patch: |-
+      - op: replace
+        path: /metadata/annotations/octomesh.github.com~1paused
+        value: "false"
+
+  #############################
+  # Unicorn worker onboarding #
+  #############################
+
+  # Stream processors group 1
+  - target:
+      kind: Deployment
+      name: achievements-galaxy-brain-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: achievements-heart-on-your-sleeve-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: achievements-heartbreaker-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: achievements-open-sourcerer-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: achievements-pair-extraordinaire-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: achievements-public-sponsor-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: achievements-pull-shark-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: achievements-quickdraw-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: achievements-starstruck-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: achievements-yolo-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: community-insights-contribution-activity-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: community-insights-discussion-page-view-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: projects-denormalization-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: sub-issue-list-recalculation-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: turboghas-summary-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: user-metadata-achievement-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: user-metadata-developer-program-membership-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: user-metadata-discussion-answer-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: user-metadata-global-advisory-credit-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: user-metadata-package-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: user-metadata-pro-badge-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: user-metadata-project-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: user-metadata-repo-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: user-metadata-sponsor-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: user-metadata-star-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: user-metadata-user-follow-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: user-metadata-user-team-membership-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: yjittestworker
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: code-search-query-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: copilot-trade-compliance-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: dependabot-alerts-alerting-progress-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: dependabot-alerts-deleted-manifest-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: dependabot-alerts-manifest-vulnerable-dependencies-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: dependabot-alerts-vulnerable-dependency-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: package-deleted-audit-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: package-file-published-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: package-published-audit-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: package-registry-download-activity-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: package-registry-package-restore-migration-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: package-registry-package-version-restore-migration-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: package-registry-sync-v1-package-version-delete-to-v2-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: package-transferred-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: package-version-deleted-audit-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: package-version-deleted-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: package-version-downloaded-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: package-version-published-audit-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: refresh-token-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: salesforce-screening-result-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: secret-scanning-scan-completion-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: stratocaster-timeline-updates-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: memex-events-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: memex-live-updates-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: user-contribution-history-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+
+  # Stream processors group 2
+  - target:
+      kind: Deployment
+      name: actions-artifact-storage-event-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: actions-cache-usage-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: actions-repository-usage-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: actions-reputation-score-change-event-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: actions-usage-relay
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: check-suite-status-change-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: code-scanning-alert-event-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: code-scanning-processed-analysis-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: cve-request-response-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: epss-ingestion-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: feature-flag-update-processor-0
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: feature-flag-update-processor-1
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: feature-flag-update-processor-2
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: feature-flag-update-processor-3
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: issue-project-events-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: orca-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: pages-deployment-status-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: programmatic-access-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: progress-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: registry-metadata-artifact-storage-event-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: rms-layer-deleted-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: rms-layer-downloaded-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: rms-layer-published-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: rms-package-deleted-audit-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: rms-package-published-audit-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: rms-version-deleted-audit-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: rms-version-downloaded-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: rms-version-migration-status-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: rms-version-published-audit-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: rms-version-published-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: secret-scanning-alert-events-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: secret-scanning-notifications-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: security-center-repository-update-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: sponsors-activity-sponsorship-cancel-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: sponsors-activity-sponsorship-payment-complete-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: sponsors-activity-sponsorship-pending-change-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: sponsors-activity-sponsorship-tier-change-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: sponsors-activity-sponsorship-transfer-reversal-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: submit-advisory-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: vss-subscription-event-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: vulnerability-exposure-repository-vulnerability-alert-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: aqueduct-job-relay
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: billing-platform-budget-threshold-notification-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: billing-platform-usage-report-request-notification-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: credit-check-request-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: pull-request-review-submit-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: pull-request-timeline-comment-create-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: usage-threshold-notification-processor
+    path: ./patches/all-clusters-enable-sidecar.yaml
+
+  # Aqueduct workers
+  - target:
+      kind: Deployment
+      name: accountsecurityworker
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: actionsworker
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: hydroworker
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: indexworker
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: issueorchestrationworker
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: notificationworker
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: pullrequestworker
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: pushworker
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: highworker
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: hookworker
+    path: ./patches/all-clusters-enable-sidecar.yaml
+  - target:
+      kind: Deployment
+      name: lowworker
+    path: ./patches/all-clusters-enable-sidecar.yaml

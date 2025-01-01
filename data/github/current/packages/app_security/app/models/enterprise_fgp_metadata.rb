@@ -1,0 +1,82 @@
+# typed: true
+# frozen_string_literal: true
+
+class EnterpriseFgpMetadata
+  attr_reader :label, :category, :description
+
+  # Fine Grained Permission metadata
+  def initialize(fgp)
+    @label = fgp
+    @category = EnterpriseFgpMetadata.category_for(fgp)
+    @description = EnterpriseFgpMetadata.description_for(fgp)
+  end
+
+  # FGP contains the metadata for an individual fine grained permission
+  def self.for(fgp)
+    new(fgp.to_sym)
+  end
+
+  # Public: get all the categories and FGPs for a role
+  #
+  # - role: the Role object
+  #
+  # Returns a Hash of categories titles to FGP descriptions
+  def self.for_role(role)
+    fgps_by_category = Permissions::FineGrainedPermissionIm.where(actions: role.permissions.map(&:action), target_type: "Business").group_by(&:category)
+
+    CATEGORY_ORDER.each_with_object({}) do |category, result|
+      next unless (fgps = fgps_by_category[category])
+
+      result[title_for(category)] = fgps.map(&:description)
+    end
+  end
+
+  def self.categories
+    CATEGORY_ORDER
+  end
+
+  def self.category_for(fgp)
+    return :unknown unless (fgp_im = Permissions::FineGrainedPermissionIm.enterprise_fgps_for_custom_roles.find { |f| f.action == fgp.to_s })
+
+    fgp_im.category || :unknown
+  end
+
+  def self.description_for(fgp)
+    return "unknown" unless (fgp_im = Permissions::FineGrainedPermissionIm.enterprise_fgps_for_custom_roles.find { |f| f.action == fgp.to_s })
+
+    fgp_im.description || "unknown"
+  end
+
+  # Public: the human readable title for every FGP category
+  def self.title_for(category)
+    case category
+    when :access_management
+      "Access management"
+    when :general
+      "General"
+    end
+  end
+
+  # Public: the octicon for every FGP category
+  def self.icon_for(category)
+    case category
+    when :access_management
+      "unlock"
+    when :general
+      "gear"
+    end
+  end
+
+  # Public: the octicon for every FGP category by title
+  # hard coded for now
+  def self.icon_for_title(title)
+    case title
+    when "Access management"
+      "unlock"
+    when "General"
+      "gear"
+    end
+  end
+
+  CATEGORY_ORDER = %i(access_management general).freeze
+end

@@ -1,0 +1,242 @@
+# This file is used to track queries that violate package boundaries. There are two reasons for violations:
+#
+# - Cross domain: A query uses tables from multiple domains.
+# - Domain access: A query bypassed a domain's interface and accessed its private tables directly.
+#
+# The format of this file is as follows:
+#
+# <query_digest>:
+#   query: <query>
+#   violations:
+#     - [location: <file:line>] # never committed but only generated with the --locations flag
+#       reason: <cross_domain|domain_access>
+#
+# To add a new violation, you can run the test causing the violation with the following environment variables:
+#
+#   TEST_ALL_FEATURES=1 PERFORM_STATEMENT_CHECKING=1 DOMAIN_QUERY_VIOLATIONS=1 bin/rails test <path_to_test_file>:<line_number>
+#
+# This will update the query violation file(s) with the new violation(s). To remove a violation, you can simply
+# remove the entry from the file.
+#
+# If there are many violations to add or update, or you'd like to refresh all recorded violations, you can
+# run the following command to pull all violations from the latest completed CI build on your branch:
+#
+#     script/domain-isolation-query-violations [--locations] [--audit] [--reason <cross_domain|domain_access>]
+#
+# This will replace all query violation files with the latest violations. Use the `--locations` flag to
+# include file locations in the output, don't commit that though! Use the `--audit` flag to include
+# violations from tables with visibility level `audit`. Use the `--reason` flag to filter violations
+# by reason in case you're only interested in locations for a specific reason.
+
+---
+'04482b56102b4a42c9b1f01d0d2652304a106619fdf39505267e03ca8cc9990f':
+  query: SELECT statuses.updated_at FROM statuses FORCE INDEX(index_statuses_on_is_archived_updated_at)
+    WHERE (is_archived = ?) AND (updated_at > ? AND updated_at <= ?) ORDER BY updated_at
+    ASC LIMIT ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+'09507c19cc7e9ae1923350832f9c6143fabbdddc6d5bd0005226f50a71637ecb':
+  query: SELECT statuses.* FROM statuses WHERE statuses.id = ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+19bc0b88518ff6c89b78c64b56db44e3ef92d6c1f97844746e08faa537ed908d:
+  query: SELECT statuses.* FROM statuses WHERE statuses.repository_id = ? AND statuses.id
+    IN (SELECT * FROM (SELECT max(id) FROM statuses FORCE INDEX (index_statuses_on_repository_id_and_sha_and_context)
+    WHERE statuses.repository_id = ? AND statuses.sha = ? GROUP BY statuses.sha, statuses.context)
+    subquery) ORDER BY statuses.id ASC
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+1f133d2f76b2898a99cf385499ce29853cbb36d935f7622c00e3ce3b95a640f8:
+  query: INSERT INTO statuses (state, description, target_url, sha, repository_id,
+    creator_id, created_at, updated_at, context, tree_oid, commit_oid) VALUES (?,
+    ?, x?, ?, ?, ?, ?, ?, ?, x?, x?)
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+2d28ca925ce61a6ec5e43a43909a8add5270224411f43816c744f3f01d27c245:
+  query: SELECT statuses.* FROM statuses WHERE statuses.repository_id = ? AND statuses.id
+    IN (SELECT * FROM (SELECT max(id) FROM statuses FORCE INDEX (index_statuses_on_repository_id_and_sha_and_context)
+    WHERE statuses.repository_id = ? AND statuses.sha IN ? GROUP BY statuses.sha,
+    statuses.context) subquery) ORDER BY statuses.id ASC
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+347398bba59312c56d11c1ee041a0844e3fd6577fadf85414677bebbd2bb52a5:
+  query: SELECT COUNT(*) FROM statuses WHERE repository_id = ? AND sha = ? AND context
+    = ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+4a3d581896f46c8ed3dd3f717c91d1e6f5f2b657872952d5100cb6ef411405d2:
+  query: SELECT statuses.updated_at FROM statuses FORCE INDEX(index_statuses_on_is_archived_updated_at)
+    WHERE (is_archived = ?) AND (updated_at > ? AND updated_at <= ?) ORDER BY updated_at
+    ASC LIMIT ? OFFSET ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+56b5ddfd38f06331dcd4f220d82f4a1149d488702ec280100516c14c95cda714:
+  query: DELETE FROM statuses WHERE statuses.repository_id = ? AND (statuses.id IN
+    ? OR statuses.id IS NULL)
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+583bfe463f25a3974c0439772aa55c605f573a0c57ca57ad985531777cd02408:
+  query: SELECT context, creator_id FROM statuses WHERE created_at > ? AND repository_id
+    = ? ORDER BY created_at DESC LIMIT ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+610bd29da1a48959447949c4d902dfd47128dc30018964630af22bb80dc2eba8:
+  query: SELECT * FROM statuses FORCE INDEX (index_statuses_on_repository_id_and_sha_and_context)
+    WHERE repository_id = ? AND sha = ? AND context = ? AND id < ? ORDER BY id DESC
+    LIMIT ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+63a11ccd8f3d063016897fcc58b8c8ac2ec5ac289d87d47216155aa9a0fc7ba7:
+  query: SELECT statuses.* FROM statuses WHERE statuses.repository_id = ? AND statuses.id
+    IN (SELECT * FROM (SELECT max(id) FROM statuses FORCE INDEX (index_statuses_on_repository_id_and_sha_and_context)
+    WHERE statuses.repository_id = ? AND statuses.sha = ? AND statuses.context = ?
+    GROUP BY statuses.sha, statuses.context) subquery)
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+74bba09cee7d0dd665c7ebff01199fa76d4817e5882d2e592c0c9b174e62ca95:
+  query: SELECT statuses.repository_id, statuses.id FROM statuses FORCE INDEX(index_statuses_on_is_archived_updated_at)
+    WHERE (is_archived = ?) AND (updated_at between ? AND ?) AND (updated_at <= ?)
+    ORDER BY statuses.id ASC LIMIT ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+7ac7be45fc7106405f3572a463555bd8d65d13977411135750847b635b29469d:
+  query: SELECT statuses.* FROM statuses WHERE statuses.repository_id = ? AND statuses.id
+    IN (SELECT * FROM (SELECT max(id) FROM statuses FORCE INDEX (index_statuses_on_repository_id_and_sha_and_context)
+    WHERE statuses.repository_id = ? AND statuses.sha = ? AND (created_at < ?) GROUP
+    BY statuses.sha, statuses.context) subquery) ORDER BY statuses.id DESC
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+907484ec22518924e552f08a8f27b1320e99bde1d97995255b094950b423e0a9:
+  query: SELECT statuses.* FROM statuses WHERE statuses.repository_id = ? AND statuses.id
+    IN (SELECT * FROM (SELECT max(id) FROM statuses FORCE INDEX (index_statuses_on_repository_id_and_sha_and_context)
+    WHERE statuses.repository_id = ? AND statuses.sha IN ? AND statuses.context =
+    ? GROUP BY statuses.sha, statuses.context) subquery)
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+a34cc3643cbd73da50be3817fd90f496630143f0c04b879dd3f5508e080975d1:
+  query: SELECT ? AS one FROM statuses WHERE statuses.repository_id = ? AND statuses.id
+    IN (SELECT * FROM (SELECT max(id) FROM statuses FORCE INDEX (index_statuses_on_repository_id_and_sha_and_context)
+    WHERE statuses.repository_id = ? AND statuses.sha = ? GROUP BY statuses.sha, statuses.context)
+    subquery) LIMIT ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+a53ee871759f06dc8dc0478941729d004721f9ab7b0bbf8ad1181c10c731a676:
+  query: SELECT statuses.updated_at, statuses.id FROM statuses FORCE INDEX(index_statuses_on_is_archived_updated_at)
+    WHERE (is_archived = ?) AND (updated_at <= ?) ORDER BY updated_at ASC LIMIT ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+c73e54b98bf437e05b839463a3e4eb2a3623c733bd1d4dd715845ace474fb761:
+  query: SELECT statuses.updated_at FROM statuses FORCE INDEX(index_statuses_on_is_archived_updated_at)
+    WHERE (is_archived = ?) AND (updated_at <= ?) ORDER BY updated_at ASC LIMIT ?
+    OFFSET ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+d2674a52f538afcefe8d5032660c763c43dec8b54180c57fc238812a3f046f49:
+  query: SELECT statuses.* FROM statuses WHERE statuses.repository_id = ? AND statuses.id
+    IN (SELECT * FROM (SELECT max(id) FROM statuses FORCE INDEX (index_statuses_on_repository_id_and_sha_and_context)
+    WHERE statuses.repository_id = ? AND statuses.sha IN ? AND statuses.context IN
+    ? GROUP BY statuses.sha, statuses.context) subquery)
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+dc050144cbf22a23d950f7b4e34e084b464e9c9426661f432a0c144dd3aefb63:
+  query: SELECT ? AS one FROM statuses WHERE statuses.repository_id = ? AND statuses.sha
+    = ? LIMIT ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+e1352190b6ea5c12d8e023019bbf1935d2bc60699aed4999842e27ab763a77f6:
+  query: SELECT DISTINCT sha FROM statuses USE INDEX(index_statuses_on_repository_id_and_sha_and_context)
+    WHERE statuses.repository_id = ? AND sha IN ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+e59b04a160634a93dbf905e54673122e8aa65401ead430655851df04493f77a9:
+  query: SELECT statuses.* FROM statuses WHERE statuses.repository_id = ? AND statuses.id
+    IN (SELECT * FROM (SELECT max(id) FROM statuses FORCE INDEX (index_statuses_on_repository_id_and_sha_and_context)
+    WHERE statuses.repository_id = ? AND statuses.sha = ? AND statuses.context IN
+    ? GROUP BY statuses.sha, statuses.context) subquery)
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+e8bfa7be5b3c8c28a9461e90953c4183244969f5160959d37e8cce10fc0b06f4:
+  query: UPDATE statuses SET statuses.archived_at = ?, statuses.updated_at = ? WHERE
+    statuses.repository_id = ? AND (statuses.id = ? OR statuses.id IS NULL)
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+e96fb01fed174abc40d2dfdbf6e092bb605b1df10a8a88ba78ee0050eaab7e99:
+  query: SELECT count(*) FROM statuses WHERE statuses.repository_id = ? AND statuses.sha
+    = ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+f094822a3a2cd9a708f3278ff95fbf2fc44b9d60bfe9e1fab73e617c9fa98e2e:
+  query: SELECT COUNT(*) AS count_all, statuses.state AS statuses_state FROM statuses
+    WHERE statuses.repository_id = ? AND statuses.sha = ? GROUP BY statuses.state
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+f4642f17323e72b8369aaa30697162ccc12aba27989c4bc11e0d4a4a492deec7:
+  query: SELECT ? AS one FROM statuses WHERE statuses.repository_id = ? AND statuses.repository_id
+    = ? LIMIT ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+f9c984d2b24a9f39b7c97ce795aa7f8530b75c9237b91858627fad7cf1854cc7:
+  query: INSERT INTO statuses (state, description, sha, repository_id, creator_id,
+    created_at, updated_at, context, tree_oid, commit_oid) VALUES (?, ?, ?, ?, ?,
+    ?, ?, ?, x?, x?)
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+fef1f005acfab09df11b0f3561e68543249a6cb1d93fe1b756c65a12c2bf85ef:
+  query: SELECT statuses.* FROM statuses WHERE statuses.repository_id = ? AND statuses.sha
+    = ? ORDER BY statuses.id DESC LIMIT ? OFFSET ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access

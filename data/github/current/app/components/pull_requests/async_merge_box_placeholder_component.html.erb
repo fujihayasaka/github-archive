@@ -1,0 +1,71 @@
+<% react_partial_replacement(name: "merge-box", react_enabled: new_mergebox_feature_enabled?) do |feature| %>
+  <% feature.react do %>
+    <div class="merge-pr Details is-merging">
+      <%= render partial: "pull_requests/deployments_box_wrapper", locals: { pull: pull_request, gate_requests: gate_requests } %>
+      <%= render_react_partial name: "mergebox-partial", props: {
+        defaultMergeMethod: default_merge_method(current_user: current_user),
+        pullRequestId: pull_request.global_relay_id,
+        basePageDataUrl: pull_request_base_page_data_path,
+        viewerLogin: current_user.display_login,
+        helpUrl: GitHub.help_url,
+        enabledFeatures: {
+          merge_box_pause_updates_in_background: user_feature_enabled?(:merge_box_pause_updates_in_background),
+          merge_box_hide_sections: user_feature_enabled?(:merge_box_hide_sections),
+          merge_box_use_fetch_with_error_handling: user_feature_enabled?(:merge_box_use_fetch_with_error_handling),
+          mergebox_paint_containment: user_feature_enabled?(:mergebox_paint_containment),
+          mergebox_smarter_checks_keys: user_feature_enabled?(:mergebox_smarter_checks_keys),
+          mergebox_disable_strict_focus_zone: user_feature_enabled?(:mergebox_disable_strict_focus_zone),
+        },
+        channels: alive_channels,
+      } %>
+      <% if show_opt_in_opt_out_react_feature_preview?(current_user: current_user) %>
+        <div class="d-flex flex-justify-end">
+          <%= form_tag toggle_new_mergebox_path(current_repository.owner_display_login, current_repository.name) do %>
+            <%= hidden_field_tag(:pull_number, pull_request.number) %>
+            <%= hidden_field_tag(:new_state, "disabled") %>
+            <% if user_feature_enabled?(:lifecycle_label_name_updates) %>
+              <%= render(Primer::Experimental::BetaLabel.new) %>
+            <% else %>
+              <%= render(Primer::Beta::Label.new(scheme: :success)) { "Beta" } %>
+            <% end %>
+            <%= render Primer::Beta::Button.new(scheme: :link, type: :submit, font_size: 6, font_weight: :normal, test_selector: "try-rails") do %>
+              Switch back to the classic merge experience
+            <% end %>
+            <span> · </span>
+            <%= render(Primer::Beta::Link.new(href: new_mergebox_feedback_link, font_size: 6)) { "Give feedback" } %>
+          <% end %>
+        </div>
+      <% end %>
+    </div>
+  <% end %>
+  <% feature.rails do %>
+    <include-fragment aria-label="Loading..." src="<%= src_path %>">
+      <div class="merge-pr Details is-merging">
+        <%= render partial: "pull_requests/deployments_box_wrapper", locals: { pull: pull_request, gate_requests: gate_requests } %>
+
+        <% if show_merge_placeholder? %>
+          <div class="ml-0 pl-0 ml-md-6 pl-md-3 my-3 branch-action branch-action-state-dirty">
+            <span class="branch-action-icon d-none d-md-flex flex-items-center flex-justify-center">
+              <%= primer_octicon(:"git-merge", size: :medium) %>
+            </span>
+            <div class="branch-action-body timeline-comment--caret" style="min-height: 138px;">
+              <%= render(Primer::Beta::Spinner.new(size: :large, mx: :auto, mt: 6, display: :block)) %>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    </include-fragment>
+    <% if new_mergebox_feature_flag_enabled? && show_opt_in_opt_out_react_feature_preview?(current_user: current_user) %>
+      <div class="d-flex flex-justify-end">
+        <%= form_tag toggle_new_mergebox_path(current_repository.owner_display_login, current_repository.name) do %>
+          <%= hidden_field_tag(:pull_number, pull_request.number) %>
+          <%= hidden_field_tag(:new_state, "enabled") %>
+          <%= emoji_tag(Emoji.find_by_alias("sparkles"), class: "emoji emoji-icon") %>
+          <%= render Primer::Beta::Button.new(scheme: :link, type: :submit, font_size: 6, font_weight: :normal, test_selector: "try-react") do %>
+            Try the new merge experience
+          <% end %>
+        <% end %>
+      </div>
+    <% end %>
+  <% end %>
+<% end %>

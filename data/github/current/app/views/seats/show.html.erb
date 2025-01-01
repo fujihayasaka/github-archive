@@ -1,0 +1,86 @@
+<%# erblint:counter ButtonComponentMigrationCounter 1 %>
+<% page_info \
+  title: "Add seats",
+  responsive: false,
+  selected_link: :"#{params[:target] || "user"}_billing_settings" %>
+<% trade_screening_error_data = trade_screening_cannot_proceed_error_data(target: target) %>
+
+<%= render layout: "orgs/settings/layout" do %>
+  <%= render Primer::Beta::Subhead.new do |component| %>
+    <% component.with_heading(tag: :h2) do %>
+      <%= link_to "Billing", target_billing_path(target), "data-pjax" => true, class: "Link--inTextBlock" %>
+        / Add seats
+    <% end %>
+  <% end %>
+
+  <% if trade_screening_error_data.empty? %>
+    <%= form_for :billing,
+      url: org_seats_path(target),
+      html: {
+        method: :put
+      } do |form| %>
+
+      <%= hidden_field_tag :return_to, params[:return_to] %>
+      <%= render "seats/fields", form: form, target: target, seat_change: seat_change %>
+
+      <%= render partial: "billing_settings/contact_us" %>
+      <%= render "seats/help", target: target, seat_change: seat_change %>
+
+      <% unless can_purchase_seats?(target, seat_change) %>
+        <% return_to = return_to ? {:return_to => return_to} : {} %>
+        <%= render "billing_settings/require_valid_contact", action_desc: "add seats", wrapper_classes: "mt-3", target:, return_to: %>
+      <% end %>
+
+      <div class="form-submit mt-4">
+        <div class="d-flex flex-items-center">
+          <% if pending_cycle(target).changing_plan? %>
+            <%= render "seats/warning_dialog", target: target, seat_change: seat_change %>
+          <% else %>
+            <button
+              type="submit"
+              class="btn btn-primary js-purchase-button mr-2"
+              <%= "disabled" unless can_purchase_seats?(target, seat_change) %>
+              aria-label="<%= purchase_button_aria_label(target) %>"
+              data-disable-with="Adding seats…"
+              <%= safe_analytics_click_attributes(
+                category: "Orgs",
+                action: "click add seat update",
+                label: "ref_cta:Add seats;ref_loc:seats_show"
+              ) %>
+            >
+              Add seats
+            </button>
+          <% end %>
+
+          <%= link_to(
+            "Cancel",
+            target_billing_path(target),
+            class: "btn mr-3",
+            data: analytics_click_attributes(
+              category: "Orgs",
+              action: "click cancel seat update",
+              label: "ref_cta:Cancel;ref_loc:seats_show"
+            )
+          ) %>
+
+          <% if seat_change_covered_by_coupon?(target, seat_change) %>
+            <span class="ml-1"><%= render "billing_settings/coupon_info", account: target %></span>
+          <% else %>
+            <%= render "billing_settings/payment_method_summary", target: target %>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+  <% else %>
+    <div class="py-3" >
+      <%= render Primer::Alpha::Banner.new(scheme: trade_screening_error_data[:scheme], icon: trade_screening_error_data[:icon], mt: 2) do %>
+        <h3 class="h5">
+          Sorry, you can't add seats to your account at this time.
+        </h3>
+        <div <%= test_selector("trade-screening-message") %>>
+          <%= trade_screening_error_data[:message] %>
+        </div>
+      <% end %>
+    </div>
+  <% end %>
+<% end %>

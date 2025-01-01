@@ -1,0 +1,463 @@
+#!/bin/bash
+set -e
+
+# This script sets up the github/slack repository for a github/github Codespace for use with development of the
+# Slack and Teams integrations with dotcom and GHE (Proxima).
+
+######################################################################################################################
+#### Variable definitions ############################################################################################
+######################################################################################################################
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+ORANGE='\033[0;33m'
+NC='\033[0m' # No Color
+GITHUB_REPO_DIR="/workspaces/github"
+SLACK_REPO_DIR="/workspaces/slack"
+GHE_TENANT="avocado-gmbh"
+DOTENV_EXAMPLE_PATH="$SLACK_REPO_DIR/.env.example"
+DOTENV_PATH_FOR_DOTCOM="$SLACK_REPO_DIR/.env.dotcom"
+DOTENV_PATH_FOR_GHE="$SLACK_REPO_DIR/.env.ghe" # used with the web and router servers
+DOTENV_PATH_FOR_GHE_WEB="$SLACK_REPO_DIR/.env.ghe-web" # used with just the web server
+DOTENV_PATH_FOR_GHE_ROUTER="$SLACK_REPO_DIR/.env.ghe-router" # used with just the router server
+DOTENV_PATH_FOR_INTEGRATIONS="$SLACK_REPO_DIR/.env.integrations"
+DOTENV_PATH_FOR_TEAMS="$SLACK_REPO_DIR/.env.teams"
+DOTENV_PATH_FOR_SLACK="$SLACK_REPO_DIR/.env.slack"
+CUSTOM_NGROK_PATH="$SLACK_REPO_DIR/bin/ngrok"
+SLACK_APP_SETUP_URL="https://github.com/github/slack/blob/master/docs/development/Slack%20app%20setup.md"
+TEAMS_APP_SETUP_URL="https://github.com/github/slack/blob/master/docs/development/Github-Teams%20app%20setup.md"
+CODESPACE_SECRET_MESSAGE="Add a new Codespace secret shared with the github/github and github/slack repositories: https://github.com/settings/codespaces"
+
+# Get the command-line arguments, if any
+while getopts ":hdwmt" opt; do
+  case $opt in
+    h) # display help message
+      help
+      exit;;
+    d) # Delete the repository if it exists
+      DELETE_REPO=true;;
+    w) # Add the repository as a workspace in VS Code
+      ADD_TO_WORKSPACE=true;;
+    m) # Configure environment variables for Proxima
+      MULTI_TENANT=true;;
+    t) # Configure environment variables for Teams
+      TEAMS_APP=true;;
+    :)
+      echo "Error: Option -$OPTARG requires an argument."
+      exit 1;;
+    \?) # Invalid option
+      echo "Error: Invalid option -$OPTARG"
+      exit 1;;
+  esac
+done
+
+if [ "$MULTI_TENANT" = true ]; then
+  SLACK_INTEGRATION_URL="https://$GITHUB_USER-slack-ghe.ngrok.io"
+  TEAMS_INTEGRATION_URL="https://$GITHUB_USER-teams-ghe.ngrok.io"
+else
+  SLACK_INTEGRATION_URL="https://$GITHUB_USER-slack.ngrok.io"
+  TEAMS_INTEGRATION_URL="https://$GITHUB_USER-teams.ngrok.io"
+fi
+
+######################################################################################################################
+#### Function definitions ############################################################################################
+######################################################################################################################
+
+# Print usage message for this script.
+help() {
+   echo "Sets up the github/slack repository in a github/github Codespace."
+   echo
+   echo "Usage: setup-slack-repo [-d] [-w] [-h] [-m] [-t]"
+   echo "Options:"
+   echo "-m     Configure environment variables for github to run in multi-tenant mode (Proxima), instead of single-tenant dotcom mode (default)."
+   echo "-t     Configure environment variables for the Teams app, instead of Slack (default)."
+   echo "-d     Before starting, delete the existing slack directory in the Codespace."
+   echo "-w     Add the github/slack repo as a workspace in VS Code."
+   echo "-h     Print this help message."
+   echo
+}
+
+checkPrerequisitesForDotcomTeams() {
+  missingVarMsg="Follow instructions here: $TEAMS_APP_SETUP_URL\n$CODESPACE_SECRET_MESSAGE"
+  if [ -z "$MICROSOFT_TENANT_ID" ]; then
+    echo -e "${RED}The MICROSOFT_TENANT_ID environment variable is not set.${NC}\n${missingVarMsg}"
+    exit 1
+  elif [ -z "$MICROSOFT_APP_PASSWORD" ]; then
+    echo -e "${RED}The MICROSOFT_APP_PASSWORD environment variable is not set.${NC}\n${missingVarMsg}"
+    exit 1
+  elif [ -z "$MICROSOFT_APP_ID" ]; then
+    echo -e "${RED}The MICROSOFT_APP_ID environment variable is not set.${NC}\n${missingVarMsg}"
+    exit 1
+  fi
+}
+
+checkPrerequisitesForGheTeams() {
+  missingVarMsg="Follow instructions here: $TEAMS_APP_SETUP_URL\n$CODESPACE_SECRET_MESSAGE"
+  if [ -z "$MICROSOFT_TENANT_ID_GHE" ]; then
+    echo -e "${RED}The MICROSOFT_TENANT_ID_GHE environment variable is not set.${NC}\n${missingVarMsg}"
+    exit 1
+  elif [ -z "$MICROSOFT_APP_PASSWORD_GHE" ]; then
+    echo -e "${RED}The MICROSOFT_APP_PASSWORD_GHE environment variable is not set.${NC}\n${missingVarMsg}"
+    exit 1
+  elif [ -z "$MICROSOFT_APP_ID_GHE" ]; then
+    echo -e "${RED}The MICROSOFT_APP_ID_GHE environment variable is not set.${NC}\n${missingVarMsg}"
+    exit 1
+  fi
+}
+
+checkPrerequisitesForDotcomSlack() {
+  missingVarMsg="Follow instructions here: $SLACK_APP_SETUP_URL\n$CODESPACE_SECRET_MESSAGE"
+  if [ -z "$NEW_SLACK_APP_ID" ]; then
+    echo -e "${RED}The NEW_SLACK_APP_ID environment variable is not set.${NC}\n${missingVarMsg}"
+    exit 1
+  elif [ -z "$NEW_SLACK_CLIENT_ID" ]; then
+    echo -e "${RED}The NEW_SLACK_CLIENT_ID environment variable is not set.${NC}\n${missingVarMsg}"
+    exit 1
+  elif [ -z "$NEW_SLACK_CLIENT_SECRET" ]; then
+    echo -e "${RED}The NEW_SLACK_CLIENT_SECRET environment variable is not set.${NC}\n${missingVarMsg}"
+    exit 1
+  elif [ -z "$NEW_SLACK_VERIFICATION_TOKEN" ]; then
+    echo -e "${RED}The NEW_SLACK_VERIFICATION_TOKEN environment variable is not set.${NC}\n${missingVarMsg}"
+    exit 1
+  fi
+}
+
+checkPrerequisitesForGheSlack() {
+  missingVarMsg="Follow instructions here: $SLACK_APP_SETUP_URL\n$CODESPACE_SECRET_MESSAGE"
+  if [ -z "$NEW_SLACK_APP_ID_GHE" ]; then
+    echo -e "${RED}The NEW_SLACK_APP_ID_GHE environment variable is not set.${NC}\n${missingVarMsg}"
+    exit 1
+  elif [ -z "$NEW_SLACK_CLIENT_ID_GHE" ]; then
+    echo -e "${RED}The NEW_SLACK_CLIENT_ID_GHE environment variable is not set.${NC}\n${missingVarMsg}"
+    exit 1
+  elif [ -z "$NEW_SLACK_CLIENT_SECRET_GHE" ]; then
+    echo -e "${RED}The NEW_SLACK_CLIENT_SECRET_GHE environment variable is not set.${NC}\n${missingVarMsg}"
+    exit 1
+  elif [ -z "$NEW_SLACK_VERIFICATION_TOKEN_GHE" ]; then
+    echo -e "${RED}The NEW_SLACK_VERIFICATION_TOKEN_GHE environment variable is not set.${NC}\n${missingVarMsg}"
+    exit 1
+  fi
+}
+
+createDotenvFileForSlack() {
+  if [ -f "$DOTENV_PATH_FOR_SLACK" ]; then
+    echo -e "\n${ORANGE}➡️ $DOTENV_PATH_FOR_SLACK already exists, skipping.\n${NC}  Delete the file and rerun this script to initialize it again: rm ${DOTENV_PATH_FOR_SLACK}"
+  else
+    echo -e "\n${GREEN}➡️ Setting server env vars for Slack integration in $DOTENV_PATH_FOR_SLACK...${NC}"
+    echo "AQUEDUCT_QUEUE=webhook-slack" >> $DOTENV_PATH_FOR_SLACK
+    echo "WEBHOOK_PROXY_URL=\"$SLACK_INTEGRATION_URL\"" >> $DOTENV_PATH_FOR_SLACK
+  fi
+}
+
+createDotenvFileForTeams() {
+  if [ -f "$DOTENV_PATH_FOR_TEAMS" ]; then
+    echo -e "\n${ORANGE}➡️ $DOTENV_PATH_FOR_TEAMS already exists, skipping.\n${NC}  Delete the file and rerun this script to initialize it again: rm ${DOTENV_PATH_FOR_TEAMS}"
+  else
+    echo -e "\n${GREEN}➡️ Setting server env vars for Teams integration in $DOTENV_PATH_FOR_TEAMS...${NC}"
+    echo "AQUEDUCT_QUEUE=webhook-teams" >> $DOTENV_PATH_FOR_TEAMS
+    echo "WEBHOOK_PROXY_URL=\"$TEAMS_INTEGRATION_URL\"" >> $DOTENV_PATH_FOR_TEAMS
+  fi
+}
+
+setSlackVarsInDotenvFile() {
+  if [ "$MULTI_TENANT" = true ]; then # GHE
+    echo -e "\n${GREEN}➡️ Setting Slack app vars in $DOTENV_PATH_FOR_GHE...${NC}"
+    sed -i "/^#\s*NEW_SLACK_APP_ID=/c\NEW_SLACK_APP_ID=\"$NEW_SLACK_APP_ID_GHE\"" $DOTENV_PATH_FOR_GHE
+    sed -i "/^#\s*NEW_SLACK_CLIENT_ID=/c\NEW_SLACK_CLIENT_ID=\"$NEW_SLACK_CLIENT_ID_GHE\"" $DOTENV_PATH_FOR_GHE
+    sed -i "/^#\s*NEW_SLACK_CLIENT_SECRET=/c\NEW_SLACK_CLIENT_SECRET=\"$NEW_SLACK_CLIENT_SECRET_GHE\"" $DOTENV_PATH_FOR_GHE
+    sed -i "/^#\s*NEW_SLACK_VERIFICATION_TOKEN=/c\NEW_SLACK_VERIFICATION_TOKEN=\"$NEW_SLACK_VERIFICATION_TOKEN_GHE\"" $DOTENV_PATH_FOR_GHE
+  else # dotcom
+    echo -e "\n${GREEN}➡️ Setting Slack app vars in $DOTENV_PATH_FOR_DOTCOM...${NC}"
+    sed -i "/^#\s*NEW_SLACK_APP_ID=/c\NEW_SLACK_APP_ID=\"$NEW_SLACK_APP_ID\"" $DOTENV_PATH_FOR_DOTCOM
+    sed -i "/^#\s*NEW_SLACK_CLIENT_ID=/c\NEW_SLACK_CLIENT_ID=\"$NEW_SLACK_CLIENT_ID\"" $DOTENV_PATH_FOR_DOTCOM
+    sed -i "/^#\s*NEW_SLACK_CLIENT_SECRET=/c\NEW_SLACK_CLIENT_SECRET=\"$NEW_SLACK_CLIENT_SECRET\"" $DOTENV_PATH_FOR_DOTCOM
+    sed -i "/^#\s*NEW_SLACK_VERIFICATION_TOKEN=/c\NEW_SLACK_VERIFICATION_TOKEN=\"$NEW_SLACK_VERIFICATION_TOKEN\"" $DOTENV_PATH_FOR_DOTCOM
+  fi
+}
+
+setTeamsVarsInDotenvFile() {
+  if [ "$MULTI_TENANT" = true ]; then # GHE
+    echo -e "\n${GREEN}➡️ Setting Teams app vars in $DOTENV_PATH_FOR_GHE...${NC}"
+    sed -i "/^#\s*MICROSOFT_TENANT_ID=/c\MICROSOFT_TENANT_ID=\"$MICROSOFT_TENANT_ID_GHE\"" $DOTENV_PATH_FOR_GHE
+    sed -i "/^#\s*MICROSOFT_APP_PASSWORD=/c\MICROSOFT_APP_PASSWORD=\"$MICROSOFT_APP_PASSWORD_GHE\"" $DOTENV_PATH_FOR_GHE
+    sed -i "/^#\s*MICROSOFT_APP_ID=/c\MICROSOFT_APP_ID=\"$MICROSOFT_APP_ID_GHE\"" $DOTENV_PATH_FOR_GHE
+  else # dotcom
+    echo -e "\n${GREEN}➡️ Setting Teams app vars in $DOTENV_PATH_FOR_DOTCOM...${NC}"
+    sed -i "/^#\s*MICROSOFT_TENANT_ID=/c\MICROSOFT_TENANT_ID=\"$MICROSOFT_TENANT_ID\"" $DOTENV_PATH_FOR_DOTCOM
+    sed -i "/^#\s*MICROSOFT_APP_PASSWORD=/c\MICROSOFT_APP_PASSWORD=\"$MICROSOFT_APP_PASSWORD\"" $DOTENV_PATH_FOR_DOTCOM
+    sed -i "/^#\s*MICROSOFT_APP_ID=/c\MICROSOFT_APP_ID=\"$MICROSOFT_APP_ID\"" $DOTENV_PATH_FOR_DOTCOM
+  fi
+}
+
+# Set environment variables in a github/slack file, either .env.dotcom or .env.ghe.
+createDotenvFileForWebServer() {
+  if [ "$MULTI_TENANT" = true ]; then
+    dotenvFilePath=$DOTENV_PATH_FOR_GHE
+  else
+    dotenvFilePath=$DOTENV_PATH_FOR_DOTCOM
+  fi
+
+  if [ -f "$dotenvFilePath" ]; then
+    echo -e "\n${ORANGE}➡️ $dotenvFilePath already exists, skipping.\n${NC}  Delete the file and rerun this script to initialize it again: rm $dotenvFilePath"
+  else
+    echo -e "\n${GREEN}➡️ Creating $dotenvFilePath...${NC}"
+    cp $DOTENV_EXAMPLE_PATH $dotenvFilePath
+
+    echo -e "\n${GREEN}➡️ Setting general env vars in $dotenvFilePath...${NC}"
+    sed -i "/^#\s*GITHUB_TOKEN=/c\GITHUB_TOKEN=\"$GITHUB_TOKEN\"" $dotenvFilePath
+
+    # Update the values in the .env file for a Slack app:
+    if [[ -n "$NEW_SLACK_APP_ID" ]]; then
+      setSlackVarsInDotenvFile
+    fi
+
+    # Update the values in the .env file for a Teams app:
+    if [[ -n "$MICROSOFT_TENANT_ID" ]]; then
+      setTeamsVarsInDotenvFile
+    fi
+
+    # General variables for controlling the github/slack web server:
+    echo "NODE_ENV=development" >> $dotenvFilePath
+    echo "REDIS_URL=\"redis://localhost:6379/0\"" >> $dotenvFilePath
+
+    # Variables that vary between dotcom and GHE (Proxima):
+    if [ "$MULTI_TENANT" = true ]; then # GHE
+      echo "CHATOPS_COMMAND_NAME=ghe-dev" >> $dotenvFilePath
+      echo "CHATOPS_APP_NAME=GHE-Dev" >> $dotenvFilePath
+      sed -i "/^GITHUB_DOMAIN=/c\GITHUB_DOMAIN=\"http://$GHE_TENANT.ghe.localhost\"" $dotenvFilePath
+      sed -i "/^GITHUB_API_DOMAIN=/c\GITHUB_API_DOMAIN=\"http://api.$GHE_TENANT.ghe.localhost\"" $dotenvFilePath
+    else # dotcom
+      echo "DATABASE_URL=\"mysql://root@localhost:3306/slack\"" >> $dotenvFilePath
+      echo "PORT=4001" >> $dotenvFilePath
+      echo "DEBUG_PORT=9230" >> $dotenvFilePath
+      echo "CHATOPS_COMMAND_NAME=github-dev" >> $dotenvFilePath
+      sed -i "/^GITHUB_DOMAIN=/c\GITHUB_DOMAIN=\"http://github.localhost\"" $dotenvFilePath
+      sed -i "/^GITHUB_API_DOMAIN=/c\GITHUB_API_DOMAIN=\"http://api.github.localhost\"" $dotenvFilePath
+    fi
+  fi
+}
+
+# Set environment variables in the github/slack .env.ghe-web file.
+createDotenvFileForGheWeb() {
+  if [ -f "$DOTENV_PATH_FOR_GHE_WEB" ]; then
+    echo -e "\n${ORANGE}➡️ $DOTENV_PATH_FOR_GHE_WEB already exists, skipping.\n${NC}  Delete the file and rerun this script to initialize it again: rm $DOTENV_PATH_FOR_GHE_WEB"
+  else
+    echo -e "\n${GREEN}➡️ Creating $DOTENV_PATH_FOR_GHE_WEB...${NC}"
+    touch $DOTENV_PATH_FOR_GHE_WEB
+
+    echo "PORT=4001" >> $DOTENV_PATH_FOR_GHE_WEB
+    echo "DEBUG_PORT=9230" >> $DOTENV_PATH_FOR_GHE_WEB
+    echo "MULTI_TENANT_ENTERPRISE=true" >> $DOTENV_PATH_FOR_GHE_WEB
+    echo "MULTI_TENANT_GLOBAL_ROUTING_FF=true" >> $DOTENV_PATH_FOR_GHE_WEB
+    echo "DYNAMIC_TENANT_MODE=true" >> $DOTENV_PATH_FOR_GHE_WEB
+    echo "DATABASE_URL=\"mysql://root@localhost:3306/ghe\"" >> $DOTENV_PATH_FOR_GHE_WEB
+  fi
+}
+
+# Set environment variables in the github/slack .env.ghe-router file.
+createDotenvFileForGheRouter() {
+  if [ -f "$DOTENV_PATH_FOR_GHE_ROUTER" ]; then
+    echo -e "\n${ORANGE}➡️ $DOTENV_PATH_FOR_GHE_ROUTER already exists, skipping.\n${NC}  Delete the file and rerun this script to initialize it again: rm $DOTENV_PATH_FOR_GHE_ROUTER"
+  else
+    echo -e "\n${GREEN}➡️ Creating $DOTENV_PATH_FOR_GHE_ROUTER...${NC}"
+    touch $DOTENV_PATH_FOR_GHE_ROUTER
+
+    echo "PORT=4000" >> $DOTENV_PATH_FOR_GHE_ROUTER
+    echo "DEBUG_PORT=9229" >> $DOTENV_PATH_FOR_GHE_ROUTER
+    echo "AQUEDUCT_ENABLED=false" >> $DOTENV_PATH_FOR_GHE_ROUTER
+    echo "DATABASE_URL=\"mysql://root@localhost:3306/ghe-router\"" >> $DOTENV_PATH_FOR_GHE_ROUTER
+    echo "ROUTER_DATABASE_URL=\"mysql://root@localhost:3306/ghe-router\"" >> $DOTENV_PATH_FOR_GHE_ROUTER
+  fi
+}
+
+# Run the Rails seed script to create integration records in the database, and write relevant environment variables
+# to a text file.
+runIntegrationsSeeds() {
+  if [ -f "$DOTENV_PATH_FOR_INTEGRATIONS" ]; then
+    echo -e "\n${ORANGE}➡️ $DOTENV_PATH_FOR_INTEGRATIONS exists, skipping internal_integrations seeds...${NC}\n  Remove the .env file(s) and re-run this script to regenerate them:\n  rm $DOTENV_PATH_FOR_INTEGRATIONS"
+  else
+    if [ "$MULTI_TENANT" = true ]; then
+      echo -e "\n${GREEN}➡️ Running internal_integrations seed script in multi-tenant mode...${NC}"
+      cd $GITHUB_REPO_DIR && bin/seed internal_integrations -f -m \
+        -o $DOTENV_PATH_FOR_INTEGRATIONS \
+        -s $SLACK_INTEGRATION_URL \
+        -t $TEAMS_INTEGRATION_URL
+    else
+      echo -e "\n${GREEN}➡️ Running internal_integrations seed script in single-tenant mode...${NC}"
+      cd $GITHUB_REPO_DIR && bin/seed internal_integrations -f \
+        -o $DOTENV_PATH_FOR_INTEGRATIONS \
+        -s $SLACK_INTEGRATION_URL \
+        -t $TEAMS_INTEGRATION_URL
+    fi
+
+    echo -e "\n${GREEN}➡️ Restarting github/slack services to pick up new env vars...${NC}"
+    overmind restart slack-web
+    overmind restart slack-tunnel
+    overmind restart slack-ghe-router
+    overmind restart slack-ghe-router-tunnel
+  fi
+}
+
+# Modify /etc/hosts as necessary.
+configureEtcHosts() {
+  if grep -q "$GHE_TENANT.ghe.localhost" /etc/hosts; then
+    echo -e "\n${ORANGE}➡️ /etc/hosts already configured, skipping...${NC}"
+  else
+    echo -e "\n${GREEN}➡️ Modifying /etc/hosts...${NC}"
+    # add configuration for /etc/hosts
+    # since default host network for docker doesn't support ipv6
+    echo "
+127.0.0.1   $GHE_TENANT.ghe.localhost api.$GHE_TENANT.ghe.localhost
+127.0.0.1	github.localhost api.github.localhost" | sudo tee -a /etc/hosts
+  fi
+}
+
+# Create databases and tables for the github/slack repo.
+setupSlackDatabase() {
+  FOUND_DATABASE=`mysql -uroot --skip-column-names --batch -e "SHOW DATABASES LIKE 'slack'" | wc -l`
+  if [ "$FOUND_DATABASE" = "1" ]; then
+    echo -e "\n${ORANGE}➡️ Database is already set up for slack repo, skipping...${NC}"
+  else
+    echo -e "\n${GREEN}➡️ Setting up database for slack repo...\n${NC}"
+    cat $SLACK_REPO_DIR/schema/create_dbs.sql | mysql -uroot
+    cd $SLACK_REPO_DIR && schema/init.sh
+  fi
+}
+
+######################################################################################################################
+
+# Ensure we have required initial environment variables, such as those populated from Codespace secrets
+if [ "$MULTI_TENANT" = true ]; then
+  if [ "$TEAMS_APP" = true ]; then
+    checkPrerequisitesForGheTeams
+  else
+    checkPrerequisitesForGheSlack
+  fi
+elif [ "$TEAMS_APP" = true ]; then
+  checkPrerequisitesForDotcomTeams
+else
+  checkPrerequisitesForDotcomSlack
+fi
+
+# Check if the github/slack repository has already been cloned, and delete it if requested
+if [[ -d "$SLACK_REPO_DIR" ]]; then
+  if [ "$DELETE_REPO" = true ]; then
+    echo -e "${GREEN}➡️ Deleting the existing slack repo...\n${NC}"
+    rm -rf $SLACK_REPO_DIR
+  else
+    echo -e "${ORANGE}➡️ ${SLACK_REPO_DIR} already exists in this Codespace, skipping git clone.\n${NC}Rerun this script with the -d argument to delete the existing repository and re-clone it."
+  fi
+fi
+
+# Clone the github/slack repository if it doesn't exist, into the same dir as the github/github repo
+if [[ ! -d "$SLACK_REPO_DIR" ]]; then
+  echo -e "${GREEN}➡️ Cloning slack repo...\n${NC}"
+  git clone https://github.com/github/slack.git $SLACK_REPO_DIR
+fi
+
+configureEtcHosts
+
+echo -e "\n${GREEN}➡️ Installing npm packages for slack repo...\n${NC}"
+cd $SLACK_REPO_DIR && npm install
+
+setupSlackDatabase
+
+if [ "$MULTI_TENANT" = true ]; then
+  echo -e "\n${GREEN}➡️ Setting up ngrok for multiple tunnels...\n${NC}"
+  cd $SLACK_REPO_DIR && .devcontainer/setup_ngrok.sh -m
+else
+  echo -e "\n${GREEN}➡️ Setting up ngrok...\n${NC}"
+  cd $SLACK_REPO_DIR && .devcontainer/setup_ngrok.sh
+fi
+
+# Create the .env.* files if they don't exist and populate some env vars in them
+if [ "$MULTI_TENANT" = true ]; then
+  echo -e "\n${GREEN}➡️ Setting up environment variables for multi-tenant mode...${NC}"
+  createDotenvFileForWebServer
+  createDotenvFileForGheWeb
+  createDotenvFileForGheRouter
+
+  if [ -f "$DOTENV_PATH_FOR_DOTCOM" ]; then
+    echo -e "\n${ORANGE}➡️ $DOTENV_PATH_FOR_DOTCOM exists, deleting...${NC}"
+    rm $DOTENV_PATH_FOR_DOTCOM
+  fi
+else # single-tenant mode
+  echo -e "\n${GREEN}➡️ Setting up environment variables for single-tenant mode...${NC}"
+  createDotenvFileForWebServer
+
+  if [ -f "$DOTENV_PATH_FOR_GHE_WEB" ]; then
+    echo -e "\n${ORANGE}➡️ $DOTENV_PATH_FOR_GHE_WEB exists, deleting...${NC}"
+    rm $DOTENV_PATH_FOR_GHE_WEB
+  fi
+
+  if [ -f "$DOTENV_PATH_FOR_GHE_ROUTER" ]; then
+    echo -e "\n${ORANGE}➡️ $DOTENV_PATH_FOR_GHE_ROUTER exists, deleting...${NC}"
+    rm $DOTENV_PATH_FOR_GHE_ROUTER
+  fi
+
+  if [ -f "$DOTENV_PATH_FOR_GHE" ]; then
+    echo -e "\n${ORANGE}➡️ $DOTENV_PATH_FOR_GHE exists, deleting...${NC}"
+    rm $DOTENV_PATH_FOR_GHE
+  fi
+fi
+
+if [ "$TEAMS_APP" = true ]; then
+  echo -e "\n${GREEN}➡️ Setting up environment variables for Teams integration...${NC}"
+  createDotenvFileForTeams
+
+  if [ -f "$DOTENV_PATH_FOR_SLACK" ]; then
+    echo -e "\n${ORANGE}➡️ $DOTENV_PATH_FOR_SLACK exists, deleting...${NC}"
+    rm $DOTENV_PATH_FOR_SLACK
+  fi
+else
+  echo -e "\n${GREEN}➡️ Setting up environment variables for Slack integration...${NC}"
+  createDotenvFileForSlack
+
+  if [ -f "$DOTENV_PATH_FOR_TEAMS" ]; then
+    echo -e "\n${ORANGE}➡️ $DOTENV_PATH_FOR_TEAMS exists, deleting...${NC}"
+    rm $DOTENV_PATH_FOR_TEAMS
+  fi
+fi
+
+# Check if gitrpc server is running before attempting to run seed script, because it will error out otherwise
+if lsof -Pi :8152 -sTCP:LISTEN -t >/dev/null ; then # dotcom server running
+  runIntegrationsSeeds
+else # dotcom server stopped
+  echo -e "\n${ORANGE}➡️ Your server is not running, so not seeding any data.\n${NC}You can rerun this script after starting the server: script/server"
+
+  echo -e "\n${GREEN}➡️ Building github/slack web app...\n${NC}"
+  cd $SLACK_REPO_DIR && npm run build
+fi
+
+echo -e "\n${GREEN}➡️ Enabling feature flags...${NC}"
+cd $GITHUB_REPO_DIR && bin/toggle-feature-flag enable scheduled_reminders
+cd $GITHUB_REPO_DIR && bin/toggle-feature-flag enable scheduled_reminders_teams_parity
+if [ "$MULTI_TENANT" = true ]; then
+  cd $GITHUB_REPO_DIR && script/multi-tenant/toggle-feature-flags enable
+fi
+
+# Add the slack repo as a workspace in VS Code
+if [ "$ADD_TO_WORKSPACE" = true ]; then
+  echo -e "\n${GREEN}➡️ Adding $SLACK_REPO_DIR to VS Code workspace...${NC}"
+  code --add $SLACK_REPO_DIR
+fi
+
+echo -e "\n${GREEN}➡️ Done! 🎉${NC}"
+
+if [ "$MULTI_TENANT" = true ]; then
+  echo -e "  Log in: http://${GHE_TENANT}.ghe.localhost"
+
+  if [ "$TEAMS_APP" = true ]; then
+    echo -e "  Install app: https://${GITHUB_USER}-teams-ghe-router.ngrok.io"
+  else
+    echo -e "  Install app: https://${GITHUB_USER}-slack-ghe-router.ngrok.io"
+  fi
+else
+  echo -e "  Log in: http://github.localhost"
+
+  if [ "$TEAMS_APP" = true ]; then
+    echo -e "  Install app: https://${GITHUB_USER}-teams.ngrok.io"
+  else
+    echo -e "  Install app: https://${GITHUB_USER}-slack.ngrok.io"
+  fi
+fi

@@ -1,0 +1,26 @@
+/**
+ * Monaco doesn't play well in the test environment, so we mock it out.
+ *
+ * This file should be THE VERY FIRST IMPORT in a test file or else it you're gonna have a bad time.
+ */
+
+// eslint-disable-next-line @github-ui/github-monorepo/filename-convention
+jest.mock('monaco-editor', () => ({}), {virtual: true})
+jest.mock('@monaco-editor/react', () => ({
+  Editor: () => <div>I&apos;M MONACO!</div>,
+  DiffEditor: () => <div>I&apos;M THE MONACO DIFF EDITOR!</div>,
+  loader: {
+    config: jest.fn(),
+  },
+  useMonaco: jest.fn(() => ({
+    monaco: {
+      editor: {
+        create: jest.fn(),
+      },
+    },
+  })),
+}))
+
+// we get weird @swc/plugin-relay errors from highlight.js and lowlight
+jest.mock('lowlight', () => ({all: {}}))
+jest.mock('@github-ui/highlight', () => ({}))

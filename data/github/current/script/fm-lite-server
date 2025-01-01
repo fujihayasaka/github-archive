@@ -1,0 +1,63 @@
+#!/bin/bash
+#/ Usage: script/fm-lite-server
+#/
+#/ Runs fm-lite service.
+
+PORT="${FM_LITE_PORT:-8090}"
+NAME="fm-lite-${PORT}"
+
+if [[ "$PORT" = 8090 ]]; then
+  # If we're running on the default port, we want to persist data across runs
+  DEFAULT_PERSIST="1"
+else
+  # If we're running on a non-default port, we're likely running parallel instances of fm-lite for testing, so data persistence is not desired. Probably.
+  DEFAULT_PERSIST="0"
+fi
+
+# Allow overriding persistence with environment variable
+USE_CONTAINER_VOLUME="${FM_LITE_PERSIST_DATA:-$DEFAULT_PERSIST}"
+
+SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+source $SCRIPT_DIR/dx/lib/subproject-containers
+
+is_fm_lite_running() {
+  local port=$1
+  # Try to access the /ready endpoint with a short timeout
+  curl -s -f "http://127.0.0.1:${port}/ready" --connect-timeout 2 > /dev/null 2>&1
+  return $?
+}
+
+# If fm-lite is already running on the specified port, skip starting a new instance
+if is_fm_lite_running "$PORT"; then
+  echo "Skipping fm-lite since it is already running on port $PORT."
+  # Because overmind will terminate all running services when one of them exits, we need to keep this script running until fm-lite terminates
+  while true; do
+    if ! is_fm_lite_running "$PORT"; then
+      echo "fm-lite has stopped running on port $PORT."
+      exit 0
+    fi
+    sleep 5
+  done
+else
+  SUBPROJECT_VERSION=$(subproject_version "fm-lite")
+  echo "fm-lite version $SUBPROJECT_VERSION"
+
+  if [[ "$USE_CONTAINER_VOLUME" = "1" ]]; then
+    # Create a port-specific volume name to avoid conflicts between different instances
+    VOLUME_NAME="${NAME}-data"
+
+    echo "Attempting to start fm-lite on port $PORT with data persistence enabled (volume: $VOLUME_NAME)."
+    if ! docker volume create $VOLUME_NAME > /dev/null 2>&1; then
+      echo "Error: Failed to create $VOLUME_NAME volume."
+      exit 1
+    fi
+    start_subproject --name=$NAME --mount type=volume,src=$VOLUME_NAME,target=/.fm-lite/ \
+      "ghcr.io/github/feature-management-lite/fm-lite:$SUBPROJECT_VERSION" \
+      --port ${PORT}
+  else
+    echo "Attempting to start fm-lite on port $PORT with data persistence disabled."
+    start_subproject --name=$NAME \
+      "ghcr.io/github/feature-management-lite/fm-lite:$SUBPROJECT_VERSION" \
+      --port ${PORT}
+  fi
+fi

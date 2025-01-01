@@ -1,0 +1,29 @@
+# typed: false
+# frozen_string_literal: true
+
+module Configurable
+  module ActionsForkPrApprovals
+    # Determines which types of users require manual approval for fork pr workflows on public repositories
+    # See ActionsPrivateForkPrApprovals for private repositories
+    KEY = "actions_fork_pr_approvals"
+
+    FIRST_TIME_CONTRIBUTORS = "FIRST_TIME_CONTRIBUTORS".freeze
+    FIRST_TIME_CONTRIBUTOR_NEW_USERS = "FIRST_TIME_CONTRIBUTOR_NEW_USERS".freeze
+    ALL_OUTSIDE_COLLABORATORS = "ALL_OUTSIDE_COLLABORATORS".freeze
+
+    VALUES = [FIRST_TIME_CONTRIBUTORS, FIRST_TIME_CONTRIBUTOR_NEW_USERS, ALL_OUTSIDE_COLLABORATORS]
+    DEFAULT_VALUE = FIRST_TIME_CONTRIBUTORS
+
+    def set_actions_fork_pr_approvals_policy(policy:, actor:)
+      raise ArgumentError unless VALUES.include?(policy)
+      config.set(KEY, policy, actor)
+
+      instrument "set_actions_fork_pr_approvals_policy", actor: actor, policy: policy
+    end
+
+    def actions_fork_pr_approvals_policy
+      policy = config.get(KEY)
+      VALUES.include?(policy) ? policy : DEFAULT_VALUE
+    end
+  end
+end

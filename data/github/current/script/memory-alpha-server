@@ -1,0 +1,33 @@
+#!/bin/bash
+#/ Usage: script/memory-alpha-server
+#/
+#/ Runs memory-alpha service.
+
+# If we need to run the service multiple times on different ports, this name should be parameterized with the port.
+NAME="memory-alpha"
+
+SKIP_MEMORY_ALPHA="${SKIP_MEMORY_ALPHA:-false}"
+
+if [ "$SKIP_MEMORY_ALPHA" = "true" ] || [ "$SKIP_MEMORY_ALPHA" = "1" ]; then
+  echo "memory-alpha has been disabled"
+  sleep infinity
+else
+  SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+  source $SCRIPT_DIR/dx/lib/subproject-containers
+
+  pushd $SCRIPT_DIR/..
+  mkdir -p ./tmp/memory-alpha/test/buckets/local-bucket
+
+  SUBPROJECT_VERSION=$(subproject_version "memory-alpha")
+  echo "memory-alpha version $SUBPROJECT_VERSION"
+
+  # ensure we have the config files
+  script/build-subproject --clone-only -v memory-alpha
+
+  start_subproject --name ${NAME} \
+    -e STORE_CONFIG=/tmp/config/stores_codespaces.yaml \
+    -v $(pwd)/vendor/memory-alpha/config/development:/tmp/config \
+    -v $(pwd)/tmp/memory-alpha/test:/app/test \
+    ghcr.io/github/memory-alpha/memory-alpha:${SUBPROJECT_VERSION} \
+    --profilerPort 18080
+fi

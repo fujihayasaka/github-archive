@@ -1,0 +1,272 @@
+#!/usr/bin/env safe-ruby
+# frozen_string_literal: true
+
+unless Rails.env.development?
+  puts "This is a dev-only script"
+  exit 1
+end
+
+options = {}
+
+ARGV.each do |arg|
+  if arg.start_with?("--")
+    option = arg[2..].underscore.to_sym
+    options[option] = true
+  else
+    puts "Unknown option: #{arg}"
+    exit 1
+  end
+end
+
+class SetupCopilotBusinessUserPropensity
+  def self.run(options = {})
+    script_run = new
+
+    if options[:help]
+      script_run.help
+      return
+    end
+
+    puts "Loading script..."
+
+    require_relative "../config/environment"
+    require_relative "./seeds/objects"
+    require_relative "./seeds/factory_bot_loader"
+
+    if options[:reset_users]
+      script_run.reset_users
+      return
+    end
+
+    if options[:reset]
+      script_run.reset_orgs
+      script_run.reset_users
+      return
+    end
+
+    script_run.seed
+  end
+
+  def help
+    puts "Usage: script/setup-copilot-business-user-propensity [options]"
+    puts "Options:"
+    puts "    --reset:        Deletes users, orgs, and propensities"
+    puts "    --reset-users:  Deletes users and propensities. Needs to be run after --reset to clean up persistent users."
+  end
+
+  def seed
+    create_non_org_user
+
+    create_org_owner
+    create_org_owner(propensity: "low")
+    create_org_owner(propensity: "medium")
+    create_org_owner(propensity: "high")
+
+    create_org_owner(copilot_enabled: true)
+    create_org_owner(copilot_enabled: true, propensity: "low")
+    create_org_owner(copilot_enabled: true, propensity: "medium")
+    create_org_owner(copilot_enabled: true, propensity: "high")
+
+    create_org_member
+    create_org_member(propensity: "low")
+    create_org_member(propensity: "medium")
+    create_org_member(propensity: "high")
+
+    create_org_member(copilot_enabled: true)
+    create_org_member(copilot_enabled: true, propensity: "low")
+    create_org_member(copilot_enabled: true, propensity: "medium")
+    create_org_member(copilot_enabled: true, propensity: "high")
+  end
+
+  def reset_orgs
+    puts "\nResetting organizations..."
+
+    delete_created_orgs
+
+    puts "➡️ Done resetting organizations!"
+  end
+
+  def reset_users
+    puts "\nResetting users & propensities..."
+
+    delete_created_users
+
+    puts "➡️ Done resetting users & propensities!"
+  end
+
+  private
+
+  def create_non_org_user
+    create_user(login: "user-without-org")
+  end
+
+  def create_org_member(propensity: "none", copilot_enabled: false)
+    create_org_user(role: "member", propensity:, copilot_enabled:)
+  end
+
+  def create_org_owner(propensity: "none", copilot_enabled: false)
+    create_org_user(role: "owner", propensity:, copilot_enabled:)
+  end
+
+  def create_org_user(role:, propensity: "none", copilot_enabled: false)
+    login = "user-#{role.dasherize}-#{propensity}"
+    login += "-copilot" if copilot_enabled
+
+    user = create_user(login:)
+    org = find_or_create_organization(propensity:, copilot_enabled:, admin: user)
+
+    case role
+    when "member"
+      org.add_member(user)
+    when "owner"
+      org.add_admin(user)
+    end
+
+    unless propensity == "none"
+      create_propensity(user:, org:, propensity:, relationship_type: role)
+    end
+  end
+
+  def create_user(login:)
+    puts "\nCreating @#{login}..."
+    user = Seeds::Objects::User.create(login: "#{login}", created_at: 2.months.ago)
+    puts "➡️ @#{login} created!"
+    user
+  end
+
+  def find_or_create_organization(propensity:, copilot_enabled:, admin:)
+    puts "\nFinding or creating org with #{propensity} propensity and with Copilot #{copilot_enabled ? "enabled" : "disabled"}..."
+
+    display_login = "org-#{propensity}"
+    display_login += "-copilot" if copilot_enabled
+    org = Organization.find_by(display_login:)
+
+    if org.present?
+      puts "➡️ Found Org @#{org}"
+      return org
+    end
+
+    puts "➡️ Creating Org @#{display_login}..."
+    if copilot_enabled
+      org = FactoryBot.create(:copilot_for_business_enabled_organization,
+        name: display_login,
+        billing_email: admin.emails.first.email,
+        admins: [admin],
+      )
+      org.business.add_owner(admin, actor: admin)
+
+      # enable Bing skill at the business level
+      b = ::Copilot::Business.new(org.business)
+      b.copilot_for_dotcom_enabled!
+      b.bing_github_chat_enable!
+      b.beta_features_github_chat_enable!
+
+      # enable additional models
+      b.a_chat_enabled!
+      b.g_chat_enabled!
+      b.o1_enabled!
+      FactoryBot.create(:copilot_seat_assignment, organization: org, assignable: admin)
+    else
+      org = Seeds::Objects::Organization.create(login: display_login, admin:)
+    end
+
+    puts "➡️ Org created!"
+    org
+  end
+
+  def create_propensity(user:, org:, propensity:, relationship_type:)
+    puts "➡️ Creating propensity for @#{user} on @#{org}..."
+    cb_propensity = UserPropensity::CopilotBusiness.create(
+      user:,
+      organization_id: org.id,
+      organization_login: org.display_login,
+      group: propensity,
+      relationship_type:
+    )
+    puts "➡️ Propensity created!"
+    cb_propensity
+  end
+
+  def delete_created_users
+    "➡️ Deleting users & propensities..."
+    deleted = 0
+    errors = 0
+    users = find_created_users
+    users.each do |user|
+      user.businesses(membership_type: :admin).each do |business|
+        business.remove_owner(user, allow_removal_of_last_owner: true, actor: user)
+      end
+
+      delete_propensity(user)
+      user.destroy!
+      ReservedLogin.untombstone!(user.login)
+
+      deleted += 1
+    rescue ActiveRecord::RecordNotDestroyed => e
+      puts "‼️ Could not delete @#{user}"
+      errors += 1
+    end
+
+    puts "➡️ Deleted #{deleted} users!"
+    if errors > 0
+      puts "‼️ #{errors} users could not be deleted. Please run the script again with `--reset-users` to clean up the remaining users."
+    end
+  end
+
+  def delete_created_orgs
+    "➡️ Deleting orgs..."
+    deleted = 0
+    find_created_orgs.each do |org|
+      org.destroy!
+      ReservedLogin.untombstone!(org.display_login)
+      deleted += 1
+    rescue ActiveRecord::RecordNotDestroyed => e
+      puts "‼️ Could not delete Org @#{org}: #{e.record.errors.full_messages}"
+    end
+
+    puts "➡️ Deleted #{deleted} orgs!"
+  end
+
+  def delete_propensity(user)
+    Site::KV.store.del("user_propensity/copilot_business/v1/#{user.id}")
+  end
+
+  def find_created_users
+    logins = %w(
+      user-without-org
+      user-member-none
+      user-member-low
+      user-member-medium
+      user-member-high
+      user-member-none-copilot
+      user-member-low-copilot
+      user-member-medium-copilot
+      user-member-high-copilot
+      user-owner-none
+      user-owner-low
+      user-owner-medium
+      user-owner-high
+      user-owner-none-copilot
+      user-owner-low-copilot
+      user-owner-medium-copilot
+      user-owner-high-copilot
+    )
+    User.where(login: logins)
+  end
+
+  def find_created_orgs
+    logins = %w(
+      org-none
+      org-low
+      org-medium
+      org-high
+      org-none-copilot
+      org-low-copilot
+      org-medium-copilot
+      org-high-copilot
+    )
+    Organization.where(display_login: logins)
+  end
+end
+
+SetupCopilotBusinessUserPropensity.run(options)

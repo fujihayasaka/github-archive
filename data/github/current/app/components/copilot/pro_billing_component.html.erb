@@ -1,0 +1,155 @@
+<%= render Primer::Alpha::Stack.new(direction: :vertical, gap: :spacious) do %>
+  <%= render Primer::Alpha::Stack.new(direction: :vertical, gap: :normal) do %>
+    <%= render Primer::Beta::Heading.new(tag: :h2, font_size: 4) do %>
+      Account
+    <% end %>
+
+    <%= render Primer::Box.new(p: 3, border: true, border_radius: 2, bg: :default) do %>
+      <%= render Primer::Alpha::Stack.new(direction: :horizontal, justify: :space_between) do %>
+        <div class="d-flex flex-items-center">
+          <%= render GitHub::AvatarComponent.new(actor: user, size: 32, mr: 3) %>
+
+          <div>
+            <%= render Primer::Beta::Text.new(tag: :p, font_size: 5, font_weight: :bold, mb: 0) do %>
+              <%= user.safe_profile_name %> · <%= user.email %>
+            <% end %>
+
+            <%= render Primer::Beta::Text.new(tag: :p, font_size: 5, color: :muted, mb: 0) do %>
+              Personal account
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <%= render Primer::Alpha::Stack.new(direction: :vertical, gap: :normal) do %>
+    <%= render Primer::Beta::Heading.new(tag: :h2, font_size: 4) do %>
+      Billing frequency
+    <% end %>
+
+    <%= render Primer::Box.new(p: 3, border: true, border_radius: 2, bg: :default) do %>
+      <%= render Primer::Alpha::Stack.new(direction: :horizontal, justify: :space_between, data: { target: "billing-checkout.billingFrequencySummary" }) do %>
+        <div class="d-flex">
+          <%= render Primer::Beta::Octicon.new(:calendar, size: :small, color: :muted, mr: 2, style: "margin-top: 2px;") %>
+
+          <div>
+            <%= render Primer::Beta::Text.new(tag: :p, font_size: 5, font_weight: :bold, mb: 0) do %>
+              <%= payment_duration.capitalize %> billing
+            <% end %>
+
+            <%= render Primer::Beta::Text.new(tag: :p, color: :muted, font_size: 5, font_weight: :normal, mb: 0) do %>
+              <%= payment_duration == "monthly" ? Billing::Money.new(1000).format(no_cents_if_whole: true) : Billing::Money.new(10000).format(no_cents_if_whole: true) %>/<%= payment_duration == "monthly" ? "month" : "year" %>
+            <% end %>
+          </div>
+        </div>
+
+        <%= render Primer::Beta::Button.new(font_size: 6, data: { action: "click:billing-checkout#editBillingFrequency", targets: "billing-checkout.editButtons" }) do %>
+          Edit<span class="sr-only">&nbsp;billing frequency</span>
+        <% end %>
+      <% end %>
+
+      <div data-target="billing-checkout.billingFrequencyForm" hidden>
+        <%= form_with url: return_to_path, method: :get do |f| %>
+          <% tracking_params&.each do |key, value| %>
+            <%= f.hidden_field key, value: value %>
+          <% end %>
+
+          <%= render "copilot/pro/billing_frequency_fields", payment_duration: payment_duration %>
+
+          <%= render Primer::Alpha::Stack.new(direction: :horizontal, gap: :condensed, mt: 3) do %>
+            <%= render Primer::Beta::Button.new(scheme: :primary, block: true, type: :submit) do %>
+              Save billing frequency
+            <% end %>
+
+            <%= render Primer::Beta::Button.new(block: true, data: { action: "click:billing-checkout#cancelEditBillingFrequency" }) do %>
+              Cancel
+            <% end %>
+          <% end %>
+        <% end %>
+      </div>
+    <% end %>
+  <% end %>
+
+  <%= render Primer::Alpha::Stack.new(direction: :vertical, gap: :normal, data: { target: has_billing_information? ? nil : "billing-checkout.billingInformationWrapper" }) do %>
+    <%= render Primer::Beta::Heading.new(tag: :h2, font_size: 4) do %>
+      Billing information
+    <% end %>
+
+    <% if has_billing_information? %>
+      <%= render Primer::Box.new(p: 3, border: true, border_radius: 2, bg: :default, classes: "js-edit-user-personal-profile-wrapper", test_selector: "billing-information-summary") do %>
+        <%= render Primer::Alpha::Stack.new(direction: :horizontal, justify: :space_between) do %>
+          <div class="d-flex">
+            <%= render Primer::Beta::Octicon.new(:location, size: :small, color: :muted, mr: 2, style: "margin-top: 2px;") %>
+
+            <ul class="list-style-none">
+              <li><%= billing_information.fullname %></li>
+              <li><%= billing_information.address1 %></li>
+              <li><%= billing_information.address2 %></li>
+              <li><%= billing_information.city %>, <%= billing_information.country_is_united_states? ? billing_information.us_state : billing_information.region %> <%= billing_information.postal_code %></li>
+              <li><%= billing_information.country.name %></li>
+
+              <% if billing_information.vat_code.present? %>
+                <li class="mt-2">VAT/GST: <%= billing_information.vat_code %></li>
+              <% end %>
+            </ul>
+          </div>
+
+          <% if user.is_allowed_to_edit_trade_screening_information? %>
+            <%= render Primer::Beta::Button.new(font_size: 6, classes: "js-edit-user-personal-profile",
+              data: { action: "click:billing-checkout#editBillingInformation", targets: "billing-checkout.editButtons" }
+            ) do %>
+              Edit<span class="sr-only">&nbsp;billing information</span>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <div class="js-name-address-collection-wrapper" <%= "hidden" if hide_billing_information_form? %> <%= test_selector("billing-information-form") %>>
+      <%= render Primer::Box.new(p: 3, border: true, border_radius: 2, bg: :default) do %>
+        <fieldset>
+          <legend class="sr-only">Billing information</legend>
+
+          <%= render Billing::Settings::NameAddressFormComponent.new(
+            target: user,
+            payment_flow_loaded_from: "COPILOT",
+            return_to: return_to_path,
+          ) %>
+        </fieldset>
+      <% end %>
+    </div>
+  <% end %>
+
+  <% if show_payment_method_container? %>
+    <%= render Primer::Alpha::Stack.new(direction: :vertical, gap: :normal, classes: "js-payment-methods-wrapper", test_selector: "payment-method-container") do %>
+      <%= render Primer::Beta::Heading.new(tag: :h2, font_size: 4) do %>
+        Payment method
+      <% end %>
+
+      <%= render Primer::Box.new(p: 3, border: true, border_radius: 2, bg: :default) do %>
+        <%= render Billing::Settings::PaymentMethodFormComponent.new(
+          target: user,
+          new_name_address_design: true,
+          signature_view_context: Billing::Zuora::HostedPaymentsPage::COPILOT_SIGNATURE_VIEW_CONTEXT,
+          return_to: return_to_path
+        ) %>
+
+        <div class="form-group m-0">
+          <input type="reset" value="Cancel" class="btn js-sponsors-cancel-edit-payment-method-btn" data-action="click:billing-checkout#cancelEditPaymentMethod" hidden>
+        </div>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if has_commercial_restrictions? %>
+    <%= render_react_partial(
+      name: "trade-screening-status-banner",
+      props: helpers.trade_screening_banner_react_payload(
+        target: user,
+        title: "You can't proceed with your payment",
+        feature_type: :copilot,
+      ),
+    ) %>
+  <% end %>
+<% end %>

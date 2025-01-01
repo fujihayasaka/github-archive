@@ -1,0 +1,83 @@
+#!/usr/bin/env safe-ruby
+# typed: strict
+# frozen_string_literal: true
+
+require_relative "../config/environment"
+require_relative "./seeds/objects"
+
+rails_server_running = system <<-SHELL
+if ! lsof -Pi :8152 -sTCP:LISTEN -t >/dev/null ; then
+  echo "Your Rails server is not running. Please start it with script/server and run this setup script again."
+  exit 1
+fi
+SHELL
+return unless rails_server_running
+
+# Check if --launcher=actions
+actions_mode = ARGV.include?("--launcher=actions")
+
+# puts "\n➡️ script/setup-codespaces-copilot-api\n"
+# system("script/setup-codespaces-copilot-api")
+
+puts "\n➡️ Enabling feature flags\n"
+system("bin/toggle-feature-flag enable copilot_swe_agent")
+
+# Enable once we can assign Copilot to an issue in the React experience
+# puts "\n➡️ Enable Issues Experience v2\n"
+# system("script/setup-issues-react")
+
+puts "\n➡️ Clone github/sweagentd\n"
+system("git clone https://github.com/github/sweagentd /workspaces/sweagentd")
+
+puts "\n➡️ Seeding GitHub App\n"
+integration = T.must(Apps::Privileged::CopilotSWEAgent.seed_database!)
+bot = T.must(integration.bot)
+mona = User.find_by_login("monalisa")
+Apps::Privileged.integration(:copilot_swe_agent).install_on(mona, repositories: [], installer: mona, entry_point: :test_case)
+Apps::Privileged.integration(:copilot_swe_agent).install_on(Organization.find_by_login("github"), repositories: [], installer: mona, entry_point: :test_case)
+
+puts "\n➡️ Pulling runtime docker container\n"
+system("docker pull ghcr.io/github/sweagentd/runtime:latest")
+
+puts "\n➡️ Mirroring github/copilot-developer-action\n"
+system("bin/seed github_repo --nwo github/copilot-developer-action -t $GITHUB_TOKEN")
+
+key = integration.generate_key(creator: mona).private_key.to_pem
+
+puts "\n➡ Collecting GitHub App credentials..."
+puts "\n➡ Creating /workspaces/sweagentd/.env with these variables\n"
+dotenv = <<-END_CONFIG
+# GitHub App Credentials
+GITHUB_APP_ID=#{integration.id.inspect}
+GITHUB_APP_BOT_ID=#{bot.id.inspect}
+GITHUB_APP_LOGIN=#{integration.slug.inspect}
+GITHUB_BOT_LOGIN=#{bot.login.inspect}
+GITHUB_APP_PRIVATE_KEY=#{Base64.strict_encode64(key.strip).inspect}
+GITHUB_SERVER_URL=http://github.localhost/
+GITHUB_API_BASE_URL=http://api.github.localhost/
+
+# User and email for commits - the email below makes it look like the commit was done by Copilot
+GITHUB_COMMIT_LOGIN="Copilot"
+GITHUB_COMMIT_EMAIL="#{bot.id.inspect}+#{bot.login.inspect}@users.noreply.github.localhost"
+
+# This is the URL that the agent will use to send callbacks to - should be sweagentd
+AGENT_CALLBACK_URL="http://localhost:2208/agent"
+END_CONFIG
+
+if actions_mode
+  dotenv += <<-END_CONFIG
+
+# Agent launcher config
+AGENT_LAUNCHER=actions
+ACTIONS_RUNS_ON_LABELS=self-hosted
+END_CONFIG
+end
+
+puts dotenv
+File.write("/workspaces/sweagentd/.env", dotenv)
+
+if actions_mode
+  puts "Set `CAPI_HMAC_KEY_OVERRIDE` and `CAPI_INTEGRATION_ID_OVERRIDE` as org secrets for the github org"
+end
+
+puts "\n🎉 Done!"

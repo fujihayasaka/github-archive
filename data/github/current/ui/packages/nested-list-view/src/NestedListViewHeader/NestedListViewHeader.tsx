@@ -1,0 +1,134 @@
+import {testIdProps} from '@github-ui/test-id-props'
+import {clsx} from 'clsx'
+import type {ReactElement, ReactNode, Suspense} from 'react'
+import {isValidElement, useCallback, useEffect} from 'react'
+
+import type {NestedListViewCompletionPill} from '../CompletionPill'
+import {useNestedListViewProperties} from '../context/PropertiesContext'
+import {useNestedListViewSelection} from '../context/SelectionContext'
+import {useNestedListViewTitle} from '../context/TitleContext'
+import {NestedListViewHeaderActionBar, type NestedListViewHeaderActionBarProps} from './ActionBar'
+import styles from './NestedListViewHeader.module.css'
+import {NestedListViewHeaderSectionFilters, type NestedListViewHeaderSectionFiltersLinks} from './SectionFilters'
+import {NestedListViewHeaderSelectAllCheckbox} from './SelectAllCheckbox'
+import type {NestedListViewHeaderTitle} from './Title'
+
+export type NestedListViewHeaderProps = {
+  /**
+   * The rendered title of the list or information regarding its contents.
+   */
+  title?: ReactElement<typeof NestedListViewHeaderTitle>
+
+  /**
+   * Display completed & total issue information about the issues contained in the NestedListView
+   */
+  completionPill?: ReactElement<typeof NestedListViewCompletionPill>
+
+  /**
+   * Links for applying any categorical, mutually exclusive section filters for the content of the NestedListView.
+   */
+  sectionFilters?: NestedListViewHeaderSectionFiltersLinks | ReactElement<typeof Suspense>
+  /**
+   * Used for assistive announcements that are reflective of the visual updates to the list container a sighted user
+   * will experience when using the list. Defaults to no announcement. Visually hidden, for screenreaders only.
+   */
+  assistiveAnnouncement?: string
+  /**
+   * Callback for when the checkbox for selecting and deselecting all list items is toggled.
+   */
+  onToggleSelectAll?: (isSelectAllChecked: boolean) => void
+
+  /**
+   * Optional additional actions to show. Will not fall into an overflow dropdown menu to accommodate small screen
+   * widths.
+   */
+  children?: ReactNode
+  /** Container class name. */
+  className?: string
+  /** Action Bar container class name. */
+  actionBarClassName?: string
+} & Omit<NestedListViewHeaderActionBarProps, 'className'>
+
+const NestedListViewAnnouncements = ({
+  idPrefix,
+  assistiveAnnouncement,
+}: {
+  idPrefix: string
+  assistiveAnnouncement: string
+}) => {
+  return (
+    <div
+      id={`${idPrefix}-nested-list-view-announcements`}
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      className="sr-only"
+      {...testIdProps('nested-list-view-announcement-container')}
+    >
+      {assistiveAnnouncement}
+    </div>
+  )
+}
+
+export const NestedListViewHeader = ({
+  title,
+  completionPill,
+  assistiveAnnouncement,
+  sectionFilters,
+  children,
+  className,
+  actionBarClassName,
+  onToggleSelectAll,
+  actions,
+  actionsLabel,
+  ...actionBarProps
+}: NestedListViewHeaderProps) => {
+  const {idPrefix} = useNestedListViewProperties()
+  const {setHasMetadataTitle} = useNestedListViewTitle()
+  const {anyItemsSelected} = useNestedListViewSelection()
+
+  useEffect(() => {
+    setHasMetadataTitle(!!title)
+  })
+
+  const ListFilters = useCallback(() => {
+    if (!sectionFilters) return null
+
+    if (Array.isArray(sectionFilters)) {
+      return <NestedListViewHeaderSectionFilters links={sectionFilters} />
+    } else if (isValidElement(sectionFilters)) {
+      return <>{sectionFilters}</>
+    }
+    return null
+  }, [sectionFilters])
+
+  // To fix Typescript error
+  const actionsProps = actions && actionsLabel ? {actions, actionsLabel} : {}
+  return (
+    <div
+      id={`${idPrefix}-nested-list-view-metadata`}
+      className={clsx(styles.container, className)}
+      {...testIdProps('nested-list-view-metadata')}
+    >
+      <NestedListViewHeaderSelectAllCheckbox
+        onToggle={(isSelectAllChecked: boolean) => {
+          if (onToggleSelectAll) onToggleSelectAll(isSelectAllChecked)
+        }}
+      />
+
+      <ListFilters />
+
+      {!anyItemsSelected && title}
+
+      {completionPill}
+
+      <NestedListViewHeaderActionBar className={actionBarClassName} {...actionsProps} {...actionBarProps}>
+        {children}
+      </NestedListViewHeaderActionBar>
+
+      {assistiveAnnouncement && (
+        <NestedListViewAnnouncements idPrefix={idPrefix} assistiveAnnouncement={assistiveAnnouncement} />
+      )}
+    </div>
+  )
+}

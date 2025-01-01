@@ -1,0 +1,51 @@
+#!/bin/bash
+
+# Usage: script/slack-tunnel-server
+# Start the github/slack ngrok tunnel if the repository has been cloned in the Codespace, or no-op otherwise.
+
+set -e
+
+if test -f /workspaces/slack/bin/ngrok; then
+  if [ -f /workspaces/slack/.env.slack ]; then
+    if [ -f /workspaces/slack/.env.dotcom ]; then
+      cd /workspaces/slack && \
+        bin/ngrok http localhost:4001 --config ngrok.yml --log=stdout --domain="${GITHUB_USER}-slack.ngrok.io"
+    elif [ -f /workspaces/slack/.env.ghe ]; then
+      cd /workspaces/slack && \
+        bin/ngrok http localhost:4001 --config ngrok.yml --log=stdout --domain="${GITHUB_USER}-slack-ghe.ngrok.io" \
+          --request-header-add=X-GitHub-Tenant:avocado-gmbh
+    else
+      echo "Neither .env.dotcom nor .env.ghe exists, sleeping."
+      echo "If you want to run ngrok for github/slack, first run 'bin/setup-slack-repo',"
+      echo "then 'overmind restart slack-tunnel'."
+      sleep infinity
+    fi
+
+  elif [ -f /workspaces/slack/.env.teams ]; then
+    if [ -f /workspaces/slack/.env.dotcom ]; then
+      cd /workspaces/slack && \
+        bin/ngrok http localhost:4001 --config ngrok.yml --log=stdout --domain="${GITHUB_USER}-teams.ngrok.io"
+    elif [ -f /workspaces/slack/.env.ghe ]; then
+      cd /workspaces/slack && \
+        bin/ngrok http localhost:4001 --config ngrok.yml --log=stdout --domain="${GITHUB_USER}-teams-ghe.ngrok.io" \
+          --request-header-add=X-GitHub-Tenant:avocado-gmbh
+    else
+      echo "Neither .env.dotcom nor .env.ghe exists, sleeping."
+      echo "If you want to run ngrok for github/slack, first run 'bin/setup-slack-repo',"
+      echo "then 'overmind restart slack-tunnel'."
+      sleep infinity
+    fi
+
+  else
+    echo "Neither .env.slack nor .env.teams exists, sleeping."
+    echo "If you want to run ngrok for github/slack, first run 'bin/setup-slack-repo',"
+    echo "then 'overmind restart slack-tunnel'."
+    sleep infinity
+  fi
+
+else
+  echo "/workspaces/slack/bin/ngrok does not exist, sleeping."
+  echo "If you want to run ngrok for github/slack, first run 'bin/setup-slack-repo',"
+  echo "then 'overmind restart slack-tunnel'."
+  sleep infinity
+fi

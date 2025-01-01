@@ -1,0 +1,51 @@
+#!/usr/bin/env safe-ruby
+# frozen_string_literal: true
+
+require_relative "#{Rails.root}/config/environment"
+require_relative "#{Rails.root}/script/seeds/objects"
+require_relative "#{Rails.root}/script/seeds/runner"
+require_relative "#{Rails.root}/script/seeds/runners/github_models"
+
+unless Rails.env.development?
+  raise "This is a dev-only script"
+end
+
+class SetupModels
+  def call
+    puts("Starting Models setup")
+
+    enable_feature_flags
+    create_models
+
+    puts "Models setup completed."
+  end
+
+  private
+
+  def enable_feature_flags
+    flags = [
+      :marketplace_search_improvements,
+      :github_models_normalize_records,
+      :github_models_org_access_policies,
+      :project_neutron_allow_all_integrations,
+      :project_neutron_fetch_catalog_items_job,
+      :project_neutron_o1_models,
+      :github_models_read_access_for_orgs,
+      :github_models_read_access_for_users,
+      :github_models_repo_tab,
+    ] + Marketplace::Models::RenderDependency::MODELS_CLIENT_SIDE_FEATURE_FLAGS
+    puts "Enabling feature flags"
+
+    flags.each do |flag|
+      puts "Enabling #{flag} feature..."
+      GitHub.flipper[flag].enable
+    end
+  end
+
+  def create_models
+    puts "Creating models..."
+    Seeds::Runner::GitHubModels.execute({})
+  end
+end
+
+SetupModels.new.call

@@ -1,0 +1,134 @@
+import {existsSync, writeFileSync, mkdirSync} from 'fs'
+import {join} from 'path'
+import {fullPathFromRoot} from '@github-ui/client-build-tools/path-utils'
+import {getJSEntryPoints, getCSSEntryPoints, getSSREntryPoints} from '@github-ui/client-build-tools/entry-points'
+import {createGeneratedFiles} from '@github-ui/client-build-tools/generated-files'
+import bundlerFlags from './bundler-flags.json' with {type: 'json'}
+
+type Manifest = Record<string, {src: string}>
+type AlloyManifest = {entries: Record<string, string>; ssrNames: string[]}
+type BundlerFlags = Record<string, {flag: string; bundler: string}>
+
+const publicPath = fullPathFromRoot('public')
+const assetsPath = join(publicPath, 'assets')
+const jsManifestPath = join(assetsPath, 'manifest.json')
+const cssManifestPath = join(assetsPath, 'manifest.css.json')
+const alloyManifestPath = join(assetsPath, 'manifest.alloy.json')
+
+const fakeChecksum = 'aaaaaaaaaaaa'
+
+/** Ensure the parent directories for the manifest exist on disk */
+function setupDirectoryStructure() {
+  if (!existsSync(publicPath)) {
+    mkdirSync(publicPath)
+  }
+
+  if (!existsSync(assetsPath)) {
+    mkdirSync(assetsPath)
+  }
+}
+
+/**
+ * Generate a stub Javascript manifest based on the Webpack config which can be passed to the Rails test suite
+ * and not rely on running webpack and transpiling all of the assets on disk.
+ */
+function generateJavascriptManifest(): Manifest {
+  const entry = getJSEntryPoints()
+  const manifest: Manifest = {}
+
+  // defining some entry points that are required in tests but not
+  // visible through the webpack config's entry object
+  manifest['wp-runtime.js'] = {src: `wp-runtime-${fakeChecksum}.js`}
+
+  const propertyNames = Object.getOwnPropertyNames(entry)
+  for (const propertyName of propertyNames) {
+    const value = entry[propertyName]
+    if (typeof value !== 'string') {
+      throw new Error(`Unexpected entry point value: ${value}`)
+    }
+
+    const fileName = `${propertyName}.js`
+    const sourceValue = `${propertyName}-${fakeChecksum}.js`
+    const recordValue = {src: sourceValue}
+
+    manifest[fileName] = recordValue
+  }
+
+  return manifest
+}
+
+/**
+ * Generate a stub CSS manifest based on the Webpack config which can be passed to the Rails test suite
+ * and not rely on running webpack and transpiling all of the assets on disk.
+ */
+function generateStubCssManifest(): Manifest {
+  const entry = getCSSEntryPoints()
+  const manifest: Manifest = {}
+
+  const propertyNames = Object.getOwnPropertyNames(entry)
+  for (const propertyName of propertyNames) {
+    const cssFileName = `${propertyName}.css`
+    const cssSourceFileName = `${propertyName}-${fakeChecksum}.css`
+    manifest[cssFileName] = {src: cssSourceFileName}
+
+    const jsCssFileName = `${cssFileName}.js`
+    manifest[jsCssFileName] = {src: `${cssSourceFileName}.js`}
+  }
+
+  return manifest
+}
+
+const ssrNames = Object.keys(getSSREntryPoints()).sort()
+
+function generateStubAlloyManifest(): AlloyManifest {
+  return {
+    entries: {
+      alloy: `alloy-${fakeChecksum}.js`,
+    },
+    ssrNames,
+  }
+}
+
+/**
+ * Write the manifest object to disk as JSON
+ */
+function persistManifest(path: string, manifest: Manifest | AlloyManifest) {
+  const manifestText = JSON.stringify(manifest, null, 2)
+  writeFileSync(path, manifestText)
+}
+
+/**
+ * Write the assets object to disk
+ */
+function persistAssets(jsManifest: Manifest, cssManifest: Manifest, alloyManifest: AlloyManifest) {
+  for (const {src: asset} of [...Object.values(jsManifest), ...Object.values(cssManifest)]) {
+    writeFileSync(join(assetsPath, asset), '')
+  }
+  for (const asset of Object.values(alloyManifest.entries)) {
+    writeFileSync(join(assetsPath, asset), '')
+  }
+}
+
+function main() {
+  setupDirectoryStructure()
+
+  const jsManifest = generateJavascriptManifest()
+  persistManifest(jsManifestPath, jsManifest)
+
+  for (const bundlerFlagKey of Object.getOwnPropertyNames(bundlerFlags as BundlerFlags)) {
+    const manifestPath = join(assetsPath, `manifest.${bundlerFlagKey}.json`)
+    persistManifest(manifestPath, jsManifest)
+  }
+
+  const cssManifest = generateStubCssManifest()
+  persistManifest(cssManifestPath, cssManifest)
+
+  const alloyManifest = generateStubAlloyManifest()
+  persistManifest(alloyManifestPath, alloyManifest)
+
+  persistAssets(jsManifest, cssManifest, alloyManifest)
+
+  createGeneratedFiles()
+}
+
+main()

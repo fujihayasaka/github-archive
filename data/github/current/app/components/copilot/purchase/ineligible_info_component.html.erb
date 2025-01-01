@@ -1,0 +1,58 @@
+<%= render(Primer::Alpha::Banner.new(scheme: :warning, mb: 3)) do %>
+  <% if reason == :copilot_enabled %>
+    Copilot is already enabled for this <%= normalized_account_type %>.
+    <% if is_business? %>
+      <% if is_standalone_business? %>
+        You can manage policies
+      <% else %>
+        You can manage licenses for your organizations
+      <% end %>
+      at your enterprise's
+    <% else %>
+      Manage Copilot on your organization's
+    <% end %>
+     <%= render(Primer::Beta::Link.new(href: settings_path, underline: true)) { "settings page" } %>.
+  <% elsif reason == :has_trial %>
+    <% if is_business? && !is_standalone_business? %>
+      This enterprise is on a trial. <%= render(Primer::Beta::Link.new(underline: true, href: enterprise_path(selected_account))) { "Visit your enterprise's settings to upgrade to a paid account." } %>
+    <% elsif is_organization? %>
+      <%
+        copilot_org = Copilot::Organization.new(selected_account)
+        copilot_trial = copilot_org.business_trial
+      %>
+      This account has access to a GitHub Copilot <%= copilot_trial.copilot_plan.capitalize %> trial for another <%= pluralize(copilot_trial.days_left, "day") %>. Contact the sales team or select a different organization.
+    <% end %>
+  <% elsif reason == :manages_trial && is_business? %>
+    All organization in this account have access to GitHub Copilot via trial. Contact the sales team or select a different enterprise account.
+  <% elsif reason == :has_legacy_plan %>
+    GitHub Copilot is not available for accounts on legacy billing plans.
+    Review your pricing plan to get access to this feature. For more information, <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_BILLING_DOCUMENTATION, underline: true)) { "read the billing documentation" } %>.
+  <% elsif reason == :not_billable %>
+    <p>
+      Update your payment method information to enable GitHub Copilot. If you are unable to do so, <%= render(Primer::Beta::Link.new(underline: true, href: GitHub.support_url)) { "contact support" } %>.
+    </p>
+  <% elsif reason == :owned_by_parent %>
+    This organization is managed by an enterprise account. To enable GitHub Copilot for this organization,
+    <% if account_is_adminable_by_user? %>
+      <% if Copilot::Business.new(@selected_account.business).copilot_enabled? %>
+        <%= render(Primer::Beta::Link.new(underline: true, href: settings_copilot_enterprise_path(@selected_account.business))) { "visit your enterprise settings page" } %>.
+      <% else %>
+        select this organization's parent enterprise using the account switcher below.
+      <% end %>
+    <% else %>
+      contact your enterprise administrator.
+    <% end %>
+  <% elsif reason == :no_billing_contact_information %>
+    Update your billing information below to enable GitHub Copilot. If you are unable to do so, <%= render(Primer::Beta::Link.new(underline: true, href: GitHub.support_url)) { "contact support" } %>.
+  <% elsif reason == :force_sales_serve && is_business? %>
+    Contact sales to complete enable Copilot
+    <p class="text-light mb-2 mt-1">
+      Your enterprise requires your billing information to be manually set up.
+      Please <%= render(Primer::Beta::Link.new(underline: true, href: Copilot::CONTACT_SALES_TEAM)) { "contact sales" } %> and we will help you set up your subscription.
+    </p>
+    <p class="text-light mb-0">
+      If you want to connect your existing Azure subscription, please follow <%= render(Primer::Beta::Link.new(href: "https://docs.github.com/enterprise-cloud@latest/billing/managing-billing-for-your-github-account/connecting-an-azure-subscription-to-your-enterprise", classes: "Link--inTextBlock")) { "these instructions" } %>
+      to set up your Azure ID.
+    </p>
+  <% end %>
+<% end %>

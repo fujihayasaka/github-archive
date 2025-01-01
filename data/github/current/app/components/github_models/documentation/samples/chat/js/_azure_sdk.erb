@@ -1,0 +1,48 @@
+import ModelClient, { isUnexpected } from "@azure-rest/ai-inference";
+import { AzureKeyCredential } from "@azure/core-auth";
+
+const token = process.env["GITHUB_TOKEN"];
+const endpoint = "https://models.inference.ai.azure.com";
+const modelName = "<%= model_name %>";
+
+export async function main() {
+
+  const client = ModelClient(
+    endpoint,
+    new AzureKeyCredential(token),
+    <%- if exception_use_openai_preview_sdk -%>
+    {apiVersion:"2024-12-01-preview"}
+    <%- end -%>
+  );
+
+  const response = await client.path("/chat/completions").post({
+    body: {
+      messages: [
+        <%- if supports_system_prompt-%>
+        { role:"<%= assistant_role %>", content: "You are a helpful assistant." },
+        <%- end -%>
+        { role:"user", content: "What is the capital of France?" }
+      ],
+      <%- if supports_temperature-%>
+      temperature: 1.0,
+      <%- end -%>
+      <%- if supports_top_p-%>
+      top_p: 1.0,
+      <%- end -%>
+      <%- if supports_max_tokens-%>
+      max_tokens: 1000,
+      <%- end -%>
+      model: modelName
+    }
+  });
+
+  if (isUnexpected(response)) {
+    throw response.body.error;
+  }
+
+  console.log(response.body.choices[0].message.content);
+}
+
+main().catch((err) => {
+  console.error("The sample encountered an error:", err);
+});

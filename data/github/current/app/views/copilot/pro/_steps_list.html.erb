@@ -1,0 +1,51 @@
+<%
+  if current_user.feature_enabled?(:copilot_pro_new_billing_flow_progress_bar)
+    steps = [
+      { title: "Billing frequency" },
+      { title: "Billing information" },
+      { title: "Payment method" },
+      { title: "Review" }
+    ]
+
+    steps = steps.each_with_index.map do |step, index|
+      step.merge(is_current: index == step_index)
+    end
+  else
+    has_no_billing_and_payment_info = !current_user.has_saved_trade_screening_record? && !current_user.has_valid_payment_method?
+    has_billing_but_no_payment_info = current_user.has_saved_trade_screening_record? && !current_user.has_valid_payment_method?
+    has_billing_and_payment_info = current_user.has_saved_trade_screening_record? && current_user.has_valid_payment_method?
+
+    steps = [
+      {
+        title: "Billing frequency",
+        is_current: false
+      },
+      {
+        title: "Billing information",
+        is_current: has_no_billing_and_payment_info
+      },
+      {
+        title: "Payment method",
+        is_current: has_billing_but_no_payment_info
+      },
+      {
+        title: "Review",
+        is_current: has_billing_and_payment_info
+      }
+    ]
+  end
+%>
+
+<%= render Primer::Alpha::Stack.new(tag: :ol, direction: :horizontal, wrap: :wrap, gap: :condensed, align: :center, mb: [5, 6], style: "list-style-type: none;", aria: { label: "Subscription form steps" } ) do %>
+  <% steps.each_with_index do |step, index| %>
+    <%= render Primer::Alpha::Stack.new(tag: :li, direction: :horizontal, wrap: :wrap, gap: :condensed, align: :center, aria: { current: step[:is_current] ? "step" : nil } ) do %>
+      <%= render Primer::Beta::Text.new(tag: :p, mb: 0, color: step[:is_current] ? :default : :muted, underline: step[:is_current]) do %>
+        <span class="sr-only"><%= "#{index + 1}." %></span><%= step[:title] %>
+      <% end %>
+
+      <% unless step[:title] == steps.last[:title] %>
+        <%= render Primer::Beta::Octicon.new("chevron-right", color: :muted) %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

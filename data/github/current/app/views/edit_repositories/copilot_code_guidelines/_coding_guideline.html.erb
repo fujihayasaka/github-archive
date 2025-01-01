@@ -1,0 +1,76 @@
+<% toggle_switch_id = "copilot-coding-guideline-#{guideline.id}" %>
+<% delete_dialog_id = "delete_copilot_coding_guideline_#{guideline.id}" %>
+<% edit_href = edit_copilot_code_guideline_path(user_id: current_repository.owner_display_login, id: guideline) %>
+<% enablement_href = copilot_code_guideline_enablement_path(user_id: current_repository.owner_display_login, copilot_code_guideline_id: guideline) %>
+<% is_disabled = limit_reached && !guideline.enabled? %>
+<%
+  toggle_switch_arguments = {
+    id: toggle_switch_id,
+    src: enablement_href,
+    checked: guideline.enabled?,
+    size: :small,
+    "aria-label": "Copilot code guideline enablement",
+    enabled: !is_disabled,
+    data: { turbo: true },
+  }
+  should_autofocus_guideline_toggle = guideline.id == autofocus_guideline_id
+  toggle_switch_arguments[:autofocus] = true if should_autofocus_guideline_toggle
+%>
+
+<% border_box.with_row(flex: 1, display: :flex, justify_content: :space_between, align_items: :center) do %>
+  <%= render(Primer::Box.new(display: :flex, direction: :column)) do %>
+    <%= render(Primer::Beta::Text.new(tag: :p, font_weight: :bold, mb: 1, test_selector: "coding-guideline")) do %>
+      <%= render(Primer::Beta::Link.new(href: edit_href, scheme: :primary)) { guideline.name } %>
+    <% end %>
+  <% end %>
+
+  <%= render(Primer::Box.new(display: :flex, align_items: :center, classes: "gap-2")) do %>
+    <%= render(Primer::Alpha::ToggleSwitch.new(**toggle_switch_arguments)) %>
+    <% if is_disabled %>
+      <%= render(Primer::Alpha::Tooltip.new(
+        for_id: toggle_switch_id,
+        type: :description,
+        direction: :s,
+        text: "Cannot enable this guideline due to limit."
+      )) %>
+    <% end %>
+
+    <%= render(Primer::Alpha::ActionMenu.new) do |menu| %>
+      <% menu.with_show_button(
+        icon: "kebab-horizontal",
+        scheme: :invisible,
+        "aria-label": "Show more actions",
+      ) %>
+      <% menu.with_item(
+        label: "Edit",
+        "aria-label": "Edit guideline",
+        href: edit_href,
+      ) %>
+      <% if current_repository.feature_enabled?(:copilot_code_guidelines_occurrences_page) %>
+        <% menu.with_item(
+          label: "Occurrences",
+          "aria-label": "View comments generated from guideline",
+          href: occurrences_path(user_id: current_repository.owner_display_login, repository: current_repository.name, id: guideline),
+        ) %>
+      <% end %>
+      <% menu.with_item(
+        label: "Delete",
+        "aria-label": "Delete guideline",
+        scheme: :danger,
+        content_arguments: { "data-show-dialog-id": delete_dialog_id },
+      ) %>
+    <% end %>
+
+    <%= render(Primer::Alpha::Dialog.new(id: delete_dialog_id, size: :small, title: "Are you sure you want to delete this guideline?")) do |d| %>
+      <%= form_tag copilot_code_guideline_path(user_id: current_repository.owner_display_login, id: guideline), method: :delete do %>
+        <%= render(Primer::Alpha::Dialog::Body.new) do %>
+          <p>Once deleted, this guideline will not be included in new reviews. Existing reviews will be unaffected.</p>
+        <% end %>
+        <%= render(Primer::Alpha::Dialog::Footer.new) do %>
+          <%= render(Primer::Beta::Button.new(data: { "close-dialog-id": delete_dialog_id })) { "Cancel" } %>
+          <%= render(Primer::Beta::Button.new(scheme: :danger, type: :submit)) { "Delete" } %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

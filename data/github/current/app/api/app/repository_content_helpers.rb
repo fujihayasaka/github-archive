@@ -1,0 +1,559 @@
+# typed: true
+# frozen_string_literal: true
+
+module Api::App::RepositoryContentHelpers
+  extend T::Helpers
+
+  requires_ancestor { Api::App }
+  requires_ancestor { Api::RepositoryContents }
+
+  def serve_contents_with_spokes!
+    GitHub.tracer.in_span("api.app.repository-content-helpers", kind: :internal, attributes: {
+      "code.namespace" => "serve_contents_with_spokes"
+    }) do |_span|
+      # handle paths that end in /
+      if content_path.ends_with?("/")
+        redirect(api_url(request.path[0..-2]))
+      end
+
+      begin
+        if content_metadata.empty_repository?
+          deliver_error!(404,
+            message: "This repository is empty.",
+            documentation_url: "/v3/repos/contents/#get-contents")
+        elsif content_metadata.commit_not_found?
+          deliver_error!(404,
+            message: "No commit found for the ref #{ref_name}",
+            documentation_url: "/v3/repos/contents/")
+        elsif content_metadata.tree_not_found?
+          deliver_error!(404,
+            message: "No commit found for the ref #{ref_name}",
+            documentation_url: "/v3/repos/contents/")
+        elsif content_metadata.object_not_found?
+          deliver_error!(404)
+        end
+
+        if content_metadata.tree?
+          deliver_tree_contents_spokes!
+        elsif content_metadata.submodule?
+          deliver_submodule_contents_spokes!
+        else # blob
+          deliver_blob_contents_spokes!
+        end
+      rescue SpokesAPI::NotFound, SpokesAPI::InvalidArgument,
+        SpokesAPI::TwirpServerError
+        deliver_error!(404)
+      rescue SpokesAPI::ResourceExhausted => err
+        deliver_error!(429, message: err.message)
+      end
+    end
+  end
+
+  def content_metadata
+    return @content_metadata if defined?(@content_metadata)
+
+    @content_metadata = Repositories.domain.contents.metadata_by_ref_and_path(
+      repository: current_repository,
+      ref: params[:ref],
+      path: normalized_path,
+    )
+
+    @content_metadata
+  end
+
+  def deliver_submodule_contents_spokes!
+    last_modified = calc_last_modified_for_object(current_repository)
+
+    # Give Sinatra a chance to halt immediately if ETag matches.
+    set_caching_headers!({ etag: content_metadata.root_tree_entry_oid, last_modified: last_modified })
+
+    deliver :content_hash,
+      submodule_tree_entry,
+      repo: current_repository,
+      full: true,
+      ref: ref_name
+  end
+
+  def deliver_blob_contents_spokes!(experiment: true)
+    # Give Sinatra a chance to halt immediately if ETag matches.
+    last_modified = current_commit_last_modified
+    set_caching_headers!({ etag: content_metadata.path_object_oid, last_modified: last_modified })
+
+    # Make sure the blob is not too large
+    blob_size = content_metadata.path_object_size
+    if blob_size > Api::RepositoryContents::MAX_BLOB_SIZE
+      deliver_too_large_error!(blob_size)
+    end
+    if blob_size > Api::RepositoryContents::RAW_OBJECT_ONLY_BLOB_SIZE && medias.api_param?(:html)
+      deliver_too_large_error!(blob_size)
+    end
+
+    blob = spokes_blob
+    if blob.nil?
+      deliver_error!(404)
+    end
+
+    GitHub.dogstats.increment("repos.api.get_repo_contents", tags: get_blob_tags(true, blob, medias))
+
+    if medias.api_param?(:raw)
+      blob_to_use = blob.symlink_target || blob
+
+      deliver_raw blob_to_use.data, content_type: "#{medias}; charset=utf-8"
+    elsif medias.api_param?(:html)
+      blob_to_use = blob.symlink_target || blob
+      blob_to_use.info["path"] = blob.path
+
+      deliver_raw render_file(blob_to_use, content_path, "file"), content_type: "#{medias}; charset=utf-8"
+    else
+
+      deliver :content_hash, blob,
+        repo: current_repository,
+        full: true,
+        ref: ref_name,
+        sha: content_metadata.root_tree_entry_oid
+    end
+  end
+
+  def current_commit_last_modified
+    return @current_commit_last_modified if defined?(@current_commit_last_modified)
+
+    @current_commit_last_modified = if current_repository.feature_enabled?(:get_commit_date_with_cache)
+      Repositories.domain.contents.get_commit_date(repository: current_repository, oid: content_metadata.ref_commit_oid)
+    else
+      science "get_commit_date_with_cache" do |e|
+        e.use do
+          spokes_commit = current_repository.spokes_api.list_commits_for_ids(oids: [content_metadata.ref_commit_oid,]).commits.first
+          committed_at = spokes_commit.commit_content.committer.date
+
+          GitRPC::Util.unixtime_to_time([committed_at.timestamp.seconds, committed_at.offset])
+        end
+        e.try { Repositories.domain.contents.get_commit_date(repository: current_repository, oid: content_metadata.ref_commit_oid) }
+      end
+    end
+  end
+
+  def spokes_blob
+    return @spokes_blob if defined?(@spokes_blob)
+
+    blob_contents = Repositories.domain.contents.blob_by_path_and_metadata(
+      repository: current_repository,
+      metadata: content_metadata,
+      path: normalized_path,
+      load_full_content: medias.api_param?(:raw)
+    )
+
+    return nil unless blob_contents
+
+    @spokes_blob = tree_entry_from_blob(blob: blob_contents)
+  end
+
+  # This conversion is needed currently as a shim to enable the html rendering pipeline to work.
+  # The Goomba code relies on logic in TreeEntry.
+  sig { params(blob: Repositories::Contents::Blob).returns(TreeEntry) }
+  def tree_entry_from_blob(blob:)
+    tree_entry = TreeEntry.new(current_repository, tree_entry_data_hash(blob:))
+
+    if symlink = blob.symlink_target
+      tree_entry.info["symlink_target"] = symlink.oid
+      tree_entry.info["symlink_target_object"] = tree_entry_data_hash(blob: symlink)
+    end
+
+    tree_entry
+  end
+
+  sig { params(blob: Repositories::Contents::Blob).returns(T::Hash[String, T.untyped]) }
+  def tree_entry_data_hash(blob:)
+    {
+      "type" => "blob",
+      "oid"  => blob.oid,
+      "mode" => blob.mode,
+      "name" => blob.name,
+      "path" => blob.path,
+      "size" => blob.size,
+      "data" => blob.truncated? ? "" : blob.contents, # this is for compatibility with TreeEntry, which omits the data if it's too large
+      "encoding" => blob.encoding,
+      "binary" => blob.binary?,
+      "truncated" => blob.truncated?,
+    }
+  end
+
+  def deliver_tree_contents_spokes!(experiment: true)
+    GitHub.tracer.in_span("api.app.repository-contents", kind: :internal, attributes: { "code.namespace" => "deliver_tree_contents_spokes!" }) do
+      # Give Sinatra a chance to halt immediately if ETag matches.
+      last_modified = calc_last_modified_for_object(current_repository)
+      # Give Sinatra a chance to halt immediately if ETag matches.
+      set_caching_headers!({ etag: content_metadata.root_tree_entry_oid, last_modified: last_modified })
+
+      content_options = {
+        repo: current_repository,
+        ref: ref_name,
+      }
+
+      if medias.api_param?(:object)
+        root_tree_entry = TreeEntry.new(
+          current_repository,
+          {
+            "type" => "tree",
+            "oid" => content_metadata.path_object_oid,
+            "name" => File.basename(content_path),
+            "path" => content_path,
+          }
+        )
+
+        deliver :tree_object_content_hash, root_tree_entry, content_options.merge(tree_entries: spokes_tree_entries)
+      else
+
+        deliver :content_hash, spokes_tree_entries, content_options
+      end
+    end
+  end
+
+  # Fetch tree entries from spokes for the specified tree OID, adding submodule info if needed.
+  sig { returns(T.nilable(T::Array[TreeEntry])) }
+  def spokes_tree_entries
+    return nil unless content_metadata.tree?
+
+    if current_repository.feature_enabled?(:tree_entries_with_cache)
+      return spokes_tree_entries_candidate
+    end
+
+    science "spokes_tree_entries_with_cache" do |e|
+      e.use { spokes_tree_entries_control }
+      e.try { spokes_tree_entries_candidate }
+      e.compare do |control, candidate|
+        if control.nil? || candidate.nil?
+          next control == candidate
+        end
+
+        control_info = control.map do |entry|
+          info = entry.info
+          if entry.submodule?
+            info["submodule_path"] = entry.submodule.path
+            info["submodule_url"] = entry.submodule.url
+            info["submodule_name"] = entry.submodule.name
+          end
+          info
+        end
+
+        candidate_info = candidate.map do |entry|
+          info = entry.info
+          if entry.submodule?
+            info["submodule_path"] = entry.submodule.path
+            info["submodule_url"] = entry.submodule.url
+            info["submodule_name"] = entry.submodule.name
+          end
+          info
+        end
+
+        control_info == candidate_info
+      end
+      e.clean do |value|
+        if value.nil?
+          nil
+        else
+          value.map do |entry|
+            info = entry.info
+            if entry.submodule?
+              info["submodule_path"] = entry.submodule.path
+              info["submodule_url"] = entry.submodule.url
+              info["submodule_name"] = entry.submodule.name
+            end
+            info
+          end
+        end
+      end
+    end
+  end
+
+  def spokes_tree_entries_control
+    entries = Repositories.domain.contents.tree_entries_by_oid(
+      repository: current_repository,
+      tree_oid: content_metadata.path_object_oid,
+      root_tree_oid: content_metadata.root_tree_entry_oid,
+      path: normalized_path
+    )&.map do |entry|
+      TreeEntry.new(
+        current_repository,
+        {
+          "type" => entry.type == :submodule ? "commit" : entry.type.to_s,
+          "oid" => entry.oid,
+          "path" => entry.path,
+          "name" => entry.name,
+          "mode" => entry.mode,
+          "size" => entry.size,
+          "collection" => true,
+          "symlink_target" => entry.symlink_target&.oid,
+          "symlink_target_object" => entry.symlink_target && {
+            "type" => entry.symlink_target&.type == :submodule ? "commit" : entry.symlink_target&.type.to_s,
+            "mode" => entry.symlink_target&.mode,
+          }
+        }
+      ).tap do |tree_entry|
+        tree_entry.path_prefix = normalized_path
+      end
+    end
+
+    # If there are any submodule tree entries, hydrate the submodule details
+    submodule_entries = entries&.select(&:submodule?)&.index_by(&:path)
+    if submodule_entries.any?
+      Repositories.domain.contents.submodules_by_commit_and_paths(
+        repository: current_repository,
+        commit_oid: content_metadata.ref_commit_oid,
+        paths: submodule_entries.keys
+      ).each do |submodule|
+        submodule_entries[submodule.path].submodule = Submodule.new(
+          superproject_repository: current_repository,
+          superproject_commit_oid: content_metadata.ref_commit_oid,
+          submodule_data: {
+            "path" => submodule.path,
+            "url" => submodule.url,
+            "name" => submodule.name
+          },
+        )
+      end
+    end
+
+    entries
+  end
+
+  def spokes_tree_entries_candidate
+    entries = Repositories.domain.contents.tree_entries_by_metadata(
+      repository: current_repository,
+      metadata: content_metadata,
+      path: normalized_path
+    )
+
+    entries&.map do |entry|
+      TreeEntry.new(
+        current_repository,
+        {
+          "type" => entry.type == :submodule ? "commit" : entry.type.to_s,
+          "oid" => entry.oid,
+          "path" => entry.path,
+          "name" => entry.name,
+          "mode" => entry.mode,
+          "size" => entry.size,
+          "collection" => true,
+          "symlink_target" => entry.symlink_target&.oid,
+          "symlink_target_object" => entry.symlink_target && {
+            "type" => entry.symlink_target&.type == :submodule ? "commit" : entry.symlink_target&.type.to_s,
+            "mode" => entry.symlink_target&.mode,
+          }
+        }
+      ).tap do |tree_entry|
+        tree_entry.path_prefix = normalized_path
+        if tree_entry.submodule?
+          tree_entry.submodule = Submodule.new(
+            superproject_repository: current_repository,
+            superproject_commit_oid: content_metadata.ref_commit_oid,
+            submodule_data: {
+              "path" => entry.submodule_path,
+              "url" => entry.submodule_url,
+              "name" => entry.submodule_name
+            },
+          )
+        end
+      end
+    end
+  end
+
+  def submodule_tree_entry
+    @submodule_tree_entry = if submodule_content.nil?
+      nil
+    else
+      tree_entry_from_submodule(submodule: submodule_content)
+    end
+  end
+
+  def submodule_content
+    return @submodule_content if defined?(@submodule_content)
+    return @submodule_content = nil unless content_metadata.submodule?
+
+    submodules = Repositories.domain.contents.submodules_by_commit_and_paths(
+      repository: current_repository,
+      commit_oid: content_metadata.ref_commit_oid,
+      paths: [normalized_path],
+    )
+
+    @submodule_content = submodules.any? ? submodules.first : nil
+  end
+
+
+  sig { params(submodule: Repositories::Contents::Submodule).returns(TreeEntry) }
+  def tree_entry_from_submodule(submodule:)
+    tree_entry = TreeEntry.new(
+      current_repository,
+      submodule_tree_entry_data_hash(submodule:),
+    )
+
+    tree_entry.submodule = Submodule.new(
+      superproject_repository: current_repository,
+      superproject_commit_oid: content_metadata.ref_commit_oid,
+      submodule_data: {
+        "path" => submodule.path,
+        "url" => submodule.url,
+        "name" => submodule.name
+      },
+    )
+
+    tree_entry
+  end
+
+  sig { params(submodule: Repositories::Contents::Submodule).returns(T::Hash[String, T.untyped]) }
+  def submodule_tree_entry_data_hash(submodule:)
+    {
+      "type" => "commit",
+      "oid"  => submodule.oid,
+      "mode" => 0o160000,
+      "name" => submodule.name,
+      "path" => submodule.path,
+      "size" => nil,
+      "content" => nil,
+    }
+  end
+
+  def normalized_path
+    return @normalized_path if defined?(@normalized_path)
+
+    @normalized_path = GitRPC::Util.normalize_path(path_string)
+  end
+
+  def ref_name
+    @ref_name ||= (params[:ref] || current_repository.default_branch).try(:b)
+  end
+
+  class ContentsAPIExperimentResponse
+    attr_reader :status, :etag, :last_modified, :location
+    attr_accessor :body
+
+    def initialize(status:, body:, etag: nil, last_modified: nil, location: nil)
+      @status = status
+      @body = body
+      @etag = etag
+      @last_modified = last_modified
+      @location = location
+    end
+
+    def ==(other)
+      status == other.status &&
+        body == other.body &&
+        etag == other.etag &&
+        last_modified == other.last_modified &&
+        location == other.location
+    end
+
+    def to_h
+      {
+        status: status,
+        location: location,
+        etag: etag,
+        last_modified: last_modified,
+        body: body
+      }.compact
+    end
+  end
+
+  def serialize_body_for_experiment(serialize_method, object, options)
+    options ||= {}
+    options.update(default_options)
+
+    options[:current_user] ||= @current_user
+
+    return object if serialize_method == :raw
+
+    serializer_options = Api::SerializerOptions.fill(options)
+
+    serialized_object = Api::Serializer.serialize(serialize_method, object, serializer_options)
+
+    if should_remove_links_from_response?(serialized_object)
+      serialized_object = remove_links_from_response(serialized_object)
+    end
+
+    if user_agent.cli? || user_agent.browser?
+      return GitHub::JSON.encode(serialized_object, pretty: true) + "\n"
+    end
+
+    GitHub::JSON.encode(serialized_object)
+  end
+
+  def remove_links_from_response(serialized_object)
+    if serialized_object.is_a?(Array)
+      return serialized_object.map { |item| remove_links_from_response(item) }
+    end
+
+    if serialized_object.is_a?(Hash)
+      if serialized_object.key?(:entries)
+        serialized_object[:entries] = serialized_object[:entries].map do |entry|
+          remove_links_from_response(entry)
+        end
+      end
+
+      return serialized_object.except(:_links, :download_url)
+    end
+
+    serialized_object
+  end
+
+  def should_remove_links_from_response?(serialized_object)
+    if serialized_object.is_a?(Array)
+      return serialized_object.any? { |item| should_remove_links_from_response?(item) }
+    end
+
+    if serialized_object.is_a?(Hash)
+      if serialized_object.key?(:entries)
+        return true if serialized_object[:entries].any? { |entry| should_remove_links_from_response?(entry) }
+      end
+
+      data = serialized_object.slice(:_links, :download_url)
+      return false if data.blank?
+      return true if data[:download_url]&.include?("token=")
+      data[:_links]&.each do |_, value|
+        return true if value&.include?("token=")
+      end
+    end
+
+    false
+  end
+
+  sig { params(request: Sinatra::Request).returns(T.untyped) }
+  def query_reposd(request:)
+    # The api router will rewrite the request path to the repositories/:id form
+    # We need to use the original /repos/:owner/:repo/ path if that's what was given.
+    request_path = request.path
+    if original_nwo = request.env[GitHub::Routers::Api::ThisRepositoryNameWithOwnerKey]
+      request_path = request.path.sub(/\/repositories\/\d*\//, "/repos/#{original_nwo}/")
+    end
+
+    reposd_client.api_request(path: request_path, params: request.GET, headers: request.env)
+  end
+
+  sig { returns Repositories::ReposdClient }
+  def reposd_client
+    @reposd_client ||= Repositories::ReposdClient.new
+  end
+
+  sig { params(body: T.nilable(String), headers: T::Hash[String, T.untyped]).returns(T.untyped) }
+  def clean_response_body(body, headers)
+    return body unless body && headers["Content-Type"].include?("json") && body.include?("?token=")
+
+    parsed_resp = JSON.parse(body, symbolize_names: true)
+
+    parsed_resp = if parsed_resp.is_a?(Array)
+      parsed_resp.map { |item| item.except(:_links, :download_url) }
+    else
+      if parsed_resp.key?(:entries)
+        parsed_resp[:entries] = parsed_resp[:entries].map { |entry| entry.except(:_links, :download_url) }
+      end
+      parsed_resp.except(:_links, :download_url)
+    end
+
+    if user_agent.cli? || user_agent.browser?
+      GitHub::JSON.encode(parsed_resp, pretty: true) + "\n"
+    else
+      GitHub::JSON.encode(parsed_resp)
+    end
+  rescue # rubocop:disable Lint/GenericRescue
+    # Ignore any errors that occur when trying to parse the response body
+    body
+  end
+end

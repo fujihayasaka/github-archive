@@ -1,0 +1,127 @@
+<%# erblint:counter DeprecatedComponentsCounter 2 %>
+<%# rubocop:disable Lint/InstanceVariable %>
+
+<%
+  page_info(
+    title: "Release #{@release.display_name} · #{current_repository.name_with_display_owner}",
+    container_xl: true,
+    selected_link: @release.viewable? ? :repo_releases : :repo_tags,
+    skip_pjax_container: true,
+    richweb: {
+      title: "Release #{@release.display_name} · #{current_repository.name_with_display_owner}",
+      description: @release.body_text,
+      twitter_creator: @release.author&.profile_twitter_username,
+      url: release_path(@release),
+      image: repository_open_graph_image_url(current_repository),
+      card: repository_twitter_image_card(current_repository)
+    }
+  )
+-%>
+
+<%
+  protected_tag_is_deletable = @release.protected_tag_deletable_by?(current_user)
+%>
+
+<%= render layout: "layouts/repository_container", locals: { repository: current_repository } do %>
+<div class="clearfix container-xl px-3 px-md-4 px-lg-5 mt-4">
+  <div class="subnav">
+    <%= render Releases::SubnavComponent.new(current_repository, selected: :repo_tags) %>
+
+    <% if current_repository_writable? && current_user_can_push? %>
+      <div class="float-right">
+        <div class="BtnGroup">
+          <%= render Primer::ButtonComponent.new(tag: :a, href: new_release_path_helper(tag_name: @release.tag.name), group_item: true) do %>Create release <span class="hide-sm">from tag</span><% end %>
+          <% if @release.deletable? %>
+            <% if @release.tag_protected? %>
+              <% if protected_tag_is_deletable %>
+                <%= render Primer::Alpha::Dialog.new(title: "Delete protected tag?", details_classes: "BtnGroup-parent", size: :medium_portrait) do |d| %>
+                  <% d.with_show_button(scheme: :danger, classes: "BtnGroup-item rounded-left-0") do %>
+                    Delete
+                  <% end %>
+
+                  <% d.with_header(show_divider: true) do %>
+                    <strong>Delete protected tag?</strong>
+                  <% end %>
+
+                  <% d.with_body(classes: "Box-body", p: 0) do %>
+                    <%= render Primer::Beta::Flash.new(icon: :alert, scheme: :warning, full: true, display: :flex, align_items: :center) do %>
+                      This is a protected tag and can only be deleted by repository admins.
+                    <% end %>
+
+                    <p class="mb-0 p-3">
+                      Are you sure you want to delete this protected tag <strong><%= @release.tag.name %></strong>?
+                      This will delete the information for this tag and cannot be undone.
+                    </p>
+                  <% end %>
+
+                  <% d.with_footer(show_divider: true, classes: "Box-footer", justify_content: :center) do %>
+                    <%= form_for 'delete_release_path', url: release_path(@release), html: { method: :delete, class: "flex-1" } do %>
+                      <% if tag = @release.tag -%>
+                        <%= hidden_field_tag :expected_commit_oid, tag.sha %>
+                      <% end -%>
+                      <div class="form-group mt-0">
+                        <div class="form-group-header">
+                          <label class="text-normal" for="tag-name">
+                            Please type <strong><%= @release.tag.name %></strong> to confirm.
+                          </label>
+                        </div>
+                        <div class="form-group-body">
+                          <input id="tag-name" class="form-control input-block" pattern="<%= case_insensitive_pattern @release.tag.name %>" autofocus type="text" required>
+                        </div>
+                      </div>
+
+                      <%= render Primer::Beta::Button.new(type: :submit, scheme: :danger, block: true, test_selector: "delete-protected-tag-dialog") do %>
+                        I understand, delete this tag
+                      <% end %>
+                    <% end %>
+                  <% end %>
+                <% end %>
+              <% else %>
+                <%= render Primer::Beta::Button.new(
+                  disabled: true,
+                  scheme: :danger,
+                  group_item: true,
+                  size: :medium,
+                  id: "delete-tag-button",
+                  classes: "BtnGroup-item rounded-left-0",
+                  test_selector: "disabled-delete-tag-button") do |button| %>
+                    <% button.with_tooltip(text: "You do not have permission to delete this protected tag.") %>
+                    Delete
+                <% end %>
+              <% end %>
+            <% else %>
+              <%= render Primer::Alpha::Dialog.new(
+                title: "Delete tag?"
+              ) do |d| %>
+                <% d.with_header(show_divider: true) do %>
+                  <strong>Delete tag?</strong>
+                <% end %>
+                <% d.with_show_button(scheme: :danger, aria: { disabled: !protected_tag_is_deletable }, classes: "BtnGroup-item rounded-left-0") { "Delete" } %>
+                <% d.with_body do %>
+                  This will delete the information for this tag and cannot be undone.
+                <% end %>
+                <% d.with_footer(show_divider: true) do %>
+                  <%= form_for 'delete_release_path',
+                    :url  => release_path(@release),
+                    :html => { :method => :delete } do %>
+                    <% if tag = @release.tag -%>
+                      <%= hidden_field_tag :expected_commit_oid, tag.sha %>
+                    <% end -%>
+                    <%= render Primer::Beta::Button.new(type: :submit, scheme: :danger, block: true) do %>
+                      I understand, delete this tag
+                    <% end %>
+                  <% end %>
+                <% end %>
+              <% end %>
+            <% end %>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+  </div>
+
+  <div class="border-top">
+    <%= render Releases::TagLandingPageComponent.new(current_repository, @release) %>
+  </div>
+</div>
+<% end %>

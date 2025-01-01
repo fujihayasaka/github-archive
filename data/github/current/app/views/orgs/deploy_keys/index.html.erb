@@ -1,0 +1,86 @@
+<%
+  deploy_key_policy_enable = this_organization.deploy_key_policy_enabled? || this_organization.deploy_key_policy_unset?
+%>
+<% page_info responsive: false, title: "Deploy keys", selected_link: :deploy_keys %>
+
+<%= render layout: "orgs/settings/layout" do %>
+  <div class="settings-next">
+    <%= render Primer::Beta::Subhead.new do |component| %>
+      <% component.with_heading(tag: :h2) do %>Deploy keys<% end %>
+    <% end %>
+    <p>
+      Deploy keys use an SSH key to grant readonly or write access to a single repository.
+      If you have a more complex project or want more fine-grain control over permissions, consider using a GitHub App instead.
+      For more information, see
+      <%= link_to "the GitHub Apps documentation", docs_url("apps/overview"), class: "Link--inTextBlock", target: "_blank", rel: "noopener noreferrer" %>.
+      Please note that deploy keys are not protected by a passphrase and can be a security risk if your server is compromised.
+      For more information on deploy keys, see
+      <%= link_to "managing deploy keys", docs_url("authentication/managing-deploy-keys-deploy-keys"), class: "Link--inTextBlock", target: "_blank", rel: "noopener noreferrer" %>.
+    </p>
+
+    <% if form_disabled %>
+      <%= render(Primer::Alpha::Banner.new(icon: :shield)) do %>
+       Some settings on this page can’t be changed because they’re managed by <b><%= this_organization.business.nil? ? "your enterprise" : this_organization.business.name %></b>.
+      <% end %>
+    <% end %>
+    <deploy-key-policy-warning>
+      <%= form_tag settings_org_deploy_keys_update_path(this_organization), method: :put do %>
+        <div class="border rounded px-3 my-3">
+          <div class="form-checkbox">
+            <label data-action="<%= this_organization.deploy_key_policy_disabled? || (repositories_using_deploy_keys_count == 0) ? "" : "click:deploy-key-policy-warning#showWarning" %>">
+              <%= radio_button_tag "organization[deploy_key_policy]", "disabled", !deploy_key_policy_enable,
+              { disabled: form_disabled, 'aria-describedby': "disable-policy-option" } %>
+              Disabled
+              <%= render(Primer::Beta::Octicon.new(icon: :shield, size: :small)) if form_disabled && this_organization.deploy_key_policy_disabled? %>
+            </label>
+            <span id="disabled-policy-description" class="note">
+              Deploy keys are not allowed to be created and used within this organization. Cloning public repositories will be unaffected by this policy.
+            </span>
+          </div>
+
+          <div class="form-checkbox">
+            <label data-action="click:deploy-key-policy-warning#hideWarning">
+              <%= radio_button_tag "organization[deploy_key_policy]", "enabled", deploy_key_policy_enable,
+              { disabled: form_disabled, 'aria-describedby': "enable-policy-option" } %>
+              Enabled
+              <%= render(Primer::Beta::Octicon.new(icon: :shield, size: :small)) if form_disabled && deploy_key_policy_enable %>
+            </label>
+            <span id="enabled-policy-description" class="note">
+              Deploy keys are allowed to be created and used within this organization.
+            </span>
+          </div>
+        </div>
+        <%= render(Primer::Alpha::Banner.new(scheme: :warning, my: 3, "data-target": "deploy-key-policy-warning.disableWarningBanner", hidden: true)) do %>
+          <b><%= pluralize(repositories_using_deploy_keys_count, "repository") %></b> use deploy keys. Disabling deploy keys may break existing workflows.
+        <% end %>
+        <%= render(Primer::Beta::Button.new(
+          type: :submit,
+          "data-target": "deploy-key-policy-warning.saveDeployKeyPolicyButton",
+          disabled: form_disabled
+        )) { "Save" } %>
+        <%= render(Primer::Alpha::Dialog.new(
+          title: "Are you sure you want to disable deploy keys?",
+          id: "deploy-key-policy-disable-confirmation-dialog",
+          position: :center,
+          h: :fit,
+        )) do |component| %>
+          <% component.with_show_button(type: :submit, hidden: :true, "data-target": "deploy-key-policy-warning.saveDeployKeyPolicyButtonAreYouSure") { "Save" }%>
+          <% component.with_header(font_weight: :bold) do %>
+            Are you sure you want to disable deploy keys?
+          <% end %>
+          <% component.with_body do %>
+            <div class="pt-3">
+              <p>Existing deploy keys in <b><%= this_organization.display_login %></b> will disabled.</p>
+            </div>
+          <% end %>
+          <% component.with_footer do %>
+            <%= render(Primer::Beta::Button.new(data: { "close-dialog-id": "deploy-key-policy-disable-confirmation-dialog" })) { "Cancel" } %>
+            <%= render Primer::Beta::Button.new(type: :submit, scheme: :danger) do %>
+              Save
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    </deploy-key-policy-warning>
+  </div>
+<% end %>

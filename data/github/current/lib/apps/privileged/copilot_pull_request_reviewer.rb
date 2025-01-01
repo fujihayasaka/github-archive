@@ -1,0 +1,84 @@
+# typed: strict
+# frozen_string_literal: true
+
+module Apps
+  class Privileged
+    class CopilotPullRequestReviewer
+
+      MAX_SESSION_TIME = T.let(30.minutes, Integer)
+      NAME = "Copilot Pull Request Reviewer"
+      SLUG = "copilot-pull-request-reviewer"
+
+      sig { returns(T.proc.returns(T.nilable(Integer))) }
+      def self.id_finder
+        ->() {
+          Integration.find_by(
+            owner_id: GitHub.trusted_apps_owner_id,
+            slug: SLUG,
+          )&.id
+        }
+      end
+
+      PRODUCTION = T.let({
+        alias: :copilot_pull_request_reviewer,
+        id: id_finder,
+        inherits: [:first_party],
+        capabilities: {
+          installed_globally: true,
+          proxima_first_party_sync: true,
+          user_installable: false,
+          limited_access: false,
+          is_copilot: true,
+        },
+        properties: {
+          display_login: "Copilot",
+          oauth_access_expiry: MAX_SESSION_TIME,
+        },
+        can_auto_install: {},
+        custom_instrumentation_events: {},
+        owners: ["@github/pull-requests"],
+      }, T.any(Proc, Symbol, T::Hash[Symbol, T::Boolean], T::Array[String]))
+
+      PERMISSIONS = T.let({
+        contents: :read,
+        members: :read,
+        metadata: :read,
+        pull_requests: :write,
+      }, T::Hash[Symbol, Symbol])
+
+      sig { returns(T.nilable(Integration)) }
+      def self.seed_database!
+        return if self.installed?
+
+        integration_attributes = {
+          owner: GitHub.trusted_oauth_apps_owner,
+          name: NAME,
+          slug: SLUG,
+          url: "https://github.com/",
+          visibility: :public_visibility,
+          default_permissions: PERMISSIONS,
+          skip_restrict_names_with_github_validation: true,
+          skip_generate_slug: true,
+        }
+
+        # NOTE: we only need to hard-code the app ID for development
+        # rubocop:disable GitHub/DoNotBranchOnRailsEnv
+        if Rails.env.development?
+          integration_attributes[:id] = 836
+        end
+
+        Integration.create!(integration_attributes)
+      end
+
+      # Similar to id_finder, but avoids instantiating an ActiveRecord object.
+      # Installed globally, shouldn't need to check for a specific IntegrationInstallation.
+      sig { returns(T::Boolean) }
+      def self.installed?
+        Integration.where(
+          owner_id: GitHub.trusted_apps_owner_id,
+          slug: SLUG
+        ).exists?
+      end
+    end
+  end
+end

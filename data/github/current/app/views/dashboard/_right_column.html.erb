@@ -1,0 +1,211 @@
+<%# rubocop:disable GitHub/ContentFor %>
+
+<% content_for :right_column do %>
+
+  <% if !GitHub.enterprise? && ExploreFeed::Spotlight.all.current.dashboard.any? %>
+    <%= render(Explore::Spotlight::DashboardItemComponent.new(
+      spotlight: ExploreFeed::Spotlight.all.current.dashboard.first,
+    )) %>
+  <% end %>
+
+  <% if !current_user.feature_enabled?(:site_user_optout) %>
+    <% if current_user.in_onboarding_period? %>
+      <% promos = [
+        {
+          feature: :dashboard_onboarding_copilot_free_nudge,
+          notice: :dashboard_onboarding_copilot_free,
+          partial: "dashboard/promos/copilot_free",
+          extra_condition: -> {
+            # This is redundant with a few lines earlier but is required to ensure the test suite doesn't complain
+            return false if !current_user.feature_enabled?(:dashboard_onboarding_copilot_free_nudge)
+            # Don't show the nudge if the user is an enterprise managed user or in proxima
+            return false if GitHub.multi_tenant_enterprise? || current_user.is_enterprise_managed? || GitHub.enterprise?
+            # Don't show the nudge if the user has opted out of in-product messaging
+            return false unless current_user.subscribed_to_in_product_messages?
+            # Show the nudge as the default fail case
+            return true if current_copilot_user_v2.nil?
+            # Show the nudge if a user doesn't already have access to Copilot
+            return true unless (
+              current_copilot_user_v2.has_limited_access? || # Copilot Free - Adding this will practically result in auto dismissal once a user has access
+              current_copilot_user_v2.has_trial_access? || # Pro trial
+              current_copilot_user_v2.has_paid_ci_access? || # Pro
+              current_copilot_user_v2.has_free_pro_access? || # Pro (for free)
+              current_copilot_user_v2.has_cb_access? || # Copilot Business
+              current_copilot_user_v2.has_ce_access? # Copilot Enterprise
+            )
+          }
+        },
+      ]
+      %>
+      <div <%= test_selector('onboarding-marketing-banners') %>>
+        <% promos.each do |promo| %>
+          <% if current_user.feature_enabled?(promo[:feature]) && UserNotice.find(promo[:notice]).effective? && !current_user.dismissed_notice?(promo[:notice]) && (promo[:extra_condition].nil? || promo[:extra_condition].call) %>
+            <%= render promo[:partial], notice: promo[:notice], **promo[:locals] %>
+            <% break %>
+          <% end %>
+        <% end %>
+      </div>
+    <% end %>
+
+    <% unless current_user.in_onboarding_period? %>
+      <%# Example of extra rendering condition for a dashboard banner
+        {
+          feature: :site_copilot_ga_dashboard,
+          notice: :dashboard_promo_copilot_ga,
+          partial: "dashboard/dashboard_promo_copilot",
+          extra_condition: -> { !copilot_user?.has_signed_up? }
+        },
+      %>
+      <%# only display one marketing banner at once; ordered based on priority %>
+      <% user_propensity = UserPropensity::CopilotBusiness.find(current_user) %>
+      <% promos = [
+        {
+          feature: :copilot_business_propensity_low_nudge,
+          notice: UserNotice::DASHBOARD_PROMO_COPILOT_BUSINESS_PROPENSITY_LOW_NUDGE_NOTICE,
+          partial: "dashboard/promos/copilot_business_propensity_low_nudge",
+          locals: { user_propensity: user_propensity },
+          extra_condition: -> {
+            # Don't show the nudge if the user has opted out of in-product messaging
+            return false unless current_user.subscribed_to_in_product_messages?
+            # Propensity based targeting
+            return user_propensity&.show_explore_nudge?
+          },
+        },
+        {
+          feature: :copilot_business_propensity_nudge,
+          notice: UserNotice::DASHBOARD_PROMO_COPILOT_BUSINESS_PROPENSITY_NUDGE_NOTICE,
+          partial: "dashboard/promos/copilot_business_propensity_nudge",
+          locals: { user_propensity: user_propensity },
+          extra_condition: -> {
+            # Don't show the nudge if the user has opted out of in-product messaging
+            return false unless current_user.subscribed_to_in_product_messages?
+            # Propensity based targeting
+            return user_propensity&.show_purchase_nudge?
+          },
+        },
+        {
+          feature: :dashboard_copilot_extensions_docker_nudge,
+          notice: :dashboard_copilot_extensions_docker,
+          partial: "dashboard/promos/copilot_extensions_docker",
+          extra_condition: -> {
+            # this is redundant with a few lines earlier but is required to ensure the test suite doesn't complain
+            return false if !current_user.feature_enabled?(:dashboard_copilot_extensions_docker_nudge)
+            # Don't show the nudge if the user is an enterprise managed user or in proxima
+            return false if GitHub.multi_tenant_enterprise? || current_user.is_enterprise_managed? || GitHub.enterprise?
+            # Don't show the nudge if the user has opted out of in-product messaging
+            return false unless current_user.subscribed_to_in_product_messages?
+            # Show the nudge only if they don't have access to a Copilot SKU or if they are a Copilot Free user
+            return false if (
+              current_copilot_user_v2.has_trial_access? || # Pro trial
+              current_copilot_user_v2.has_paid_ci_access? || # Pro
+              current_copilot_user_v2.has_free_pro_access? || # Pro (for free)
+              current_copilot_user_v2.has_cb_access? || # Copilot Business
+              current_copilot_user_v2.has_ce_access? # Copilot Enterprise
+            )
+            # Show the nudge only if the user has starred a docker repo recently
+            return true if recently_starred_docker_repo?(current_user)
+          },
+        },
+        {
+          feature: :dashboard_2025_03_27_roadmap_nudge_pre_event,
+          notice: :dashboard_2025_03_27_roadmap,
+          partial: "dashboard/promos/roadmap_2025_03_27_pre_event",
+          extra_condition: -> {
+            # this is redundant with a few lines earlier but is required to ensure the test suite doesn't complain
+            return false if !current_user.feature_enabled?(:dashboard_2025_03_27_roadmap_nudge_pre_event)
+            # Don't show the nudge if the user is an enterprise managed user or in proxima
+            return false if GitHub.multi_tenant_enterprise? || current_user&.is_enterprise_managed? || GitHub.enterprise?
+            # Don't show the nudge if the user has opted out of in-product messaging
+            return false unless current_user.subscribed_to_in_product_messages?
+            # Only show for US users who are Team org admins, Enterprise org admins or Enterprise admins
+            return true if (GitHub::Location.look_up(request.remote_ip)[:country_code] == "US" || Rails.env.development?) && (
+                # GitHub Team org admin
+                current_user.owned_organizations.where(plan: GitHub::Plan.business.name).count > 0 ||
+                current_user.billing_manager_organizations.where(plan: GitHub::Plan.business.name).count > 0 ||
+                # Additional condition for Enterprise admins
+                current_user.businesses(membership_type: :admin).count > 0
+            )
+          },
+        },
+        {
+          feature: :dashboard_2025_03_27_roadmap_nudge_pre_event_emea,
+          notice: :dashboard_2025_03_27_roadmap,
+          partial: "dashboard/promos/roadmap_2025_03_27_pre_event_emea",
+          extra_condition: -> {
+            # this is redundant with a few lines earlier but is required to ensure the test suite doesn't complain
+            return false if !current_user.feature_enabled?(:dashboard_2025_03_27_roadmap_nudge_pre_event_emea)
+            # Don't show the nudge if the user is an enterprise managed user or in proxima
+            return false if GitHub.multi_tenant_enterprise? || current_user&.is_enterprise_managed? || GitHub.enterprise?
+            # Don't show the nudge if the user has opted out of in-product messaging
+            return false unless current_user.subscribed_to_in_product_messages?
+            # Only show for key country EMEA users who are Team org admins, Enterprise org admins or Enterprise admins
+            return true if
+              (
+                GitHub::Location.look_up(request.remote_ip)[:country_code] == "FR" ||
+                GitHub::Location.look_up(request.remote_ip)[:country_code] == "GB" ||
+                GitHub::Location.look_up(request.remote_ip)[:country_code] == "DE" ||
+                Rails.env.development?
+              ) && (
+                # GitHub Team org admin
+                current_user.owned_organizations.where(plan: GitHub::Plan.business.name).count > 0 ||
+                current_user.billing_manager_organizations.where(plan: GitHub::Plan.business.name).count > 0 ||
+                # Additional condition for Enterprise admins
+                current_user.businesses(membership_type: :admin).count > 0
+            )
+          },
+        },
+        {
+          feature: :dashboard_2025_03_27_roadmap_nudge_post_event,
+          notice: :dashboard_2025_03_27_roadmap,
+          partial: "dashboard/promos/roadmap_2025_03_27_post_event",
+          extra_condition: -> {
+            # this is redundant with a few lines earlier but is required to ensure the test suite doesn't complain
+            return false if !current_user.feature_enabled?(:dashboard_2025_03_27_roadmap_nudge_post_event)
+            # Don't show the nudge if the user is an enterprise managed user or in proxima
+            return false if GitHub.multi_tenant_enterprise? || current_user&.is_enterprise_managed? || GitHub.enterprise?
+            # Don't show the nudge if the user has opted out of in-product messaging
+            return false unless current_user.subscribed_to_in_product_messages?
+            # Only show for US users who are Team org admins, Enterprise org admins or Enterprise admins
+            return true if (GitHub::Location.look_up(request.remote_ip)[:country_code] == "US" || Rails.env.development?) && (
+                # GitHub Team org admin
+                current_user.owned_organizations.where(plan: GitHub::Plan.business.name).count > 0 ||
+                current_user.billing_manager_organizations.where(plan: GitHub::Plan.business.name).count > 0 ||
+                # Additional condition for Enterprise admins
+                current_user.businesses(membership_type: :admin).count > 0
+            )
+          },
+        },
+      ] %>
+      <div <%= test_selector('marketing-banners') %>>
+        <% promos.each do |promo| %>
+          <% if current_user.feature_enabled?(promo[:feature]) && UserNotice.find(promo[:notice]).effective? && !current_user.dismissed_notice?(promo[:notice]) && (promo[:extra_condition].nil? || promo[:extra_condition].call) %>
+            <%= render promo[:partial], notice: promo[:notice], **promo[:locals] %>
+            <% break %>
+          <% end %>
+        <% end %>
+      </div>
+    <% end %>
+
+    <% if current_user.feature_enabled?(:subdomain_cookies_message_dashboard) && !current_user.dismissed_notice?("subdomain_cookies_message") %>
+      <%= render "dashboard/subdomain_cookies_notice" %>
+    <% end %>
+  <% end %>
+
+  <% if show_existing_user_github_education_banner? %>
+    <%= render "dashboard/github_education_banner_existing_user" %>
+  <% end %>
+
+  <% unless GitHub.enterprise? || current_user.in_onboarding_period? %>
+    <include-fragment loading="lazy" src="<%= dashboard_changelog_path %>" <%= test_selector("dashboard-changelog-fragment")%>>
+      <div class="d-flex flex-items-center">
+        <%= render(Primer::Beta::Spinner.new(my: 6, flex: 1)) %> <%# rubocop:disable GitHub/RailsViewRenderLiteral %>
+      </div>
+    </include-fragment>
+  <% end %>
+
+  <% featured_recommendations_repos = explore_repos.map(&:repository) %>
+
+  <% unless current_user.in_onboarding_period? && current_user.feature_enabled?(:nux_explore_repos) %>
+    <%= render(Dashboard::Sidebar::ExploreRepositoriesComponent.new(repositories: featured_recommendations_repos)) %> <%# rubocop:disable GitHub/RailsViewRenderLiteral %>
+  <% end %>
+<% end %>

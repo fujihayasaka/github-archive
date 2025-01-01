@@ -1,0 +1,4054 @@
+# This file is used to track queries that violate package boundaries. There are two reasons for violations:
+#
+# - Cross domain: A query uses tables from multiple domains.
+# - Domain access: A query bypassed a domain's interface and accessed its private tables directly.
+#
+# The format of this file is as follows:
+#
+# <query_digest>:
+#   query: <query>
+#   violations:
+#     - [location: <file:line>] # never committed but only generated with the --locations flag
+#       reason: <cross_domain|domain_access>
+#
+# To add a new violation, you can run the test causing the violation with the following environment variables:
+#
+#   TEST_ALL_FEATURES=1 PERFORM_STATEMENT_CHECKING=1 DOMAIN_QUERY_VIOLATIONS=1 bin/rails test <path_to_test_file>:<line_number>
+#
+# This will update the query violation file(s) with the new violation(s). To remove a violation, you can simply
+# remove the entry from the file.
+#
+# If there are many violations to add or update, or you'd like to refresh all recorded violations, you can
+# run the following command to pull all violations from the latest completed CI build on your branch:
+#
+#     script/domain-isolation-query-violations [--locations] [--audit] [--reason <cross_domain|domain_access>]
+#
+# This will replace all query violation files with the latest violations. Use the `--locations` flag to
+# include file locations in the output, don't commit that though! Use the `--audit` flag to include
+# violations from tables with visibility level `audit`. Use the `--reason` flag to filter violations
+# by reason in case you're only interested in locations for a specific reason.
+
+---
+00337e2b91ef2acc3e7b577be73844eb6dbcda1960bdc98ae87e7a66802de255:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? AND workflows.state
+    != ? AND workflows.imposer_repository_id != ? AND ( (present_in_default_branch
+    = ? OR EXISTS ( SELECT ? FROM workflow_runs WHERE workflow_id = workflows.id AND
+    repository_id = workflows.repository_id AND user_hidden = ? )) ) AND workflows.path
+    != x? AND workflows.path != x? ORDER BY CAST(name as CHAR) LIMIT ? OFFSET ?
+  tables:
+  - workflow_runs
+  - workflows
+  violations:
+  - reason: domain_access
+'005489e6b765e128920c7e534bbdcc8ebf3129591f3926cff2b71a12f931f8e6':
+  query: SELECT workflows.* FROM workflows WHERE workflows.id IS NULL AND workflows.repository_id
+    = ? LIMIT ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+'009df0716747a24728b272839d33bbbe6d03cf5ee71c26823298212758312286':
+  query: SELECT workflow_run_executions.id, workflow_run_executions.status, workflow_run_executions.conclusion,
+    workflow_run_executions.workflow_run_id, workflow_run_executions.actor_id, workflow_run_executions.external_id,
+    workflow_run_executions.completed_log_url, workflow_run_executions.repository_id,
+    workflow_run_executions.attempt, workflow_run_executions.started_at, workflow_run_executions.completed_at,
+    workflow_run_executions.created_at, workflow_run_executions.updated_at, workflow_run_executions.run_stamp_url
+    FROM workflow_run_executions WHERE workflow_run_executions.workflow_run_id = ?
+    AND workflow_run_executions.repository_id = ? AND workflow_run_executions.attempt
+    = ? LIMIT ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+013e60d58aa92dc7b6680555203682bd621e6cabc2cb8a9c1b78477e509d8162:
+  query: SELECT gate_requests.id AS t0_r0, gate_requests.gate_id AS t0_r1, gate_requests.state
+    AS t0_r2, gate_requests.check_run_id AS t0_r3, gate_requests.token AS t0_r4, gate_requests.data
+    AS t0_r5, gate_requests.created_at AS t0_r6, gate_requests.updated_at AS t0_r7,
+    gate_requests.expires_at AS t0_r8, gate_approvals.id AS t1_r0, gate_approvals.gate_request_id
+    AS t1_r1, gate_approvals.repository_id AS t1_r2, gate_approvals.approver_type
+    AS t1_r3, gate_approvals.approver_id AS t1_r4, gate_approvals.state AS t1_r5,
+    gate_approvals.user_id AS t1_r6, gate_approvals.gate_approval_log_id AS t1_r7,
+    gate_approvals.environment_id AS t1_r8 FROM gate_requests LEFT OUTER JOIN gate_approvals
+    ON gate_approvals.gate_request_id = gate_requests.id WHERE gate_approvals.gate_request_id
+    IN ?
+  tables:
+  - gate_approvals
+  - gate_requests
+  violations:
+  - reason: domain_access
+022d173603df68469f0263f597f6aba871e610a10dc774fab3308f26a4689053:
+  query: SELECT workflows.id FROM workflows WHERE workflows.repository_id = ? AND
+    workflows.state != ? AND ( (present_in_default_branch = ? OR EXISTS ( SELECT ?
+    FROM workflow_runs WHERE workflow_id = workflows.id AND repository_id = workflows.repository_id
+    AND user_hidden = ? )) ) ORDER BY workflows.created_at DESC, workflows.id desc
+    LIMIT ?
+  tables:
+  - workflow_runs
+  - workflows
+  violations:
+  - reason: domain_access
+'024241786e63db752f909b90279e3bcfbee5c4fc8251b0c402599e44df5221c8':
+  query: UPDATE workflow_runs SET workflow_runs.cloned_workflow_run_id = ? WHERE workflow_runs.id
+    = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+0344dad65d4c1346f96f33fb6d6e17dbbd0c77e4fa77197ccb108a9dc10df9ce:
+  query: SELECT COUNT(*) FROM workflows LEFT JOIN pinned_workflows ON workflows.id=pinned_workflows.workflow_id
+    AND workflows.repository_id=pinned_workflows.repository_id WHERE workflows.repository_id
+    = ? AND workflows.state != ? AND workflows.state != ? AND ( (present_in_default_branch
+    = ? OR EXISTS( SELECT ? FROM workflow_runs WHERE workflow_id = workflows.id AND
+    repository_id = workflows.repository_id AND user_hidden = ? ) OR EXISTS( SELECT
+    ? FROM workflow_runs WHERE workflow_id = workflows.id AND repository_id = workflows.repository_id
+    AND actor_id = ? ) ) ) AND workflows.path != x? AND workflows.path != x?
+  tables:
+  - pinned_workflows
+  - workflow_runs
+  - workflows
+  violations:
+  - reason: domain_access
+03ce7aa9fc9aedac04d62f335b1fcec974277a560f80a3e0ca2031e9d2367e29:
+  query: INSERT INTO workflows (repository_id, name, path, created_at, updated_at)
+    VALUES (?, x?, x?, ?, ?)
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+03e882d8ef0b1520f116e77fda4bad99dd555567176b7f6b329e07e4716f27eb:
+  query: SELECT gate_approval_logs.* FROM gate_approval_logs WHERE gate_approval_logs.check_suite_id
+    = ? AND (created_at BETWEEN ? and ?) ORDER BY id DESC
+  tables:
+  - gate_approval_logs
+  violations:
+  - reason: domain_access
+'04482b56102b4a42c9b1f01d0d2652304a106619fdf39505267e03ca8cc9990f':
+  query: SELECT statuses.updated_at FROM statuses FORCE INDEX(index_statuses_on_is_archived_updated_at)
+    WHERE (is_archived = ?) AND (updated_at > ? AND updated_at <= ?) ORDER BY updated_at
+    ASC LIMIT ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+04c87eb6667aa6b2195dc004dec049e083e7ca002cb92ae5623772624c570024:
+  query: SELECT workflow_run_executions.id, workflow_run_executions.status, workflow_run_executions.conclusion,
+    workflow_run_executions.workflow_run_id, workflow_run_executions.actor_id, workflow_run_executions.external_id,
+    workflow_run_executions.completed_log_url, workflow_run_executions.repository_id,
+    workflow_run_executions.attempt, workflow_run_executions.started_at, workflow_run_executions.completed_at,
+    workflow_run_executions.created_at, workflow_run_executions.updated_at, workflow_run_executions.run_stamp_url
+    FROM workflow_run_executions WHERE workflow_run_executions.id = ? AND workflow_run_executions.repository_id
+    = ? LIMIT ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+04e14d07a94e060c6e48662fee58c94e69406e562e180a17df25bef6934d9556:
+  query: UPDATE workflow_job_runs SET workflow_job_runs.parent_job_id = ?, workflow_job_runs.job_key
+    = ?, workflow_job_runs.updated_at = ?, workflow_job_runs.label_data = ?, workflow_job_runs.runner_id
+    = ?, workflow_job_runs.runner_name = ?, workflow_job_runs.runner_group_id = ?,
+    workflow_job_runs.runner_group_name = ? WHERE workflow_job_runs.id = ?
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+0557a810bee3fa1ee62e0f0ebf0e39da8169a776b18cc031fcf84e99f5164b1d:
+  query: DELETE FROM pinned_workflows WHERE pinned_workflows.id = ?
+  tables:
+  - pinned_workflows
+  violations:
+  - reason: domain_access
+05a4ff8df1a72fc15d78172c709564c727d6c8c204dab4600b30ff1ade766c71:
+  query: INSERT INTO gate_requests (gate_id, state, check_run_id, token, created_at,
+    updated_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - gate_requests
+  violations:
+  - reason: domain_access
+077a002afcedd197756f28ad76f66c26610b60d4e57b093d8713367a2df45c31:
+  query: SELECT gate_branch_policies.* FROM gate_branch_policies WHERE gate_branch_policies.gate_id
+    = ? AND gate_branch_policies.name = x? AND gate_branch_policies.gate_id = ? LIMIT
+    ?
+  tables:
+  - gate_branch_policies
+  violations:
+  - reason: domain_access
+07dc6e58232b1dcb6cd0c5e2daf6ab6781d399a0cbde192985df7c7537ae376d:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    USE INDEX FOR JOIN (index_workflow_runs_on_workflow_id_repository_id_user_hidden)
+    WHERE workflow_runs.repository_id = ? AND workflow_runs.workflow_id = ? AND workflow_runs.user_hidden
+    = ? ORDER BY workflow_runs.id DESC LIMIT ? OFFSET ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+'082b151d147a447e11369c30f52320d15ce9d18770dd673d33513eec853f3352':
+  query: SELECT workflow_run_executions.id, workflow_run_executions.workflow_run_id,
+    workflow_run_executions.external_id FROM workflow_run_executions WHERE workflow_run_executions.repository_id
+    = ? AND workflow_run_executions.workflow_run_id IN ? LIMIT ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+'08bd7a32a490f27d97e54ebc30c56f768bcdce3ce324c79293ce484cfa6c2504':
+  query: UPDATE workflows SET workflows.state = ?, workflows.updated_at = ?, workflows.disabled_at
+    = ? WHERE workflows.id = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+'09507c19cc7e9ae1923350832f9c6143fabbdddc6d5bd0005226f50a71637ecb':
+  query: SELECT statuses.* FROM statuses WHERE statuses.id = ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+'0988dbf798ed4fa513dc375d34b2f5098cacde5572dd5a80e7d1ebcb9b8e75d1':
+  query: SELECT gate_branch_policies.* FROM gate_branch_policies WHERE gate_branch_policies.gate_id
+    = ?
+  tables:
+  - gate_branch_policies
+  violations:
+  - reason: domain_access
+0ad29da8b87d5560cf3e064abdfb0415c3b77257eafa2a7c28d42a76840fd4a0:
+  query: SELECT environments.id FROM environments INNER JOIN pinned_environments ON
+    pinned_environments.environment_id = environments.id WHERE environments.repository_id
+    = ? ORDER BY environments.name ASC, environments.id asc LIMIT ?
+  tables:
+  - environments
+  - pinned_environments
+  violations:
+  - reason: domain_access
+0bd603cfb858064cece2597369b946f296d8944654836e4d31b48abbdf856838:
+  query: SELECT environments.* FROM environments WHERE environments.repository_id
+    = ? LIMIT ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+0bd97a999678b4d9eaca59a429e3788be6f28a0c42dbf533842d70b14e2d6e8b:
+  query: SELECT environments.* FROM environments WHERE environments.repository_id
+    = ? ORDER BY environments.id DESC LIMIT ? OFFSET ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+0d662abecd3c40157ce973b58f1e77438fda282a37c54d8c72e025ac80794945:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? AND workflows.id
+    = ? LIMIT ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+0e118b99d4f94e3021c29e75e6f6f54ee399dc1292d82cfd51bbe0d68f2643f9:
+  query: DELETE FROM artifacts WHERE artifacts.repository_id = ? AND (artifacts.id
+    = ? OR artifacts.id IS NULL)
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+0eba6ea0da7695a2303a3bea205f369bd6a26bb7b602e265049ea5b8c6a23848:
+  query: UPDATE gate_requests SET gate_requests.state = ? WHERE gate_requests.id =
+    ?
+  tables:
+  - gate_requests
+  violations:
+  - reason: domain_access
+0f4ebe7e47d8b852123491f7c24055be751831d48637a6f20d90812adc4eeee1:
+  query: SELECT COUNT(*) FROM workflow_runs WHERE workflow_runs.workflow_id = ? AND
+    workflow_runs.repository_id = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+0f5aba2b118605b6fb5662b88410b16453f9caf118aad1d48302d57f929561e9:
+  query: SELECT workflow_run_executions.id, workflow_run_executions.status, workflow_run_executions.conclusion,
+    workflow_run_executions.workflow_run_id, workflow_run_executions.actor_id, workflow_run_executions.external_id,
+    workflow_run_executions.completed_log_url, workflow_run_executions.repository_id,
+    workflow_run_executions.attempt, workflow_run_executions.started_at, workflow_run_executions.completed_at,
+    workflow_run_executions.created_at, workflow_run_executions.updated_at, workflow_run_executions.run_stamp_url
+    FROM workflow_run_executions WHERE workflow_run_executions.workflow_run_id = ?
+    AND workflow_run_executions.repository_id = ? ORDER BY workflow_run_executions.id
+    DESC LIMIT ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+0fadc75798e38eac0aa9bb7c2ae2b6b6532cb31f879e9d9600533d83193f8b06:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, trigger_id,
+    trigger_type, event, action, name, head_branch, head_sha, workflow_file_path,
+    repository_id, actor_id, workflow_file_checkout_sha, imposer_repository_id) VALUES
+    (?, ?, ?, ?, ?, ?, x?, x?, x?, ?, x?, ?, ?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+0ffbc9d2a88a46074b294cee5c00cca20ff2a5b07e7bf07ab46949e4305167d3:
+  query: SELECT gates.id, gates.environment_id, gates.body, gates.type, gates.timeout,
+    gates.created_at, gates.updated_at, gates.min_approvals, gates.integration_id,
+    gates.integration_installation_id, gates.prevent_self_review FROM gates WHERE
+    gates.id = ? LIMIT ?
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+11571ff9ff06e3e0560cc804196079ea6f5c6053de6bf04d5dbc79976fda97e3:
+  query: SELECT workflow_run_executions.id, workflow_run_executions.status, workflow_run_executions.conclusion,
+    workflow_run_executions.workflow_run_id, workflow_run_executions.actor_id, workflow_run_executions.external_id,
+    workflow_run_executions.completed_log_url, workflow_run_executions.repository_id,
+    workflow_run_executions.attempt, workflow_run_executions.started_at, workflow_run_executions.completed_at,
+    workflow_run_executions.created_at, workflow_run_executions.updated_at, workflow_run_executions.run_stamp_url
+    FROM workflow_run_executions WHERE workflow_run_executions.workflow_run_id = ?
+    AND workflow_run_executions.repository_id = ? AND workflow_run_executions.external_id
+    = x? LIMIT ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+119155cad0c1252e9b49a88a2c019c77d0dedff9b87951538581a496c16f153e:
+  query: SELECT ? AS one FROM artifacts WHERE artifacts.check_suite_id = ? LIMIT ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+124f81052f0d5516f1c58c0d42fddb29603280e525b98b3e7a311d0d8155038c:
+  query: SELECT gate_requests.* FROM gate_requests WHERE gate_requests.gate_id = ?
+    AND gate_requests.state = ?
+  tables:
+  - gate_requests
+  violations:
+  - reason: domain_access
+12ea774aae53385badb219791e80e52a38f94d3bd7cdfbc57eedcbf6deec1708:
+  query: INSERT INTO gates (environment_id, body, type, timeout, created_at, updated_at)
+    VALUES (?, x?, ?, ?, ?, ?)
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+136eca97152101ce9c436bf9a3e669f67dd6f76909ddcb7b021bd4d580c68d74:
+  query: SELECT COUNT(*) FROM workflows WHERE workflows.repository_id = ? AND workflows.state
+    != ? AND workflows.imposer_repository_id = ? AND ( (present_in_default_branch
+    = ? OR EXISTS ( SELECT ? FROM workflow_runs WHERE workflow_id = workflows.id AND
+    repository_id = workflows.repository_id AND user_hidden = ? )) ) AND workflows.path
+    != x? AND workflows.path != x?
+  tables:
+  - workflow_runs
+  - workflows
+  violations:
+  - reason: domain_access
+13aae4119a685b691750e2a71e7cf56f530d2c90c9e2d650bd3dcd110d6247e7:
+  query: SELECT workflow_runs.id, workflow_runs.check_suite_id FROM workflow_runs
+    WHERE workflow_runs.repository_id = ? AND workflow_runs.check_suite_id IN ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+1672896bf91cdfc0bedb57501d2f769c97a23c870c0ce38114f7842aec2388ee:
+  query: UPDATE workflows SET workflows.state = ?, workflows.updated_at = ? WHERE
+    workflows.id = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+1709fd63fd24335f75d39ffe4a52a5865009b841ff31a6a076f2f97f17a9e0c6:
+  query: SELECT ? AS one FROM gates WHERE gates.environment_id = ? LIMIT ?
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+17bf33879c143292114bef1864d98d1e0d1e885a203d5b7a03847d0c61f98ce0:
+  query: UPDATE workflow_run_executions SET workflow_run_executions.status = ?, workflow_run_executions.conclusion
+    = ?, workflow_run_executions.external_id = x?, workflow_run_executions.completed_log_url
+    = x?, workflow_run_executions.completed_at = ?, workflow_run_executions.updated_at
+    = ? WHERE workflow_run_executions.id = ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+1805d642426df169be00f002bb61a443b0402046786b1087f4e255d6220d37ca:
+  query: SELECT workflow_job_runs.* FROM workflow_job_runs WHERE workflow_job_runs.repository_id
+    = ? AND workflow_job_runs.check_run_id = ?
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+18dc4f1e00b54956ace1043663820d5be87f0ead25f111a9ee52a9cc44521065:
+  query: SELECT workflows.id FROM workflows WHERE workflows.repository_id = ? AND
+    workflows.state != ? AND ( (present_in_default_branch = ? OR EXISTS( SELECT ?
+    FROM workflow_runs WHERE workflow_id = workflows.id AND repository_id = workflows.repository_id
+    AND user_hidden = ? ) OR EXISTS( SELECT ? FROM workflow_runs WHERE workflow_id
+    = workflows.id AND repository_id = workflows.repository_id AND actor_id = ? )
+    ) ) ORDER BY workflows.created_at DESC, workflows.id desc LIMIT ?
+  tables:
+  - workflow_runs
+  - workflows
+  violations:
+  - reason: domain_access
+19bc0b88518ff6c89b78c64b56db44e3ef92d6c1f97844746e08faa537ed908d:
+  query: SELECT statuses.* FROM statuses WHERE statuses.repository_id = ? AND statuses.id
+    IN (SELECT * FROM (SELECT max(id) FROM statuses FORCE INDEX (index_statuses_on_repository_id_and_sha_and_context)
+    WHERE statuses.repository_id = ? AND statuses.sha = ? GROUP BY statuses.sha, statuses.context)
+    subquery) ORDER BY statuses.id ASC
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+1a0ba975b3c96da54bf8e80fd37caaf41ea362882b4db7d234ae8a155117ef94:
+  query: SELECT pinned_environments.* FROM pinned_environments WHERE pinned_environments.id
+    IN ?
+  tables:
+  - pinned_environments
+  violations:
+  - reason: domain_access
+1a1b61d913579e7f49fad714d72da1e31ee12e33312c73d2f77b0a584a86fced:
+  query: SELECT gate_approval_logs.* FROM gate_approval_logs WHERE gate_approval_logs.check_suite_id
+    = ? ORDER BY id DESC
+  tables:
+  - gate_approval_logs
+  violations:
+  - reason: domain_access
+1a38b819e4a81c9316db2c9f9fc7e3e8e160cdb6be530a2ae8f275000a2ed236:
+  query: INSERT INTO actions_key_values (key,value,created_at,updated_at,expires_at,partition_key)
+    VALUES(?,?,?,?,?,?) ON DUPLICATE KEY UPDATE value=IF( concat(?,value*?) = value,
+    LAST_INSERT_ID(IF( expires_at IS NULL OR expires_at>=?, value+ ?, ? )), value
+    ), updated_at=IF( concat(?,value*?) = value, ?, updated_at ), expires_at=IF( concat(?,value*?)
+    = value, IF( ? OR (expires_at IS NULL OR expires_at<?), ?, expires_at ), expires_at
+    )
+  tables:
+  - actions_key_values
+  violations:
+  - reason: domain_access
+1a41560e441ddfb467cd30251e1cd4403ec893ebcd70dc2b386f150713bdc683:
+  query: SELECT gate_requests.* FROM gate_requests WHERE gate_requests.id = ? LIMIT
+    ?
+  tables:
+  - gate_requests
+  violations:
+  - reason: domain_access
+1ac69de207c06c7c063fb42d48afd26291f56161434d6bf33436cba42a986cf2:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.id IN ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+1affc434429ef842b1e19ee6dd7018ca76047cf31992828843145ba27c53ec7c:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, trigger_id,
+    trigger_type, event, head_branch, head_sha, workflow_file_path, repository_id,
+    actor_id) VALUES (?, ?, ?, ?, ?, ?, x?, ?, x?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+1c7f84bf41467cf926d3a53fc83bd0953a6dcecf2a800a8d41b256b6b44df837:
+  query: SELECT COUNT(*) FROM workflow_runs use index(index_workflow_runs_on_workflow_id_repository_id_user_hidden)
+    WHERE workflow_runs.workflow_id = ? AND workflow_runs.user_hidden = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+1c941bb2ed3348c8bad011f5b9604b75432d7dfe2f2b93e5ce4eb3203d8743cf:
+  query: SELECT gate_branch_policies.* FROM gate_branch_policies WHERE gate_branch_policies.gate_id
+    = ? LIMIT ? OFFSET ?
+  tables:
+  - gate_branch_policies
+  violations:
+  - reason: domain_access
+1ce1b00c87987bda59c2671102ed5f19792435a343d6242812f6d013cb7a5fad:
+  query: UPDATE workflow_run_executions SET workflow_run_executions.status = ?, workflow_run_executions.conclusion
+    = ?, workflow_run_executions.completed_at = ?, workflow_run_executions.updated_at
+    = ? WHERE workflow_run_executions.id = ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+1ce32011a1a7611d4e167c4cfac8fe4d7e9ea372f0dda2a42494e14d6ac98dc8:
+  query: UPDATE workflow_runs SET workflow_runs.concurrency = ? WHERE workflow_runs.id
+    = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+1d141a9b3c7f8ee8d8a9590b5498b91e31cae4159858089f403eeef8bdcff67e:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.repository_id = ? AND workflow_runs.workflow_id = ? AND workflow_runs.event
+    IN ? AND workflow_runs.tree_id = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+1d28a027b89707c06c41cd0905de1193c8150478c1dec809d46ab4be55e90f8b:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.repository_id = ? AND (workflow_runs.id IN (SELECT * FROM
+    (SELECT workflow_runs.id FROM workflow_runs use index(index_workflow_runs_on_workflow_id_repository_id_user_hidden)
+    WHERE workflow_runs.workflow_id = ? AND workflow_runs.user_hidden = ? AND workflow_runs.repository_id
+    = ? ORDER BY workflow_runs.id DESC LIMIT ? OFFSET ?) subquery_for_limit)) ORDER
+    BY workflow_runs.id DESC LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+1d72051f33a2daaeaaae803754d73eb01ae6f43996c5cbbc03086e28ade2a203:
+  query: SELECT COUNT(*) FROM workflow_runs USE INDEX FOR JOIN (index_workflow_runs_on_workflow_id_repository_id_user_hidden)
+    WHERE workflow_runs.repository_id = ? AND workflow_runs.workflow_id = ? AND workflow_runs.user_hidden
+    = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+1db1deff8bf91fb364fcdf849573d3c4c12e9ab70073d57e7c081ca27cd4a665:
+  query: SELECT COUNT(*) FROM gate_approvers WHERE gate_approvers.gate_id = ?
+  tables:
+  - gate_approvers
+  violations:
+  - reason: domain_access
+1e9ed3124a365d5a9d229d2d14829783af9cc62a3316a38751dfd937f773a812:
+  query: UPDATE workflow_job_runs SET workflow_job_runs.updated_at = ?, workflow_job_runs.concurrency
+    = ? WHERE workflow_job_runs.id = ?
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+1eefce6142c9f20a504e2d6b4f8d6bd62fe0bb55d229eefde23bcd8ae838d453:
+  query: SELECT environments.name FROM environments WHERE environments.repository_id
+    = ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+1ef49fbde3ca526bf448495f9d777685688838537ba3f9716c4cb3b83ec2f58b:
+  query: SELECT ? AS one FROM workflow_job_runs WHERE workflow_job_runs.workflow_run_id
+    = ? AND workflow_job_runs.repository_id = ? AND workflow_job_runs.repository_id
+    = ? LIMIT ?
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+1f133d2f76b2898a99cf385499ce29853cbb36d935f7622c00e3ce3b95a640f8:
+  query: INSERT INTO statuses (state, description, target_url, sha, repository_id,
+    creator_id, created_at, updated_at, context, tree_oid, commit_oid) VALUES (?,
+    ?, x?, ?, ?, ?, ?, ?, ?, x?, x?)
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+1f4b178729fc41a52305c09d29bc42aaad3633990b1f03a41a34f1fe71e3be50:
+  query: INSERT INTO workflow_job_runs (workflow_run_id, check_run_id, repository_id,
+    job_key, created_at, updated_at, workflow_run_execution_id, original_workflow_run_execution_id,
+    summary_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+1ff57716f3d0b1b40e12d864b5e189e2861ded03363bacf0cf43d2a743ce3172:
+  query: SELECT actions_key_values.expires_at, actions_key_values.id FROM actions_key_values
+    WHERE (expires_at <= ?) ORDER BY actions_key_values.expires_at DESC LIMIT ?
+  tables:
+  - actions_key_values
+  violations:
+  - reason: domain_access
+20160db244a063a75d2fac485358bd64f5fefdf1141051d527d04efa39e9e7da:
+  query: SELECT gate_requests.id AS t0_r0, gate_requests.gate_id AS t0_r1, gate_requests.state
+    AS t0_r2, gate_requests.check_run_id AS t0_r3, gate_requests.token AS t0_r4, gate_requests.data
+    AS t0_r5, gate_requests.created_at AS t0_r6, gate_requests.updated_at AS t0_r7,
+    gate_requests.expires_at AS t0_r8, gates.id AS t1_r0, gates.environment_id AS
+    t1_r1, gates.body AS t1_r2, gates.type AS t1_r3, gates.timeout AS t1_r4, gates.created_at
+    AS t1_r5, gates.updated_at AS t1_r6, gates.min_approvals AS t1_r7, gates.integration_id
+    AS t1_r8, gates.integration_installation_id AS t1_r9, gates.prevent_self_review
+    AS t1_r10, environment.id AS t2_r0, environment.repository_id AS t2_r1, environment.name
+    AS t2_r2, environment.created_at AS t2_r3, environment.updated_at AS t2_r4, environment.gates_admin_enforced
+    AS t2_r5 FROM gate_requests LEFT OUTER JOIN gates ON gates.id = gate_requests.gate_id
+    LEFT OUTER JOIN environments environment ON environment.id = gates.environment_id
+    WHERE environment.repository_id = ? AND gate_requests.id = ? LIMIT ?
+  tables:
+  - environments
+  - gate_requests
+  - gates
+  violations:
+  - reason: domain_access
+205da78cc12bba4367a43ec418eef4292ea3f9593f1596aba3da06977a51bf67:
+  query: UPDATE workflow_run_executions SET workflow_run_executions.status = ?, workflow_run_executions.conclusion
+    = NULL WHERE workflow_run_executions.id = ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+20e9c209f0f406f5c9dbe3f29a03bd2039ebe34eacc28a48c6a2f8662a7b06e4:
+  query: SELECT pinned_environments.* FROM pinned_environments WHERE pinned_environments.environment_id
+    = ? LIMIT ?
+  tables:
+  - pinned_environments
+  violations:
+  - reason: domain_access
+212a027312a437c5122844704a91d946f37e9d4105d19ade952503478eb19fd4:
+  query: DELETE FROM workflow_run_executions WHERE workflow_run_executions.repository_id
+    = ? AND (workflow_run_executions.id IN ? OR workflow_run_executions.id IS NULL)
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+21d091a57f3e48a7dac15a67082852f64ca2eaf73a51a2140ab80e84aa48d3d7:
+  query: SELECT COUNT(*) FROM artifacts WHERE artifacts.repository_id = ? AND artifacts.name
+    = x?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+227ed22136d487433268178c685305aea3ceee847b14150ee8dd067ad98c1ec0:
+  query: INSERT INTO workflow_run_executions (conclusion, workflow_run_id, actor_id,
+    external_id, repository_id, started_at, created_at, updated_at) VALUES (?, ?,
+    ?, x?, ?, ?, ?, ?)
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+229e9f10a867eb2e5d8cad62bde446f8d2eba6fea4becb6ab78f01c5e790f197:
+  query: UPDATE workflow_runs SET workflow_runs.name = x?, workflow_runs.explicit_name
+    = ? WHERE workflow_runs.id = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+22ab2f801d8e620156c64af53bc461f297395565ae3410785f42a39af8a9baa0:
+  query: SELECT key FROM actions_key_values WHERE key IN ? AND (expires_at IS NULL
+    OR expires_at > ?) AND partition_key = ?
+  tables:
+  - actions_key_values
+  violations:
+  - reason: domain_access
+22deb6cff738b84dc84bafbc37d38f6ec1604ee8f38a6432d6a4551783d627aa:
+  query: SELECT gates.id, gates.environment_id, gates.body, gates.type, gates.timeout,
+    gates.created_at, gates.updated_at, gates.min_approvals, gates.integration_id,
+    gates.integration_installation_id, gates.prevent_self_review FROM gates WHERE
+    gates.environment_id = ? AND gates.type = ? AND gates.type = ? LIMIT ?
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+231970cdeeb0732ec984c473b965b1583ebf22924a6cd338f7c74425d179931b:
+  query: SELECT pinned_environments.* FROM pinned_environments WHERE pinned_environments.id
+    = ?
+  tables:
+  - pinned_environments
+  violations:
+  - reason: domain_access
+23b8923eed2810cc41a723a05c7b128d8f55cb534dd71bb42ea9ad04aef8176e:
+  query: SELECT workflow_run_executions.id, workflow_run_executions.status, workflow_run_executions.conclusion,
+    workflow_run_executions.workflow_run_id, workflow_run_executions.actor_id, workflow_run_executions.external_id,
+    workflow_run_executions.completed_log_url, workflow_run_executions.repository_id,
+    workflow_run_executions.attempt, workflow_run_executions.started_at, workflow_run_executions.completed_at,
+    workflow_run_executions.created_at, workflow_run_executions.updated_at, workflow_run_executions.run_stamp_url
+    FROM workflow_run_executions WHERE workflow_run_executions.repository_id = ? AND
+    workflow_run_executions.id = ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+247531896bff556f222022920907083a1e35f0e8b6f45e7142849b5cece09790:
+  query: UPDATE workflows SET workflows.state = ?, workflows.path = x? WHERE workflows.id
+    = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+24946cf6c48b71ac68b61325c63c99c7c96d6a8ee28a04d05bca1b93ba405821:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    USE INDEX FOR JOIN (index_workflow_runs_on_workflow_id_repository_id_user_hidden)
+    WHERE workflow_runs.repository_id = ? AND workflow_runs.workflow_id = ? ORDER
+    BY workflow_runs.id DESC LIMIT ? OFFSET ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+25a167a8c46916efe3652ffa315672a30f03cb204fbb5849660872d3b52e1dd7:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.execution_graph, workflow_runs.concurrency, workflow_runs.user_hidden,
+    workflow_runs.actor_id, workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name,
+    workflow_runs.tree_id, workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at,
+    workflow_runs.workflow_file_checkout_sha, workflow_runs.imposer_repository_id,
+    workflow_runs.workflow_file_ref FROM workflow_runs WHERE workflow_runs.repository_id
+    = ? AND workflow_runs.id = ? LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+25aa82fca1cb7dbb64f2d503267c6b3804d076c3124d37e056c624c901294683:
+  query: SELECT ? AS one FROM environments WHERE environments.name = ? AND environments.repository_id
+    = ? LIMIT ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+27a752298c58994bb5019bee063b8ce6d3251aa4e849506b4f4f9ffefb2080b6:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.id = ? AND workflow_runs.repository_id = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+27ecb2b67394f448f733d80020bdd51e22feaa3711b73673d91add48d1ba8245:
+  query: INSERT INTO environments (repository_id, name, created_at, updated_at) VALUES
+    (?, ?, ?, ?)
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+2806d1e1dfb02818e68e275265515623f34675f75682e6deafdffa27ca36f684:
+  query: SELECT environments.* FROM environments WHERE environments.repository_id
+    = ? AND environments.id = ? LIMIT ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+28b9465c60006aabd0e2147d7aae33abeab065abe2f62b6144177478a6a9b6a6:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.repository_id = ? ORDER BY workflow_runs.id DESC LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+28c37b843385876b31e143c24b70753a8293213f82ebc1bfdb729222b59c0481:
+  query: SELECT COUNT(*) FROM workflows WHERE workflows.repository_id = ? AND workflows.state
+    != ? AND ( (present_in_default_branch = ? OR EXISTS( SELECT ? FROM workflow_runs
+    WHERE workflow_id = workflows.id AND repository_id = workflows.repository_id AND
+    user_hidden = ? ) OR EXISTS( SELECT ? FROM workflow_runs WHERE workflow_id = workflows.id
+    AND repository_id = workflows.repository_id AND actor_id = ? ) ) )
+  tables:
+  - workflow_runs
+  - workflows
+  violations:
+  - reason: domain_access
+29092addee7832b4f0d6772056f3de410ab5c66c31b8d6ebe934f24161e103ff:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? AND workflows.state
+    = ? AND workflows.path = x? LIMIT ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+290d3b145dcef4f29cfbc36e338696384eeacc34fef8ad0de13cf3d3817d95b5:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, trigger_id,
+    trigger_type, event, action, name, head_branch, head_sha, workflow_file_path,
+    repository_id, actor_id) VALUES (?, ?, ?, ?, ?, ?, x?, x?, x?, ?, x?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+29637da91e9950da7666b6f4ef45817bc423471af9cbcf5fe08439e8848035ea:
+  query: SELECT workflow_run_executions.id, workflow_run_executions.status, workflow_run_executions.conclusion,
+    workflow_run_executions.workflow_run_id, workflow_run_executions.actor_id, workflow_run_executions.external_id,
+    workflow_run_executions.completed_log_url, workflow_run_executions.repository_id,
+    workflow_run_executions.attempt, workflow_run_executions.started_at, workflow_run_executions.completed_at,
+    workflow_run_executions.created_at, workflow_run_executions.updated_at, workflow_run_executions.run_stamp_url
+    FROM workflow_run_executions WHERE workflow_run_executions.workflow_run_id = ?
+    AND workflow_run_executions.repository_id = ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+297f0c8e0afaa97f45b0f3f0f70d9edf75f4c6b102ab5110c35b449917e1c7ea:
+  query: UPDATE workflows SET workflows.state = ?, workflows.updated_at = ?, workflows.disabled_at
+    = NULL, workflows.enabled_at = ? WHERE workflows.id = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+29807afec7362a9a223c337bc896a094354129b5210e1f93ad1ded3a3e3974ef:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, trigger_id,
+    trigger_type, event, name, head_branch, head_sha, workflow_file_path, repository_id,
+    actor_id, tree_id) VALUES (?, ?, ?, ?, ?, ?, x?, x?, ?, x?, ?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+29c13847b449ab6e22bc2d0de277df89e0446d600954a37690e04b57001f864f:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? AND workflows.path
+    = x? AND workflows.imposer_repository_id = ? ORDER BY workflows.id ASC LIMIT ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+2a0f18df2e9639400f576fb0c05fe5fd04ad1fbbe873ee453299ee280c5c284a:
+  query: SELECT ? AS one FROM workflow_run_executions WHERE workflow_run_executions.workflow_run_id
+    = ? AND workflow_run_executions.repository_id = ? LIMIT ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+2aeb968f1450b48f1479e6dca850cba24ffccfe47afaddff01b353fe5ba2d2b2:
+  query: UPDATE workflow_runs SET workflow_runs.latest_workflow_run_execution_id =
+    ? WHERE workflow_runs.id = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+2af9c93f8cf56cd5cb8a233a64daebed1b7c58a89d422c63d69c4aca1a7bcac6:
+  query: SELECT pinned_workflows.* FROM pinned_workflows WHERE pinned_workflows.repository_id
+    = ? AND pinned_workflows.workflow_id IN ?
+  tables:
+  - pinned_workflows
+  violations:
+  - reason: domain_access
+2bdc95d011908c54fd3dc829c87bfc3d8e92f656389363d995218f8eac86861d:
+  query: SELECT workflow_run_executions.external_id FROM workflow_run_executions WHERE
+    workflow_run_executions.workflow_run_id = ? AND workflow_run_executions.repository_id
+    = ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+2c982d792098bdb35a93e0147798bff3274a02ef0679d9cc09a7aa13e9778795:
+  query: SELECT workflow_run_executions.id, workflow_run_executions.status, workflow_run_executions.conclusion,
+    workflow_run_executions.workflow_run_id, workflow_run_executions.actor_id, workflow_run_executions.external_id,
+    workflow_run_executions.completed_log_url, workflow_run_executions.repository_id,
+    workflow_run_executions.attempt, workflow_run_executions.started_at, workflow_run_executions.completed_at,
+    workflow_run_executions.created_at, workflow_run_executions.updated_at, workflow_run_executions.run_stamp_url,
+    workflow_run_executions.referenced_workflows FROM workflow_run_executions WHERE
+    workflow_run_executions.workflow_run_id = ? AND workflow_run_executions.repository_id
+    = ? AND workflow_run_executions.external_id = x? LIMIT ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+2cadca255dc9024a64492b5dab693fcc1ed9106265ab4d47f399aa3b88b6f896:
+  query: SELECT COUNT(*) FROM artifacts WHERE artifacts.check_suite_id = ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+2cc386ce97e9725cea22bd875abaefd410dfeff3c04424291f10bb7be1f2c23f:
+  query: SELECT gate_approval_logs.* FROM gate_approval_logs WHERE gate_approval_logs.id
+    = ?
+  tables:
+  - gate_approval_logs
+  violations:
+  - reason: domain_access
+2d1eb6136f4d5f31719827d8e9c7b58e768d7ac8891c82d07d41633485106620:
+  query: DELETE FROM workflow_job_runs WHERE workflow_job_runs.repository_id = ? AND
+    (workflow_job_runs.check_run_id IN ? OR workflow_job_runs.check_run_id IS NULL)
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+2d28ca925ce61a6ec5e43a43909a8add5270224411f43816c744f3f01d27c245:
+  query: SELECT statuses.* FROM statuses WHERE statuses.repository_id = ? AND statuses.id
+    IN (SELECT * FROM (SELECT max(id) FROM statuses FORCE INDEX (index_statuses_on_repository_id_and_sha_and_context)
+    WHERE statuses.repository_id = ? AND statuses.sha IN ? GROUP BY statuses.sha,
+    statuses.context) subquery) ORDER BY statuses.id ASC
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+2e9ea49958a665f75e1e7561ed409f9246eae81ae1632522a839321625609769:
+  query: SELECT gate_requests.* FROM gate_requests WHERE gate_requests.check_run_id
+    IN ? AND (created_at BETWEEN ? and ?)
+  tables:
+  - gate_requests
+  violations:
+  - reason: domain_access
+2f217db1b82675e71e76e720455eb0d92a67578711b22c48ccf0f4d9a110b147:
+  query: SELECT artifacts.* FROM artifacts WHERE artifacts.check_suite_id = ? ORDER
+    BY artifacts.name ASC LIMIT ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+30671dcc83285639a92c6370a495b6ca881398370b83cc7f574a7926108d0d5d:
+  query: UPDATE workflows SET workflows.state = ?, workflows.path = x?, workflows.disabled_at
+    = NULL WHERE workflows.id = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+317dde2f01e8b6c8f44b0ac1b1e55812498764617ce54f675fcabf0847bd65b6:
+  query: SELECT artifacts.* FROM artifacts WHERE artifacts.repository_id = ? AND artifacts.id
+    = ? ORDER BY artifacts.id ASC LIMIT ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+3280de131b1b31505207b491f8d35a403d80a708016bae164f30eb591ba86805:
+  query: SELECT COUNT(*) FROM workflow_runs use index(index_workflow_runs_on_repository_id_user_hidden_imposer_repo_id)
+    WHERE workflow_runs.repository_id = ? AND workflow_runs.user_hidden = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+329f1d4aa33427764f2e16329f97b17eacd1cbdc5d57f135913cec53aee16517:
+  query: INSERT INTO pinned_environments (repository_id, environment_id, created_at)
+    VALUES (?, ?, ?)
+  tables:
+  - pinned_environments
+  violations:
+  - reason: domain_access
+3377bf4c13539e75152c83a1fec4dbec9abab3d7f87233b32ab5fa970ceff30c:
+  query: INSERT INTO gate_approvals (gate_request_id, repository_id, approver_type,
+    approver_id, state, user_id, gate_approval_log_id, environment_id) VALUES (?,
+    ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - gate_approvals
+  violations:
+  - reason: domain_access
+33b2c77fb6e9f98c120b850467851d579d48c5d28518b8d52da251ce5bd4c557:
+  query: SELECT artifacts.* FROM artifacts WHERE artifacts.id = ? AND artifacts.repository_id
+    = ? ORDER BY artifacts.id DESC LIMIT ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+344311cadbffb2f70903940e02c3986483ac5aee09211a38b874dbbddb844d30:
+  query: SELECT workflows.name, workflows.path FROM workflows WHERE workflows.repository_id
+    = ? AND workflows.imposer_repository_id = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+347398bba59312c56d11c1ee041a0844e3fd6577fadf85414677bebbd2bb52a5:
+  query: SELECT COUNT(*) FROM statuses WHERE repository_id = ? AND sha = ? AND context
+    = ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+35408e632a67d09607d4adcb0448de8e301d83c3944a8ae969f4cdcad5e548d5:
+  query: SELECT environments.* FROM environments WHERE environments.id = ? LIMIT ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+3667baed3ceb29f2c7e99a171dae298566c99aabcf694ddfa6296b39ceaebbd2:
+  query: SELECT workflow_run_executions.id, workflow_run_executions.status, workflow_run_executions.conclusion,
+    workflow_run_executions.workflow_run_id, workflow_run_executions.actor_id, workflow_run_executions.external_id,
+    workflow_run_executions.completed_log_url, workflow_run_executions.repository_id,
+    workflow_run_executions.attempt, workflow_run_executions.started_at, workflow_run_executions.completed_at,
+    workflow_run_executions.created_at, workflow_run_executions.updated_at, workflow_run_executions.run_stamp_url,
+    workflow_run_executions.referenced_workflows FROM workflow_run_executions WHERE
+    workflow_run_executions.id = ? AND workflow_run_executions.repository_id = ? LIMIT
+    ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+37ac6bca66fccfbb27279505eccfadc03766435c61d296b614341d94ceb6bcaf:
+  query: SELECT workflow_run_executions.id, workflow_run_executions.status, workflow_run_executions.conclusion,
+    workflow_run_executions.workflow_run_id, workflow_run_executions.actor_id, workflow_run_executions.external_id,
+    workflow_run_executions.completed_log_url, workflow_run_executions.repository_id,
+    workflow_run_executions.attempt, workflow_run_executions.started_at, workflow_run_executions.completed_at,
+    workflow_run_executions.created_at, workflow_run_executions.updated_at, workflow_run_executions.run_stamp_url
+    FROM workflow_run_executions WHERE workflow_run_executions.workflow_run_id = ?
+    AND workflow_run_executions.repository_id = ? ORDER BY workflow_run_executions.attempt
+    DESC LIMIT ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+37c94f7a16acc4dd348ff0fc87dc6ad3353779f901ea92c2c0603572cdf2ed58:
+  query: SELECT gate_approvals.* FROM gate_approvals WHERE gate_approvals.gate_request_id
+    = ?
+  tables:
+  - gate_approvals
+  violations:
+  - reason: domain_access
+385f2398a8f85ceb3656da1016561f0e40e5b020162cbb256be6de3dbd53a01b:
+  query: SELECT ? AS one FROM workflows WHERE workflows.repository_id = ? AND workflows.imposer_repository_id
+    != ? AND workflows.state != ? LIMIT ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+38747c19e2abc9df7dcddb3e0cd18d2d284c18fcb69644a7339613dad77f083b:
+  query: UPDATE gates SET gates.timeout = ? WHERE gates.id = ?
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+38af2b26b3a2e41f498b6568098b31cc665465168b0d1c1d5b36dcadd3c05864:
+  query: SELECT workflows.* FROM workflows WHERE workflows.id IN ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+39958d7c5628e230c914c62151cf65f9bc131021efbb7f5149282ac29c0f67b0:
+  query: SELECT ? AS one FROM environments WHERE environments.repository_id = ? AND
+    environments.name = ? LIMIT ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+3a06a69f22d7ad7bcfd812bd8f6b5164addcc8c39afeb3e1545e6d5b02096c26:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    use index(index_workflow_runs_on_workflow_id_repository_id_user_hidden) WHERE
+    workflow_runs.workflow_id = ? AND workflow_runs.user_hidden = ? ORDER BY workflow_runs.id
+    DESC LIMIT ? OFFSET ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+3a3e340e23323bdec0e1b855845ed5b5ffbde9236a117b1992fa0980b9a02800:
+  query: INSERT INTO workflow_run_executions (workflow_run_id, actor_id, external_id,
+    completed_log_url, repository_id, started_at, created_at, updated_at) VALUES (?,
+    ?, x?, x?, ?, ?, ?, ?)
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+3b6890782ccae416a1d5b4c063936bda76ccda5dabf35fca0cd272530dbba963:
+  query: SELECT ? AS one FROM gate_approvers WHERE gate_approvers.gate_id = ? LIMIT
+    ?
+  tables:
+  - gate_approvers
+  violations:
+  - reason: domain_access
+3b7dde3e9d401c6b4eb82be2053fc9f3fcb2191f6cf4e181eb73bbd55f874dc3:
+  query: SELECT workflow_job_runs.* FROM workflow_job_runs WHERE workflow_job_runs.workflow_run_id
+    = ? AND workflow_job_runs.repository_id = ? AND workflow_job_runs.job_key = ?
+    ORDER BY workflow_job_runs.id DESC LIMIT ?
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+3b8c4a3d63e077534ae2ba05229c8cb9abc9119b2cff7a894c2598534d3bc099:
+  query: SELECT gate_approvals.id AS t0_r0, gate_approvals.gate_request_id AS t0_r1,
+    gate_approvals.repository_id AS t0_r2, gate_approvals.approver_type AS t0_r3,
+    gate_approvals.approver_id AS t0_r4, gate_approvals.state AS t0_r5, gate_approvals.user_id
+    AS t0_r6, gate_approvals.gate_approval_log_id AS t0_r7, gate_approvals.environment_id
+    AS t0_r8, gate_approval_log.id AS t1_r0, gate_approval_log.repository_id AS t1_r1,
+    gate_approval_log.check_suite_id AS t1_r2, gate_approval_log.user_id AS t1_r3,
+    gate_approval_log.state AS t1_r4, gate_approval_log.comment AS t1_r5, gate_approval_log.created_at
+    AS t1_r6, gate_approval_log.updated_at AS t1_r7 FROM gate_approvals LEFT OUTER
+    JOIN gate_approval_logs gate_approval_log ON gate_approval_log.id = gate_approvals.gate_approval_log_id
+    WHERE gate_approval_log.id = ?
+  tables:
+  - gate_approval_logs
+  - gate_approvals
+  violations:
+  - reason: domain_access
+3b956735c5f9763a940448a7dc68a18bfb47cbf69fc1a5b139ac4dfc6f74db56:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? AND workflows.state
+    != ? AND workflows.imposer_repository_id = ? LIMIT ? OFFSET ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+3bc4275be7835d38591904c1c7756db388c240c10a0f010658931dbc7188aa4e:
+  query: INSERT INTO gates (environment_id, body, type, timeout, created_at, updated_at,
+    integration_id) VALUES (?, x?, ?, ?, ?, ?, ?)
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+3bfab6c3ae287dc346f024e3aec65b541be4d966a9a182709624683764430c63:
+  query: SELECT workflows.* FROM workflows WHERE workflows.id = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+3c89193c322b0350a39d07c17e8a43082e5d56bb19a2db7090af9a45507485c2:
+  query: SELECT COUNT(*) FROM artifacts WHERE artifacts.check_suite_id = ? AND artifacts.name
+    = x?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+3c9c95fe5facb6681f8489e06b8741994be1e03daaf29f8363714ca0cee85fd6:
+  query: DELETE FROM artifacts WHERE artifacts.id = ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+3dc217af58b74171c0ccdc9ea9fa1af8d5a35417f26f78b991e6c5ff2c4f57d4:
+  query: DELETE FROM workflow_runs WHERE workflow_runs.repository_id = ? AND (workflow_runs.id
+    IN ? OR workflow_runs.id IS NULL)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+3de6f78f31978bb3d16fa2e0f6e0ebff1fd1e12a8f4e0c799d588c0e146d7929:
+  query: UPDATE workflows SET workflows.updated_at = ?, workflows.enabled_at = ? WHERE
+    workflows.id = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+3e130b8e28c1591b7306e4c9ff3c8decfab1e0654ea387fcb51790e0eb69f189:
+  query: UPDATE workflow_run_executions SET workflow_run_executions.status = ?, workflow_run_executions.conclusion
+    = NULL, workflow_run_executions.completed_at = NULL, workflow_run_executions.updated_at
+    = ? WHERE workflow_run_executions.id = ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+3e1d8a780802f2c10df3ecf95283dba14e5ab9f4297b05c392929f5cce64c634:
+  query: SELECT gates.id, gates.environment_id, gates.body, gates.type, gates.timeout,
+    gates.created_at, gates.updated_at, gates.min_approvals, gates.integration_id,
+    gates.integration_installation_id, gates.prevent_self_review FROM gates WHERE
+    gates.environment_id = ?
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+3e92353e90e545164909ee860ddc8be00a04bae161a92cdb7b835c9a93b4ac62:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? AND workflows.path
+    = x? LIMIT ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+3fa44f546517594a670dd2b5c6b3c259896f30562e5fabc3fe356d09f38fa12e:
+  query: UPDATE workflow_run_executions SET workflow_run_executions.status = -? WHERE
+    workflow_run_executions.id = ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+3fd18a5076cc12ea769be9d862e50fb47206d303cdd5eeb0e332d01a59da7cec:
+  query: SELECT workflows.* FROM workflows LEFT JOIN pinned_workflows ON workflows.id=pinned_workflows.workflow_id
+    AND workflows.repository_id=pinned_workflows.repository_id WHERE workflows.repository_id
+    = ? AND workflows.state != ? AND workflows.state != ? AND ( (present_in_default_branch
+    = ? OR EXISTS( SELECT ? FROM workflow_runs WHERE workflow_id = workflows.id AND
+    repository_id = workflows.repository_id AND user_hidden = ? ) OR EXISTS( SELECT
+    ? FROM workflow_runs WHERE workflow_id = workflows.id AND repository_id = workflows.repository_id
+    AND actor_id = ? ) ) ) AND workflows.path != x? AND workflows.path != x? ORDER
+    BY pinned_workflows.workflow_id IS NULL, state, CAST(name as CHAR) LIMIT ? OFFSET
+    ?
+  tables:
+  - pinned_workflows
+  - workflow_runs
+  - workflows
+  violations:
+  - reason: domain_access
+40200e9dd1bdcfcef13611812ff306e31daa8dd4403409348ac344597de11dcd:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? AND workflows.state
+    != ? AND workflows.present_in_default_branch = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+40b0c6bc2d05970cc1bab954d155706305b9e70e6bdd624c43c79e399f2fee32:
+  query: UPDATE gate_requests SET gate_requests.state = ?, gate_requests.token = ?
+    WHERE gate_requests.id = ?
+  tables:
+  - gate_requests
+  violations:
+  - reason: domain_access
+41b54669b3e7811c79c8e0253db5fef5790edfcc0ffac817d5b6d4ed115caf46:
+  query: INSERT INTO pinned_environments (repository_id, environment_id, position,
+    created_at) VALUES (?, ?, ?, ?)
+  tables:
+  - pinned_environments
+  violations:
+  - reason: domain_access
+426c03ee67d1fe50cdcd2ee14f3b10a6f52f68bfb878f439517326d70b87a076:
+  query: UPDATE workflows SET workflows.state = ?, workflows.present_in_default_branch
+    = ? WHERE workflows.id = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+4287cbbd708c427b057350c23e9acd72625067172ca8b22f19df5773e8d97287:
+  query: SELECT workflow_run_executions.id, workflow_run_executions.status, workflow_run_executions.conclusion,
+    workflow_run_executions.workflow_run_id, workflow_run_executions.actor_id, workflow_run_executions.external_id,
+    workflow_run_executions.completed_log_url, workflow_run_executions.repository_id,
+    workflow_run_executions.attempt, workflow_run_executions.started_at, workflow_run_executions.completed_at,
+    workflow_run_executions.created_at, workflow_run_executions.updated_at, workflow_run_executions.run_stamp_url
+    FROM workflow_run_executions WHERE workflow_run_executions.workflow_run_id = ?
+    AND workflow_run_executions.repository_id = ? AND workflow_run_executions.attempt
+    = ? AND workflow_run_executions.external_id = x? LIMIT ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+42b2d46fd013735ca4891ef112bafcb7d4b79fdd6d22d3d33adcb1fd1f6c42da:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, trigger_id,
+    trigger_type, event, head_branch, head_sha, workflow_file_path, repository_id,
+    actor_id, tree_id, cloned_workflow_run_id) VALUES (?, ?, ?, ?, ?, ?, x?, ?, x?,
+    ?, ?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+42ce9f9174b280176baf10d1b473f3a5e812eb956db27c9d4586ec7cce9e3424:
+  query: SELECT COUNT(*) FROM gate_approvals WHERE gate_approvals.gate_request_id
+    = ?
+  tables:
+  - gate_approvals
+  violations:
+  - reason: domain_access
+43c85ca7c5211f646db22fa2edc6413c55fd325a47dbfb109dfad20eb9fc8e9e:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.repository_id = ? AND workflow_runs.id = ? LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+43e2352e637fc0ff36edbc8e7031fa4d7761c4ef535016fb9fd4b8291eecb80f:
+  query: SELECT environments.id FROM environments WHERE environments.repository_id
+    = ? ORDER BY environments.name ASC, environments.id asc LIMIT ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+44a5a1e66419464f8be69ad7441e462d8bff0cd446e0614643b0f986963345c6:
+  query: SELECT gate_approval_logs.* FROM gate_approval_logs WHERE gate_approval_logs.check_suite_id
+    = ?
+  tables:
+  - gate_approval_logs
+  violations:
+  - reason: domain_access
+45645561fed481da2f62c4bfc79e82f8d787afc1836677d65d8d7cb53d85a8fd:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? LIMIT
+    ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+4703ec2b0e67eb859e2f3e34ecf7edca6c9d2b667320e5f6297545a4278fa131:
+  query: INSERT INTO workflow_job_runs (workflow_run_id, check_run_id, repository_id,
+    parent_job_id, job_key, created_at, updated_at, label_data, runner_id, runner_name,
+    runner_group_id, runner_group_name, workflow_run_execution_id, original_workflow_run_execution_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+47406788be0f381752d0e9cf1e29d8a33c1ef913f447d437e043d866b60d89d2:
+  query: SELECT workflows.* FROM workflows LEFT JOIN pinned_workflows ON workflows.id=pinned_workflows.workflow_id
+    AND workflows.repository_id=pinned_workflows.repository_id WHERE workflows.repository_id
+    = ? AND workflows.state != ? AND workflows.imposer_repository_id != ? AND ( (present_in_default_branch
+    = ? OR EXISTS ( SELECT ? FROM workflow_runs WHERE workflow_id = workflows.id AND
+    repository_id = workflows.repository_id AND user_hidden = ? )) ) AND workflows.path
+    != x? AND workflows.path != x? ORDER BY pinned_workflows.workflow_id IS NULL,
+    state, CAST(name as CHAR) LIMIT ? OFFSET ?
+  tables:
+  - pinned_workflows
+  - workflow_runs
+  - workflows
+  violations:
+  - reason: domain_access
+4a202eaddf0c39b9b5203ba2a7c95719a29b694ffe0a6603ea4e0203b93c857a:
+  query: UPDATE workflow_run_executions SET workflow_run_executions.status = ?, workflow_run_executions.updated_at
+    = ? WHERE workflow_run_executions.id = ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+4a3d581896f46c8ed3dd3f717c91d1e6f5f2b657872952d5100cb6ef411405d2:
+  query: SELECT statuses.updated_at FROM statuses FORCE INDEX(index_statuses_on_is_archived_updated_at)
+    WHERE (is_archived = ?) AND (updated_at > ? AND updated_at <= ?) ORDER BY updated_at
+    ASC LIMIT ? OFFSET ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+4bba1708b2afb18cba6646504281f74fbbf03f4e1190e0a19c4945a16647fcd5:
+  query: INSERT INTO statuses (state, target_url, sha, repository_id, creator_id,
+    created_at, updated_at, tree_oid, commit_oid) VALUES (?, x?, ?, ?, ?, ?, ?, x?,
+    x?)
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+4bc146dc622702027895a539403ba8b64e8c1b044bd17cb377681060e524434b:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, event,
+    action, name, head_branch, head_sha, workflow_file_path, repository_id, user_hidden,
+    actor_id) VALUES (?, ?, ?, ?, x?, x?, x?, ?, x?, ?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+4c5a5f8e467ee5d8778a0eaadd64f5c825df99c2c9a264c298d00b9a98e1c61b:
+  query: INSERT INTO workflow_job_runs (workflow_run_id, check_run_id, repository_id,
+    parent_job_id, job_key, created_at, updated_at, workflow_run_execution_id, original_workflow_run_execution_id,
+    summary_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+4e2b1e6a8c8815f5190e6c411b146e6cf6876f5cb509b5eeccd14a81660ee835:
+  query: INSERT INTO workflow_job_runs (workflow_run_id, check_run_id, repository_id,
+    parent_job_id, created_at, updated_at, workflow_run_execution_id, original_workflow_run_execution_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+4ea1f7493897845a5feadeb16df677c35e4a637b6dcdbff08dab65551b13a411:
+  query: SELECT environments.id FROM environments WHERE environments.repository_id
+    = ? AND environments.name IN ? ORDER BY environments.name ASC, environments.id
+    asc LIMIT ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+4eb22e9ad3b74a59615cbca02453fcabdf6c283f1d88c509e815fda8cfc598ae:
+  query: INSERT INTO gate_branch_policies (gate_id, repository_id, name, created_at,
+    updated_at) VALUES (?, ?, x?, ?, ?)
+  tables:
+  - gate_branch_policies
+  violations:
+  - reason: domain_access
+4f0efa588a00a178528943ad3e2de7d88b7d8e8dc95c46b4647a7f6556d395f5:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, event,
+    name, head_branch, head_sha, workflow_file_path, repository_id, user_hidden, actor_id)
+    VALUES (?, ?, ?, ?, x?, x?, ?, x?, ?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+4f9c879a6e372a6e8c621fa9eb2788f773af2ab46d5d740ce0ddbfb30ce81b0c:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, event,
+    name, head_branch, head_sha, workflow_file_path, repository_id, actor_id, imposer_repository_id)
+    VALUES (?, ?, ?, ?, x?, x?, ?, x?, ?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+500ea0ae1a72a310222761c2edab560d1ed26b4ac1e5685ca90dcd57dde8eefd:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.check_suite_id = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+53706f92ad304dea6e4038432cc369abd542f8574697a5f0824b271cb8460177:
+  query: SELECT gate_branch_policies.id, gate_branch_policies.name FROM gate_branch_policies
+    WHERE gate_branch_policies.gate_id = ? AND (name LIKE ?)
+  tables:
+  - gate_branch_policies
+  violations:
+  - reason: domain_access
+537fcadb85b1c72035ee48fba588079abb1611fadbb9206f057af8d4920e9963:
+  query: INSERT INTO actions_key_values (key,value,created_at,updated_at,expires_at,partition_key)
+    VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at
+    = VALUES(updated_at), expires_at = VALUES(expires_at)
+  tables:
+  - actions_key_values
+  violations:
+  - reason: domain_access
+54d466026720c7e56441f9329ebf1af17f0b32dd8f8cea96716fe3cdaecb0a94:
+  query: UPDATE workflow_run_executions SET workflow_run_executions.status = ?, workflow_run_executions.completed_at
+    = ?, workflow_run_executions.updated_at = ? WHERE workflow_run_executions.id =
+    ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+55905783c63579554ca10cb7021a628f8ed5131b1148ee8ecffe74281ad9c026:
+  query: SELECT artifacts.id FROM artifacts INNER JOIN check_suites ON check_suites.id
+    = artifacts.check_suite_id WHERE check_suites.repository_id = ? AND artifacts.repository_id
+    = ? AND artifacts.name = ? order by artifacts.id desc limit ?
+  tables:
+  - artifacts
+  violations:
+  - reason: cross_domain
+  - reason: domain_access
+56b5ddfd38f06331dcd4f220d82f4a1149d488702ec280100516c14c95cda714:
+  query: DELETE FROM statuses WHERE statuses.repository_id = ? AND (statuses.id IN
+    ? OR statuses.id IS NULL)
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+56c1ab2e4cb6a2824130e5a13e6647cf48f32911b628e0edfeaf65c383dd16be:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? AND workflows.path
+    = x? AND workflows.imposer_repository_id = ? LIMIT ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+5701eccda2f56f4a445b1cf8e43ee825402e2f780cd5dc85b901bf5a97938864:
+  query: SELECT artifacts.* FROM artifacts WHERE artifacts.repository_id = ? AND (id
+    > ?) ORDER BY artifacts.id ASC, artifacts.name ASC LIMIT ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+576074a45fafb4558b1d9a54275c842953008f623e67c5683b763d3287cf779e:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, event,
+    name, head_branch, head_sha, workflow_file_path, repository_id, actor_id) VALUES
+    (?, ?, ?, ?, x?, x?, ?, x?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+57a895c80ca62001aa508703107c75260e8914e6b3eaf1ca0ff45e654732224f:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, event,
+    head_sha, workflow_file_path, repository_id, actor_id) VALUES (?, ?, ?, ?, ?,
+    x?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+583bfe463f25a3974c0439772aa55c605f573a0c57ca57ad985531777cd02408:
+  query: SELECT context, creator_id FROM statuses WHERE created_at > ? AND repository_id
+    = ? ORDER BY created_at DESC LIMIT ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+588eac8f2b3993ca01e5878cd713b3def16c5129ed09337ec3c8f70305d5719c:
+  query: SELECT ? AS one FROM pinned_environments WHERE pinned_environments.repository_id
+    = ? AND pinned_environments.environment_id = ? LIMIT ?
+  tables:
+  - pinned_environments
+  violations:
+  - reason: domain_access
+58d6bb7de9c6803a28e67ab9d84987f89ace325d6556049c1ab35d0904bcae8f:
+  query: SELECT artifacts.* FROM artifacts WHERE artifacts.repository_id = ? AND artifacts.check_suite_id
+    = ? LIMIT ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+58f1159f10e91bcf3d2850021f6ed58503e7452c2d568e736576ede607d1eaa6:
+  query: SELECT gate_requests.* FROM gate_requests WHERE gate_requests.id = ?
+  tables:
+  - gate_requests
+  violations:
+  - reason: domain_access
+5931542cf959df75cfd6c7210f7a2ac8158007d4cc5df6f98c0a401903171a65:
+  query: SELECT artifacts.* FROM artifacts WHERE artifacts.repository_id = ? AND artifacts.check_suite_id
+    = ? AND artifacts.name = x? LIMIT ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+59aa7e336a68e8b44f0c544fa8ea8ffd3849ac251102895e0a013cb34b461868:
+  query: SELECT COUNT(*) FROM workflows WHERE workflows.repository_id = ? AND workflows.state
+    != ? AND workflows.imposer_repository_id != ? AND ( (present_in_default_branch
+    = ? OR EXISTS ( SELECT ? FROM workflow_runs WHERE workflow_id = workflows.id AND
+    repository_id = workflows.repository_id AND user_hidden = ? )) ) AND workflows.path
+    != x? AND workflows.path != x?
+  tables:
+  - workflow_runs
+  - workflows
+  violations:
+  - reason: domain_access
+5a237071e41b4c74d25329c2868b20d6472ec83648d68540d01e30d3f803747f:
+  query: INSERT INTO workflow_run_executions (status, workflow_run_id, actor_id, external_id,
+    repository_id, started_at, created_at, updated_at) VALUES (?, ?, ?, x?, ?, ?,
+    ?, ?)
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+5a2e574799bb38851bb55f24f5393d078496a861d6445ab80baac523a6a9c207:
+  query: SELECT pinned_environments.id FROM pinned_environments WHERE pinned_environments.repository_id
+    = ? ORDER BY position ASC, pinned_environments.position ASC, pinned_environments.id
+    ASC LIMIT ?
+  tables:
+  - pinned_environments
+  violations:
+  - reason: domain_access
+5a3c04cea6f21940ec6628d3107d87e8e676872254fe8f9ef8d10ee67dc679a7:
+  query: INSERT INTO gate_approvers (gate_id, repository_id, approver_type, approver_id)
+    VALUES (?, ?, ?, ?)
+  tables:
+  - gate_approvers
+  violations:
+  - reason: domain_access
+5a7470a327084f817bba077185b810f1904f4a7327df62ded085faa2b69b5100:
+  query: SELECT gate_requests.id AS t0_r0, gate_requests.gate_id AS t0_r1, gate_requests.state
+    AS t0_r2, gate_requests.check_run_id AS t0_r3, gate_requests.token AS t0_r4, gate_requests.data
+    AS t0_r5, gate_requests.created_at AS t0_r6, gate_requests.updated_at AS t0_r7,
+    gate_requests.expires_at AS t0_r8, gates.id AS t1_r0, gates.environment_id AS
+    t1_r1, gates.body AS t1_r2, gates.type AS t1_r3, gates.timeout AS t1_r4, gates.created_at
+    AS t1_r5, gates.updated_at AS t1_r6, gates.min_approvals AS t1_r7, gates.integration_id
+    AS t1_r8, gates.integration_installation_id AS t1_r9, gates.prevent_self_review
+    AS t1_r10, environment.id AS t2_r0, environment.repository_id AS t2_r1, environment.name
+    AS t2_r2, environment.created_at AS t2_r3, environment.updated_at AS t2_r4, environment.gates_admin_enforced
+    AS t2_r5 FROM gate_requests LEFT OUTER JOIN gates ON gates.id = gate_requests.gate_id
+    LEFT OUTER JOIN environments environment ON environment.id = gates.environment_id
+    WHERE environment.gates_admin_enforced = ? AND environment.repository_id = ? AND
+    gate_requests.state = ? AND gate_requests.id = ? LIMIT ?
+  tables:
+  - environments
+  - gate_requests
+  - gates
+  violations:
+  - reason: domain_access
+5ac0f49db56162b75483a352cbd6cd56f7f39a54e6643fbd028d389aafbaa1be:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.repository_id = ? AND (workflow_runs.id IN (SELECT * FROM
+    (SELECT workflow_runs.id FROM workflow_runs use index(index_workflow_runs_on_repository_id_user_hidden_imposer_repo_id)
+    WHERE workflow_runs.repository_id = ? AND workflow_runs.user_hidden = ? ORDER
+    BY workflow_runs.id DESC LIMIT ? OFFSET ?) subquery_for_limit)) ORDER BY workflow_runs.id
+    DESC LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+5c2d60678f6b9f1d3095eb6ad6335eb6277c2e3acfe6d058456312093d80d038:
+  query: UPDATE workflow_run_executions SET workflow_run_executions.status = ?, workflow_run_executions.completed_log_url
+    = x?, workflow_run_executions.updated_at = ? WHERE workflow_run_executions.id
+    = ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+5c4df25c51cc96b349265f7bda59e404dc67be8806822050f73fe119a7829ef6:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, event,
+    head_branch, head_sha, workflow_file_path, repository_id, user_hidden, actor_id)
+    VALUES (?, ?, ?, ?, x?, ?, x?, ?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+5ce26e12381d5825281d492b66f46192c9c92081e43e605e3a80b75330d8870b:
+  query: SELECT gate_approval_logs.* FROM gate_approval_logs WHERE gate_approval_logs.id
+    = ? LIMIT ?
+  tables:
+  - gate_approval_logs
+  violations:
+  - reason: domain_access
+5cf426e59af3dc09dd12d7f7f7b789bda09a7366f430789c04bd299a8b3a4dd0:
+  query: SELECT ? AS one FROM workflow_runs WHERE workflow_runs.workflow_id = ? AND
+    workflow_runs.user_hidden = ? LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+5e04a1818150b52991117a81f8d3696a4b76a06b156b0991230c10e120641f5b:
+  query: SELECT id FROM statuses WHERE repository_id = ? LIMIT ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+5ec43f0d4788df4a7a4d8ffa4aed284e6ceadd82a1621c9776135ae6daa606d6:
+  query: SELECT workflow_job_runs.* FROM workflow_job_runs WHERE workflow_job_runs.workflow_run_execution_id
+    = ? AND workflow_job_runs.repository_id = ? AND workflow_job_runs.workflow_run_id
+    = ? AND NOT ((workflow_job_runs.summary_url = ? OR workflow_job_runs.summary_url
+    IS NULL))
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+5f05f21bd9929d5d68c9c6e6a3735356a8d791a7b43002e3ae67318a81f99d71:
+  query: SELECT environments.* FROM environments WHERE environments.id IN ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+610bd29da1a48959447949c4d902dfd47128dc30018964630af22bb80dc2eba8:
+  query: SELECT * FROM statuses FORCE INDEX (index_statuses_on_repository_id_and_sha_and_context)
+    WHERE repository_id = ? AND sha = ? AND context = ? AND id < ? ORDER BY id DESC
+    LIMIT ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+6163f5b1741c35040fc5f385ea94b12d3eedc87751d67ce6fa07f7647d4b4f7c:
+  query: SELECT gate_requests.* FROM gate_requests WHERE gate_requests.state = ? AND
+    gate_requests.check_run_id = ?
+  tables:
+  - gate_requests
+  violations:
+  - reason: domain_access
+6339a18b5ca52e61d890c07b035e33aa13f21d79e6b017377d440573be11b975:
+  query: DELETE FROM gate_branch_policies WHERE gate_branch_policies.id = ?
+  tables:
+  - gate_branch_policies
+  violations:
+  - reason: domain_access
+63a11ccd8f3d063016897fcc58b8c8ac2ec5ac289d87d47216155aa9a0fc7ba7:
+  query: SELECT statuses.* FROM statuses WHERE statuses.repository_id = ? AND statuses.id
+    IN (SELECT * FROM (SELECT max(id) FROM statuses FORCE INDEX (index_statuses_on_repository_id_and_sha_and_context)
+    WHERE statuses.repository_id = ? AND statuses.sha = ? AND statuses.context = ?
+    GROUP BY statuses.sha, statuses.context) subquery)
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+6463a15286eb2176eaabbac530fa3ce3be3923289fd51695fe7b595f64be1009:
+  query: INSERT INTO gate_approval_logs (repository_id, check_suite_id, user_id, state,
+    comment, created_at, updated_at) VALUES (?, ?, ?, ?, x?, ?, ?)
+  tables:
+  - gate_approval_logs
+  violations:
+  - reason: domain_access
+65093830b69d49e9fce6dc1e9b9c25fd47d712bb928386776f3d86cc6605e550:
+  query: SELECT pinned_workflows.* FROM pinned_workflows WHERE pinned_workflows.workflow_id
+    = ? AND pinned_workflows.repository_id = ? LIMIT ?
+  tables:
+  - pinned_workflows
+  violations:
+  - reason: domain_access
+656e72ff45ec4b837fc34b92f1f785b9e846cd69addb4d38bc407b30812ca220:
+  query: SELECT environments.repository_id FROM environments WHERE environments.id
+    = ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+657df707feb16a9cbe79bc5cdcdf84d608bc4ee54a553c65968fc4c8eaf2af76:
+  query: SELECT COUNT(workflow_runs.id) FROM workflow_runs WHERE workflow_runs.repository_id
+    IN ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+65e63d42051704fe8a8f416dd0694b0bd61e7a4dd397c9ce02e006b6ea678d64:
+  query: SELECT COUNT(*) FROM artifacts WHERE artifacts.id IN ? AND artifacts.repository_id
+    = ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+667128f40c039eb397e655f11fc7116b43524113f62461fa9cb2bace6aace84f:
+  query: SELECT gates.id, gates.environment_id, gates.body, gates.type, gates.timeout,
+    gates.created_at, gates.updated_at, gates.min_approvals, gates.integration_id,
+    gates.integration_installation_id, gates.prevent_self_review FROM gates WHERE
+    gates.id IN ?
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+672b42d6c0572b7c81e8cf009373d140c45609d1aec4e08ac4891a0b72827bda:
+  query: UPDATE workflows SET workflows.state = ?, workflows.path = x?, workflows.updated_at
+    = ?, workflows.disabled_at = ? WHERE workflows.id = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+672b98ec428d942de33e14f3e06de82bed982f2f2b334600cb419340603f1361:
+  query: SELECT environments.* FROM environments WHERE environments.repository_id
+    = ? AND environments.id = ? ORDER BY environments.id DESC LIMIT ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+679bbf79884f7225e2bb2d50aaf50b37efe4d4c8041e67d17ee3fffdc1fae0b9:
+  query: SELECT workflows.* FROM workflows WHERE workflows.id = ? LIMIT ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+68080d9e3d8054f2624b339a36290692b114afc423bc298149c963004810e2c1:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.repository_id IN ? ORDER BY workflow_runs.id DESC
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+6878a436391d2b7416dfc8b46d78aa476bca7ed18b7278544d9c78718620e93e:
+  query: SELECT workflow_run_executions.id, workflow_run_executions.status, workflow_run_executions.conclusion,
+    workflow_run_executions.workflow_run_id, workflow_run_executions.actor_id, workflow_run_executions.external_id,
+    workflow_run_executions.completed_log_url, workflow_run_executions.repository_id,
+    workflow_run_executions.attempt, workflow_run_executions.started_at, workflow_run_executions.completed_at,
+    workflow_run_executions.created_at, workflow_run_executions.updated_at, workflow_run_executions.run_stamp_url
+    FROM workflow_run_executions WHERE workflow_run_executions.workflow_run_id = ?
+    AND workflow_run_executions.repository_id = ? ORDER BY workflow_run_executions.attempt
+    DESC
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+68b0d0c0a1c29cb4c2377abdad0b94b27e8513136a7365ccda74d54154fda1b3:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.repository_id = ? AND workflow_runs.id = ? ORDER BY workflow_runs.id
+    DESC LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+6906fdbf8116c4bff11255dc056cc6d98e76b9dd6693d5072f6acbb86cd39cb7:
+  query: SELECT gates.id, gates.environment_id, gates.body, gates.type, gates.timeout,
+    gates.created_at, gates.updated_at, gates.min_approvals, gates.integration_id,
+    gates.integration_installation_id, gates.prevent_self_review FROM gates WHERE
+    gates.environment_id = ? AND gates.type = ? AND gates.id = ? LIMIT ?
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+693312f5f8616e27043a83e648d04153740e6bb840a490a4281de01d4d358054:
+  query: SELECT gate_requests.* FROM gate_requests WHERE gate_requests.check_run_id
+    IN ? AND gate_requests.state = ? AND gate_requests.id NOT IN ?
+  tables:
+  - gate_requests
+  violations:
+  - reason: domain_access
+69d74ee7a981d60735e898bfd1c1f524851e66b0e83614338a78d283a9d601a9:
+  query: DELETE FROM gate_approvers WHERE gate_approvers.id = ?
+  tables:
+  - gate_approvers
+  violations:
+  - reason: domain_access
+69fe494e2bc679957aca0d8daec2fa1478df9cf8c6e379c41feed640a1f9b090:
+  query: SELECT artifacts.* FROM artifacts INNER JOIN check_suites ON check_suites.id
+    = artifacts.check_suite_id WHERE check_suites.repository_id = ? AND artifacts.id
+    = ? AND artifacts.repository_id = ? AND artifacts.name = x? ORDER BY artifacts.id
+    ASC LIMIT ?
+  tables:
+  - artifacts
+  violations:
+  - reason: cross_domain
+  - reason: domain_access
+6a563124b0e981bbce52f36b90c3e2569fefe1207fe23a902de62e1929f7c38c:
+  query: INSERT INTO workflow_job_runs (workflow_run_id, check_run_id, repository_id,
+    created_at, updated_at, label_data, workflow_run_execution_id, original_workflow_run_execution_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+6aa43f9b06fe191319e69d7648a9d76f26f6f16a64cb81338ae63605dd68fc58:
+  query: SELECT workflow_job_runs.* FROM workflow_job_runs WHERE workflow_job_runs.id
+    = ? AND workflow_job_runs.repository_id = ? AND workflow_job_runs.workflow_run_id
+    = ? LIMIT ?
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+6b640ceadf26fddf704406bcc6cb0125cb2704a2b0cb65d7b232172525b53f9c:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE (workflow_runs.id = ? OR workflow_runs.check_suite_id = ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+6bbe312bc93e19fdad826df9312023b023250a65a5f5962fd7c4d6a4daf367d8:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, trigger_id,
+    trigger_type, event, name, head_branch, head_sha, workflow_file_path, repository_id,
+    actor_id) VALUES (?, ?, ?, ?, ?, ?, x?, x?, ?, x?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+6bdfad8f0bf6759994b3795a82d3452ad335d8918d9104d515ab62ff9faa60f8:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.repository_id = ? AND workflow_runs.id = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+6c55591723dec8b7b827f34f7bd01e7efb54d2faafe63285a51cb03e5779ec2f:
+  query: UPDATE workflow_job_runs SET workflow_job_runs.parent_job_id = ?, workflow_job_runs.job_key
+    = ?, workflow_job_runs.updated_at = ?, workflow_job_runs.label_data = ?, workflow_job_runs.runner_id
+    = ?, workflow_job_runs.runner_name = ?, workflow_job_runs.runner_group_id = ?,
+    workflow_job_runs.runner_group_name = ?, workflow_job_runs.summary_url = ? WHERE
+    workflow_job_runs.id = ?
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+6c64757a1ccd0dd2c8901292459d9031436b4f6d55dbe855fe6a28d8e333e5d5:
+  query: SELECT COUNT(*) FROM artifacts FORCE INDEX(index_artifacts_on_repository_id_and_id)
+    WHERE artifacts.repository_id = ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+6c8f1e440b18fd3f3f231f04c480ea6989370b4a8152ed464b2375c265706230:
+  query: SELECT artifacts.* FROM artifacts WHERE artifacts.check_suite_id = ? ORDER
+    BY artifacts.name ASC
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+6c8f9fe0707bdebc1edca222012d3b012c9436b4657d76bc21a19dd4f7d90395:
+  query: SELECT COUNT(*) FROM gates WHERE gates.environment_id = ?
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+6d3bbf67934ba34a66d0d62a943beedbf62926e81117426b1b64eadd799b4c9a:
+  query: SELECT artifacts.id FROM artifacts WHERE artifacts.repository_id = ? AND
+    artifacts.check_suite_id IN ? LIMIT ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+6d5c73636eafff9586f1ab2d29edce80c649824048ce1a18c922e74a7da08cf1:
+  query: UPDATE pinned_environments SET position = CASE id WHEN ? THEN ? WHEN ? THEN
+    ? WHEN ? THEN ? WHEN ? THEN ? WHEN ? THEN ? WHEN ? THEN ? WHEN ? THEN ? WHEN ?
+    THEN ? WHEN ? THEN ? END WHERE pinned_environments.id IN ?
+  tables:
+  - pinned_environments
+  violations:
+  - reason: domain_access
+6e455544661df61b0760bd29a7ec627e93f205aef0bd4cbabdade4d74ced0ee8:
+  query: SELECT DISTINCT artifacts.source_url FROM artifacts WHERE artifacts.check_suite_id
+    = ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+6f1f9a5b54c1e453ee265565a04995f73677abc08105c80796b9ef0c2bfd04b1:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    use index(index_workflow_runs_on_workflow_id_repository_id_user_hidden) WHERE
+    workflow_runs.workflow_id = ? AND workflow_runs.user_hidden = ? AND workflow_runs.repository_id
+    = ? ORDER BY workflow_runs.id DESC LIMIT ? OFFSET ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+7050d734f7a1d3e35110634ffd6e49014f808b1bbf9981cc4dcb47afc434b424:
+  query: SELECT ? AS one FROM workflow_runs WHERE workflow_runs.repository_id = ?
+    AND workflow_runs.name = x? AND workflow_runs.event = ? LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+70f55a1959b2d3e5206db402d358caf574986f27aa6f470fadfe3eae3e61b2a8:
+  query: INSERT INTO pinned_workflows (workflow_id, repository_id, pinned_by_id, created_at,
+    updated_at) VALUES (?, ?, ?, ?, ?)
+  tables:
+  - pinned_workflows
+  violations:
+  - reason: domain_access
+710014c7913c688e9573e81e9d7d98656b6ec6a403c2b9c4a072a9e50a171da7:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? AND workflows.state
+    != ? AND workflows.imposer_repository_id = ? AND ( (present_in_default_branch
+    = ? OR EXISTS ( SELECT ? FROM workflow_runs WHERE workflow_id = workflows.id AND
+    repository_id = workflows.repository_id AND user_hidden = ? )) ) AND workflows.path
+    != x? AND workflows.path != x? ORDER BY CAST(name as CHAR) LIMIT ? OFFSET ?
+  tables:
+  - workflow_runs
+  - workflows
+  violations:
+  - reason: domain_access
+7111eaf16abe752255580de494c67054a3a93a4703cbe15d79f7cbd6078a2931:
+  query: SELECT pinned_workflows.* FROM pinned_workflows WHERE pinned_workflows.repository_id
+    = ? AND pinned_workflows.workflow_id = ?
+  tables:
+  - pinned_workflows
+  violations:
+  - reason: domain_access
+713e8a6c06590ee181792ca6b809b0ec82de65550f4aaba90d52d720c1a3122c:
+  query: INSERT INTO workflow_run_executions (workflow_run_id, actor_id, external_id,
+    repository_id, attempt, started_at, created_at, updated_at, execution_graph, referenced_workflows)
+    VALUES (?, ?, x?, ?, ?, ?, ?, ?, x?, x?)
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+714d8c3cbc354e64a4f3b3c38d037e11ffdbfc9b6121503f2be921cdeebfc1e8:
+  query: INSERT INTO workflow_run_executions (workflow_run_id, actor_id, external_id,
+    repository_id, started_at, created_at, updated_at) VALUES (?, ?, x?, ?, ?, ?,
+    ?)
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+71512defdbf1a3e72db7b1d8a0d80db6f0503982cc0d8cfec4eb98ba8d1dbff4:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.check_suite_id = ? LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+715b5d8b3a2704d871a86b58ed7252fd361f3c2645df6c7d3ddded1d87d080db:
+  query: SELECT artifacts.* FROM artifacts WHERE artifacts.id IN ? AND artifacts.repository_id
+    = ? ORDER BY artifacts.id ASC LIMIT ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+71cd38f8f66826ad003b14f2353790fc59018a8fe07fcd67a95fae11f2509a50:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.repository_id = ? AND
+    check_runs.id IN (SELECT workflow_job_runs.check_run_id FROM workflow_job_runs
+    WHERE workflow_job_runs.workflow_run_execution_id = ? AND workflow_job_runs.repository_id
+    = ? AND workflow_job_runs.workflow_run_id = ?) AND check_runs.external_id = ?
+    LIMIT ?
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: cross_domain
+  - reason: domain_access
+72c716c59cfdf49fa839ffc9f81f54d32a76136a7cebb8f27b3f3e2c104dc6e4:
+  query: INSERT INTO workflow_job_runs (workflow_run_id, check_run_id, repository_id,
+    created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+73c97aad8a73b1ec9d06cc2847beb9cc659fc61b4c1ea04e645512b5c17626be:
+  query: UPDATE workflow_job_runs SET workflow_job_runs.parent_job_id = ?, workflow_job_runs.job_key
+    = ?, workflow_job_runs.updated_at = ?, workflow_job_runs.concurrency = ?, workflow_job_runs.label_data
+    = ?, workflow_job_runs.runner_id = ?, workflow_job_runs.runner_name = ?, workflow_job_runs.runner_group_id
+    = ?, workflow_job_runs.runner_group_name = ? WHERE workflow_job_runs.id = ?
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+74bba09cee7d0dd665c7ebff01199fa76d4817e5882d2e592c0c9b174e62ca95:
+  query: SELECT statuses.repository_id, statuses.id FROM statuses FORCE INDEX(index_statuses_on_is_archived_updated_at)
+    WHERE (is_archived = ?) AND (updated_at between ? AND ?) AND (updated_at <= ?)
+    ORDER BY statuses.id ASC LIMIT ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+764a6bf4678560bd06ba00481596f9eeadbeab98f6aeb98e8b835ca635180414:
+  query: DELETE FROM workflows WHERE workflows.id = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+765640528338d4965bcdab717113fceb82cf6ed562aae7ddf3202d84f4a8af87:
+  query: UPDATE workflow_run_executions SET workflow_run_executions.status = ?, workflow_run_executions.conclusion
+    = ?, workflow_run_executions.completed_at = ? WHERE workflow_run_executions.id
+    = ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+778739cee25e54ad56caa270fee760c4c36068055ebf1a44f2cbaae4d12386ff:
+  query: UPDATE workflow_run_executions SET workflow_run_executions.status = ?, workflow_run_executions.conclusion
+    = NULL, workflow_run_executions.updated_at = ? WHERE workflow_run_executions.id
+    = ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+78a94614c4ee11e4f2d72ff58c930d6cf26e91fac0446be5360367412f428aca:
+  query: INSERT INTO workflow_job_runs (workflow_run_id, check_run_id, repository_id,
+    created_at, updated_at, workflow_run_execution_id, original_workflow_run_execution_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+78e31405982c9de0881d6e6e323a36782468e51f7e7bd13be4afec46a029a65b:
+  query: UPDATE gate_branch_policies SET gate_branch_policies.name = x?, gate_branch_policies.updated_at
+    = ? WHERE gate_branch_policies.id = ?
+  tables:
+  - gate_branch_policies
+  violations:
+  - reason: domain_access
+793888660709b685003859c0914b11861e32a769ee6c525655c61c592f8bf98e:
+  query: SELECT workflow_runs.id FROM workflow_runs WHERE workflow_runs.actor_id =
+    ? ORDER BY workflow_runs.id ASC LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+799160edcff77865db186251907a062842299f5df3481a1a8b46c56bbeead4e2:
+  query: SELECT artifacts.* FROM artifacts WHERE artifacts.check_suite_id = ? AND
+    artifacts.name = x? LIMIT ? OFFSET ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+7a57cf8b9e129b3533c6071b1da45bed09e1282fa21f9a20eac97fb207b58a37:
+  query: SELECT COUNT(*) FROM environments WHERE environments.repository_id = ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+7ac7be45fc7106405f3572a463555bd8d65d13977411135750847b635b29469d:
+  query: SELECT statuses.* FROM statuses WHERE statuses.repository_id = ? AND statuses.id
+    IN (SELECT * FROM (SELECT max(id) FROM statuses FORCE INDEX (index_statuses_on_repository_id_and_sha_and_context)
+    WHERE statuses.repository_id = ? AND statuses.sha = ? AND (created_at < ?) GROUP
+    BY statuses.sha, statuses.context) subquery) ORDER BY statuses.id DESC
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+7bc7eb69359d56cb13f6dde60e2f4d985d18115c8da323a0304ece5d3ef04ec6:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.workflow_id = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+7d0ea785508a959af9ff813fc9e4b6aa13b0a06a44e87022272c9d19b08b5ca3:
+  query: SELECT DISTINCT COALESCE(check_runs.display_name, check_runs.name), check_suite.github_app_id
+    FROM check_runs INNER JOIN check_suites check_suite ON check_suite.id = check_runs.check_suite_id
+    LEFT JOIN workflow_runs ON check_suite.id = workflow_runs.check_suite_id WHERE
+    check_suite.repository_id = ? AND check_suite.is_archived = ? AND check_suite.updated_at
+    >= ? AND (workflow_runs.imposer_repository_id = ? OR workflow_runs.imposer_repository_id
+    IS NULL) AND check_runs.completed_at >= ? ORDER BY check_suite.updated_at DESC
+    LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: cross_domain
+  - reason: domain_access
+7d5a3a43ca9481a2696196c830acb473892141d9b1cdf7e339e265430a24a71b:
+  query: SELECT artifacts.* FROM artifacts FORCE INDEX(index_artifacts_on_repository_id_and_id)
+    WHERE artifacts.repository_id = ? ORDER BY artifacts.id DESC LIMIT ? OFFSET ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+7dc5e231b7c29b52d69b873f847a06ffe3bb562be48fab9a8be885fb4369d08d:
+  query: SELECT workflow_run_executions.id, workflow_run_executions.status, workflow_run_executions.conclusion,
+    workflow_run_executions.workflow_run_id, workflow_run_executions.actor_id, workflow_run_executions.external_id,
+    workflow_run_executions.completed_log_url, workflow_run_executions.repository_id,
+    workflow_run_executions.attempt, workflow_run_executions.started_at, workflow_run_executions.completed_at,
+    workflow_run_executions.created_at, workflow_run_executions.updated_at, workflow_run_executions.run_stamp_url
+    FROM workflow_run_executions WHERE workflow_run_executions.workflow_run_id = ?
+    AND workflow_run_executions.repository_id = ? AND workflow_run_executions.attempt
+    = ? AND workflow_run_executions.repository_id = ? LIMIT ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+7eb9e47290e168b76e4a0b49eb59ee61511313f3d4a579a6ec9c85ff450b561c:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? AND workflows.path
+    = x? AND workflows.imposer_repository_id = ? AND workflows.state != ? ORDER BY
+    workflows.id ASC LIMIT ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+7ee944ea7100e1344caed7cda637267d576eb6a41f630ff3f9f10e6711798e70:
+  query: SELECT artifacts.* FROM artifacts WHERE artifacts.repository_id = ? AND artifacts.id
+    = ? LIMIT ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+7f3d7e180be5a123abe8e707f1fb09eae4578c7b47e022ae77b0eba6e4707aa1:
+  query: SELECT ? AS one FROM environments WHERE environments.repository_id = ? LIMIT
+    ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+7fe4894e08269e71efe26a67646b875f1e3548a075037ab3225fd233f32357d4:
+  query: SELECT COUNT(*) FROM workflows WHERE workflows.repository_id = ? AND workflows.state
+    != ? AND workflows.imposer_repository_id = ? AND ( (present_in_default_branch
+    = ? OR EXISTS ( SELECT ? FROM workflow_runs WHERE workflow_id = workflows.id AND
+    repository_id = workflows.repository_id AND user_hidden = ? )) )
+  tables:
+  - workflow_runs
+  - workflows
+  violations:
+  - reason: domain_access
+80c9905b34b9c3094b750a0849a51d7c263b034e8351f11e7a5c5030e070e215:
+  query: INSERT INTO workflow_run_executions (workflow_run_id, actor_id, repository_id,
+    started_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+81805ede41dbc86921825dc0dcf43ba6d9c0359084caf5e272dd2cf206701e31:
+  query: SELECT workflow_run_executions.id, workflow_run_executions.workflow_run_id,
+    workflow_run_executions.external_id FROM workflow_run_executions WHERE workflow_run_executions.repository_id
+    = ? AND workflow_run_executions.workflow_run_id = ? LIMIT ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+821c56aa79130d4aebb931080954afbdb7417d0667e3aff4f081af1727bfaef9:
+  query: SELECT environments.* FROM environments WHERE environments.repository_id
+    = ? AND (name LIKE ?) GROUP BY environments.name ORDER BY environments.name ASC
+    LIMIT ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+82fbd297322b73ff78f473a3d8d534aa537374b77d35caf4ee76fcf6a764ae47:
+  query: UPDATE workflow_run_executions SET workflow_run_executions.status = ?, workflow_run_executions.conclusion
+    = ?, workflow_run_executions.completed_log_url = x?, workflow_run_executions.updated_at
+    = ? WHERE workflow_run_executions.id = ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+837d40c50f7e6b48c16147d690e8370dbf6158d562850b5557745f9999851541:
+  query: SELECT gate_requests.id AS t0_r0, gate_requests.gate_id AS t0_r1, gate_requests.state
+    AS t0_r2, gate_requests.check_run_id AS t0_r3, gate_requests.token AS t0_r4, gate_requests.data
+    AS t0_r5, gate_requests.created_at AS t0_r6, gate_requests.updated_at AS t0_r7,
+    gate_requests.expires_at AS t0_r8, gates.id AS t1_r0, gates.environment_id AS
+    t1_r1, gates.body AS t1_r2, gates.type AS t1_r3, gates.timeout AS t1_r4, gates.created_at
+    AS t1_r5, gates.updated_at AS t1_r6, gates.min_approvals AS t1_r7, gates.integration_id
+    AS t1_r8, gates.integration_installation_id AS t1_r9, gates.prevent_self_review
+    AS t1_r10, environment.id AS t2_r0, environment.repository_id AS t2_r1, environment.name
+    AS t2_r2, environment.created_at AS t2_r3, environment.updated_at AS t2_r4, environment.gates_admin_enforced
+    AS t2_r5 FROM gate_requests LEFT OUTER JOIN gates ON gates.id = gate_requests.gate_id
+    LEFT OUTER JOIN environments environment ON environment.id = gates.environment_id
+    WHERE environment.repository_id = ? AND gate_requests.id IN ?
+  tables:
+  - environments
+  - gate_requests
+  - gates
+  violations:
+  - reason: domain_access
+838f49758c53020cbf935f7f40aacba2abd0051d33a94620b7137af1aa4c5685:
+  query: DELETE FROM environments WHERE environments.id = ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+83f2bc7458064a0b12e8ca901090eff93ad8edb807c2b24f31039727126dd2b9:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, event,
+    name, head_branch, head_sha, workflow_file_path, repository_id, execution_graph,
+    actor_id) VALUES (?, ?, ?, ?, x?, x?, ?, x?, ?, x?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+84579d9f8c73ac28056c9a9d091ad75d13f524cd75f402bdf4a6c5a0ede23fc9:
+  query: UPDATE workflow_run_executions SET workflow_run_executions.conclusion = ?,
+    workflow_run_executions.completed_at = ?, workflow_run_executions.updated_at =
+    ? WHERE workflow_run_executions.id = ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+84bb52dd1ef92934d46666550bc28ebbaa3d2c08dc62cb9438de1a8c6a41248a:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.repository_id = ? AND (workflow_runs.id IN (SELECT * FROM
+    (SELECT workflow_runs.id FROM workflow_runs USE INDEX FOR JOIN (index_workflow_runs_on_repository_id_user_hidden_imposer_repo_id)
+    WHERE workflow_runs.repository_id = ? AND workflow_runs.user_hidden = ? ORDER
+    BY workflow_runs.id DESC LIMIT ? OFFSET ?) subquery_for_limit)) ORDER BY workflow_runs.id
+    DESC LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+84ca437c5e25adc53ca1bb2cd2042f9ac9b98ecf2fea83d9a1432c272045f738:
+  query: UPDATE artifacts SET artifacts.expiration_emitted = ? WHERE artifacts.repository_id
+    = ? AND (artifacts.id = ? OR artifacts.id IS NULL) AND artifacts.expiration_emitted
+    = ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+85a830879abefeb48c0d47187df40b03bba80f016e0ea8231b71b77b0d1f052a:
+  query: SELECT COUNT(*) FROM workflows WHERE workflows.repository_id = ? AND workflows.state
+    != ? AND ( (present_in_default_branch = ? OR EXISTS ( SELECT ? FROM workflow_runs
+    WHERE workflow_id = workflows.id AND repository_id = workflows.repository_id AND
+    user_hidden = ? )) )
+  tables:
+  - workflow_runs
+  - workflows
+  violations:
+  - reason: domain_access
+85b97cea2ccce6372179fa896c0dbd6ce5d530f4a33e5d075773a3c33411e849:
+  query: SELECT workflow_job_runs.check_run_id FROM workflow_job_runs WHERE workflow_job_runs.workflow_run_execution_id
+    = ? AND workflow_job_runs.repository_id = ? AND workflow_job_runs.workflow_run_id
+    = ?
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+860a71be43e7497820b92383e87e8522ec372f1f814f90b8115d365c23463bb4:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.id = ? AND workflow_runs.repository_id = ? ORDER BY workflow_runs.id
+    ASC LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+8684c836b828a195b16fb003959fa9f07d4415e4e260b63a4126683cdb161e12:
+  query: DELETE FROM statuses WHERE statuses.repository_id = ? AND (statuses.id =
+    ? OR statuses.id IS NULL)
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+86de2ed66eb4b3d0abf0841577bc43590b619c58ef5a0e6c5ad56bb197fdfdc6:
+  query: DELETE FROM artifacts WHERE artifacts.repository_id = ? AND (artifacts.id
+    IN ? OR artifacts.id IS NULL)
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+8720d7bfa1a0409a25fa943e1a72bf766c5db7d8fa523eb99483416abd94d33b:
+  query: SELECT gates.id, gates.environment_id, gates.body, gates.type, gates.timeout,
+    gates.created_at, gates.updated_at, gates.min_approvals, gates.integration_id,
+    gates.integration_installation_id, gates.prevent_self_review FROM gates WHERE
+    gates.environment_id = ? AND gates.type = ? AND gates.type = ? AND gates.type
+    = ? LIMIT ?
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+87969733e45a772e552d3d6ec1b9a0f37983d5c76de1bc5517321064a57ec3a1:
+  query: SELECT ? AS one FROM gates WHERE gates.environment_id = ? AND gates.type
+    = ? LIMIT ?
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+8932ba80eefd7e39204b3f75ae87fa178d8141377348a06985a5b948c55c9e59:
+  query: SELECT environments.name FROM environments WHERE environments.repository_id
+    = ? LIMIT ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+8aed2421646daa2ef74d958ea5a677b695b2e532820707e72a4e8f8b4d71addc:
+  query: INSERT INTO workflow_job_runs (workflow_run_id, check_run_id, repository_id,
+    created_at, updated_at, concurrency, workflow_run_execution_id, original_workflow_run_execution_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+8b65a785d25c5d24c7e70ca1e5a79c827f05f82c2048e154e3941023168e5bd5:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? AND workflows.imposer_repository_id
+    = ? AND (workflows.id = NULL OR workflows.path = x?) ORDER BY workflows.id ASC
+    LIMIT ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+8bcf77c6a2b1f5996a203c97a5b56dcf4182efae6e0fe5c849db0db75d55d4f0:
+  query: SELECT artifacts.id FROM artifacts WHERE artifacts.check_suite_id = ? ORDER
+    BY artifacts.created_at DESC, artifacts.id DESC LIMIT ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+8bfba6ab5251317247f946a2d044b93602d935e7ffce393f63bdad117f586d6d:
+  query: SELECT gates.id, gates.environment_id, gates.body, gates.type, gates.timeout,
+    gates.created_at, gates.updated_at, gates.min_approvals, gates.integration_id,
+    gates.integration_installation_id, gates.prevent_self_review FROM gates WHERE
+    gates.environment_id = ? AND gates.type = ? LIMIT ?
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+8c4df32d57b7f984ae80b1a0f4fb43393a2ce6cc6892e5e69655115bdb6b856e:
+  query: DELETE FROM actions_key_values WHERE key IN ? AND partition_key = ?
+  tables:
+  - actions_key_values
+  violations:
+  - reason: domain_access
+8cdcf9cbd0117e28fb9a8ce033bd8c9635f65022270be5631617a5ceab6357b6:
+  query: SELECT workflows.* FROM workflows WHERE workflows.path = x? AND workflows.repository_id
+    = ? AND workflows.imposer_repository_id = ? LIMIT ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+8d9ea8ce5d18e682a3335738d56b0eed3e71a22d956a248a257439f56fed5b32:
+  query: SELECT repository_tech_projects.* FROM repository_tech_projects WHERE repository_tech_projects.repository_id
+    = ?
+  tables:
+  - repository_tech_projects
+  violations:
+  - reason: domain_access
+8dc778cf7d65168e07f5bd9d0137d94286ce63118aed5ed73c5b1405c2d08156:
+  query: SELECT artifacts.* FROM artifacts WHERE artifacts.repository_id = ? AND artifacts.check_suite_id
+    = ? AND artifacts.id = ? LIMIT ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+8dde34b8039cf377731fd9d5563d27b102d11e9d5961ed92189026009b786afd:
+  query: SELECT COUNT(*) FROM (SELECT ? AS one FROM artifacts WHERE artifacts.repository_id
+    = ? AND (id > ?) LIMIT ?) subquery_for_count
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+8e3d6cff39acb8586491afeaa966fe3458a1808e02bc2da301207bf138a6ea81:
+  query: SELECT gate_requests.* FROM gate_requests WHERE gate_requests.check_run_id
+    = ? AND (created_at BETWEEN ? and ?)
+  tables:
+  - gate_requests
+  violations:
+  - reason: domain_access
+8eeff1a07747179308d0698309f3b855e465da0028893beff0d85248ea7bb92a:
+  query: INSERT INTO workflows (repository_id, name, path, created_at, updated_at,
+    present_in_default_branch) VALUES (?, x?, x?, ?, ?, ?)
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+8fa1b84440921f123066e5ee6d29dd8236b3b7d34530224f46855914484f2624:
+  query: SELECT ? AS one FROM workflow_run_executions WHERE workflow_run_executions.workflow_run_id
+    = ? AND workflow_run_executions.repository_id = ? AND workflow_run_executions.repository_id
+    = ? LIMIT ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+907484ec22518924e552f08a8f27b1320e99bde1d97995255b094950b423e0a9:
+  query: SELECT statuses.* FROM statuses WHERE statuses.repository_id = ? AND statuses.id
+    IN (SELECT * FROM (SELECT max(id) FROM statuses FORCE INDEX (index_statuses_on_repository_id_and_sha_and_context)
+    WHERE statuses.repository_id = ? AND statuses.sha IN ? AND statuses.context =
+    ? GROUP BY statuses.sha, statuses.context) subquery)
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+9187c5795842596ee6c882c2a62d255577acd7060897b8991dbcc9b0813f8f81:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.repository_id = ? AND (workflow_runs.id IN (SELECT * FROM
+    (SELECT workflow_runs.id FROM workflow_runs use index(index_workflow_runs_on_workflow_id_repository_id_user_hidden)
+    WHERE workflow_runs.workflow_id = ? AND workflow_runs.user_hidden = ? ORDER BY
+    workflow_runs.id DESC LIMIT ? OFFSET ?) subquery_for_limit)) ORDER BY workflow_runs.id
+    DESC LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+9221173a3b8250831fa0975b52405d6c98820ebb2e422f2c3b5d9eace9b7518c:
+  query: SELECT gate_requests.* FROM gate_requests WHERE gate_requests.check_run_id
+    = ? AND gate_requests.state = ? AND gate_requests.id != ?
+  tables:
+  - gate_requests
+  violations:
+  - reason: domain_access
+92a8def97878413cff5180d0677f7698fce3dec64d0e2bd38985b5163323d449:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.repository_id = ? AND (workflow_runs.id = ? OR workflow_runs.check_suite_id
+    = ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+93365d4b4750de7fc88d706f6ff0b435836d212830cfe296df7316d62b047cb8:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.check_suite_id = ? AND workflow_runs.repository_id = ? LIMIT
+    ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+93e6371f9ba4b7ba4fb424c4c8e25374de6f1186b918135ac54852659d699c38:
+  query: SELECT gate_approvals.* FROM gate_approvals WHERE gate_approvals.gate_approval_log_id
+    = ?
+  tables:
+  - gate_approvals
+  violations:
+  - reason: domain_access
+94e4fd3be75de72decaf075108f0ffcec59f7ee79e71d9a4699357bcd3cf5635:
+  query: SELECT gate_requests.* FROM gate_requests WHERE gate_requests.id = ? ORDER
+    BY gate_requests.id ASC LIMIT ?
+  tables:
+  - gate_requests
+  violations:
+  - reason: domain_access
+9628d483e35bd1ddeb12900f908318abd84ca7852798b6b1147b1971e2c4fc13:
+  query: SELECT artifacts.* FROM artifacts WHERE artifacts.check_suite_id = ? LIMIT
+    ? OFFSET ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+975edd80536cbdaa38b2e00be848f0a13cac205ae65a4eb0716478dcf96f3b7f:
+  query: SELECT workflows.* FROM workflows LEFT JOIN pinned_workflows ON workflows.id=pinned_workflows.workflow_id
+    AND workflows.repository_id=pinned_workflows.repository_id WHERE workflows.repository_id
+    = ? AND workflows.state != ? AND workflows.path != x? AND workflows.path != x?
+    ORDER BY pinned_workflows.workflow_id IS NULL, state, CAST(name as CHAR) LIMIT
+    ? OFFSET ?
+  tables:
+  - pinned_workflows
+  - workflows
+  violations:
+  - reason: domain_access
+976ae09ad443b19689acceffc55ca9fbde490fe110f7aa45f3b9255dfe8c6831:
+  query: SELECT COUNT(*) FROM workflow_runs use index(index_workflow_runs_on_workflow_id_repository_id_user_hidden)
+    WHERE workflow_runs.workflow_id = ? AND workflow_runs.user_hidden = ? AND workflow_runs.repository_id
+    = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+97f60eeefab4e89ccf5b28952371a067d1a3c4df7877c8ce06bbc20898e49b38:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.repository_id = ? AND workflow_runs.id IN ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+984c07f64c38c260d4cb518ebf3c882b34689da119fba5898a4293cb6368814e:
+  query: SELECT environments.* FROM environments WHERE environments.repository_id
+    = ? AND environments.name = ? ORDER BY environments.id ASC LIMIT ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+98e9140ec88ad7533d38ca6a8701aff401752f188a43f9e20f7d926cbfbfadae:
+  query: SELECT gates.id, gates.environment_id, gates.body, gates.type, gates.timeout,
+    gates.created_at, gates.updated_at, gates.min_approvals, gates.integration_id,
+    gates.integration_installation_id, gates.prevent_self_review FROM gates WHERE
+    gates.environment_id IN ?
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+997121de96139e545aa048a51d91032294fe970e4036783680150f87b4dc8a36:
+  query: INSERT INTO gate_requests (gate_id, check_run_id, token, created_at, updated_at,
+    expires_at) VALUES (?, ?, ?, ?, ?, ?)
+  tables:
+  - gate_requests
+  violations:
+  - reason: domain_access
+9a4a34ae0fc05d715279c0d84cae0e6c5f67ab8820ddbec548b21d9654b205a7:
+  query: SELECT artifacts.* FROM artifacts WHERE artifacts.check_suite_id = ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+9b3aadb97e6f7152468f4ae68a6cede3d84e0d7ce3f46878170e4a095c422b7e:
+  query: SELECT pinned_environments.* FROM pinned_environments WHERE pinned_environments.environment_id
+    = ?
+  tables:
+  - pinned_environments
+  violations:
+  - reason: domain_access
+9c34569d06beef6583bfec9ed33dc9e549c0e0d72d97a30d96d1853decfdee65:
+  query: INSERT INTO workflow_run_executions (status, conclusion, workflow_run_id,
+    actor_id, external_id, completed_log_url, repository_id, started_at, completed_at,
+    created_at, updated_at) VALUES (?, ?, ?, ?, x?, x?, ?, ?, ?, ?, ?)
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+9d00dd52d8fe298f194596b412663f5ff81667e6478a8b613e3be9113a6f3c0a:
+  query: SELECT COUNT(*) FROM gate_branch_policies WHERE gate_branch_policies.gate_id
+    = ?
+  tables:
+  - gate_branch_policies
+  violations:
+  - reason: domain_access
+9d0cf3aa21e70d85c4754aef32ff245664112c91e7319abbe055ba56a8b47ff6:
+  query: INSERT INTO workflow_run_executions (workflow_run_id, actor_id, external_id,
+    repository_id, started_at, completed_at, created_at, updated_at) VALUES (?, ?,
+    x?, ?, ?, ?, ?, ?)
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+9e3e288fe41b822d0b779310878e5af43c43cc9b642bdad87ac4334f60f3c653:
+  query: SELECT workflow_job_runs.* FROM workflow_job_runs WHERE workflow_job_runs.workflow_run_execution_id
+    = ? AND workflow_job_runs.repository_id = ? AND workflow_job_runs.workflow_run_id
+    = ? AND (parent_job_id LIKE ?)
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+9ead153c9ebcdb47443c0529845cc71622fdac13a60d00e61ce5c77ac8f68455:
+  query: SELECT workflow_job_runs.* FROM workflow_job_runs WHERE workflow_job_runs.workflow_run_id
+    = ? AND workflow_job_runs.repository_id = ? AND workflow_job_runs.id = ? LIMIT
+    ?
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+9fc50f8c5b28f9424b056112305d2fa59251819f80b61af9367d000136917d9e:
+  query: UPDATE workflow_run_executions SET workflow_run_executions.status = -?, workflow_run_executions.updated_at
+    = ? WHERE workflow_run_executions.id = ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+a0310eeb7634dd0ef89259d26ddcc614a6e60b78fcc6809f96110d25f330c966:
+  query: INSERT INTO workflow_run_executions (status, conclusion, workflow_run_id,
+    actor_id, external_id, completed_log_url, repository_id, started_at, created_at,
+    updated_at) VALUES (?, ?, ?, ?, x?, x?, ?, ?, ?, ?)
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+a18617afd4d086ddf2c8dbf7322d6f44c103b2f19f2dd2874bfade50dc4f8fd6:
+  query: UPDATE workflows SET workflows.updated_at = ?, workflows.present_in_default_branch
+    = ? WHERE workflows.id = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+a1a6f414f63929b9c2236db1ce20cba6b0816f84368bd4b5a7f7675063a25846:
+  query: SELECT workflow_runs.id, workflow_runs.check_suite_id FROM workflow_runs
+    WHERE workflow_runs.repository_id = ? AND workflow_runs.check_suite_id = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+a1da5bf20de5c5af0cbc02df4c355b7821c5b338be40b6795dab6a5e87a88e57:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? AND workflows.imposer_repository_id
+    = ? AND (workflows.id = ? OR workflows.path = x?) ORDER BY workflows.id ASC LIMIT
+    ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+a2174d63528e77a2579aaeb6d07e3fb25c8e8780efb03b988d7ffddc854a5f3e:
+  query: INSERT INTO workflow_job_runs (workflow_run_id, check_run_id, repository_id,
+    parent_job_id, job_key, created_at, updated_at, label_data, runner_id, runner_name,
+    runner_group_id, runner_group_name, workflow_run_execution_id, original_workflow_run_execution_id,
+    summary_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+a34cc3643cbd73da50be3817fd90f496630143f0c04b879dd3f5508e080975d1:
+  query: SELECT ? AS one FROM statuses WHERE statuses.repository_id = ? AND statuses.id
+    IN (SELECT * FROM (SELECT max(id) FROM statuses FORCE INDEX (index_statuses_on_repository_id_and_sha_and_context)
+    WHERE statuses.repository_id = ? AND statuses.sha = ? GROUP BY statuses.sha, statuses.context)
+    subquery) LIMIT ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+a41267bd7b98f7966678a6d04b28bd53286129ec16b73d411b7f10fcc8f1bc3f:
+  query: SELECT COUNT(*) FROM workflow_runs WHERE workflow_runs.workflow_id = ? AND
+    workflow_runs.repository_id = ? AND workflow_runs.user_hidden = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+a46804481dfde17fa1fbe7f795fb0ce632c922c2c639dbbce741a11e9e24ca74:
+  query: SELECT gates.id FROM gates WHERE gates.environment_id = ? ORDER BY gates.id
+    ASC LIMIT ?
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+a4b6f7576ee8905ec3d202f8ea81156723bafa3e54301c85ec03a173740745ff:
+  query: UPDATE workflow_runs SET user_hidden = ? WHERE id IN ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+a53ee871759f06dc8dc0478941729d004721f9ab7b0bbf8ad1181c10c731a676:
+  query: SELECT statuses.updated_at, statuses.id FROM statuses FORCE INDEX(index_statuses_on_is_archived_updated_at)
+    WHERE (is_archived = ?) AND (updated_at <= ?) ORDER BY updated_at ASC LIMIT ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+a625a5ad5dd1027ea59144cedc0b249c355accc2f71c1a77d4fb5545029fd01c:
+  query: UPDATE workflows SET workflows.path = x?, workflows.updated_at = ?, workflows.enabled_at
+    = ? WHERE workflows.id = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+a72980c9c3cfe667595e7a403a88ca508837b9ed67d08cc6905f6d4b402eb547:
+  query: INSERT INTO workflow_run_executions (workflow_run_id, actor_id, repository_id,
+    started_at, created_at, updated_at, referenced_workflows) VALUES (?, ?, ?, ?,
+    ?, ?, x?)
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+a8260cffea8273ab2f4bbd08523783ac9b87c0b45a99c2972f4e60fe21831817:
+  query: SELECT workflow_job_runs.* FROM workflow_job_runs WHERE workflow_job_runs.workflow_run_execution_id
+    = ? AND workflow_job_runs.repository_id = ? AND workflow_job_runs.workflow_run_id
+    = ?
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+a8c9bfcede60f9bbc084149c29f177d5c4eb4666ff09f765636a216a11faee76:
+  query: INSERT INTO statuses (state, target_url, sha, repository_id, creator_id,
+    created_at, updated_at, oauth_application_id, tree_oid, commit_oid) VALUES (?,
+    x?, ?, ?, ?, ?, ?, ?, x?, x?)
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+a8d9ba37dfe554351477071faa7ea692cecef7d0a52a5ccef136ae89452f278a:
+  query: SELECT COUNT(*) FROM workflows WHERE workflows.repository_id = ? AND workflows.state
+    != ? AND workflows.imposer_repository_id = ? AND ( (present_in_default_branch
+    = ? OR EXISTS( SELECT ? FROM workflow_runs WHERE workflow_id = workflows.id AND
+    repository_id = workflows.repository_id AND user_hidden = ? ) OR EXISTS( SELECT
+    ? FROM workflow_runs WHERE workflow_id = workflows.id AND repository_id = workflows.repository_id
+    AND actor_id = ? ) ) )
+  tables:
+  - workflow_runs
+  - workflows
+  violations:
+  - reason: domain_access
+a8e0c209c230150a364f5fef1f9336735c6f2c4b2b280fae33e556f836f38e8c:
+  query: SELECT ? AS one FROM pinned_environments WHERE pinned_environments.environment_id
+    = ? LIMIT ?
+  tables:
+  - pinned_environments
+  violations:
+  - reason: domain_access
+a94c038ca19e41114f589d7461843a8056b67b8c8f690355d6a5dcaa03d0d6c0:
+  query: SELECT artifacts.* FROM artifacts WHERE artifacts.id = ? LIMIT ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+aa9d9f6074fa5dbd563a4836e86dcf73e5f5cb824eb230e217dedfa0133f5e10:
+  query: SELECT workflow_runs.id FROM workflow_runs WHERE workflow_runs.actor_id =
+    ? AND workflow_runs.id = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+ab0145d1f01d5ebb78230bbfe6b10ba6a0910b827ce5a5cea2191f906ccdf038:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, event,
+    head_branch, head_sha, workflow_file_path, repository_id, actor_id, imposer_repository_id)
+    VALUES (?, ?, ?, ?, x?, ?, x?, ?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+abcfea17e7f4f220f7f19cbcfbb8205527c5a372a6d3c64af54a2104c88e9bba:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.id = ? LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+ac10e1b13daab60b7ffdeec2a663f98a41f9013625c0966f3d59f9174f5e764b:
+  query: SELECT gate_requests.id AS t0_r0, gate_requests.gate_id AS t0_r1, gate_requests.state
+    AS t0_r2, gate_requests.check_run_id AS t0_r3, gate_requests.token AS t0_r4, gate_requests.data
+    AS t0_r5, gate_requests.created_at AS t0_r6, gate_requests.updated_at AS t0_r7,
+    gate_requests.expires_at AS t0_r8, gates.id AS t1_r0, gates.environment_id AS
+    t1_r1, gates.body AS t1_r2, gates.type AS t1_r3, gates.timeout AS t1_r4, gates.created_at
+    AS t1_r5, gates.updated_at AS t1_r6, gates.min_approvals AS t1_r7, gates.integration_id
+    AS t1_r8, gates.integration_installation_id AS t1_r9, gates.prevent_self_review
+    AS t1_r10, environment.id AS t2_r0, environment.repository_id AS t2_r1, environment.name
+    AS t2_r2, environment.created_at AS t2_r3, environment.updated_at AS t2_r4, environment.gates_admin_enforced
+    AS t2_r5 FROM gate_requests LEFT OUTER JOIN gates ON gates.id = gate_requests.gate_id
+    LEFT OUTER JOIN environments environment ON environment.id = gates.environment_id
+    WHERE environment.gates_admin_enforced = ? AND environment.repository_id = ? AND
+    gate_requests.state = ? AND gate_requests.id IN ?
+  tables:
+  - environments
+  - gate_requests
+  - gates
+  violations:
+  - reason: domain_access
+ac264f92b03777936d7e1151751d2176a1f87fd705fd9f5d8b7d822c7b3197f8:
+  query: INSERT INTO workflow_run_executions (status, workflow_run_id, actor_id, external_id,
+    completed_log_url, repository_id, started_at, created_at, updated_at) VALUES (?,
+    ?, ?, x?, x?, ?, ?, ?, ?)
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+acfbf1f29cc29fc442177c56909e97af2afd97660b088d645b1cb6cd172c8be8:
+  query: SELECT artifacts.* FROM artifacts FORCE INDEX(index_artifacts_on_expiration_emitted_and_expires_at)
+    WHERE (expires_at between ? AND ? AND expiration_emitted = ?) LIMIT ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+ad18273841ea2bdfd9a555ada5dcd779e7b0f7813fb1fcec285409352d1b88c8:
+  query: SELECT workflows.* FROM workflows LEFT JOIN pinned_workflows ON workflows.id=pinned_workflows.workflow_id
+    AND workflows.repository_id=pinned_workflows.repository_id WHERE workflows.repository_id
+    = ? AND workflows.state != ? AND ( (present_in_default_branch = ? OR EXISTS (
+    SELECT ? FROM workflow_runs WHERE workflow_id = workflows.id AND repository_id
+    = workflows.repository_id AND user_hidden = ? )) ) AND workflows.path != x? AND
+    workflows.path != x? ORDER BY pinned_workflows.workflow_id IS NULL, state, CAST(name
+    as CHAR) LIMIT ? OFFSET ?
+  tables:
+  - pinned_workflows
+  - workflow_runs
+  - workflows
+  violations:
+  - reason: domain_access
+ad94b9e67793f9cfa4106dfcade1371278c2d47a07535753b86206c105fa885f:
+  query: INSERT INTO workflow_run_executions (status, conclusion, workflow_run_id,
+    actor_id, repository_id, started_at, completed_at, created_at, updated_at) VALUES
+    (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+aee1be2a00ce499306f14bb038885a8ee022d31d08611fb880850e191c72ad90:
+  query: SELECT ? AS one FROM gate_approvers WHERE gate_approvers.approver_id = ?
+    AND gate_approvers.approver_type = ? AND gate_approvers.gate_id = ? LIMIT ?
+  tables:
+  - gate_approvers
+  violations:
+  - reason: domain_access
+af75747ab0129ca78b95b190c0f165efbdd636d711b50c93a1cb1b7fcad1be48:
+  query: SELECT pinned_workflows.* FROM pinned_workflows WHERE pinned_workflows.repository_id
+    = ?
+  tables:
+  - pinned_workflows
+  violations:
+  - reason: domain_access
+af78bf4dbc46c79f89ba193085d6d6ca10f4270b675ec9c86430a92f056a578d:
+  query: SELECT pinned_environments.* FROM pinned_environments WHERE pinned_environments.repository_id
+    = ? ORDER BY position ASC
+  tables:
+  - pinned_environments
+  violations:
+  - reason: domain_access
+b044e375b3f69d8d7d8c620d0368f7e1a4a328cbbc7e4d130e5cc465e16383b2:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, event,
+    head_branch, head_sha, workflow_file_path, repository_id, actor_id) VALUES (?,
+    ?, ?, ?, x?, ?, x?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+b12ffdaa70bd7a32c07402bf2835e5cb4a51697dd346f670d6490139d0883d4f:
+  query: UPDATE workflows SET workflows.name = x? WHERE workflows.id = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+b1967ed29e47331fe2224732556bc203de46c4fa77c1e2f80477df95dbdee9f5:
+  query: SELECT gate_branch_policies.* FROM gate_branch_policies WHERE gate_branch_policies.gate_id
+    = ? AND gate_branch_policies.id = ? LIMIT ?
+  tables:
+  - gate_branch_policies
+  violations:
+  - reason: domain_access
+b215ace8cd56306763bfefabfc20f77bd8e5d9671c7c1b22224ac6c6951b1a1b:
+  query: SELECT gate_approvers.approver_id FROM gate_approvers WHERE gate_approvers.gate_id
+    = ?
+  tables:
+  - gate_approvers
+  violations:
+  - reason: domain_access
+b2e9a11ee34a1b7e9aab213f705e311c6505188d4712a161bba18be78f75ee36:
+  query: UPDATE workflows SET workflows.state = ? WHERE workflows.id = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+b375de72bd282b7d532bbc473fd11d91ef820aa6496f1fe2aa090f38a30f0a6d:
+  query: SELECT workflows.name FROM workflows WHERE workflows.repository_id = ? AND
+    workflows.state != ? ORDER BY workflows.id DESC LIMIT ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+b5cc6e3659d181746fb782c01293286a07f74e5af25e7a615246c3898520d808:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, event,
+    name, head_branch, head_sha, workflow_file_path, repository_id, user_hidden, actor_id,
+    imposer_repository_id) VALUES (?, ?, ?, ?, x?, x?, ?, x?, ?, ?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+b63f29c27375c440fd09dd4e23f606e8501ffee878577a00972931fbc5ba627d:
+  query: SELECT workflow_runs.id FROM workflow_runs WHERE workflow_runs.id = ? AND
+    workflow_runs.repository_id = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+b744bc440e1a8eabf48409ec134204e30fe2b39db6beadf76aeaa4245217fd72:
+  query: SELECT gate_requests.* FROM gate_requests WHERE gate_requests.check_run_id
+    = ? AND gate_requests.gate_id = ? LIMIT ?
+  tables:
+  - gate_requests
+  violations:
+  - reason: domain_access
+b7e9bb87bdd046504640dadfa79ea354b347ccfaeaba5c7325c855a8c8103fce:
+  query: UPDATE workflows SET workflows.name = x?, workflows.updated_at = ? WHERE
+    workflows.id = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+b9791180d61525d1ec91fb8a1b4fb0eb510321c57bbae24326f06c8dbd96781e:
+  query: SELECT workflows.id FROM workflows WHERE workflows.repository_id = ? AND
+    workflows.state != ? ORDER BY workflows.created_at DESC, workflows.id desc LIMIT
+    ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+ba222a538e3d15fdfadf1362902d25b388c36a39bc942dfd5e8fd6c1aee10a2a:
+  query: INSERT INTO actions_key_values (key,value,created_at,updated_at,expires_at,partition_key)
+    VALUES (?,?,?,?,NULL,?) ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at
+    = VALUES(updated_at), expires_at = VALUES(expires_at)
+  tables:
+  - actions_key_values
+  violations:
+  - reason: domain_access
+ba5c5d3f9def5a94c26edcb472b028b19365b556916a90bca38543cd5fdfc249:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, trigger_id,
+    trigger_type, event, head_branch, head_sha, workflow_file_path, repository_id,
+    execution_graph, actor_id, tree_id, cloned_workflow_run_id) VALUES (?, ?, ?, ?,
+    ?, ?, x?, ?, x?, ?, x?, ?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+ba8d3456550bf4413aaa4f248ff97837721a9b6687e66bdf01cc6bc5c2e858bc:
+  query: SELECT workflow_run_executions.* FROM workflow_run_executions WHERE workflow_run_executions.id
+    = ? AND workflow_run_executions.repository_id = ? LIMIT ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+ba93f4b2049d66828a26d4251d43fb887ee9f645630c559c35906499de52c67a:
+  query: INSERT INTO workflows (repository_id, name, path, created_at, updated_at,
+    imposer_repository_id) VALUES (?, x?, x?, ?, ?, ?)
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+baa91ea9a00ddf89783df3c945ad4dbc73762cf3bfe06488a86ecf9248ae6060:
+  query: SELECT workflow_run_executions.id, workflow_run_executions.status, workflow_run_executions.conclusion,
+    workflow_run_executions.workflow_run_id, workflow_run_executions.actor_id, workflow_run_executions.external_id,
+    workflow_run_executions.completed_log_url, workflow_run_executions.repository_id,
+    workflow_run_executions.attempt, workflow_run_executions.started_at, workflow_run_executions.completed_at,
+    workflow_run_executions.created_at, workflow_run_executions.updated_at, workflow_run_executions.run_stamp_url,
+    workflow_run_executions.referenced_workflows FROM workflow_run_executions WHERE
+    workflow_run_executions.repository_id = ? AND workflow_run_executions.workflow_run_id
+    = ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+bb26bb7e60cbbebaf7bed97ef64f410ea4509ddebdd58eab12b627541c4f3413:
+  query: SELECT environments.* FROM environments WHERE environments.id = ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+bbc22890af8d191f083cb8f5f3d45b7f7bb92cad42c7c1aa3e6c948ed2e2baed:
+  query: SELECT gates.integration_id FROM gates WHERE gates.environment_id = ? AND
+    gates.type = ?
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+bbe2fdf623c65e74275b46ad0598b898025f6f85ece0ae866400898093f129fd:
+  query: UPDATE workflow_run_executions SET workflow_run_executions.status = ?, workflow_run_executions.conclusion
+    = ?, workflow_run_executions.started_at = ?, workflow_run_executions.completed_at
+    = ?, workflow_run_executions.updated_at = ? WHERE workflow_run_executions.id =
+    ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+bc0db7c2c75dd4d1f10e3c91732dbb4a3e15daa41c7fb00aa82d08e74b47fa0a:
+  query: UPDATE pinned_environments SET position = CASE id WHEN ? THEN ? WHEN ? THEN
+    ? WHEN ? THEN ? WHEN ? THEN ? WHEN ? THEN ? WHEN ? THEN ? WHEN ? THEN ? WHEN ?
+    THEN ? WHEN ? THEN ? WHEN ? THEN ? END WHERE pinned_environments.id IN ?
+  tables:
+  - pinned_environments
+  violations:
+  - reason: domain_access
+bc176d9dd07dfb7cea6fbcedc6a642584e00ac472394c2c4ae1995ff75f9f87b:
+  query: SELECT gate_requests.* FROM gate_requests WHERE gate_requests.check_run_id
+    IN ?
+  tables:
+  - gate_requests
+  violations:
+  - reason: domain_access
+bc98ef77e5ae128d09adaa897120ccedebccd426b449529bd4ea611e2c2771e2:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? AND workflows.imposer_repository_id
+    = ? AND workflows.path = x? LIMIT ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+bd105b5ccd63b11fe6c06545f9b1ab81be68c5ed08702d9eb22272b60d74d82d:
+  query: DELETE FROM workflow_runs WHERE workflow_runs.id = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+bd28a9411136e21c66d881354303378ad91cfcd9d929ff71c313bc93589592a0:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.id IN ? AND workflow_runs.repository_id = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+bdcee37d38e2b996d22f8ce593be5977c6c9e41d845de116aafc8406c248fa98:
+  query: SELECT COUNT(*) FROM workflows WHERE workflows.repository_id = ? AND workflows.state
+    != ? AND workflows.imposer_repository_id = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+be3135d663cdad87d81efb5aff8cb71e4488b38e5f0b5fceec39e640ee2964db:
+  query: SELECT artifacts.* FROM artifacts WHERE artifacts.id = ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+bebfd05c68d9a54937df4024e65b3adebdc5f25ffbce448a316331df5163aee3:
+  query: SELECT COUNT(*) FROM workflows LEFT JOIN pinned_workflows ON workflows.id=pinned_workflows.workflow_id
+    AND workflows.repository_id=pinned_workflows.repository_id WHERE workflows.repository_id
+    = ? AND workflows.state != ? AND ( (present_in_default_branch = ? OR EXISTS (
+    SELECT ? FROM workflow_runs WHERE workflow_id = workflows.id AND repository_id
+    = workflows.repository_id AND user_hidden = ? )) ) AND workflows.path != x? AND
+    workflows.path != x?
+  tables:
+  - pinned_workflows
+  - workflow_runs
+  - workflows
+  violations:
+  - reason: domain_access
+bef945f048c0a0cddacfb34205bcbe5b39b5343a1762d5be809df1ce4d142af0:
+  query: SELECT ? AS one FROM workflow_runs WHERE workflow_runs.repository_id = ?
+    AND workflow_runs.name = x? LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+c071bbdebee3589f65ac0412cc23135987632b909286736e68c9ba661b70951c:
+  query: SELECT COUNT(*) FROM workflow_runs USE INDEX FOR JOIN (index_workflow_runs_on_repository_id_user_hidden_imposer_repo_id)
+    WHERE workflow_runs.repository_id = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+c0779bc85a2ab0cc284c2b7ab96993dc5f3d292ab20de6829d0714c3ac8c4bc4:
+  query: DELETE FROM workflow_runs WHERE workflow_runs.repository_id = ? AND (workflow_runs.id
+    = ? OR workflow_runs.id IS NULL)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+c088d925592d00cbc0d8a07f3560c033e6c662bc33dbda1ce05615bb2f0e9a4b:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, head_sha,
+    workflow_file_path, repository_id, actor_id, imposer_repository_id) VALUES (?,
+    ?, ?, ?, x?, ?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+c1dc5283860b3b4ae701b30f3882f9a15695ef17af3b579c17e8c2ab048efdb2:
+  query: UPDATE workflow_run_executions SET workflow_run_executions.status = ?, workflow_run_executions.conclusion
+    = ?, workflow_run_executions.updated_at = ? WHERE workflow_run_executions.id =
+    ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+c24112b4cebfc51b078df7a831be332681e6176abbfcfd5dec4c151f9dd13eb6:
+  query: SELECT COUNT(*) FROM (SELECT ? AS one FROM artifacts WHERE artifacts.check_suite_id
+    = ? LIMIT ?) subquery_for_count
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+c2bbea8a255333d3e2f9c78be7b18d836d5c1c4a9fad438ab2dffd0c15099f8e:
+  query: SELECT workflows.* FROM workflows WHERE (workflows.repository_id = ? AND
+    workflows.id = ? OR workflows.repository_id = ? AND workflows.id = ?) AND workflows.repository_id
+    IN ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+c2bd5f4c9f3b7fa2261d91177a861fd72ca9d242b20425ff713244e81461409f:
+  query: SELECT environments.* FROM environments WHERE environments.repository_id
+    = ? AND environments.name = ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+c5c7f68d0482e8e13418d72047950ce9b8ba44027c76af921e4e467aed132ad2:
+  query: INSERT INTO workflow_job_runs (workflow_run_id, check_run_id, repository_id,
+    created_at, updated_at, concurrency, label_data, runner_id, runner_name, runner_group_id,
+    runner_group_name, workflow_run_execution_id, original_workflow_run_execution_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+c61c6eb3547eab1ffb03c4ffc956261002a17c38592fbfcefdb6bee0fdbf7623:
+  query: SELECT workflow_runs.id FROM workflow_runs WHERE workflow_runs.actor_id =
+    ? AND workflow_runs.user_hidden = ? AND workflow_runs.id > ? ORDER BY workflow_runs.id
+    LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+c6fff961282d3b647f5972f916ce55811d86a387ee79f48594dd38d355d29347:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.workflow_id = ? ORDER BY workflow_runs.id DESC LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+c73e54b98bf437e05b839463a3e4eb2a3623c733bd1d4dd715845ace474fb761:
+  query: SELECT statuses.updated_at FROM statuses FORCE INDEX(index_statuses_on_is_archived_updated_at)
+    WHERE (is_archived = ?) AND (updated_at <= ?) ORDER BY updated_at ASC LIMIT ?
+    OFFSET ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+c832592a45d9462cf7ca222a89c4c1320550e483a1edc66d4cc23c29e215a913:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? AND workflows.state
+    != ? AND workflows.imposer_repository_id = ? AND ( (present_in_default_branch
+    = ? OR EXISTS ( SELECT ? FROM workflow_runs WHERE workflow_id = workflows.id AND
+    repository_id = workflows.repository_id AND user_hidden = ? )) ) LIMIT ? OFFSET
+    ?
+  tables:
+  - workflow_runs
+  - workflows
+  violations:
+  - reason: domain_access
+c83f2b6471276cc6a89b9f73d6dd8674f01a1c8b86cab9a075b2284c66725adf:
+  query: UPDATE gates SET gates.prevent_self_review = ? WHERE gates.id = ?
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+c89ca53c0404d47a92e12623778bee7a235706c2e8381025e16f6bee719020a7:
+  query: SELECT workflows.* FROM workflows WHERE workflows.id = ? AND workflows.repository_id
+    = ? LIMIT ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+c89ecf9a5bd5bca7f660f58e829e055e837d0afa881612115a021ab72c350aac:
+  query: SELECT workflow_runs.actor_id FROM workflow_runs WHERE workflow_runs.user_hidden
+    = ? AND workflow_runs.actor_id IN ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+c8c4c37d2907190fdc4fe71bd8e30073c3320c62af582591ffbded856e925376:
+  query: SELECT COUNT(*) FROM artifacts WHERE artifacts.repository_id = ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+c91a7fb1ff041d771b313ba2cc776854eec83df93c79357df3ec08af43f17e15:
+  query: SELECT COUNT(*) FROM workflows LEFT JOIN pinned_workflows ON workflows.id=pinned_workflows.workflow_id
+    AND workflows.repository_id=pinned_workflows.repository_id WHERE workflows.repository_id
+    = ? AND workflows.state != ? AND workflows.imposer_repository_id != ? AND ( (present_in_default_branch
+    = ? OR EXISTS ( SELECT ? FROM workflow_runs WHERE workflow_id = workflows.id AND
+    repository_id = workflows.repository_id AND user_hidden = ? )) ) AND workflows.path
+    != x? AND workflows.path != x?
+  tables:
+  - pinned_workflows
+  - workflow_runs
+  - workflows
+  violations:
+  - reason: domain_access
+c9401bdc7ab6c3ea18ebe1740e77c975a02f5a2ba0032bebbffb6e3c1f5589f1:
+  query: UPDATE workflow_run_executions SET workflow_run_executions.completed_at =
+    ?, workflow_run_executions.updated_at = ? WHERE workflow_run_executions.id = ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+c94255e7e57df1ea9c4e6e38d949edb4ad09387f96a134037e8c2d70eecbb49a:
+  query: SELECT ? AS one FROM workflow_runs WHERE workflow_runs.workflow_id = ? AND
+    workflow_runs.repository_id = ? LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+ca71653d837b7bf2af7a71f5fe903715ae5369ff1f9fc2764ef37c71797bca96:
+  query: SELECT environments.* FROM environments WHERE environments.repository_id
+    = ? AND (name LIKE ?)
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+cac6ba97cb1a57d6a3a8766e61b56d3314fc45dfa791d92c2aeabace6fcb4e4d:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, head_sha,
+    workflow_file_path, repository_id, actor_id) VALUES (?, ?, ?, ?, x?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+cb0cdee1bd699b97f6196c95253d1770a32f4632b74cfd8781ad53a8eaf0e6c1:
+  query: SELECT ? AS one FROM statuses WHERE statuses.repository_id = ? AND statuses.id
+    IN (SELECT * FROM (SELECT max(id) FROM statuses FORCE INDEX (index_statuses_on_repository_id_and_sha_and_context)
+    WHERE statuses.repository_id = ? AND statuses.sha = ? AND (created_at < ?) GROUP
+    BY statuses.sha, statuses.context) subquery) LIMIT ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+cb89619006cedbb89e177621b4d63f531fe30dea1c3406ed68b46c42ecde4e1f:
+  query: SELECT workflow_run_executions.* FROM workflow_run_executions WHERE workflow_run_executions.workflow_run_id
+    = ? AND workflow_run_executions.repository_id = ? AND workflow_run_executions.attempt
+    = ? LIMIT ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+cc336991ca88efa5908c58774eb341c6901361b32659cb953d700ca201fee900:
+  query: SELECT artifacts.* FROM artifacts WHERE artifacts.repository_id = ? AND artifacts.name
+    = x? ORDER BY artifacts.id DESC LIMIT ? OFFSET ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+cd529f75e36013a1855be412d92f2fcbc7adf699029145d08dbf162c3b3574a3:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.check_suite_id IN ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+cd5a9e7982b7e05d84c15243817e7a5f979b51897b6ca5adf3d2f4c9a9591905:
+  query: SELECT ? AS one FROM artifacts WHERE artifacts.check_suite_id = ? AND artifacts.repository_id
+    = ? LIMIT ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+ce31bf6ce78f9e0e8ba3d6266a7f2e1eb6eb49a607700c533f98740414aa942c:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, name,
+    head_branch, head_sha, workflow_file_path, repository_id, actor_id) VALUES (?,
+    ?, ?, x?, x?, ?, x?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+ce3fefdf57a092a4d522da3685521e6b8778b94437f2edc2bd3d941283e9449d:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? AND workflows.id
+    = ? AND workflows.repository_id = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+ced469c8741305efc65827adf4315a2d6e26efe2a437fa58b1b750118830f0b4:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+d0744d8d9f521dae9f555e7533c0188f037109852788b685337a43300d0a641d:
+  query: SELECT workflow_job_runs.* FROM workflow_job_runs WHERE workflow_job_runs.repository_id
+    = ? AND workflow_job_runs.check_run_id IN ?
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+d09e7c11f2022c4d62cd1acc0ae02f56c0b2f1411f6122b96fb8cae21260bad0:
+  query: SELECT artifacts.* FROM artifacts WHERE artifacts.check_suite_id = ? AND
+    artifacts.id = ? LIMIT ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+d1b674b9f0faa7d46564f57f383bf6fa9a9b2f74622c65e7947aaa81017df8f9:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? AND workflows.state
+    != ? AND workflows.imposer_repository_id = ? AND ( (present_in_default_branch
+    = ? OR EXISTS( SELECT ? FROM workflow_runs WHERE workflow_id = workflows.id AND
+    repository_id = workflows.repository_id AND user_hidden = ? ) OR EXISTS( SELECT
+    ? FROM workflow_runs WHERE workflow_id = workflows.id AND repository_id = workflows.repository_id
+    AND actor_id = ? ) ) ) LIMIT ? OFFSET ?
+  tables:
+  - workflow_runs
+  - workflows
+  violations:
+  - reason: domain_access
+d1d49d496453decbe775b5e5c2de4d448094a26849e3348b634bcf8874cd63ba:
+  query: UPDATE environments SET environments.updated_at = ?, environments.gates_admin_enforced
+    = ? WHERE environments.id = ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+d2674a52f538afcefe8d5032660c763c43dec8b54180c57fc238812a3f046f49:
+  query: SELECT statuses.* FROM statuses WHERE statuses.repository_id = ? AND statuses.id
+    IN (SELECT * FROM (SELECT max(id) FROM statuses FORCE INDEX (index_statuses_on_repository_id_and_sha_and_context)
+    WHERE statuses.repository_id = ? AND statuses.sha IN ? AND statuses.context IN
+    ? GROUP BY statuses.sha, statuses.context) subquery)
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+d5754f660d6bbb710efb8a5f6f62f44120110bdccc413eaad19bc0a78b7771d5:
+  query: UPDATE gate_requests SET gate_requests.state = ?, gate_requests.updated_at
+    = ? WHERE gate_requests.id = ?
+  tables:
+  - gate_requests
+  violations:
+  - reason: domain_access
+d58cf71657153adbfa047c265847f7b90361d847c7d7c761bafd53609d842cf9:
+  query: SELECT ? AS one FROM gate_requests WHERE gate_requests.check_run_id = ? LIMIT
+    ?
+  tables:
+  - gate_requests
+  violations:
+  - reason: domain_access
+d593026958e333b7f0ad77c3914552954474f6910714866f99d9ed09d66a540b:
+  query: SELECT COUNT(*) FROM workflow_runs USE INDEX FOR JOIN (index_workflow_runs_on_repository_id_user_hidden_imposer_repo_id)
+    WHERE workflow_runs.repository_id = ? AND workflow_runs.user_hidden = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+d66a9e831db7beee24df0369c5aaa8af057d9fb109024c8d44c78472994cf225:
+  query: SELECT gate_approvers.* FROM gate_approvers WHERE gate_approvers.gate_id
+    = ?
+  tables:
+  - gate_approvers
+  violations:
+  - reason: domain_access
+d703400027cde0c1116eb34a15de8f863b5b08cf0d349557b4888111cbf702ef:
+  query: SELECT workflow_runs.id FROM workflow_runs WHERE workflow_runs.workflow_id
+    = ? AND workflow_runs.repository_id = ? ORDER BY workflow_runs.id DESC LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+d77a37980d362351ad116009dc0f0e0721635a3b977150251dfd32b3dcbc46a4:
+  query: SELECT environments.* FROM environments WHERE environments.repository_id
+    = ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+d782cfe6cdfef0be9ece5bddf3f728e1b1ae64b758a2a88523686ac4d98d00f6:
+  query: SELECT ? AS one FROM workflows WHERE workflows.repository_id = ? LIMIT ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+d9bc2768de9364443bd5297745d947e0e1b4b83713db9c6bf35b09ebcaa9a341:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.id = ? AND workflow_runs.repository_id IS NULL LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+da563abbbbde543513dc850a0888ebbcc43207568dd45846d345f5f72e1cdedd:
+  query: SELECT workflow_runs.check_suite_id FROM workflow_runs WHERE workflow_runs.workflow_id
+    = ? AND workflow_runs.head_branch = x?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+dacd3cb87a1d55f30fa2adb16227d61e5c4eb45f6d85f62da465fffee0e09866:
+  query: SELECT COUNT(*) FROM pinned_environments WHERE pinned_environments.repository_id
+    = ?
+  tables:
+  - pinned_environments
+  violations:
+  - reason: domain_access
+db404826674fc213a53ce81e5bde0320d699d2576fc92e4f6d9a9f9d2e44d8c4:
+  query: INSERT INTO artifacts (source_url, name, created_at, updated_at, size, check_suite_id,
+    expires_at, repository_id, workflow_run_id, upload_hash) VALUES (?, x?, ?, ?,
+    ?, ?, ?, ?, ?, ?)
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+dbd3a771957e352f3a2a005a26c3582e1f39d5d55c993c6be19df12337be412a:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.execution_graph, workflow_runs.concurrency, workflow_runs.user_hidden,
+    workflow_runs.actor_id, workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name,
+    workflow_runs.tree_id, workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at,
+    workflow_runs.workflow_file_checkout_sha, workflow_runs.imposer_repository_id,
+    workflow_runs.workflow_file_ref FROM workflow_runs WHERE workflow_runs.check_suite_id
+    = ? AND workflow_runs.repository_id = ? ORDER BY workflow_runs.id ASC LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+dc050144cbf22a23d950f7b4e34e084b464e9c9426661f432a0c144dd3aefb63:
+  query: SELECT ? AS one FROM statuses WHERE statuses.repository_id = ? AND statuses.sha
+    = ? LIMIT ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+dc06b4ed6d6b7c73b88f949f6d7489e2ceee5b854e263251c555cc85e2729101:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.id = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+dce28d13f7740822626c191d8068274c8bd4ffca67c7b15c441e8a3a7313d7ab:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, event,
+    action, name, head_branch, head_sha, workflow_file_path, repository_id, actor_id)
+    VALUES (?, ?, ?, ?, x?, x?, x?, ?, x?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+dd42942ebf1f1acb1d19b7b2f1cfe0cca19bc995c66b8a79b06c80b5bb5fe5d2:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, event,
+    action, head_branch, head_sha, workflow_file_path, repository_id, actor_id) VALUES
+    (?, ?, ?, ?, x?, x?, ?, x?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+ddf7fe650202cc7d7b9ced0a5519db67cadae8af1d51b6f52f92489515b0e47e:
+  query: UPDATE workflow_run_executions SET workflow_run_executions.completed_log_url
+    = NULL, workflow_run_executions.updated_at = ? WHERE workflow_run_executions.id
+    = ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+de3a8c812f8c1a2824e4414863aa755ae8731440fbf0f773ea374e40028096c3:
+  query: INSERT INTO workflow_run_executions (status, conclusion, workflow_run_id,
+    actor_id, external_id, repository_id, started_at, created_at, updated_at) VALUES
+    (?, ?, ?, ?, x?, ?, ?, ?, ?)
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+df7571fcddc5378e8c34105e4c31054443a7a505b6eed0e116c7794673be9771:
+  query: SELECT gate_branch_policies.id, gate_branch_policies.name FROM gate_branch_policies
+    WHERE gate_branch_policies.gate_id = ? AND NOT ((name LIKE ?))
+  tables:
+  - gate_branch_policies
+  violations:
+  - reason: domain_access
+dfe53ed9e2f57c8eb2e17fd834d8960d8882dc4d09d667e9e25e7ee52992e608:
+  query: SELECT ? AS one FROM environments WHERE environments.name = ? AND environments.id
+    != ? AND environments.repository_id = ? LIMIT ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+e1352190b6ea5c12d8e023019bbf1935d2bc60699aed4999842e27ab763a77f6:
+  query: SELECT DISTINCT sha FROM statuses USE INDEX(index_statuses_on_repository_id_and_sha_and_context)
+    WHERE statuses.repository_id = ? AND sha IN ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+e1699b1cf095538e05b40a5fbbec757cc67f1a352bb964488939cdcd067c7c98:
+  query: DELETE FROM gates WHERE gates.id = ?
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+e20600d27a02a4d7d1e3bba47611f88977233d0a9995df3b51edf543f903c166:
+  query: SELECT COUNT(*) FROM workflows LEFT JOIN pinned_workflows ON workflows.id=pinned_workflows.workflow_id
+    AND workflows.repository_id=pinned_workflows.repository_id WHERE workflows.repository_id
+    = ? AND workflows.state != ? AND workflows.path != x? AND workflows.path != x?
+  tables:
+  - pinned_workflows
+  - workflows
+  violations:
+  - reason: domain_access
+e2a34e37305c7139c500c915cd80225f115527c274a672b7c3f5fbeedc67db17:
+  query: SELECT COUNT(*) FROM workflows WHERE workflows.repository_id = ? AND workflows.state
+    != ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+e310a65bee35f3af68fcd5336b0b416d714013acfe376de3ab1e574691fbf35a:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? AND workflows.state
+    = ? LIMIT ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+e392bd56f290fcfdfa94f872af33b50068bb066da51b423c4f945a113eae883a:
+  query: SELECT gate_requests.* FROM gate_requests WHERE gate_requests.check_run_id
+    = ?
+  tables:
+  - gate_requests
+  violations:
+  - reason: domain_access
+e40cc573b97a2e21885f8ea6c0b397867608578f52cf52cb20820b65ec5db334:
+  query: INSERT INTO workflow_run_executions (status, conclusion, workflow_run_id,
+    actor_id, external_id, repository_id, started_at, completed_at, created_at, updated_at)
+    VALUES (?, ?, ?, ?, x?, ?, ?, ?, ?, ?)
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+e44cd09402a0f4671e653bec0f4d39b2f5692ad012f99a1a5750312d499eb8ea:
+  query: SELECT gate_requests.id AS t0_r0, gate_requests.gate_id AS t0_r1, gate_requests.state
+    AS t0_r2, gate_requests.check_run_id AS t0_r3, gate_requests.token AS t0_r4, gate_requests.data
+    AS t0_r5, gate_requests.created_at AS t0_r6, gate_requests.updated_at AS t0_r7,
+    gate_requests.expires_at AS t0_r8, gate_approvals.id AS t1_r0, gate_approvals.gate_request_id
+    AS t1_r1, gate_approvals.repository_id AS t1_r2, gate_approvals.approver_type
+    AS t1_r3, gate_approvals.approver_id AS t1_r4, gate_approvals.state AS t1_r5,
+    gate_approvals.user_id AS t1_r6, gate_approvals.gate_approval_log_id AS t1_r7,
+    gate_approvals.environment_id AS t1_r8 FROM gate_requests LEFT OUTER JOIN gate_approvals
+    ON gate_approvals.gate_request_id = gate_requests.id WHERE gate_approvals.gate_request_id
+    = ?
+  tables:
+  - gate_approvals
+  - gate_requests
+  violations:
+  - reason: domain_access
+e45561bef8742f8453f121a2e9fd8684218271c51573fd7be903212188fd1672:
+  query: SELECT workflow_runs.id FROM workflow_runs WHERE workflow_runs.workflow_id
+    = ? AND workflow_runs.repository_id = ? AND workflow_runs.user_hidden = ? ORDER
+    BY workflow_runs.id DESC LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+e47d4a4dde9b9953f6aba37b7a7419f7ca0962b637137d7069fffe3acbce4ebb:
+  query: SELECT ? AS one FROM workflow_runs WHERE workflow_runs.repository_id = ?
+    LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+e4a9500e3631d0d9f6e7c424965ce7672f07b51f98d36ef06f150ef0ecb44d94:
+  query: SELECT COUNT(*) FROM pinned_workflows WHERE pinned_workflows.repository_id
+    = ?
+  tables:
+  - pinned_workflows
+  violations:
+  - reason: domain_access
+e4e14dde0e56ef3f42e691ebf5d35ad57449dd2fc74454506b3cc1a09da9837b:
+  query: INSERT INTO gate_requests (gate_id, check_run_id, token, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+  tables:
+  - gate_requests
+  violations:
+  - reason: domain_access
+e59639ddf32505c6330e9bd25b9e6012cd2e7f847ea95f05cf0faf3a1f0bb791:
+  query: SELECT gates.id, gates.environment_id, gates.body, gates.type, gates.timeout,
+    gates.created_at, gates.updated_at, gates.min_approvals, gates.integration_id,
+    gates.integration_installation_id, gates.prevent_self_review FROM gates WHERE
+    gates.id = ?
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+e59b04a160634a93dbf905e54673122e8aa65401ead430655851df04493f77a9:
+  query: SELECT statuses.* FROM statuses WHERE statuses.repository_id = ? AND statuses.id
+    IN (SELECT * FROM (SELECT max(id) FROM statuses FORCE INDEX (index_statuses_on_repository_id_and_sha_and_context)
+    WHERE statuses.repository_id = ? AND statuses.sha = ? AND statuses.context IN
+    ? GROUP BY statuses.sha, statuses.context) subquery)
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+e79d6b480b68b2addb4e4f91bd7418fd3a4b67d0a4692675029d3d9ecf68c6fd:
+  query: SELECT ? AS one FROM workflow_runs WHERE workflow_runs.id = ? LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+e7a266f85c10084e9fa20cee28a2964369bb34f0dc29f5a99480b9a5a9a7d3da:
+  query: SELECT environments.* FROM environments WHERE environments.repository_id
+    = ? GROUP BY environments.name ORDER BY environments.name ASC LIMIT ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+e858018646cc4d7281c031df9a2dceab0e855d6c1f09d093b9ac93c199eeab7e:
+  query: SELECT gate_approvers.* FROM gate_approvers WHERE gate_approvers.gate_id
+    IN ?
+  tables:
+  - gate_approvers
+  violations:
+  - reason: domain_access
+e8bfa7be5b3c8c28a9461e90953c4183244969f5160959d37e8cce10fc0b06f4:
+  query: UPDATE statuses SET statuses.archived_at = ?, statuses.updated_at = ? WHERE
+    statuses.repository_id = ? AND (statuses.id = ? OR statuses.id IS NULL)
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+e8e87c94ae7256009797777ca110fd11bc323c08bf81cf487b57cf02fb21c635:
+  query: DELETE FROM actions_key_values WHERE ((id) IN ((?), (?))) AND (expires_at
+    >= ?) AND (expires_at <= ?)
+  tables:
+  - actions_key_values
+  violations:
+  - reason: domain_access
+e956f2f076ae376df6abe1b59304e466c9b03020e63d99bedd47f88cc15675ac:
+  query: SELECT workflow_job_runs.* FROM workflow_job_runs WHERE workflow_job_runs.workflow_run_id
+    = ? AND workflow_job_runs.repository_id = ? AND workflow_job_runs.job_key IS NULL
+    ORDER BY workflow_job_runs.id DESC LIMIT ?
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+e96fb01fed174abc40d2dfdbf6e092bb605b1df10a8a88ba78ee0050eaab7e99:
+  query: SELECT count(*) FROM statuses WHERE statuses.repository_id = ? AND statuses.sha
+    = ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+ea092320a383277e80a7b52df1bec2666dcca554815399a6766f5f9674f60a1c:
+  query: SELECT workflow_job_runs.* FROM workflow_job_runs WHERE workflow_job_runs.workflow_run_id
+    = ? AND workflow_job_runs.repository_id = ? AND workflow_job_runs.workflow_run_execution_id
+    = ?
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+ea27eed6c2c1bbf61f32a3acc1d75d81a198b8f0f19e37e635bd543fa503eaa7:
+  query: SELECT environments.* FROM environments WHERE environments.repository_id
+    = ? AND environments.name = ? LIMIT ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+eb17ef09b9a7b8449145498c510fc4bc71be2590a2111ee5b19744cf303b17b9:
+  query: SELECT workflow_run_executions.id, workflow_run_executions.status, workflow_run_executions.conclusion,
+    workflow_run_executions.workflow_run_id, workflow_run_executions.actor_id, workflow_run_executions.external_id,
+    workflow_run_executions.completed_log_url, workflow_run_executions.repository_id,
+    workflow_run_executions.attempt, workflow_run_executions.started_at, workflow_run_executions.completed_at,
+    workflow_run_executions.created_at, workflow_run_executions.updated_at, workflow_run_executions.run_stamp_url
+    FROM workflow_run_executions WHERE workflow_run_executions.workflow_run_id = ?
+    AND workflow_run_executions.repository_id = ? AND workflow_run_executions.attempt
+    < ? ORDER BY workflow_run_executions.attempt DESC LIMIT ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+eb6ebccc065da098db2f5b8268d19f3763cce405c981efc5c1b56f12ac0891f8:
+  query: SELECT environments.* FROM environments WHERE environments.name = ? AND environments.repository_id
+    = ? LIMIT ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+eb91d7052b1e6e5b69fec667599119af05ce45954a785f7e357f594949d8c434:
+  query: INSERT INTO workflow_runs (workflow_id, check_suite_id, run_number, trigger_id,
+    trigger_type, event, action, head_branch, head_sha, workflow_file_path, repository_id,
+    actor_id) VALUES (?, ?, ?, ?, ?, ?, x?, x?, ?, x?, ?, ?)
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+ec7e05cfea201f30c2c955897a764fd9245c38257ab569b817a08fd7586320ee:
+  query: SELECT key, value FROM actions_key_values WHERE key IN ? AND (expires_at
+    IS NULL OR expires_at > ?) AND partition_key = ?
+  tables:
+  - actions_key_values
+  violations:
+  - reason: domain_access
+ed1026c8bc403ecae4f4ca896707ca2386cb460641cdbb0861bc7a4feb34bdb0:
+  query: UPDATE workflow_run_executions SET workflow_run_executions.updated_at = ?,
+    workflow_run_executions.run_stamp_url = x? WHERE workflow_run_executions.id =
+    ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+eda9f351e753572b04f3a624d6f23f1ce7764df889139ad4b20e26e57c4f9ea6:
+  query: SELECT pinned_environments.* FROM pinned_environments WHERE pinned_environments.repository_id
+    = ? AND pinned_environments.environment_id = ? ORDER BY position ASC LIMIT ?
+  tables:
+  - pinned_environments
+  violations:
+  - reason: domain_access
+edb5fd99858fc8151d4c0cd02b186c954c3f2be2328cd3cdbb006c9bf72854ed:
+  query: DELETE FROM workflow_run_executions WHERE workflow_run_executions.repository_id
+    = ? AND (workflow_run_executions.id = ? OR workflow_run_executions.id IS NULL)
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+ee54ca888d19c4f6f41aee2b1243630a199982789a5360e6b245551808d482b2:
+  query: UPDATE workflow_run_executions SET workflow_run_executions.status = ? WHERE
+    workflow_run_executions.id = ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+ee5528a7446941b0eb756d898dc69b51a603553edef4f805e61a026522d765c7:
+  query: SELECT gate_approvals.* FROM gate_approvals WHERE gate_approvals.gate_approval_log_id
+    IN ?
+  tables:
+  - gate_approvals
+  violations:
+  - reason: domain_access
+ee64b8bca435df1820f106dbd1efc8339a9e6a7c85412e506d56d429dbe5253e:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.execution_graph, workflow_runs.concurrency, workflow_runs.user_hidden,
+    workflow_runs.actor_id, workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name,
+    workflow_runs.tree_id, workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at,
+    workflow_runs.workflow_file_checkout_sha, workflow_runs.imposer_repository_id,
+    workflow_runs.workflow_file_ref FROM workflow_runs WHERE workflow_runs.id = ?
+    LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+ee801ae094a29a30648a986d5071fe01333c9e0029d517501d73f1eaa109c0c1:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? AND workflows.state
+    = ? AND (path LIKE ?) AND workflows.name = x? LIMIT ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+ef7e7de871645d9af0f18fa9e81249e8eb5c149b7c22414287288e9cc85dff94:
+  query: INSERT INTO artifacts (source_url, name, created_at, updated_at, size, check_suite_id,
+    expires_at, repository_id, workflow_run_id) VALUES (?, x?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+f045effd34dcf25bb3b4ef2be8c5538951c4dda61133d47d70e4273a7bc06e7a:
+  query: SELECT workflow_run_executions.id, workflow_run_executions.status, workflow_run_executions.conclusion,
+    workflow_run_executions.workflow_run_id, workflow_run_executions.actor_id, workflow_run_executions.external_id,
+    workflow_run_executions.completed_log_url, workflow_run_executions.repository_id,
+    workflow_run_executions.attempt, workflow_run_executions.started_at, workflow_run_executions.completed_at,
+    workflow_run_executions.created_at, workflow_run_executions.updated_at, workflow_run_executions.run_stamp_url
+    FROM workflow_run_executions WHERE workflow_run_executions.workflow_run_id = ?
+    AND workflow_run_executions.repository_id = ? ORDER BY workflow_run_executions.id
+    ASC LIMIT ?
+  tables:
+  - workflow_run_executions
+  violations:
+  - reason: domain_access
+f094822a3a2cd9a708f3278ff95fbf2fc44b9d60bfe9e1fab73e617c9fa98e2e:
+  query: SELECT COUNT(*) AS count_all, statuses.state AS statuses_state FROM statuses
+    WHERE statuses.repository_id = ? AND statuses.sha = ? GROUP BY statuses.state
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+f09f62b9739bcb34f2a0c50aac2532c665a7c72fe1a5f1f11e6338e88c971f1d:
+  query: UPDATE gates SET gates.timeout = ?, gates.updated_at = ? WHERE gates.id =
+    ?
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+f1c3234c0d5eb187ea079ef267a214ed409139a76149ffe665eb70bc62a3b125:
+  query: SELECT ? AS one FROM workflows WHERE workflows.repository_id = ? AND workflows.state
+    != ? AND workflows.present_in_default_branch = ? LIMIT ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+f2c6686ae56824b656ad75fc3ea86aec2442088e91628d323e1398f81ffcc3b7:
+  query: SELECT environments.* FROM environments WHERE environments.repository_id
+    = ? LIMIT ? OFFSET ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+f2cf1c2be024bd81c8868e1b36ecb521cb1fe8653d498b848d04a550ffef8db5:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? AND workflows.path
+    = x?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+f364deac6e9a7530ea8755919aa8de6aa6ee10af55ad2474a81483b178a26591:
+  query: INSERT INTO workflows (repository_id, state, name, path, created_at, updated_at)
+    VALUES (?, ?, x?, x?, ?, ?)
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+f3bbf338cf1c42a4376ba51edc1a06dbda76a66c4462635524035a35c0bdaae7:
+  query: SELECT workflows.* FROM workflows WHERE workflows.repository_id = ? AND workflows.id
+    IN ? AND workflows.repository_id = ?
+  tables:
+  - workflows
+  violations:
+  - reason: domain_access
+f3f4aaaab3e3a93394751786ba7eadd22706fba0e113e4489e3e2c5b18269ccd:
+  query: SELECT gates.id, gates.environment_id, gates.body, gates.type, gates.timeout,
+    gates.created_at, gates.updated_at, gates.min_approvals, gates.integration_id,
+    gates.integration_installation_id, gates.prevent_self_review FROM gates WHERE
+    gates.environment_id = ? AND gates.type = ?
+  tables:
+  - gates
+  violations:
+  - reason: domain_access
+f43c5ef4d85de7993b89694f5625a3bf268a1befdf5a155e0e7c3f7da7482e4e:
+  query: SELECT workflow_job_runs.* FROM workflow_job_runs WHERE workflow_job_runs.id
+    = ? LIMIT ?
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+f4642f17323e72b8369aaa30697162ccc12aba27989c4bc11e0d4a4a492deec7:
+  query: SELECT ? AS one FROM statuses WHERE statuses.repository_id = ? AND statuses.repository_id
+    = ? LIMIT ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+f46ddc239c39a70f858ee08c5fc202d226f01a65ba3cff9badd7740cb54b97c7:
+  query: SELECT environments.id FROM environments WHERE environments.repository_id
+    = ? ORDER BY environments.name DESC, environments.id desc LIMIT ?
+  tables:
+  - environments
+  violations:
+  - reason: domain_access
+f664571e4f678e769dbccabb0d5a3a149e02c11edc220ae39df6f4690f08c6f1:
+  query: SELECT ? AS one FROM gate_branch_policies WHERE gate_branch_policies.gate_id
+    = ? LIMIT ?
+  tables:
+  - gate_branch_policies
+  violations:
+  - reason: domain_access
+f6a8b7ddb9657d1eb671b7616c9428e3f4dd936af1fd53df0e2afcef0cc7ff00:
+  query: SELECT workflow_runs.actor_id FROM workflow_runs WHERE workflow_runs.user_hidden
+    = ? AND workflow_runs.actor_id = ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+f6b4504d600e05341d7ae91d449613ded48fd636779b16ec0eb2397d4c0adbae:
+  query: SELECT pinned_environments.position FROM pinned_environments WHERE pinned_environments.repository_id
+    = ? ORDER BY position ASC
+  tables:
+  - pinned_environments
+  violations:
+  - reason: domain_access
+f7c628b0864649df53dc5cab3545b98d03cf497280c6cc2f2b515c2630a62298:
+  query: INSERT INTO workflow_job_runs (workflow_run_id, check_run_id, repository_id,
+    parent_job_id, job_key, created_at, updated_at, label_data, workflow_run_execution_id,
+    original_workflow_run_execution_id, summary_url) VALUES (?, ?, ?, ?, ?, ?, ?,
+    ?, ?, ?, ?)
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+f7f6ec9a8236621748a8c24752cd49864ad24e0682e9195afb2d7a2202569466:
+  query: INSERT INTO statuses (state, description, sha, repository_id, creator_id,
+    created_at, updated_at, context, oauth_application_id, tree_oid, commit_oid) VALUES
+    (?, ?, ?, ?, ?, ?, ?, ?, ?, x?, x?)
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+f8347299b20b9ca05ba2e11d10f5dae58e5e5eec7508bdccef7ddb3d0d893968:
+  query: SELECT ? AS one FROM gate_approvers WHERE gate_approvers.gate_id IN ? LIMIT
+    ?
+  tables:
+  - gate_approvers
+  violations:
+  - reason: domain_access
+f846605d261c8af822ef30001581b357a0528fb000a268fc2e0b96e74ba38efe:
+  query: SELECT ? AS one FROM workflow_runs WHERE workflow_runs.workflow_id = ? LIMIT
+    ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+f853dd814168b652a86588b9834d24fbbc2accc7d48a4fe9d313f35509850ac4:
+  query: SELECT workflow_job_runs.* FROM workflow_job_runs WHERE workflow_job_runs.check_run_id
+    = ? AND workflow_job_runs.repository_id = ? LIMIT ?
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+f9c984d2b24a9f39b7c97ce795aa7f8530b75c9237b91858627fad7cf1854cc7:
+  query: INSERT INTO statuses (state, description, sha, repository_id, creator_id,
+    created_at, updated_at, context, tree_oid, commit_oid) VALUES (?, ?, ?, ?, ?,
+    ?, ?, ?, x?, x?)
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+f9f0284fe4bc9edd9c531e20a6ed75c7ba8971eecfea0b64afdc1cadce4fd56c:
+  query: SELECT environments.id FROM environments LEFT OUTER JOIN pinned_environments
+    pinned_environment ON pinned_environment.environment_id = environments.id WHERE
+    environments.repository_id = ? AND pinned_environment.id IS NULL ORDER BY environments.name
+    ASC, environments.id asc LIMIT ?
+  tables:
+  - environments
+  - pinned_environments
+  violations:
+  - reason: domain_access
+fa834830147991cc50ae55be4bc718be0b9c1443666419ffb2a5b0b267835a43:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.repository_id = ? AND (workflow_runs.id IN (SELECT * FROM
+    (SELECT workflow_runs.id FROM workflow_runs USE INDEX FOR JOIN (index_workflow_runs_on_repository_id_user_hidden_imposer_repo_id)
+    WHERE workflow_runs.repository_id = ? ORDER BY workflow_runs.id DESC LIMIT ? OFFSET
+    ?) subquery_for_limit)) ORDER BY workflow_runs.id DESC LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+fafea83c53ae1f305165e235c9edd33ed599b13272a7c190c385bfb02a2cb9e8:
+  query: SELECT gate_approvals.* FROM gate_approvals WHERE gate_approvals.gate_request_id
+    IN ?
+  tables:
+  - gate_approvals
+  violations:
+  - reason: domain_access
+fb7eac88b0e0c13e419193f3c88f248f564ddd49adf8582880e8fffeab68df55:
+  query: INSERT INTO workflow_job_runs (workflow_run_id, check_run_id, repository_id,
+    created_at, updated_at, label_data, runner_id, runner_name, runner_group_id, runner_group_name,
+    workflow_run_execution_id, original_workflow_run_execution_id) VALUES (?, ?, ?,
+    ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+fb942667727222daafb3c7f6b0b36d1bb1fe3cc116bf287463ca3f87a07766a2:
+  query: DELETE FROM pinned_environments WHERE pinned_environments.id = ?
+  tables:
+  - pinned_environments
+  violations:
+  - reason: domain_access
+fbe6861e823a0f122b93583881f7b31a3f2f4cf7e867c7a269916d7a4cf78bdf:
+  query: INSERT INTO workflow_job_runs (workflow_run_id, check_run_id, repository_id,
+    job_key, created_at, updated_at, workflow_run_execution_id, original_workflow_run_execution_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+fd174bef0ba7cd3c276a4741024337673b61f5b0fd5f5995e130d37b3958b3f7:
+  query: SELECT artifacts.* FROM artifacts WHERE artifacts.repository_id = ? ORDER
+    BY artifacts.id ASC LIMIT ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access
+fdc0834f07b9ad7fe698d1acc4e13877f69d43abcdba50d436c53fc582b9b791:
+  query: SHOW KEYS FROM gate_approvers
+  tables:
+  - gate_approvers
+  violations:
+  - reason: domain_access
+fea4abb7d93725a7df9d636dd7bfcfd14a1b2da0e661ee588c8627405091db42:
+  query: SELECT workflow_job_runs.* FROM workflow_job_runs WHERE workflow_job_runs.workflow_run_id
+    = ? AND workflow_job_runs.repository_id = ? ORDER BY workflow_job_runs.id DESC
+    LIMIT ?
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+fef1f005acfab09df11b0f3561e68543249a6cb1d93fe1b756c65a12c2bf85ef:
+  query: SELECT statuses.* FROM statuses WHERE statuses.repository_id = ? AND statuses.sha
+    = ? ORDER BY statuses.id DESC LIMIT ? OFFSET ?
+  tables:
+  - statuses
+  violations:
+  - reason: domain_access
+ff4d4216a96090727d1972630c70aca685e281fc43834dc772526098f0c9a69b:
+  query: SELECT workflow_runs.id, workflow_runs.workflow_id, workflow_runs.check_suite_id,
+    workflow_runs.run_number, workflow_runs.trigger_id, workflow_runs.trigger_type,
+    workflow_runs.event, workflow_runs.action, workflow_runs.name, workflow_runs.head_branch,
+    workflow_runs.head_sha, workflow_runs.workflow_file_path, workflow_runs.repository_id,
+    workflow_runs.concurrency, workflow_runs.user_hidden, workflow_runs.actor_id,
+    workflow_runs.latest_workflow_run_execution_id, workflow_runs.explicit_name, workflow_runs.tree_id,
+    workflow_runs.cloned_workflow_run_id, workflow_runs.logs_deleted_at, workflow_runs.workflow_file_checkout_sha,
+    workflow_runs.imposer_repository_id, workflow_runs.workflow_file_ref FROM workflow_runs
+    WHERE workflow_runs.id = ? AND workflow_runs.repository_id = ? LIMIT ?
+  tables:
+  - workflow_runs
+  violations:
+  - reason: domain_access
+ffa09603ffd5f9e464feff0211936e31c6e6ed96f1c340746c3b5fba26afd928:
+  query: INSERT INTO workflow_job_runs (workflow_run_id, check_run_id, repository_id,
+    parent_job_id, job_key, created_at, updated_at, workflow_run_execution_id, original_workflow_run_execution_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - workflow_job_runs
+  violations:
+  - reason: domain_access
+ffc4b89277059c82f8bdd760ad215cdef2ed80c02f3864fb192897052df6eb73:
+  query: SELECT artifacts.id FROM artifacts WHERE artifacts.repository_id = ? AND
+    artifacts.check_suite_id = ? LIMIT ?
+  tables:
+  - artifacts
+  violations:
+  - reason: domain_access

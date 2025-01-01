@@ -1,0 +1,106 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unicorn-gitauth-api
+  annotations:
+    heaven.githubapp.com/deploy-requirement: "true"
+    moda.github.net/cluster-preferences: |-
+      {
+        "dotcom-1-ash1-iad": {
+          "spec": {
+            "template": {
+              "spec": {
+                "volumes": [
+                  {
+                    "name": "nginx-conf",
+                    "configMap": {
+                      "name": "unicorn-gitauth-api-nginx-conf-mirror"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "dotcom-7-va3-iad": {
+          "spec": {
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "unicorn",
+                    "env": [
+                      {
+                        "name": "UNICORN_CHECK_CLIENT_CONNECTION_ENABLED",
+                        "value": "1"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    moda.github.net/allow-missing-ready-pods: "5"
+    moda.github.net/canary-v2: "true"
+    moda.github.net/canary-label: "role"
+    moda.github.net/canary-replicas: 9
+spec:
+  replicas: 110
+  strategy:
+    rollingUpdate:
+      maxSurge: 50%
+      maxUnavailable: 6%
+  template:
+    metadata:
+      labels:
+        scheduling-size: "large"
+    spec:
+      containers:
+        - name: nginx
+          volumeMounts:
+            - mountPath: /etc/nginx/
+              name: nginx-conf
+            - mountPath: /assets
+              name: assets
+        - name: unicorn
+          env:
+            - name: HOOKSHOT_STAGING_URL
+              value: 'https://hookshot-stg-http.service.iad.github.net'
+            - name: GH_HOSTNAME
+              value: github.com
+            - name: GH_UNICORN_WORKER_COUNT
+              value: "9"
+            - name: SERVICE_MESH_ENABLED
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['sidecar.istio.io/inject']
+            - name: GOTAUTH_URL
+              value: 'https://gotauth-production.service.iad.github.net'
+            - name: MONOLITH_REDIS_RATE_LIMITER_TIMEOUT
+              value: "0.2"
+          resources:
+            limits:
+              memory: 16Gi
+            requests:
+              cpu: 6
+              memory: 10Gi
+      initContainers:
+          - command:
+              - cp
+              - --recursive
+              - --no-preserve=mode
+              - --verbose
+              - /build/public
+              - /assets
+            image: github
+            imagePullPolicy: IfNotPresent
+            name: unicorn-assets
+            resources:
+              requests:
+                  cpu: 100m
+            volumeMounts:
+              - mountPath: /assets
+                name: assets

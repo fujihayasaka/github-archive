@@ -1,0 +1,157 @@
+import {Box} from '@primer/react'
+import {graphql} from 'react-relay'
+import {useFragment} from 'react-relay/hooks'
+
+import {LinkExternalIcon} from '@primer/octicons-react'
+import {LABELS} from '../constants/labels'
+import {createIssueEventExternalUrl} from '../utils/urls'
+import type {CrossReferencedEvent$key} from './__generated__/CrossReferencedEvent.graphql'
+import {IssueLink} from './IssueLink'
+import {Ago} from './row/Ago'
+import {TimelineRow} from './row/TimelineRow'
+import {getGroupCreatedAt} from '../utils/get-group-created-at'
+
+export type ReferenceTypes = 'issues' | 'prs' | 'mixed'
+
+type RollupGroup = CrossReferencedEvent$key & {source?: {__typename: string}; createdAt?: string}
+type RollupGroups = Record<string, RollupGroup[]>
+
+type CrossReferencedEventProps = {
+  queryRef: CrossReferencedEvent$key & {createdAt?: string}
+  rollupGroup?: RollupGroups
+  issueUrl: string
+  onLinkClick?: (event: MouseEvent) => void
+  highlightedEventId?: string
+  refAttribute?: React.MutableRefObject<HTMLDivElement | null>
+}
+
+type sourceType = 'Issue' | 'PullRequest'
+
+export const CrossReferencedEventFragment = graphql`
+  fragment CrossReferencedEvent on CrossReferencedEvent {
+    referencedAt
+    willCloseTarget
+    databaseId
+    target {
+      ... on Issue {
+        repository {
+          id
+        }
+      }
+    }
+    innerSource: source {
+      __typename
+      ...IssueLink
+    }
+    actor {
+      ...TimelineRowEventActor
+    }
+  }
+`
+
+export function CrossReferencedEvent({
+  queryRef,
+  issueUrl,
+  highlightedEventId,
+  onLinkClick,
+  refAttribute,
+  rollupGroup,
+}: CrossReferencedEventProps): JSX.Element {
+  const {actor, referencedAt, willCloseTarget, innerSource, databaseId, target} = useFragment(
+    CrossReferencedEventFragment,
+    queryRef,
+  )
+
+  const isIssue = innerSource.__typename === 'Issue'
+  const isPullRequest = innerSource.__typename === 'PullRequest'
+
+  if (!isIssue && !isPullRequest) {
+    return <></>
+  }
+
+  const rolledUpGroup = rollupGroup && rollupGroup['CrossReferencedEvent'] ? rollupGroup['CrossReferencedEvent'] : []
+  const hasMixedReferenceTypes = rolledUpGroup.some(item => item.source?.__typename !== innerSource.__typename)
+
+  const message = buildMessage(innerSource.__typename, willCloseTarget, rolledUpGroup?.length, hasMixedReferenceTypes)
+
+  const highlighted = String(databaseId) === highlightedEventId
+
+  const itemsToRender = rolledUpGroup.length === 0 ? [queryRef] : rolledUpGroup
+  const eventCreatedAt = getGroupCreatedAt(queryRef.createdAt, rolledUpGroup)
+
+  return (
+    <TimelineRow
+      highlighted={highlighted}
+      refAttribute={refAttribute}
+      actor={actor}
+      createdAt={referencedAt}
+      showAgoTimestamp={false}
+      deepLinkUrl={issueUrl}
+      onLinkClick={onLinkClick}
+      leadingIcon={LinkExternalIcon}
+    >
+      <TimelineRow.Main>
+        {message}{' '}
+        {eventCreatedAt ? (
+          <Ago timestamp={new Date(eventCreatedAt)} linkUrl={createIssueEventExternalUrl(issueUrl, databaseId)} />
+        ) : null}
+      </TimelineRow.Main>
+      <TimelineRow.Secondary>
+        <section aria-label={LABELS.crossReferencedEvent.sectionLabel}>
+          <Box
+            as="ul"
+            sx={{
+              mt: 2,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 2,
+            }}
+          >
+            {itemsToRender.map((item, index) => (
+              <CrossReferenceItem
+                // eslint-disable-next-line @eslint-react/no-array-index-key
+                key={`${databaseId}_${index}`}
+                event={item}
+                targetRepositoryId={target.repository?.id}
+              />
+            ))}
+          </Box>
+        </section>
+      </TimelineRow.Secondary>
+    </TimelineRow>
+  )
+}
+
+function CrossReferenceItem({
+  event,
+  targetRepositoryId,
+}: {
+  event: CrossReferencedEvent$key
+  targetRepositoryId: string | undefined
+}) {
+  const {innerSource} = useFragment(CrossReferencedEventFragment, event)
+  return (
+    <li style={{listStyle: 'none'}}>
+      <IssueLink data={innerSource} targetRepositoryId={targetRepositoryId} />
+    </li>
+  )
+}
+
+function buildMessage(
+  sourceType: sourceType,
+  willCloseTarget: boolean,
+  rolledUpGroupLength: number,
+  mixedReferenceTypes: boolean,
+) {
+  if (willCloseTarget) {
+    return LABELS.timeline.linkedAClosingPR
+  }
+  if (rolledUpGroupLength === 0 || mixedReferenceTypes) {
+    return LABELS.timeline.mentionedThisIn
+  }
+  if (sourceType === 'Issue') {
+    return `${LABELS.timeline.mentionedThisIn} in ${rolledUpGroupLength} issues`
+  } else {
+    return `${LABELS.timeline.mentionedThisIn} in ${rolledUpGroupLength} pull requests`
+  }
+}

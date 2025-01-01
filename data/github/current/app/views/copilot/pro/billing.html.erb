@@ -1,0 +1,65 @@
+<% page_info(
+  title: "GitHub Copilot Pro Checkout",
+  class: "bgColor-inset",
+  full_height_scrollable: true,
+  full_height: true,
+  hide_footer: logged_in?,
+) %>
+
+<% if current_user.feature_enabled?(:copilot_pro_new_billing_flow_progress_bar) %>
+  <%
+    step_index = 0
+
+    # has_no_billing_and_payment_info
+    if !current_user.has_saved_trade_screening_record? && !current_user.has_valid_payment_method?
+      step_index = 1
+    # has_billing_but_no_payment_info
+    elsif current_user.has_saved_trade_screening_record? && !current_user.has_valid_payment_method?
+      step_index = 2
+    # has_billing_and_payment_info
+    elsif current_user.has_saved_trade_screening_record? && current_user.has_valid_payment_method?
+      step_index = 3
+    end
+  %>
+
+  <%= render_react_partial name: "copilot-activation-progress-bar", props: {
+      segmentPoints: [0, 25, 50, 75, 100],
+      currentSegmentIndex: step_index,
+      color: 'gradient',
+      shouldUseLocalStorage: true,
+    }
+  %>
+<% end %>
+
+<%= render Primer::Box.new(container: :lg, px: [2, 4], py: [5, 7]) do %>
+  <%= render Primer::Beta::Heading.new(tag: :h1, mb: 2, font_size: 2, text_align: :left) do %>
+    Subscribe to GitHub&nbsp;Copilot&nbsp;Pro<% if copilot_user.eligible_for_trial? %> for&nbsp;30&#8209;days&nbsp;free<% end %>
+  <% end %>
+
+  <% if current_user.feature_enabled?(:copilot_pro_new_billing_flow_progress_bar) %>
+    <%= render partial: "copilot/pro/steps_list", locals: { step_index: step_index } %>
+  <% else %>
+    <%= render "copilot/pro/steps_list" %>
+  <% end %>
+
+  <billing-checkout data-trial-allowed="<%= copilot_user.eligible_for_trial? %>">
+    <%= render Primer::Alpha::Layout.new(gutter: :spacious, first_in_source: :main) do |component| %>
+      <% component.with_main do %>
+        <%= render Copilot::ProBillingComponent.new(
+          user: current_user,
+          payment_duration: payment_duration,
+          return_to_path: return_to_path,
+          tracking_params: tracking_params
+        ) %>
+      <% end %>
+
+      <% component.with_sidebar(col_placement: :end, row_placement: :end, mt: [2, 2, 0]) do %>
+        <%= render "copilot/pro/billing_summary",
+          payment_duration: payment_duration,
+          subscribe_path: subscribe_path,
+          copilot_user: copilot_user
+        %>
+      <% end %>
+    <% end %>
+  </billing-checkout>
+<% end %>

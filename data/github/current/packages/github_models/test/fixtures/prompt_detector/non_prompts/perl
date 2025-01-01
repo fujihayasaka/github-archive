@@ -1,0 +1,85 @@
+#!/usr/bin/env perl6
+
+use lib $*PROGRAM.dirname ~ '/lib';
+use Config;
+use Executor;
+use Utils;
+use Linenoise;
+
+sub MAIN(Str :$exec?, Bool :$help_flag) {
+
+    if $help_flag { display_help; exit; }
+
+    config.initialize;
+    config.apply_defaults;
+
+    session_manager.ensure_active;
+
+    if $exec { Executor.new(:line($exec)); exit; }
+
+    load_available_endpoints;
+
+    linenoiseHistoryLoad(store.path(HISTORY_FILE));
+    linenoiseHistorySetMaxLen(HISTORY_LENGTH);
+
+    linenoiseSetCompletionCallback(-> $input, $completions {
+        my $prefix = '';
+        my $last_part = $input;
+        if $input ~~ /(.* \s+) (<[\S]>+ $)/ {
+            $prefix = $0;
+            $last_part = $1;
+        }
+
+        my @segments = $last_part.split('/');
+        my $final_segment = @segments.pop;
+
+        for Executor.suggest_completions($input) -> $suggestion {
+            linenoiseAddCompletion($completions, $suggestion);
+        }
+
+        for (|recent_paths, |Executor.actions, |Executor.qualified_actions, |completion_targets).map({
+            my @tokens = .split('/');
+            if @segments.elems >= @tokens.elems {
+                '';
+            } else {
+                my @result;
+                for zip @segments, @tokens -> ($seg, $tok) {
+                    @result.push($seg) if $tok ~~ /^ ':' / || $tok eq $seg;
+                }
+                if @result.elems == @segments.elems && @tokens[@segments.elems] ~~ /^ "$final_segment" / {
+                    (|@segments, |@tokens[@segments.elems .. @tokens.end]).join('/');
+                } else {
+                    '';
+                }
+            }
+        }).grep(/./) -> $match {
+            linenoiseAddCompletion($completions, $prefix ~ $match);
+        }
+    });
+
+    say ansi('~~~ shell: cmd_prompt interactive client ~~~', 'bold');
+
+    while (my $input = linenoise command_prompt).defined {
+        try {
+            linenoiseHistoryAdd($input.trim) if $input.trim;
+            Executor.new(:$input);
+            linenoiseHistorySave(store.path(HISTORY_FILE));
+        }
+        if $! {
+            say "An error occurred: $!";
+            say $!.backtrace.join;
+        }
+    }
+}
+
+sub display_help {
+    say q:heredoc/END/;
+
+shell - an interactive terminal client
+
+    shell             Start interactive shell
+    shell -e=cmd      Execute command and print output
+    shell -h          Display this help message
+
+END
+}

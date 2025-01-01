@@ -1,0 +1,68 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "json"
+require_relative "../../lib/github/feature_flag"
+
+FLIPPER_USAGE_PATTERNS = GitHub::FeatureFlag::FLIPPER_USAGE_PATTERNS.reject do |pattern|
+  pattern == /GitHub\.flipper\.enable\(["':](\w+).*\)/ ||
+  pattern == /GitHub\.flipper\.disable\(["':](\w+).*\)/
+end.freeze
+
+input = $stdin.read
+details = JSON.parse(input)
+
+result = { "comments" => [] }
+at_exit { puts result.to_json }
+
+if details["strict"] && !details["pull"]
+  result["comments"] << {
+    text: "No pull request was provided",
+    severity: "Error"
+  }
+end
+
+if details["pull"]["draft"]
+  return
+end
+
+feature_flag_used = false
+total_additions = 0
+touches_ruby_file = false
+
+details["diff"]["files"].each do |file, data|
+  next unless file.end_with?(".rb") || file.include?(".erb")
+  touches_ruby_file = true
+
+  data["left"].each do |line|
+    FLIPPER_USAGE_PATTERNS.each do |pattern|
+      if line["content"].split("#", 2).first.match?(pattern)
+        feature_flag_used = true
+      end
+    end
+  end
+
+  data["right"].each do |line|
+    total_additions += 1
+    FLIPPER_USAGE_PATTERNS.each do |pattern|
+      if line["content"].split("#", 2).first.match?(pattern)
+        feature_flag_used = true
+      end
+    end
+  end
+end
+
+if !feature_flag_used && details["pull"]["description"].include?("- **Feature Flag** -")
+  result["comments"] << {
+    severity: "Warn",
+    text: <<~MESSAGE
+    Your pull request description indicates that a feature flag will be used as a mitigation strategy but no feature flag was detected in your changes.
+
+    Please update your description to include the relevant feature flag details, or use a feature flag. You can find [documentation on how to use feature flags in TheHub](https://thehub.github.com/epd/engineering/products-and-services/dotcom/features/feature-flags/overview/)
+
+    If this change is in fact using a feature flag, please react with a 👎, otherwise please react with a 👍
+
+    <sub>Feel free to reach out in the #feature-management slack channel with any questions or concerns.</sub>
+    MESSAGE
+  }
+end

@@ -1,0 +1,73 @@
+# typed: true
+# frozen_string_literal: true
+
+require "test_helper"
+
+module SecretScanning::Features::Org
+  class OrgContentScanningTest < GitHub::TestCase
+    include SecretScanning::Features::FeatureFlagHelper
+
+    fixtures do
+      business = create(:business)
+      @org = create(:business_plus_org, business: business)
+      @user = create(:user)
+    end
+
+    setup do
+      @issue_scanning = SecretScanning::Features::Org::ContentScanning.new(@org)
+    end
+
+    context "initialize" do
+      test "good input" do
+        refute SecretScanning::Features::Org::ContentScanning.new(@org).nil?
+      end
+    end
+
+    context "feature_available?" do
+      test "true if public scanning enabled", skip_enterprise: true do
+        SecretScanning::Features::Org::PublicScanning.any_instance.stubs(:enabled?).returns(true)
+        assert @issue_scanning.feature_available?
+      end
+
+      test "true if token scanning enabled", skip_enterprise: true do
+        SecretScanning::Features::Org::TokenScanning.any_instance.stubs(:enabled?).returns(true)
+        assert @issue_scanning.feature_available?
+      end
+
+      test "false if token scanning not enabled" do
+        SecretScanning::Features::Org::PublicScanning.any_instance.stubs(:feature_available?).returns(false)
+        SecretScanning::Features::Org::TokenScanning.any_instance.stubs(:enabled?).returns(false)
+        refute @issue_scanning.feature_available?
+      end
+    end
+
+    context "enabled?" do
+      test "true if feature available" do
+        SecretScanning::Features::Org::ContentScanning.any_instance.stubs(:feature_available?).returns(true)
+        assert @issue_scanning.enabled?
+      end
+
+      test "false if feature not available" do
+        SecretScanning::Features::Org::ContentScanning.any_instance.stubs(:feature_available?).returns(false)
+        refute @issue_scanning.enabled?
+      end
+
+      test "true by default on enterprise", enterprise_only: true do
+        SecretScanning::Features::Org::TokenScanning.any_instance.stubs(:enabled?).returns(true)
+        assert @issue_scanning.enabled?
+      end
+
+      test "false if enterprise and explicitly enabled when repo is disabled", enterprise_only: true do
+        GitHub.stubs(:secret_scanning_for_all_content_types_enabled?).returns(true)
+        SecretScanning::Features::Org::TokenScanning.any_instance.stubs(:enabled?).returns(false)
+        refute @issue_scanning.enabled?
+      end
+
+      test "false if enterprise and explicitly disabled when repo is enabled", enterprise_only: true do
+        GitHub.stubs(:secret_scanning_for_all_content_types_enabled?).returns(false)
+        SecretScanning::Features::Org::TokenScanning.any_instance.stubs(:enabled?).returns(true)
+        refute @issue_scanning.enabled?
+      end
+    end
+  end
+end

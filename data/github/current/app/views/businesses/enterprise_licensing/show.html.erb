@@ -1,0 +1,106 @@
+<%
+  if this_business.customer&.billed_via_billing_platform?
+    title = "Licensing"
+    selected_link = :business_licensing
+    sidebar = :billing_and_licensing
+  else
+    title = "Enterprise licensing"
+    selected_link = :enterprise_licensing
+    sidebar = :settings
+  end
+
+  page_info title: title,
+    selected_link: selected_link,
+    sidebar: sidebar,
+    stafftools: stafftools_enterprise_path(this_business)
+%>
+<%= render layout: "businesses/layout",
+  locals: {
+    business: this_business,
+    title: title,
+  } do %>
+  <% if this_business.feature_enabled?(:enterprise_licensing_feedback_survey) %>
+    <%= render Licensing::FeedbackLinkComponent.new(
+      business_slug: this_business.slug,
+      survey_id: "enterprise-licensing-admins-feedback-survey",
+      mb: 3,
+    ) do |component| %>
+      <% component.with_description do %>
+        Help us enhance the Enterprise Licensing experience! <%= render(Primer::Beta::Link.new(href: Licensing::FeedbackLinkComponent::FEEDBACK_SCHEDULING_URL, classes: "Link--inTextBlock")) { "Sign up" } %> now to share your feedback.
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% view = Businesses::EnterpriseLicensing::ShowView.new(business: this_business, viewer: current_user) %>
+  <% is_copilot_only = this_business.copilot_licensing_enabled? && this_business.seats_plan_basic? %>
+
+  <%= render Billing::Settings::EnterpriseWithOutstandingInvoicesPleasePayComponent.new(business: this_business, current_user: current_user) %>
+
+  <% if this_business.feature_enabled?(:ghe_sales_serve_renewals) && !Billing::Settings::EnterpriseContractGlobalExpirationBannerComponent.new(business: this_business, current_user: current_user).render? %>
+    <%= render Billing::Settings::EnterpriseContractEarlyExpirationBannerComponent.new(business: this_business, current_user: current_user) %>
+    <%= render Billing::Settings::EnterpriseContractStatusBannerComponent.new(business: this_business, current_user: current_user) %>
+  <% end %>
+
+
+  <div data-hpc>
+    <%= render "businesses/enterprise_licensing/copilot_standalone_licenses", view: view if enterprise_copilot_licensing_enabled?(this_business) %>
+
+    <% if !is_copilot_only %>
+      <%= render_fallback_on_error(fallback: render("businesses/enterprise_licensing/error_fallback", message: "Could not load Enterprise Cloud data.")) do %>
+        <%= render_react_partial(
+          name: "licensing-enterprise-overview",
+          props: {
+            enterpriseContactUrl: ent_contact_url,
+            ghe: ghe_overview_react_payload(business: this_business, preopen_seat_management: params[:manage_seats] == 'true'),
+            slug: this_business.slug,
+          }
+        ) %>
+      <% end %>
+    <% end %>
+
+    <%# temporarily render React ghas card along side old card for easier testing %>
+    <% if current_user.feature_enabled?(:enterprise_licensing_advanced_security) %>
+      <%= render_fallback_on_error(fallback: render("businesses/enterprise_licensing/error_fallback", message: "Could not load Advanced Security data.")) do %>
+        <%= render_react_partial(
+          name: "licensing-advanced-security-overview",
+          props: {
+            enterpriseContactUrl: ent_contact_url,
+            ghas: ghas_overview_react_payload(business: this_business, preopen_seat_management: params[:manage_committers_view] == 'true'),
+            slug: this_business.slug,
+          }
+        ) %>
+      <% end %>
+    <% end %>
+    <%= render "businesses/enterprise_licensing/advanced_security", view: view %>
+
+    <% if current_user.feature_enabled?(:enterprise_copilot_licensing) && !enterprise_copilot_licensing_enabled?(this_business) %>
+      <%= render_fallback_on_error(fallback: render("businesses/enterprise_licensing/error_fallback", message: "Could not load Copilot data.")) do %>
+        <%= render_react_partial(
+          name: "licensing-copilot-overview",
+          props: {
+            enterpriseContactUrl: ent_contact_url,
+            copilot: copilot_overview_react_payload(business: this_business),
+            slug: this_business.slug,
+          }
+        ) %>
+      <% end %>
+    <% end %>
+
+    <% if !is_copilot_only && this_business.metered_ghes_eligible?  %>
+      <%= render_fallback_on_error(fallback: render("businesses/enterprise_licensing/error_fallback", message: "Could not load Enterprise Server data.")) do %>
+        <%= render_react_partial(
+          name: "licensing-enterprise-server-overview",
+          props: {
+            ghesUsage: ghes_overview_react_payload(business: this_business)
+          }
+        ) %>
+      <% end %>
+    <% end %>
+
+    <% if !is_copilot_only && (this_business.metered_ghes_eligible? || !this_business.metered_plan?) %>
+      <%= render "businesses/enterprise_licensing/enterprise_server_licenses", view: view %>
+      <%= render "businesses/enterprise_licensing/enterprise_server_instances", view: view %>
+    <% end %>
+  </div>
+
+<% end %>

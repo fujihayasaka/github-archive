@@ -1,0 +1,139 @@
+import {useCallback, useEffect, useRef, useState} from 'react'
+import useIntersectionObserver from '../../lib/hooks/useIntersectionObserver'
+import {COPY} from './Cta.data'
+import Artwork from './cta-webgl/artwork'
+import Assets from './cta-webgl/assets'
+import {hasWebGLSupport} from '../../lib/utils/platform'
+
+export default function CtaWebGL() {
+  const [isVisible, setIsVisible] = useState<boolean>(false)
+  const mascotsRef = useRef<HTMLDivElement | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const animationFrameId = useRef(0)
+
+  const {isIntersecting} = useIntersectionObserver(mascotsRef, {threshold: 0.4, isOnce: true})
+
+  const startCopyAnimation = useCallback(() => {
+    setIsVisible(true)
+  }, [])
+
+  useEffect(() => {
+    if (isIntersecting) {
+      startCopyAnimation()
+    }
+  }, [isIntersecting, startCopyAnimation])
+
+  useEffect(() => {
+    if (!hasWebGLSupport()) return
+    if (!isIntersecting) return
+
+    let isReducedMotion = false
+    let isInViewport = false
+    let artwork: Artwork
+    const assets: Assets = new Assets()
+    const handleReduceMotionChange = (event: MediaQueryListEvent) => {
+      isReducedMotion = event.matches
+
+      if (isReducedMotion) {
+        if (artwork) {
+          if (isInViewport) {
+            artwork.update(isReducedMotion)
+          }
+          if (animationFrameId.current) {
+            cancelAnimationFrame(animationFrameId.current)
+          }
+        }
+      } else {
+        if (isInViewport) {
+          tick()
+        }
+      }
+    }
+
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
+    mediaQuery.addEventListener('change', handleReduceMotionChange)
+
+    isReducedMotion = mediaQuery.matches
+
+    const resize = () => {
+      if (artwork) artwork.resize()
+      if (isReducedMotion && artwork) artwork.update(isReducedMotion)
+    }
+
+    const scroll = () => {
+      if (artwork) artwork.scroll(isReducedMotion)
+    }
+
+    const observer = new IntersectionObserver(
+      entries => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            // Canvas is in the viewport, start rendering
+            isInViewport = true
+            if (isReducedMotion) {
+              artwork.update(isReducedMotion)
+            } else {
+              tick()
+            }
+          } else {
+            isInViewport = false
+            if (animationFrameId.current) {
+              cancelAnimationFrame(animationFrameId.current)
+            }
+          }
+        }
+      },
+      {threshold: 0.1}, // Adjust the threshold as needed
+    )
+
+    if (mascotsRef.current && canvasRef.current) {
+      artwork = new Artwork(mascotsRef.current, canvasRef.current, isReducedMotion, assets)
+      observer.observe(canvasRef.current)
+      assets.load(() => {
+        artwork.afterLoad()
+        resize()
+        scroll()
+
+        if (isReducedMotion) {
+          artwork.update(isReducedMotion)
+        }
+      })
+    }
+
+    // eslint-disable-next-line github/prefer-observers
+    window.addEventListener('resize', resize)
+    // eslint-disable-next-line github/prefer-observers
+    window.addEventListener('scroll', scroll)
+
+    const tick = () => {
+      if (isInViewport) {
+        artwork.update(isReducedMotion)
+        animationFrameId.current = requestAnimationFrame(tick)
+      }
+    }
+
+    if (!isReducedMotion) {
+      tick()
+    }
+
+    const handleBeforeUnload = () => {
+      cancelAnimationFrame(animationFrameId.current)
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+
+    return () => {
+      window.removeEventListener('resize', resize)
+      window.removeEventListener('scroll', scroll)
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+      mediaQuery.removeEventListener('change', handleReduceMotionChange)
+      observer.disconnect()
+    }
+  }, [isIntersecting])
+
+  return (
+    <div ref={mascotsRef} className={`lp-Cta-mascots ${!isVisible ? 'lp-Cta-mascots--hidden' : ''}`}>
+      <div className="sr-only">{COPY.visual.alt}</div>
+      <canvas ref={canvasRef} />
+    </div>
+  )
+}

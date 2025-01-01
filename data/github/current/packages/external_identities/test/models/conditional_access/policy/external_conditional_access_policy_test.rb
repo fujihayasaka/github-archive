@@ -1,0 +1,1047 @@
+# typed: true
+# frozen_string_literal: true
+
+require "test_helper"
+require "test_helpers/conditional_access/policy_test_helper"
+require "digest/sha2"
+
+class TestExternalConditionalAccessPolicy
+  include ConditionalAccess::Policy::ExternalConditionalAccessPolicy
+
+  attr_reader :actor, :business, :anonymous
+  attr_accessor :actor_ip, :client_ip
+
+  def initialize(actor: nil, business: nil, anonymous: false)
+    @actor = actor
+    @business = business
+    @actor_ip = "192.168.0.1"
+    @client_ip = "192.168.0.1"
+    @anonymous = anonymous
+  end
+
+  def anonymous?
+    anonymous
+  end
+
+  def location
+    :test
+  end
+
+  def callback_name
+    self.class.name
+  end
+end
+
+class ExternalConditionalAccessPolicyTest < GitHub::TestCase
+  include GitHub::LoggerHelper
+  include HydroTestHelpers
+  include ConditionalAccess::PolicyTestHelpers
+
+  def policy_name
+    :external_conditional_access_policy
+  end
+
+  class TestExternalConditionalAccessEnforcer < ConditionalAccess::Api::Public::Enforcer
+    attr_reader :actor_ip
+
+    def initialize(actor, ip: "192.168.0.1")
+      @actor_ip = ip
+      super(TestExternalConditionalAccessPolicyCallback.new(actor: actor, ip: @actor_ip))
+    end
+
+    def conditional_access_policies
+      [:external_conditional_access_policy]
+    end
+    alias :registered_policies :conditional_access_policies
+
+    def location
+      :test
+    end
+  end
+
+  class TestExternalConditionalAccessPolicyCallback
+    attr_reader :actor, :business, :anonymous
+    attr_accessor :actor_ip, :client_ip
+
+    alias :actor_for_conditional_access :actor
+    alias :actor_for_conditional_access_authzd :actor
+    alias :current_user :actor
+    alias :ip_for_allowed_check :actor_ip
+
+    def initialize(actor: nil, ip: nil)
+      @actor = actor
+      @business = business
+      @actor_ip = ip
+      @client_ip = ip
+      @anonymous = anonymous
+    end
+
+    def anonymous?
+      anonymous
+    end
+
+    def location
+      :test
+    end
+
+    def logged_in?
+      !!@actor
+    end
+
+    def callback_name
+      self.class.name
+    end
+  end
+
+  fixtures do
+    @emu = create :emu, provider_type: :oidc
+    @business = @emu.enterprise_managed_business
+    @owner = @business.find_first_emu_owner
+    @org = create(:organization, business: @business, admin: @owner)
+    @org_repo = create(:repository, owner: @org)
+    @user_repo = create(:repository, owner: @emu)
+    @user_repo_two = create(:repository, owner: @emu)
+
+    @ei = @emu.external_identities.first
+    ExternalIdentityRefreshToken.create!(external_identity: @ei, refresh_token: "foobar")
+
+    @staff_owned_emu = create :emu, provider_type: :oidc
+    @staff_owned_business = @staff_owned_emu.enterprise_managed_business
+    @staff_owned_business.update(staff_owned: true)
+    @staff_owned_owner = @staff_owned_business.find_first_emu_owner
+    @staff_owned_ei = @staff_owned_emu.external_identities.first
+    @staff_owned_user_repo = create(:repository, owner: @staff_owned_emu)
+    @staff_owned_user_repo_two = create(:repository, owner: @staff_owned_emu)
+  end
+
+  setup do
+    @target_provider = ConditionalAccess::TargetProvider.new(location: :test, callback_name: "Object")
+    disable_feature_flag(:disable_oidc_cap_cache)
+    @business.update_ip_allowlist_configuration(actor: @owner, config_value: "idp")
+    @staff_owned_business.update_ip_allowlist_configuration(actor: @staff_owned_owner, config_value: "idp")
+    @tenant_provider = ::OIDC::TenantProvider.new(@business)
+    GitHub.stubs(:dogstats).returns(GitHub::MemoryDogstatsD.new)
+  end
+
+  # stub the IdP call as a failure, such that we know we'll get an unsatisfied
+  # result, as long as we've made it past applicability
+  # this test is mainly used to assert applicability behavior
+  def external_cap_assert_applicable(enforcer, resource)
+    VCR.use_cassette("oidc/azure-cap-failure", erb: { arg1: @tenant_provider.tenant_id }, record: :once) do
+      assert_unsatisfied(enforcer, resource)
+    end
+  end
+
+  def external_cap_assert_unsatisfied_with_azure_failure(enforcer, resource)
+    VCR.use_cassette("oidc/azure-cap-failure", erb: { arg1: @tenant_provider.tenant_id }, record: :once) do
+      assert_unsatisfied(enforcer, resource)
+    end
+  end
+
+  def external_cap_assert_satisfied_with_azure_success(enforcer, resource)
+    VCR.use_cassette("oidc/azure-cap-success", erb: { arg1: @tenant_provider.tenant_id }, record: :once) do
+      assert_satisfied(enforcer, resource)
+    end
+  end
+
+  context "applicable" do
+    test "no for resource without a TFCA" do
+      enforcer = TestExternalConditionalAccessEnforcer.new(nil)
+      assert_inapplicable(enforcer, @org)
+    end
+
+    test "no for resource without a business" do
+      org = create(:organization)
+      enforcer = TestExternalConditionalAccessEnforcer.new(nil)
+      assert_inapplicable(enforcer, org)
+    end
+
+    test "no when resource's business doesn't have an OIDC provider" do
+      biz_without_provider = create(:business, :enterprise_managed)
+      owner = biz_without_provider.find_first_emu_owner
+      org = create(:organization, business: biz_without_provider, admin: owner)
+      repo = create(:repository, owner: org)
+
+      enforcer = TestExternalConditionalAccessEnforcer.new(nil)
+      assert_inapplicable(enforcer, repo)
+    end
+
+    test "no if actor is nil" do
+      enforcer = TestExternalConditionalAccessEnforcer.new(nil)
+      assert_inapplicable(enforcer, @user_repo)
+      assert_inapplicable(enforcer, @org_repo)
+    end
+
+    test "no if actor is bot" do
+      installation = make_integration_installation(target: @business, permissions: { "enterprise_administration" => :write })
+
+      enforcer = TestExternalConditionalAccessEnforcer.new(installation)
+      assert_inapplicable(enforcer, @user_repo)
+      assert_inapplicable(enforcer, @org_repo)
+    end
+
+    test "no for first enterprise owner of EMU business" do
+      enforcer = TestExternalConditionalAccessEnforcer.new(@owner)
+      assert_inapplicable(enforcer, @user_repo)
+      assert_inapplicable(enforcer, @org_repo)
+    end
+
+    test "yes for a resource with a OIDC configured business when logged in through an OAuth app and business.ip_allowlist_app_access_disabled?" do
+      configure_user_as_oauth_app @emu, ["repo"]
+
+      enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+      external_cap_assert_applicable(enforcer, @user_repo)
+      external_cap_assert_applicable(enforcer, @org_repo)
+    end
+
+    test "yes for a resource with a OIDC configured business" do
+      enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+      external_cap_assert_applicable(enforcer, @user_repo)
+      external_cap_assert_applicable(enforcer, @org_repo)
+    end
+
+    context "exempt_internal_github_resource?" do
+      test "no for GitHub internal IP" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+        @business.disable_skip_idp_ip_allowlist_app_access(actor: @owner)
+
+        app = create_privileged_app_with_capabilities(options: { owner: @business, visibility: "internal_visibility" })
+        refute Apps::Privileged.capable?(:ip_allowlist_exempt, app: app), "expected #{app} to not be IP allow list exempt"
+
+        @emu.oauth_access = app.grant(@emu)
+        exempt_log = {
+          "Body" => "Resource exemption status from external conditional access policy applicability",
+          "code.function" => "exempt_internal_github_resource?",
+          "gh.app.class" => app.class,
+          "gh.app.id" => app.id,
+          "gh.external_identities.cap_exemption" => "exempted",
+          "gh.external_identities.internal_app_exempted" => false,
+          "gh.external_identities.internal_ip_exempted" => true,
+          "gh.external_identities.client_ip" => "10.56.131.48",
+        }
+
+        enforcer = TestExternalConditionalAccessEnforcer.new(@emu, ip: "10.56.131.48") # 10.* are github internal IPs
+        assert_logged **exempt_log do
+          assert_inapplicable(enforcer, app)
+        end
+      end
+
+      test "no for internal app with IP exempt" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+        @business.disable_skip_idp_ip_allowlist_app_access(actor: @owner)
+
+        app = create_privileged_app_with_capabilities(capabilities: { ip_allowlist_exempt: true }, options: { owner: @business, visibility: "internal_visibility" })
+        assert Apps::Privileged.capable?(:ip_allowlist_exempt, app: app), "expected #{app} to be IP allow list exempt"
+
+        @emu.oauth_access = app.grant(@emu)
+
+        enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+        exempt_log = {
+          "Body" => "Resource exemption status from external conditional access policy applicability",
+          "code.function" => "exempt_internal_github_resource?",
+          "gh.app.class" => app.class,
+          "gh.app.id" => app.id,
+          "gh.external_identities.cap_exemption" => "exempted",
+          "gh.external_identities.internal_app_exempted" => true,
+          "gh.external_identities.internal_ip_exempted" => false,
+          "gh.external_identities.client_ip" => enforcer.actor_ip,
+        }
+
+        assert_logged **exempt_log do
+          assert_inapplicable(enforcer, app)
+        end
+      end
+
+      test "yes for internal app without IP exempt" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+        @business.disable_skip_idp_ip_allowlist_app_access(actor: @owner)
+
+        app = create_privileged_app_with_capabilities(options: { owner: @business, visibility: "internal_visibility" })
+        refute Apps::Privileged.capable?(:ip_allowlist_exempt, app: app), "expected #{app} to not be IP allow list exempt"
+
+        @emu.oauth_access = app.grant(@emu)
+
+        enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+        exempt_log = {
+          "Body" => "Resource exemption status from external conditional access policy applicability",
+          "code.function" => "exempt_internal_github_resource?",
+          "gh.app.class" => app.class,
+          "gh.app.id" => app.id,
+          "gh.external_identities.cap_exemption" => "not exempted",
+          "gh.external_identities.internal_app_exempted" => false,
+          "gh.external_identities.internal_ip_exempted" => false,
+          "gh.external_identities.client_ip" => enforcer.actor_ip,
+        }
+
+        assert_logged **exempt_log do
+          enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+          external_cap_assert_applicable(enforcer, app)
+        end
+      end
+
+      test "no for empty IP address (with :external_conditional_access_inapplicable_empty_ip enabled)" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+        @business.disable_skip_idp_ip_allowlist_app_access(actor: @owner)
+
+        app = create_privileged_app_with_capabilities(options: { owner: @business, visibility: "internal_visibility" })
+        refute Apps::Privileged.capable?(:ip_allowlist_exempt, app: app), "expected #{app} to not be IP allow list exempt"
+
+        @emu.oauth_access = app.grant(@emu)
+        enforcer = TestExternalConditionalAccessEnforcer.new(@emu, ip: "")
+
+        if @business.feature_enabled?(:external_conditional_access_inapplicable_empty_ip)
+          assert_inapplicable(enforcer, app)
+        else
+          exempt_log = {
+            "Body" => "Resource exemption status from external conditional access policy applicability",
+            "code.function" => "exempt_internal_github_resource?",
+            "gh.app.class" => app.class,
+            "gh.app.id" => app.id,
+            "gh.external_identities.cap_exemption" => "not exempted",
+            "gh.external_identities.internal_app_exempted" => false,
+            "gh.external_identities.internal_ip_exempted" => false,
+            "gh.external_identities.client_ip" => enforcer.actor_ip,
+          }
+          assert_logged **exempt_log do
+            external_cap_assert_applicable(enforcer, app)
+          end
+        end
+      end
+    end
+
+    context "skip_idp_ip_allowlist_app_access" do
+      test "no for oauth app if skip_idp_ip_allowlist_app_access is enabled" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+        @business.enable_skip_idp_ip_allowlist_app_access(actor: @owner)
+
+        configure_user_as_oauth_app @emu, ["repo"]
+        enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+
+        assert_inapplicable(enforcer, @user_repo)
+        assert_inapplicable(enforcer, @org_repo)
+      end
+
+      test "yes for oauth app if skip_idp_ip_allowlist_app_access is disabled" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+
+        configure_user_as_oauth_app @emu, ["repo"]
+        enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+
+        external_cap_assert_applicable(enforcer, @user_repo)
+        external_cap_assert_applicable(enforcer, @org_repo)
+      end
+
+      test "yes for PATs if skip_idp_ip_allowlist_app_access is disabled" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+
+        @emu.oauth_access = make_personal_access_token(@emu, "repo")
+        enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+
+        external_cap_assert_applicable(enforcer, @user_repo)
+        external_cap_assert_applicable(enforcer, @org_repo)
+      end
+
+      test "yes for PATs if skip_idp_ip_allowlist_app_access is enabled" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+        @business.enable_skip_idp_ip_allowlist_app_access(actor: @owner)
+
+        @emu.oauth_access = make_personal_access_token(@emu, "repo")
+        enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+
+        external_cap_assert_applicable(enforcer, @user_repo)
+        external_cap_assert_applicable(enforcer, @org_repo)
+      end
+    end
+
+    context "ip allow list configuration with idp settings enabled" do
+      test "no if business is github_based_ip_allowlist_configuration?" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::GITHUB)
+        assert_predicate @business, :github_based_ip_allowlist_configuration?
+        enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+
+        assert_inapplicable(enforcer, @user_repo)
+        assert_inapplicable(enforcer, @org_repo)
+      end
+
+      test "no if business disabled_ip_allowlist_configuration?" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::DISABLED)
+        assert_predicate @business, :disabled_ip_allowlist_configuration?
+        enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+
+        assert_inapplicable(enforcer, @user_repo)
+        assert_inapplicable(enforcer, @org_repo)
+      end
+
+      test "yes if business is idp_based_ip_allowlist_configuration?" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+        assert_predicate @business, :idp_based_ip_allowlist_configuration?
+        enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+
+        external_cap_assert_applicable(enforcer, @user_repo)
+        external_cap_assert_applicable(enforcer, @org_repo)
+      end
+
+      test "no for oauth app if skip_idp_ip_allowlist_app_access is enabled" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+
+        configure_user_as_oauth_app @emu, ["repo"]
+        @business.enable_skip_idp_ip_allowlist_app_access(actor: @owner)
+        enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+
+        assert_inapplicable(enforcer, @user_repo)
+        assert_inapplicable(enforcer, @org_repo)
+      end
+
+      test "yes for oauth app if skip_idp_ip_allowlist_app_access is disabled" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+
+        configure_user_as_oauth_app @emu, ["repo"]
+        enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+
+        external_cap_assert_applicable(enforcer, @user_repo)
+        external_cap_assert_applicable(enforcer, @org_repo)
+      end
+    end
+  end
+
+  context "multiple applicable" do
+    test "none when Platform::Errors::Execution is raised" do
+      policy = TestExternalConditionalAccessPolicy.new(actor: @emu)
+      TestExternalConditionalAccessPolicy.any_instance.stubs(:anonymous?).raises(Platform::Errors::Execution.new("MISSING_CONDITIONAL_ACCESS_ATTR", "request must provide an Actor in context"))
+
+      expected_log = {
+        "Body" => "Applicability of external conditional access policy for resources via filter raised Platform::Errors::Execution",
+        "code.function" => "multiple_external_conditional_access_policy_applicable",
+        "error.message" => "request must provide an Actor in context",
+      }
+
+      assert_logged **expected_log do
+        assert_same_elements [], policy.multiple_external_conditional_access_policy_applicable([@user_repo], @target_provider)
+      end
+    end
+
+    test "none when request is anonymous" do
+      policy = TestExternalConditionalAccessPolicy.new(anonymous: true)
+      assert_same_elements [], policy.multiple_external_conditional_access_policy_applicable([@user_repo], @target_provider)
+    end
+
+    test "none when actor is nil" do
+      configure_user_as_oauth_app @emu, ["repo"]
+      policy = TestExternalConditionalAccessPolicy.new
+
+      assert_same_elements [], policy.multiple_external_conditional_access_policy_applicable([@user_repo], @target_provider)
+    end
+
+    test "none for actor without business" do
+      owner = create :user
+      org = create(:organization, admin: owner)
+
+      configure_user_as_oauth_app owner, ["repo"]
+      policy = TestExternalConditionalAccessPolicy.new(actor: owner)
+
+      assert_same_elements [], policy.multiple_external_conditional_access_policy_applicable([org], @target_provider)
+    end
+
+    test "none when resource's business doesn't have an OIDC provider" do
+      biz_without_provider = create(:business, :enterprise_managed)
+      owner = biz_without_provider.find_first_emu_owner
+      org = create(:organization, business: biz_without_provider, admin: owner)
+      repo = create(:repository, owner: org)
+
+      policy = TestExternalConditionalAccessPolicy.new(actor: owner)
+      assert_same_elements [], policy.multiple_external_conditional_access_policy_applicable([repo], @target_provider)
+    end
+
+    test "none if actor is bot" do
+      @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+      installation = make_integration_installation(target: @business, permissions: { "enterprise_administration" => :write })
+      policy = TestExternalConditionalAccessPolicy.new(actor: installation)
+
+      assert_same_elements [], policy.multiple_external_conditional_access_policy_applicable([@user_repo, @org_repo], @target_provider)
+    end
+
+    test "none for first enterprise owner of EMU business" do
+      @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+      policy = TestExternalConditionalAccessPolicy.new(actor: @owner)
+
+      assert_same_elements [], policy.multiple_external_conditional_access_policy_applicable([@user_repo, @org_repo], @target_provider)
+    end
+
+    test "applicable to resources for a resource with a OIDC configured business when logged in through an OAuth app" do
+      @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+      configure_user_as_oauth_app @emu, ["repo"]
+      policy = TestExternalConditionalAccessPolicy.new(actor: @emu)
+
+      assert_same_elements [@user_repo, @org_repo], policy.multiple_external_conditional_access_policy_applicable([@user_repo, @org_repo], @target_provider)
+    end
+
+    test "none when configurable not enabled" do
+      @business.disable_idp_ip_allowlist_for_web(actor: @owner)
+      refute_predicate @business, :idp_ip_allowlist_for_web_configurable_enabled?
+
+      policy = TestExternalConditionalAccessPolicy.new(actor: @emu)
+
+      assert_same_elements [], policy.multiple_external_conditional_access_policy_applicable([@user_repo, @org_repo], @target_provider)
+    end
+
+    test "applicable when configurable enabled" do
+      @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+      assert_predicate @business, :idp_ip_allowlist_for_web_configurable_enabled?
+
+      policy = TestExternalConditionalAccessPolicy.new(actor: @emu)
+
+      assert_same_elements [@user_repo, @org_repo], policy.multiple_external_conditional_access_policy_applicable([@user_repo, @org_repo], @target_provider)
+    end
+
+    context "exempt_internal_github_resource?" do
+      test "none for GitHub internal IP" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+        @business.disable_skip_idp_ip_allowlist_app_access(actor: @owner)
+        @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+        app = create_privileged_app_with_capabilities(options: { owner: @business, visibility: "internal_visibility" })
+        refute Apps::Privileged.capable?(:ip_allowlist_exempt, app: app), "expected #{app} to not be IP allow list exempt"
+
+        @emu.oauth_access = app.grant(@emu)
+        policy = TestExternalConditionalAccessPolicy.new(actor: @emu, business: @business)
+        policy.actor_ip = "10.56.131.48" # 10.* are github internal IPs
+        policy.client_ip = "10.56.131.48" # 10.* are github internal IPs
+
+        exempt_log = {
+          "Body" => "Resource exemption status from external conditional access policy applicability",
+          "code.function" => "exempt_internal_github_resource?",
+          "gh.app.class" => @business.class,
+          "gh.app.id" => @business.id,
+          "gh.external_identities.cap_exemption" => "exempted",
+          "gh.external_identities.internal_app_exempted" => false,
+          "gh.external_identities.internal_ip_exempted" => true,
+          "gh.external_identities.client_ip" => "10.56.131.48",
+        }
+
+        assert_logged **exempt_log do
+          assert_same_elements [], policy.multiple_external_conditional_access_policy_applicable([app], @target_provider)
+        end
+      end
+
+      test "none for internal app with IP exempt" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+        @business.disable_skip_idp_ip_allowlist_app_access(actor: @owner)
+
+        @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+        app = create_privileged_app_with_capabilities(capabilities: { ip_allowlist_exempt: true }, options: { owner: @business, visibility: "internal_visibility" })
+        assert Apps::Privileged.capable?(:ip_allowlist_exempt, app: app), "expected #{app} to be IP allow list exempt"
+
+        @emu.oauth_access = app.grant(@emu)
+        policy = TestExternalConditionalAccessPolicy.new(actor: @emu, business: @business)
+
+        exempt_log = {
+          "Body" => "Resource exemption status from external conditional access policy applicability",
+          "code.function" => "exempt_internal_github_resource?",
+          "gh.app.class" => @business.class,
+          "gh.app.id" => @business.id,
+          "gh.external_identities.cap_exemption" => "exempted",
+          "gh.external_identities.internal_app_exempted" => true,
+          "gh.external_identities.internal_ip_exempted" => false,
+          "gh.external_identities.client_ip" => policy.actor_ip,
+        }
+
+        assert_logged **exempt_log do
+          assert_same_elements [], policy.multiple_external_conditional_access_policy_applicable([app], @target_provider)
+        end
+      end
+
+      test "applicable to resources for internal app without IP exempt" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+        @business.disable_skip_idp_ip_allowlist_app_access(actor: @owner)
+
+        @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+        app = create_privileged_app_with_capabilities(options: { owner: @business, visibility: "internal_visibility" })
+        refute Apps::Privileged.capable?(:ip_allowlist_exempt, app: app), "expected #{app} to not be IP allow list exempt"
+
+        @emu.oauth_access = app.grant(@emu)
+        policy = TestExternalConditionalAccessPolicy.new(actor: @emu, business: @business)
+
+        exempt_log = {
+          "Body" => "Resource exemption status from external conditional access policy applicability",
+          "code.function" => "exempt_internal_github_resource?",
+          "gh.app.class" => @business.class,
+          "gh.app.id" => @business.id,
+          "gh.external_identities.cap_exemption" => "not exempted",
+          "gh.external_identities.internal_app_exempted" => false,
+          "gh.external_identities.internal_ip_exempted" => false,
+          "gh.external_identities.client_ip" => policy.actor_ip,
+        }
+
+        assert_logged **exempt_log do
+          assert_same_elements [app], policy.multiple_external_conditional_access_policy_applicable([app], @target_provider)
+        end
+      end
+    end
+
+    context "skip_idp_ip_allowlist_app_access" do
+      test "none for oauth app if skip_idp_ip_allowlist_app_access is enabled" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+        @business.enable_skip_idp_ip_allowlist_app_access(actor: @owner)
+
+        @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+        configure_user_as_oauth_app @emu, ["repo"]
+        policy = TestExternalConditionalAccessPolicy.new(actor: @emu)
+
+        assert_same_elements [], policy.multiple_external_conditional_access_policy_applicable([@user_repo, @org_repo], @target_provider)
+      end
+
+      test "applicable to resources for oauth app if skip_idp_ip_allowlist_app_access is disabled" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+
+        @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+        configure_user_as_oauth_app @emu, ["repo"]
+        policy = TestExternalConditionalAccessPolicy.new(actor: @emu)
+
+        assert_same_elements [@user_repo, @org_repo], policy.multiple_external_conditional_access_policy_applicable([@user_repo, @org_repo], @target_provider)
+      end
+
+      test "applicable to resources for PATs if skip_idp_ip_allowlist_app_access is disabled" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+
+        @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+        @emu.oauth_access = make_personal_access_token(@emu, "repo")
+        policy = TestExternalConditionalAccessPolicy.new(actor: @emu)
+
+        assert_same_elements [@user_repo, @org_repo], policy.multiple_external_conditional_access_policy_applicable([@user_repo, @org_repo], @target_provider)
+      end
+
+      test "applicable to resources for PATs if skip_idp_ip_allowlist_app_access is enabled" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+        @business.enable_skip_idp_ip_allowlist_app_access(actor: @owner)
+
+        @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+        @emu.oauth_access = make_personal_access_token(@emu, "repo")
+        policy = TestExternalConditionalAccessPolicy.new(actor: @emu)
+
+        assert_same_elements [@user_repo, @org_repo], policy.multiple_external_conditional_access_policy_applicable([@user_repo, @org_repo], @target_provider)
+      end
+    end
+
+    context "ip allow list configuration with idp settings enabled" do
+      test "none if business is github_based_ip_allowlist_configuration?" do
+        @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::GITHUB)
+        assert_predicate @business, :github_based_ip_allowlist_configuration?
+        policy = TestExternalConditionalAccessPolicy.new(actor: @emu)
+
+        assert_same_elements [], policy.multiple_external_conditional_access_policy_applicable([@user_repo, @org_repo], @target_provider)
+      end
+
+      test "none if business disabled_ip_allowlist_configuration?" do
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::DISABLED)
+        assert_predicate @business, :disabled_ip_allowlist_configuration?
+        policy = TestExternalConditionalAccessPolicy.new(actor: @emu)
+
+        assert_same_elements [], policy.multiple_external_conditional_access_policy_applicable([@user_repo, @org_repo], @target_provider)
+      end
+
+      test "applicable to resources if business is idp_based_ip_allowlist_configuration?" do
+        @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+        assert_predicate @business, :idp_based_ip_allowlist_configuration?
+        policy = TestExternalConditionalAccessPolicy.new(actor: @emu)
+
+        assert_same_elements [@user_repo, @org_repo], policy.multiple_external_conditional_access_policy_applicable([@user_repo, @org_repo], @target_provider)
+      end
+
+      test "none for oauth app if skip_idp_ip_allowlist_app_access is enabled" do
+        @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+
+        configure_user_as_oauth_app @emu, ["repo"]
+        @business.enable_skip_idp_ip_allowlist_app_access(actor: @owner)
+        policy = TestExternalConditionalAccessPolicy.new(actor: @emu)
+
+        assert_same_elements [], policy.multiple_external_conditional_access_policy_applicable([@user_repo, @org_repo], @target_provider)
+      end
+
+      test "applicable to resources for oauth app if skip_idp_ip_allowlist_app_access is disabled" do
+        @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+        @business.update_ip_allowlist_configuration(actor: @owner, config_value: Configurable::IpAllowlistConfiguration::IDP)
+
+        configure_user_as_oauth_app @emu, ["repo"]
+        policy = TestExternalConditionalAccessPolicy.new(actor: @emu)
+
+        assert_same_elements [@user_repo, @org_repo], policy.multiple_external_conditional_access_policy_applicable([@user_repo, @org_repo], @target_provider)
+      end
+    end
+
+    context "logging" do
+      test "logs after business is derived from the actor" do
+        GitHub.context.push(request_id: SecureRandom.uuid)
+        expected_log = {
+          "Body" => "Applicability of external conditional access policy for resources via filter",
+          "code.function" => "multiple_external_conditional_access_policy_applicable",
+          "gh.request.id" => GitHub.context[:request_id],
+          "gh.business.name" => @business.slug,
+          "gh.actor.id" => @emu.id,
+          "gh.actor.login" => @emu.display_login,
+        }
+
+        @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+        policy = TestExternalConditionalAccessPolicy.new(actor: @emu)
+
+        assert_logged **expected_log do
+          policy.multiple_external_conditional_access_policy_applicable([@user_repo, @org_repo], @target_provider)
+        end
+      end
+    end
+  end
+
+  context "satisfied" do
+    test "no for actor without a refresh token" do
+      ExternalIdentityRefreshToken.destroy_all
+      policy = TestExternalConditionalAccessPolicy.new(actor: @emu)
+      enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+
+      assert_unsatisfied(enforcer, @user_repo)
+    end
+
+    test "no when cache is empty Azure doesn't return an HTTP 200" do
+      OIDC::CapValidator.stubs(:refresh_token_access_token_request).returns(Faraday::Response.new(status: 500))
+
+      expected_log_data = {
+        "code.function" => "external_cap.unsatisfied",
+        "http.status_code" => 500,
+        "gh.business.name" => @business.slug,
+        "enduser.id" => @emu,
+        "gh.external_identities.oid" => @emu.external_identities.first.external_id
+      }
+
+      enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+      assert_logged **expected_log_data do
+        external_cap_assert_unsatisfied_with_azure_failure(enforcer, @user_repo)
+      end
+      assert_equal 1, GitHub.dogstats.increments("external_identities.external_cap.unsatisfied").count
+    end
+
+    test "yes when cache is empty and Azure returns an HTTP 200" do
+      OIDC::CapValidator.stubs(:refresh_token_access_token_request).returns(Faraday::Response.new(status: 200, body: '{"token_type":"Bearer","scope":"profile openid email User.Read","expires_in":3741,"ext_expires_in":3741,"access_token":"eyJ0eXAiOiJKV1QiLCJub25jZSI6Ik5QQ3pJdndyUGpWakdlSlJQMTBMU2NaWGViOFRkNUdyMmsxMWlpM1Buc00iLCJhbGciOiJSUzI1NiIsIng1dCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCIsImtpZCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCJ9.eyJhdWQiOiIwMDAwMDAwMy0wMDAwLTAwMDAtYzAwMC0wMDAwMDAwMDAwMDAiLCJpc3MiOiJodHRwczovL3N0cy53aW5kb3dzLm5ldC84MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUvIiwiaWF0IjoxNjM4OTE2MTU1LCJuYmYiOjE2Mzg5MTYxNTUsImV4cCI6MTYzODkyMDE5NywiYWNjdCI6MCwiYWNyIjoiMSIsImFpbyI6IkUyWmdZTEI4dFdPdjN4dnhGT0cwNEdkZVpoSXhWbmxiOXpGdXViL2pTN2lsazhudmdyc0EiLCJhbXIiOlsicHdkIl0sImFwcF9kaXNwbGF5bmFtZSI6IkdpdEh1YiBPcGVuSUQgQ29ubmVjdCIsImFwcGlkIjoiMWVlOTk1MDgtZmViMS00NDE1LWIxYTUtNTdkNDFmMDllNmU5IiwiYXBwaWRhY3IiOiIyIiwiZmFtaWx5X25hbWUiOiJQcmVtYW5hdGgiLCJnaXZlbl9uYW1lIjoiSW5kcmFqaXRoIiwiaWR0eXAiOiJ1c2VyIiwiaXBhZGRyIjoiMjQuMTguMjU0LjEzNiIsIm5hbWUiOiJJbmRyYWppdGggUHJlbWFuYXRoIiwib2lkIjoiZmJmYzJjMWUtZmZhOS00MjdkLThiNzgtNGE1YTU3OWQ5YmEyIiwicGxhdGYiOiI1IiwicHVpZCI6IjEwMDMyMDAwRUYxRjE1QTEiLCJyaCI6IjAuQVhVQWZlUTVnSjZQZEUtdzZKSUJxbnBJbFFpVjZSNnhfaFZFc2FWWDFCOEo1dWwxQUVBLiIsInNjcCI6IlVzZXIuUmVhZCBwcm9maWxlIG9wZW5pZCBlbWFpbCIsInN1YiI6IjU3Y2VSaWpUbGZfNkhacHdIMTIwanFLRW5VM1JsN0Jsa1NoUkRzX190MW8iLCJ0ZW5hbnRfcmVnaW9uX3Njb3BlIjoiTkEiLCJ0aWQiOiI4MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUiLCJ1bmlxdWVfbmFtZSI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsInVwbiI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsInV0aSI6ImVKeFZQTjVOOFUyUWNZWWdpM0VEQUEiLCJ2ZXIiOiIxLjAiLCJ3aWRzIjpbIjYyZTkwMzk0LTY5ZjUtNDIzNy05MTkwLTAxMjE3NzE0NWUxMCIsImI3OWZiZjRkLTNlZjktNDY4OS04MTQzLTc2YjE5NGU4NTUwOSJdLCJ4bXNfc3QiOnsic3ViIjoiUFVqNTRTY2YtTXNzVEFYS2VIRTdXSmpLMVUtWTdqck5OUzNlLXB6ZnI0USJ9LCJ4bXNfdGNkdCI6MTYwMjgyMDkwN30.B7gI8Ivb6ewGzTdtyNcsy_Px4iGRbGZbWWLbLekXOeM-qxVKt9ym8Xlo52Bk0T-ePZsWwYPXWcueIgvct1oadBGIT4zjtTsKMwLkHobNKX4eZWqtxln5SKv6n6qiEh2iCmsmcCeDW6iMZqdFTqmuaxOBjRRbJ_sLo_2c_po8u8KGtqKGhgpOIrbI7T74MYf-9vqDMY-KCvPKuDQAuGO45SzMfNvwrZWqyvz2zLSf99nIiukby_w6bOq5g20h0lUgmNjcwj0q2ptLGKyfERMBf79ebC6nXzjy3mT-GYhOEZs6qIqKvJ9czYLuZ11L2sgZqawt5nS-5zG-FTN5li1uhA","refresh_token":"0.AXUAfeQ5gJ6PdE-w6JIBqnpIlQiV6R6x_hVEsaVX1B8J5ul1AEA.AgABAAAAAAD--DLA3VO7QrddgJg7WevrAgDs_wQA9P-Y4ZtUtziF22eTjRBynztBiiWLO15ff3aMwiPWyhsjC2ZRpbZKbIECJxlK8AVIef6keyHj8xT02Q14U4CkZogcqQuTAoJinkJrPq3wV4am8rTHo-TgTLNI16GhTwJbdOCHJ_8TK3sNpuVDCUUH2Aa1zzoMdQhezSt7w1DfJvjnyuYrYLG5vRP3vhYlnZr5wDOuyG-k1baxMvTVwwLoT9YF24_xgyNMj4cFGZyTBcqYxf9alNWRXbe7xYba9gviyDUVjeMul07edcvrpeI7GeSXNqh0qp1uYnKACLvLiAtkFaqF7FPF-oiwZ_Li9AFZ_Afpv5DuIwXvkit1BqYME0EEJ5PH0m13YZlzLCep0uuXMLBU0utRibl__FD8NCcSHLnELRDo1MfESTO4njurQXt5TRV9mFqFu0lRlSgRCcmrtfbJBd8XRs53sRWy-TtSqHYsKTktoU7bYtQe-i18cIiicQmr1qegWZpUwT7DHQDhQxsvnrYuIwEwssUCMz2Gdz2-JoJHi2GsR9dAHK3JziSe18fCOBP2IRgnIECRV7QYYck0hO-3ut84UpUur9DRNhTuoTJnqgKoDELDKcotn1pM6LG-5e30DZ0M-eIoP0xBM9t36ChNR7WULFmMeNaDDYOLDJ3a-boqtsqlltjw8fEM1ISoP_LCYnkmRkmPZTMc0YPVxUtFkPbmzcZHH-w38QaKL5cmQtrcYFwCs-vOuD9Gk--6NPyanr79K18ZC2MpSH8kiL0JO71MS-tz3H19WSF6_86fycWQtXsUPlU1BEXVaUeJgO8fZh7DOYkQuM7vqPLZPQE5EzQPsXIlYMGX4AzEE3YaW_Vk-vktbk9a9ZITxGOvolhK2rSPatx5poOIelvGl-cr-u2O-myY3oW25W55NH0cNwuHqqIimlXUjJ1sc7V7dm-0T0MF3AgyqiTITHDZ3JP37UgYlNBIId06c8aBwXrt3LwIMp937xkHE_66cqYYr9Hn83FfvrOZWYyN5g","id_token":"eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImtpZCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCJ9.eyJhdWQiOiIxZWU5OTUwOC1mZWIxLTQ0MTUtYjFhNS01N2Q0MWYwOWU2ZTkiLCJpc3MiOiJodHRwczovL2xvZ2luLm1pY3Jvc29mdG9ubGluZS5jb20vODAzOWU0N2QtOGY5ZS00Zjc0LWIwZTgtOTIwMWFhN2E0ODk1L3YyLjAiLCJpYXQiOjE2Mzg5MTYxNTUsIm5iZiI6MTYzODkxNjE1NSwiZXhwIjoxNjM4OTIwMDU1LCJlbWFpbCI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsIm5hbWUiOiJJbmRyYWppdGggUHJlbWFuYXRoIiwibm9uY2UiOiJscEt3cmJhbVd3MnlaSzNrTFpMNEJMVnhWRGlld2VVZHhSSkxFMFRiNUJKVzdtLTFHVjRoVVEiLCJvaWQiOiJmYmZjMmMxZS1mZmE5LTQyN2QtOGI3OC00YTVhNTc5ZDliYTIiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJpbnByZW1hbkBnaGVtdS5vbm1pY3Jvc29mdC5jb20iLCJyaCI6IjAuQVhVQWZlUTVnSjZQZEUtdzZKSUJxbnBJbFFpVjZSNnhfaFZFc2FWWDFCOEo1dWwxQUVBLiIsInN1YiI6IlBVajU0U2NmLU1zc1RBWEtlSEU3V0pqSzFVLVk3anJOTlMzZS1wemZyNFEiLCJ0aWQiOiI4MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUiLCJ1dGkiOiJlSnhWUE41TjhVMlFjWVlnaTNFREFBIiwidmVyIjoiMi4wIn0.Cq83HF3zFE-35N5LQw3B3Bckw875hBn4oSd1_lLpgesIJG9mTAwZzlcIaQrfwq8vGr2fwW-8_R0cbATqerBk_IEufqWakodKSTmq0YnHL6D1l_hN8loqc9Xog8tWPJXZO7nc6tuz1uW2tTXanqRfRmuTNEGoXtQCl9O0Xf0nstn3nujl0azMyzV58Vx4yjkpw8aGXX40JkLji-m7Z50fn8JCCeOsk8lmZ-a2BgmjTzhSif5jQ1oKnlLfOFYZiwi_PO5DSd7j0NyTlERG-rHLXdZbqOSIFucUV7nfGh-G-CjqNhmCRLyoODOeLe71XaBs3B3ofF_WiJu1PhBUDDy1bQ"}'))
+
+      enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+      external_cap_assert_satisfied_with_azure_success(enforcer, @user_repo)
+      key = @business.feature_enabled?(:use_cap_validator_cache_class) ? OIDC::CapValidatorCache.cache_key(@ei, enforcer.actor_ip) : OIDC::CapValidator.cache_key(@ei, enforcer.actor_ip)
+      run_processor(GitHub::StreamProcessors::RefreshTokenProcessor.new, allowed_primary_query_count: 1)
+      assert_equal "true", ExternalIdentities::KV.get(key).value { nil }
+    end
+
+    test "yes when cache is full" do
+      # This stub is here to demonstrate that if the cache is full, we are not making a request to the IDP
+      OIDC::CapValidator.stubs(:refresh_token_access_token_request).returns(Faraday::Response.new(status: 500))
+
+      enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+      # Filling the cache manually
+      key = @business.feature_enabled?(:use_cap_validator_cache_class) ? OIDC::CapValidatorCache.cache_key(@ei, enforcer.actor_ip) : OIDC::CapValidator.cache_key(@ei, enforcer.actor_ip)
+      ExternalIdentities::KV.set(key, "true", expires: 1.hour.from_now)
+      Timecop::freeze(58.minutes.from_now) do
+        assert_satisfied(enforcer, @user_repo)
+        assert_equal "true", ExternalIdentities::KV.get(key).value { nil }
+        assert_in_delta 2.minutes.from_now.utc, ExternalIdentities::KV.ttl(key).value { nil }.utc, 5
+      end
+    end
+
+    test "yes when cache is full with logging" do
+      # This stub is here to demonstrate that if the cache is full, we are not making a request to the IDP
+      OIDC::CapValidator.stubs(:refresh_token_access_token_request).returns(Faraday::Response.new(status: 500))
+
+      enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+
+      expected_log_data = {
+        "code.function" => "external_cap.satisfied_cache",
+        "gh.business.name" => @business.slug,
+        "enduser.id" => @ei.user.login,
+        "gh.external_identities.oid" => @ei.external_id,
+        "gh.external_identities.client_ip" => enforcer.actor_ip
+      }
+
+      # Filling the cache manually
+      key = @business.feature_enabled?(:use_cap_validator_cache_class) ? OIDC::CapValidatorCache.cache_key(@ei, enforcer.actor_ip) : OIDC::CapValidator.cache_key(@ei, enforcer.actor_ip)
+      ExternalIdentities::KV.set(key, "true", expires: 1.hour.from_now)
+      Timecop::freeze(58.minutes.from_now) do
+        assert_logged **expected_log_data do
+          assert_satisfied(enforcer, @user_repo)
+        end
+
+        assert_equal "true", ExternalIdentities::KV.get(key).value { nil }
+        assert_in_delta 2.minutes.from_now.utc, ExternalIdentities::KV.ttl(key).value { nil }.utc, 5
+      end
+      assert_equal 1, GitHub.dogstats.increments("external_identities.external_cap.satisfied_cache").count
+    end
+
+    test "no when cache is yes but skipped and the request fails for staff owned enterprise" do
+      disable_feature_flag(:oidc_cap_validator_caching_stop_checking_for_staff_ownership)
+      OIDC::CapValidator.stubs(:refresh_token_access_token_request).returns(Faraday::Response.new(status: 500))
+
+      enforcer = TestExternalConditionalAccessEnforcer.new(@staff_owned_emu)
+      # Filling the cache manually
+      key = @staff_owned_business.feature_enabled?(:use_cap_validator_cache_class) ? OIDC::CapValidatorCache.cache_key(@staff_owned_ei, enforcer.actor_ip) : OIDC::CapValidator.cache_key(@staff_owned_ei, enforcer.actor_ip)
+      assert_nil ExternalIdentities::KV.get(key).value { nil }
+      run_processor(GitHub::StreamProcessors::RefreshTokenProcessor.new, allowed_primary_query_count: 1)
+      ExternalIdentities::KV.set(key, "true", expires: 1.hour.from_now)
+      Timecop::freeze(58.minutes.from_now) do
+        external_cap_assert_unsatisfied_with_azure_failure(enforcer, @staff_owned_user_repo)
+      end
+    end
+
+    test "no when cache is yes but skipped and the request fails for enterprise managed business with ff enabled" do
+      enable_feature_flag(:disable_oidc_cap_cache, @business)
+      OIDC::CapValidator.stubs(:refresh_token_access_token_request).returns(Faraday::Response.new(status: 500))
+
+      enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+      # Filling the cache manually
+      key = @business.feature_enabled?(:use_cap_validator_cache_class) ? OIDC::CapValidatorCache.cache_key(@ei, enforcer.actor_ip) : OIDC::CapValidator.cache_key(@ei, enforcer.actor_ip)
+      ExternalIdentities::KV.set(key, "true", expires: 1.hour.from_now)
+      Timecop::freeze(58.minutes.from_now) do
+        external_cap_assert_unsatisfied_with_azure_failure(enforcer, @user_repo)
+      end
+    end
+
+    test "yes when cache is unavailable and Azure returns an HTTP 200" do
+      OIDC::CapValidator.stubs(:refresh_token_access_token_request).returns(Faraday::Response.new(status: 200, body: '{"token_type":"Bearer","scope":"profile openid email User.Read","expires_in":3741,"ext_expires_in":3741,"access_token":"eyJ0eXAiOiJKV1QiLCJub25jZSI6Ik5QQ3pJdndyUGpWakdlSlJQMTBMU2NaWGViOFRkNUdyMmsxMWlpM1Buc00iLCJhbGciOiJSUzI1NiIsIng1dCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCIsImtpZCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCJ9.eyJhdWQiOiIwMDAwMDAwMy0wMDAwLTAwMDAtYzAwMC0wMDAwMDAwMDAwMDAiLCJpc3MiOiJodHRwczovL3N0cy53aW5kb3dzLm5ldC84MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUvIiwiaWF0IjoxNjM4OTE2MTU1LCJuYmYiOjE2Mzg5MTYxNTUsImV4cCI6MTYzODkyMDE5NywiYWNjdCI6MCwiYWNyIjoiMSIsImFpbyI6IkUyWmdZTEI4dFdPdjN4dnhGT0cwNEdkZVpoSXhWbmxiOXpGdXViL2pTN2lsazhudmdyc0EiLCJhbXIiOlsicHdkIl0sImFwcF9kaXNwbGF5bmFtZSI6IkdpdEh1YiBPcGVuSUQgQ29ubmVjdCIsImFwcGlkIjoiMWVlOTk1MDgtZmViMS00NDE1LWIxYTUtNTdkNDFmMDllNmU5IiwiYXBwaWRhY3IiOiIyIiwiZmFtaWx5X25hbWUiOiJQcmVtYW5hdGgiLCJnaXZlbl9uYW1lIjoiSW5kcmFqaXRoIiwiaWR0eXAiOiJ1c2VyIiwiaXBhZGRyIjoiMjQuMTguMjU0LjEzNiIsIm5hbWUiOiJJbmRyYWppdGggUHJlbWFuYXRoIiwib2lkIjoiZmJmYzJjMWUtZmZhOS00MjdkLThiNzgtNGE1YTU3OWQ5YmEyIiwicGxhdGYiOiI1IiwicHVpZCI6IjEwMDMyMDAwRUYxRjE1QTEiLCJyaCI6IjAuQVhVQWZlUTVnSjZQZEUtdzZKSUJxbnBJbFFpVjZSNnhfaFZFc2FWWDFCOEo1dWwxQUVBLiIsInNjcCI6IlVzZXIuUmVhZCBwcm9maWxlIG9wZW5pZCBlbWFpbCIsInN1YiI6IjU3Y2VSaWpUbGZfNkhacHdIMTIwanFLRW5VM1JsN0Jsa1NoUkRzX190MW8iLCJ0ZW5hbnRfcmVnaW9uX3Njb3BlIjoiTkEiLCJ0aWQiOiI4MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUiLCJ1bmlxdWVfbmFtZSI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsInVwbiI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsInV0aSI6ImVKeFZQTjVOOFUyUWNZWWdpM0VEQUEiLCJ2ZXIiOiIxLjAiLCJ3aWRzIjpbIjYyZTkwMzk0LTY5ZjUtNDIzNy05MTkwLTAxMjE3NzE0NWUxMCIsImI3OWZiZjRkLTNlZjktNDY4OS04MTQzLTc2YjE5NGU4NTUwOSJdLCJ4bXNfc3QiOnsic3ViIjoiUFVqNTRTY2YtTXNzVEFYS2VIRTdXSmpLMVUtWTdqck5OUzNlLXB6ZnI0USJ9LCJ4bXNfdGNkdCI6MTYwMjgyMDkwN30.B7gI8Ivb6ewGzTdtyNcsy_Px4iGRbGZbWWLbLekXOeM-qxVKt9ym8Xlo52Bk0T-ePZsWwYPXWcueIgvct1oadBGIT4zjtTsKMwLkHobNKX4eZWqtxln5SKv6n6qiEh2iCmsmcCeDW6iMZqdFTqmuaxOBjRRbJ_sLo_2c_po8u8KGtqKGhgpOIrbI7T74MYf-9vqDMY-KCvPKuDQAuGO45SzMfNvwrZWqyvz2zLSf99nIiukby_w6bOq5g20h0lUgmNjcwj0q2ptLGKyfERMBf79ebC6nXzjy3mT-GYhOEZs6qIqKvJ9czYLuZ11L2sgZqawt5nS-5zG-FTN5li1uhA","refresh_token":"0.AXUAfeQ5gJ6PdE-w6JIBqnpIlQiV6R6x_hVEsaVX1B8J5ul1AEA.AgABAAAAAAD--DLA3VO7QrddgJg7WevrAgDs_wQA9P-Y4ZtUtziF22eTjRBynztBiiWLO15ff3aMwiPWyhsjC2ZRpbZKbIECJxlK8AVIef6keyHj8xT02Q14U4CkZogcqQuTAoJinkJrPq3wV4am8rTHo-TgTLNI16GhTwJbdOCHJ_8TK3sNpuVDCUUH2Aa1zzoMdQhezSt7w1DfJvjnyuYrYLG5vRP3vhYlnZr5wDOuyG-k1baxMvTVwwLoT9YF24_xgyNMj4cFGZyTBcqYxf9alNWRXbe7xYba9gviyDUVjeMul07edcvrpeI7GeSXNqh0qp1uYnKACLvLiAtkFaqF7FPF-oiwZ_Li9AFZ_Afpv5DuIwXvkit1BqYME0EEJ5PH0m13YZlzLCep0uuXMLBU0utRibl__FD8NCcSHLnELRDo1MfESTO4njurQXt5TRV9mFqFu0lRlSgRCcmrtfbJBd8XRs53sRWy-TtSqHYsKTktoU7bYtQe-i18cIiicQmr1qegWZpUwT7DHQDhQxsvnrYuIwEwssUCMz2Gdz2-JoJHi2GsR9dAHK3JziSe18fCOBP2IRgnIECRV7QYYck0hO-3ut84UpUur9DRNhTuoTJnqgKoDELDKcotn1pM6LG-5e30DZ0M-eIoP0xBM9t36ChNR7WULFmMeNaDDYOLDJ3a-boqtsqlltjw8fEM1ISoP_LCYnkmRkmPZTMc0YPVxUtFkPbmzcZHH-w38QaKL5cmQtrcYFwCs-vOuD9Gk--6NPyanr79K18ZC2MpSH8kiL0JO71MS-tz3H19WSF6_86fycWQtXsUPlU1BEXVaUeJgO8fZh7DOYkQuM7vqPLZPQE5EzQPsXIlYMGX4AzEE3YaW_Vk-vktbk9a9ZITxGOvolhK2rSPatx5poOIelvGl-cr-u2O-myY3oW25W55NH0cNwuHqqIimlXUjJ1sc7V7dm-0T0MF3AgyqiTITHDZ3JP37UgYlNBIId06c8aBwXrt3LwIMp937xkHE_66cqYYr9Hn83FfvrOZWYyN5g","id_token":"eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImtpZCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCJ9.eyJhdWQiOiIxZWU5OTUwOC1mZWIxLTQ0MTUtYjFhNS01N2Q0MWYwOWU2ZTkiLCJpc3MiOiJodHRwczovL2xvZ2luLm1pY3Jvc29mdG9ubGluZS5jb20vODAzOWU0N2QtOGY5ZS00Zjc0LWIwZTgtOTIwMWFhN2E0ODk1L3YyLjAiLCJpYXQiOjE2Mzg5MTYxNTUsIm5iZiI6MTYzODkxNjE1NSwiZXhwIjoxNjM4OTIwMDU1LCJlbWFpbCI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsIm5hbWUiOiJJbmRyYWppdGggUHJlbWFuYXRoIiwibm9uY2UiOiJscEt3cmJhbVd3MnlaSzNrTFpMNEJMVnhWRGlld2VVZHhSSkxFMFRiNUJKVzdtLTFHVjRoVVEiLCJvaWQiOiJmYmZjMmMxZS1mZmE5LTQyN2QtOGI3OC00YTVhNTc5ZDliYTIiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJpbnByZW1hbkBnaGVtdS5vbm1pY3Jvc29mdC5jb20iLCJyaCI6IjAuQVhVQWZlUTVnSjZQZEUtdzZKSUJxbnBJbFFpVjZSNnhfaFZFc2FWWDFCOEo1dWwxQUVBLiIsInN1YiI6IlBVajU0U2NmLU1zc1RBWEtlSEU3V0pqSzFVLVk3anJOTlMzZS1wemZyNFEiLCJ0aWQiOiI4MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUiLCJ1dGkiOiJlSnhWUE41TjhVMlFjWVlnaTNFREFBIiwidmVyIjoiMi4wIn0.Cq83HF3zFE-35N5LQw3B3Bckw875hBn4oSd1_lLpgesIJG9mTAwZzlcIaQrfwq8vGr2fwW-8_R0cbATqerBk_IEufqWakodKSTmq0YnHL6D1l_hN8loqc9Xog8tWPJXZO7nc6tuz1uW2tTXanqRfRmuTNEGoXtQCl9O0Xf0nstn3nujl0azMyzV58Vx4yjkpw8aGXX40JkLji-m7Z50fn8JCCeOsk8lmZ-a2BgmjTzhSif5jQ1oKnlLfOFYZiwi_PO5DSd7j0NyTlERG-rHLXdZbqOSIFucUV7nfGh-G-CjqNhmCRLyoODOeLe71XaBs3B3ofF_WiJu1PhBUDDy1bQ"}'))
+      ExternalIdentities::KV.stubs(:set).raises(GitHub::KV::UnavailableError)
+
+      enforcer = TestExternalConditionalAccessEnforcer.new(@emu)
+      external_cap_assert_satisfied_with_azure_success(enforcer, @user_repo)
+    end
+
+    test "no when ip is empty when :use_cap_validator_cache_class enabled" do
+      policy = TestExternalConditionalAccessPolicy.new(actor: @emu, business: @business)
+      policy.actor_ip = ""
+      policy.client_ip = ""
+
+      if TestEnv.test_all_features?
+        OIDC::CapValidator.expects(:refresh_token_access_token_request).never
+        assert_equal :no, policy.external_conditional_access_policy_satisfied(resource: @user_repo, target_provider: @target_provider)
+      else
+        OIDC::CapValidator.stubs(:oidc_token_url).returns("url")
+        # this shows that the codepath in prod right now for an empty ip
+        # ends up calling the refresh_token_access_token_request with params built from a nil ip
+        OIDC::CapValidator.expects(:refresh_token_params).with(has_entry(:client_ip, "")).returns({})
+        # assuming that the IdP returns a 200 response with a nil IP, since we know that customers currently aren't experiencing "blocked by Conditional Access Policies" in this case
+        OIDC::CapValidator.expects(:get_access_token_with_retry).returns(Faraday::Response.new(status: 200, body: '{"token_type":"Bearer","scope":"profile openid email User.Read","expires_in":3741,"ext_expires_in":3741,"access_token":"eyJ0eXAiOiJKV1QiLCJub25jZSI6Ik5QQ3pJdndyUGpWakdlSlJQMTBMU2NaWGViOFRkNUdyMmsxMWlpM1Buc00iLCJhbGciOiJSUzI1NiIsIng1dCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCIsImtpZCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCJ9.eyJhdWQiOiIwMDAwMDAwMy0wMDAwLTAwMDAtYzAwMC0wMDAwMDAwMDAwMDAiLCJpc3MiOiJodHRwczovL3N0cy53aW5kb3dzLm5ldC84MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUvIiwiaWF0IjoxNjM4OTE2MTU1LCJuYmYiOjE2Mzg5MTYxNTUsImV4cCI6MTYzODkyMDE5NywiYWNjdCI6MCwiYWNyIjoiMSIsImFpbyI6IkUyWmdZTEI4dFdPdjN4dnhGT0cwNEdkZVpoSXhWbmxiOXpGdXViL2pTN2lsazhudmdyc0EiLCJhbXIiOlsicHdkIl0sImFwcF9kaXNwbGF5bmFtZSI6IkdpdEh1YiBPcGVuSUQgQ29ubmVjdCIsImFwcGlkIjoiMWVlOTk1MDgtZmViMS00NDE1LWIxYTUtNTdkNDFmMDllNmU5IiwiYXBwaWRhY3IiOiIyIiwiZmFtaWx5X25hbWUiOiJQcmVtYW5hdGgiLCJnaXZlbl9uYW1lIjoiSW5kcmFqaXRoIiwiaWR0eXAiOiJ1c2VyIiwiaXBhZGRyIjoiMjQuMTguMjU0LjEzNiIsIm5hbWUiOiJJbmRyYWppdGggUHJlbWFuYXRoIiwib2lkIjoiZmJmYzJjMWUtZmZhOS00MjdkLThiNzgtNGE1YTU3OWQ5YmEyIiwicGxhdGYiOiI1IiwicHVpZCI6IjEwMDMyMDAwRUYxRjE1QTEiLCJyaCI6IjAuQVhVQWZlUTVnSjZQZEUtdzZKSUJxbnBJbFFpVjZSNnhfaFZFc2FWWDFCOEo1dWwxQUVBLiIsInNjcCI6IlVzZXIuUmVhZCBwcm9maWxlIG9wZW5pZCBlbWFpbCIsInN1YiI6IjU3Y2VSaWpUbGZfNkhacHdIMTIwanFLRW5VM1JsN0Jsa1NoUkRzX190MW8iLCJ0ZW5hbnRfcmVnaW9uX3Njb3BlIjoiTkEiLCJ0aWQiOiI4MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUiLCJ1bmlxdWVfbmFtZSI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsInVwbiI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsInV0aSI6ImVKeFZQTjVOOFUyUWNZWWdpM0VEQUEiLCJ2ZXIiOiIxLjAiLCJ3aWRzIjpbIjYyZTkwMzk0LTY5ZjUtNDIzNy05MTkwLTAxMjE3NzE0NWUxMCIsImI3OWZiZjRkLTNlZjktNDY4OS04MTQzLTc2YjE5NGU4NTUwOSJdLCJ4bXNfc3QiOnsic3ViIjoiUFVqNTRTY2YtTXNzVEFYS2VIRTdXSmpLMVUtWTdqck5OUzNlLXB6ZnI0USJ9LCJ4bXNfdGNkdCI6MTYwMjgyMDkwN30.B7gI8Ivb6ewGzTdtyNcsy_Px4iGRbGZbWWLbLekXOeM-qxVKt9ym8Xlo52Bk0T-ePZsWwYPXWcueIgvct1oadBGIT4zjtTsKMwLkHobNKX4eZWqtxln5SKv6n6qiEh2iCmsmcCeDW6iMZqdFTqmuaxOBjRRbJ_sLo_2c_po8u8KGtqKGhgpOIrbI7T74MYf-9vqDMY-KCvPKuDQAuGO45SzMfNvwrZWqyvz2zLSf99nIiukby_w6bOq5g20h0lUgmNjcwj0q2ptLGKyfERMBf79ebC6nXzjy3mT-GYhOEZs6qIqKvJ9czYLuZ11L2sgZqawt5nS-5zG-FTN5li1uhA","refresh_token":"0.AXUAfeQ5gJ6PdE-w6JIBqnpIlQiV6R6x_hVEsaVX1B8J5ul1AEA.AgABAAAAAAD--DLA3VO7QrddgJg7WevrAgDs_wQA9P-Y4ZtUtziF22eTjRBynztBiiWLO15ff3aMwiPWyhsjC2ZRpbZKbIECJxlK8AVIef6keyHj8xT02Q14U4CkZogcqQuTAoJinkJrPq3wV4am8rTHo-TgTLNI16GhTwJbdOCHJ_8TK3sNpuVDCUUH2Aa1zzoMdQhezSt7w1DfJvjnyuYrYLG5vRP3vhYlnZr5wDOuyG-k1baxMvTVwwLoT9YF24_xgyNMj4cFGZyTBcqYxf9alNWRXbe7xYba9gviyDUVjeMul07edcvrpeI7GeSXNqh0qp1uYnKACLvLiAtkFaqF7FPF-oiwZ_Li9AFZ_Afpv5DuIwXvkit1BqYME0EEJ5PH0m13YZlzLCep0uuXMLBU0utRibl__FD8NCcSHLnELRDo1MfESTO4njurQXt5TRV9mFqFu0lRlSgRCcmrtfbJBd8XRs53sRWy-TtSqHYsKTktoU7bYtQe-i18cIiicQmr1qegWZpUwT7DHQDhQxsvnrYuIwEwssUCMz2Gdz2-JoJHi2GsR9dAHK3JziSe18fCOBP2IRgnIECRV7QYYck0hO-3ut84UpUur9DRNhTuoTJnqgKoDELDKcotn1pM6LG-5e30DZ0M-eIoP0xBM9t36ChNR7WULFmMeNaDDYOLDJ3a-boqtsqlltjw8fEM1ISoP_LCYnkmRkmPZTMc0YPVxUtFkPbmzcZHH-w38QaKL5cmQtrcYFwCs-vOuD9Gk--6NPyanr79K18ZC2MpSH8kiL0JO71MS-tz3H19WSF6_86fycWQtXsUPlU1BEXVaUeJgO8fZh7DOYkQuM7vqPLZPQE5EzQPsXIlYMGX4AzEE3YaW_Vk-vktbk9a9ZITxGOvolhK2rSPatx5poOIelvGl-cr-u2O-myY3oW25W55NH0cNwuHqqIimlXUjJ1sc7V7dm-0T0MF3AgyqiTITHDZ3JP37UgYlNBIId06c8aBwXrt3LwIMp937xkHE_66cqYYr9Hn83FfvrOZWYyN5g","id_token":"eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImtpZCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCJ9.eyJhdWQiOiIxZWU5OTUwOC1mZWIxLTQ0MTUtYjFhNS01N2Q0MWYwOWU2ZTkiLCJpc3MiOiJodHRwczovL2xvZ2luLm1pY3Jvc29mdG9ubGluZS5jb20vODAzOWU0N2QtOGY5ZS00Zjc0LWIwZTgtOTIwMWFhN2E0ODk1L3YyLjAiLCJpYXQiOjE2Mzg5MTYxNTUsIm5iZiI6MTYzODkxNjE1NSwiZXhwIjoxNjM4OTIwMDU1LCJlbWFpbCI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsIm5hbWUiOiJJbmRyYWppdGggUHJlbWFuYXRoIiwibm9uY2UiOiJscEt3cmJhbVd3MnlaSzNrTFpMNEJMVnhWRGlld2VVZHhSSkxFMFRiNUJKVzdtLTFHVjRoVVEiLCJvaWQiOiJmYmZjMmMxZS1mZmE5LTQyN2QtOGI3OC00YTVhNTc5ZDliYTIiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJpbnByZW1hbkBnaGVtdS5vbm1pY3Jvc29mdC5jb20iLCJyaCI6IjAuQVhVQWZlUTVnSjZQZEUtdzZKSUJxbnBJbFFpVjZSNnhfaFZFc2FWWDFCOEo1dWwxQUVBLiIsInN1YiI6IlBVajU0U2NmLU1zc1RBWEtlSEU3V0pqSzFVLVk3anJOTlMzZS1wemZyNFEiLCJ0aWQiOiI4MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUiLCJ1dGkiOiJlSnhWUE41TjhVMlFjWVlnaTNFREFBIiwidmVyIjoiMi4wIn0.Cq83HF3zFE-35N5LQw3B3Bckw875hBn4oSd1_lLpgesIJG9mTAwZzlcIaQrfwq8vGr2fwW-8_R0cbATqerBk_IEufqWakodKSTmq0YnHL6D1l_hN8loqc9Xog8tWPJXZO7nc6tuz1uW2tTXanqRfRmuTNEGoXtQCl9O0Xf0nstn3nujl0azMyzV58Vx4yjkpw8aGXX40JkLji-m7Z50fn8JCCeOsk8lmZ-a2BgmjTzhSif5jQ1oKnlLfOFYZiwi_PO5DSd7j0NyTlERG-rHLXdZbqOSIFucUV7nfGh-G-CjqNhmCRLyoODOeLe71XaBs3B3ofF_WiJu1PhBUDDy1bQ"}'))
+        assert_equal :yes, policy.external_conditional_access_policy_satisfied(resource: @user_repo, target_provider: @target_provider)
+      end
+    end
+
+    test "no when ip is nil when :use_cap_validator_cache_class enabled" do
+      policy = TestExternalConditionalAccessPolicy.new(actor: @emu, business: @business)
+      policy.actor_ip = nil
+      policy.client_ip = nil
+
+      if TestEnv.test_all_features?
+        OIDC::CapValidator.expects(:refresh_token_access_token_request).never
+        assert_equal :no, policy.external_conditional_access_policy_satisfied(resource: @user_repo, target_provider: @target_provider)
+      else
+        OIDC::CapValidator.stubs(:oidc_token_url).returns("url")
+        # this shows that the codepath in prod right now for an empty ip
+        # ends up calling the refresh_token_access_token_request with params built from a nil ip
+        OIDC::CapValidator.expects(:refresh_token_params).with(has_entry(:client_ip, nil)).returns({})
+        # assuming that the IdP returns a 200 response with a nil IP, since we know that customers currently aren't experiencing "blocked by Conditional Access Policies" in this case
+        OIDC::CapValidator.expects(:get_access_token_with_retry).returns(Faraday::Response.new(status: 200, body: '{"token_type":"Bearer","scope":"profile openid email User.Read","expires_in":3741,"ext_expires_in":3741,"access_token":"eyJ0eXAiOiJKV1QiLCJub25jZSI6Ik5QQ3pJdndyUGpWakdlSlJQMTBMU2NaWGViOFRkNUdyMmsxMWlpM1Buc00iLCJhbGciOiJSUzI1NiIsIng1dCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCIsImtpZCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCJ9.eyJhdWQiOiIwMDAwMDAwMy0wMDAwLTAwMDAtYzAwMC0wMDAwMDAwMDAwMDAiLCJpc3MiOiJodHRwczovL3N0cy53aW5kb3dzLm5ldC84MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUvIiwiaWF0IjoxNjM4OTE2MTU1LCJuYmYiOjE2Mzg5MTYxNTUsImV4cCI6MTYzODkyMDE5NywiYWNjdCI6MCwiYWNyIjoiMSIsImFpbyI6IkUyWmdZTEI4dFdPdjN4dnhGT0cwNEdkZVpoSXhWbmxiOXpGdXViL2pTN2lsazhudmdyc0EiLCJhbXIiOlsicHdkIl0sImFwcF9kaXNwbGF5bmFtZSI6IkdpdEh1YiBPcGVuSUQgQ29ubmVjdCIsImFwcGlkIjoiMWVlOTk1MDgtZmViMS00NDE1LWIxYTUtNTdkNDFmMDllNmU5IiwiYXBwaWRhY3IiOiIyIiwiZmFtaWx5X25hbWUiOiJQcmVtYW5hdGgiLCJnaXZlbl9uYW1lIjoiSW5kcmFqaXRoIiwiaWR0eXAiOiJ1c2VyIiwiaXBhZGRyIjoiMjQuMTguMjU0LjEzNiIsIm5hbWUiOiJJbmRyYWppdGggUHJlbWFuYXRoIiwib2lkIjoiZmJmYzJjMWUtZmZhOS00MjdkLThiNzgtNGE1YTU3OWQ5YmEyIiwicGxhdGYiOiI1IiwicHVpZCI6IjEwMDMyMDAwRUYxRjE1QTEiLCJyaCI6IjAuQVhVQWZlUTVnSjZQZEUtdzZKSUJxbnBJbFFpVjZSNnhfaFZFc2FWWDFCOEo1dWwxQUVBLiIsInNjcCI6IlVzZXIuUmVhZCBwcm9maWxlIG9wZW5pZCBlbWFpbCIsInN1YiI6IjU3Y2VSaWpUbGZfNkhacHdIMTIwanFLRW5VM1JsN0Jsa1NoUkRzX190MW8iLCJ0ZW5hbnRfcmVnaW9uX3Njb3BlIjoiTkEiLCJ0aWQiOiI4MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUiLCJ1bmlxdWVfbmFtZSI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsInVwbiI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsInV0aSI6ImVKeFZQTjVOOFUyUWNZWWdpM0VEQUEiLCJ2ZXIiOiIxLjAiLCJ3aWRzIjpbIjYyZTkwMzk0LTY5ZjUtNDIzNy05MTkwLTAxMjE3NzE0NWUxMCIsImI3OWZiZjRkLTNlZjktNDY4OS04MTQzLTc2YjE5NGU4NTUwOSJdLCJ4bXNfc3QiOnsic3ViIjoiUFVqNTRTY2YtTXNzVEFYS2VIRTdXSmpLMVUtWTdqck5OUzNlLXB6ZnI0USJ9LCJ4bXNfdGNkdCI6MTYwMjgyMDkwN30.B7gI8Ivb6ewGzTdtyNcsy_Px4iGRbGZbWWLbLekXOeM-qxVKt9ym8Xlo52Bk0T-ePZsWwYPXWcueIgvct1oadBGIT4zjtTsKMwLkHobNKX4eZWqtxln5SKv6n6qiEh2iCmsmcCeDW6iMZqdFTqmuaxOBjRRbJ_sLo_2c_po8u8KGtqKGhgpOIrbI7T74MYf-9vqDMY-KCvPKuDQAuGO45SzMfNvwrZWqyvz2zLSf99nIiukby_w6bOq5g20h0lUgmNjcwj0q2ptLGKyfERMBf79ebC6nXzjy3mT-GYhOEZs6qIqKvJ9czYLuZ11L2sgZqawt5nS-5zG-FTN5li1uhA","refresh_token":"0.AXUAfeQ5gJ6PdE-w6JIBqnpIlQiV6R6x_hVEsaVX1B8J5ul1AEA.AgABAAAAAAD--DLA3VO7QrddgJg7WevrAgDs_wQA9P-Y4ZtUtziF22eTjRBynztBiiWLO15ff3aMwiPWyhsjC2ZRpbZKbIECJxlK8AVIef6keyHj8xT02Q14U4CkZogcqQuTAoJinkJrPq3wV4am8rTHo-TgTLNI16GhTwJbdOCHJ_8TK3sNpuVDCUUH2Aa1zzoMdQhezSt7w1DfJvjnyuYrYLG5vRP3vhYlnZr5wDOuyG-k1baxMvTVwwLoT9YF24_xgyNMj4cFGZyTBcqYxf9alNWRXbe7xYba9gviyDUVjeMul07edcvrpeI7GeSXNqh0qp1uYnKACLvLiAtkFaqF7FPF-oiwZ_Li9AFZ_Afpv5DuIwXvkit1BqYME0EEJ5PH0m13YZlzLCep0uuXMLBU0utRibl__FD8NCcSHLnELRDo1MfESTO4njurQXt5TRV9mFqFu0lRlSgRCcmrtfbJBd8XRs53sRWy-TtSqHYsKTktoU7bYtQe-i18cIiicQmr1qegWZpUwT7DHQDhQxsvnrYuIwEwssUCMz2Gdz2-JoJHi2GsR9dAHK3JziSe18fCOBP2IRgnIECRV7QYYck0hO-3ut84UpUur9DRNhTuoTJnqgKoDELDKcotn1pM6LG-5e30DZ0M-eIoP0xBM9t36ChNR7WULFmMeNaDDYOLDJ3a-boqtsqlltjw8fEM1ISoP_LCYnkmRkmPZTMc0YPVxUtFkPbmzcZHH-w38QaKL5cmQtrcYFwCs-vOuD9Gk--6NPyanr79K18ZC2MpSH8kiL0JO71MS-tz3H19WSF6_86fycWQtXsUPlU1BEXVaUeJgO8fZh7DOYkQuM7vqPLZPQE5EzQPsXIlYMGX4AzEE3YaW_Vk-vktbk9a9ZITxGOvolhK2rSPatx5poOIelvGl-cr-u2O-myY3oW25W55NH0cNwuHqqIimlXUjJ1sc7V7dm-0T0MF3AgyqiTITHDZ3JP37UgYlNBIId06c8aBwXrt3LwIMp937xkHE_66cqYYr9Hn83FfvrOZWYyN5g","id_token":"eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImtpZCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCJ9.eyJhdWQiOiIxZWU5OTUwOC1mZWIxLTQ0MTUtYjFhNS01N2Q0MWYwOWU2ZTkiLCJpc3MiOiJodHRwczovL2xvZ2luLm1pY3Jvc29mdG9ubGluZS5jb20vODAzOWU0N2QtOGY5ZS00Zjc0LWIwZTgtOTIwMWFhN2E0ODk1L3YyLjAiLCJpYXQiOjE2Mzg5MTYxNTUsIm5iZiI6MTYzODkxNjE1NSwiZXhwIjoxNjM4OTIwMDU1LCJlbWFpbCI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsIm5hbWUiOiJJbmRyYWppdGggUHJlbWFuYXRoIiwibm9uY2UiOiJscEt3cmJhbVd3MnlaSzNrTFpMNEJMVnhWRGlld2VVZHhSSkxFMFRiNUJKVzdtLTFHVjRoVVEiLCJvaWQiOiJmYmZjMmMxZS1mZmE5LTQyN2QtOGI3OC00YTVhNTc5ZDliYTIiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJpbnByZW1hbkBnaGVtdS5vbm1pY3Jvc29mdC5jb20iLCJyaCI6IjAuQVhVQWZlUTVnSjZQZEUtdzZKSUJxbnBJbFFpVjZSNnhfaFZFc2FWWDFCOEo1dWwxQUVBLiIsInN1YiI6IlBVajU0U2NmLU1zc1RBWEtlSEU3V0pqSzFVLVk3anJOTlMzZS1wemZyNFEiLCJ0aWQiOiI4MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUiLCJ1dGkiOiJlSnhWUE41TjhVMlFjWVlnaTNFREFBIiwidmVyIjoiMi4wIn0.Cq83HF3zFE-35N5LQw3B3Bckw875hBn4oSd1_lLpgesIJG9mTAwZzlcIaQrfwq8vGr2fwW-8_R0cbATqerBk_IEufqWakodKSTmq0YnHL6D1l_hN8loqc9Xog8tWPJXZO7nc6tuz1uW2tTXanqRfRmuTNEGoXtQCl9O0Xf0nstn3nujl0azMyzV58Vx4yjkpw8aGXX40JkLji-m7Z50fn8JCCeOsk8lmZ-a2BgmjTzhSif5jQ1oKnlLfOFYZiwi_PO5DSd7j0NyTlERG-rHLXdZbqOSIFucUV7nfGh-G-CjqNhmCRLyoODOeLe71XaBs3B3ofF_WiJu1PhBUDDy1bQ"}'))
+        assert_equal :yes, policy.external_conditional_access_policy_satisfied(resource: @user_repo, target_provider: @target_provider)
+      end
+    end
+  end
+
+  context "multiple satisfied" do
+    test "satisfied when actor is nil" do
+      configure_user_as_oauth_app @emu, ["repo"]
+      policy = TestExternalConditionalAccessPolicy.new(business: @business)
+
+      assert_equal({ @user_repo => { private: :satisfied }, @user_repo_two => { private: :satisfied }  }, policy.multiple_external_conditional_access_policy_satisfied([@user_repo, @user_repo_two], @target_provider))
+    end
+
+    test "satisfied for actor without business" do
+      owner = create :user
+      org = create(:organization, admin: owner)
+
+      configure_user_as_oauth_app owner, ["repo"]
+      policy = TestExternalConditionalAccessPolicy.new(actor: owner, business: @business)
+
+      assert_equal({ @user_repo => { private: :satisfied }, @user_repo_two => { private: :satisfied }  }, policy.multiple_external_conditional_access_policy_satisfied([@user_repo, @user_repo_two], @target_provider))
+    end
+
+    test "unsatisfied for actor without a refresh token" do
+      @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+      ExternalIdentityRefreshToken.destroy_all
+      policy = TestExternalConditionalAccessPolicy.new(actor: @emu)
+
+      assert_equal({ @user_repo => { private: :unsatisfied }, @user_repo_two => { private: :unsatisfied }  }, policy.multiple_external_conditional_access_policy_satisfied([@user_repo, @user_repo_two], @target_provider))
+    end
+
+    test "unsatisfied when cache is empty Azure doesn't return an HTTP 200" do
+      @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+      OIDC::CapValidator.stubs(:refresh_token_access_token_request).returns(Faraday::Response.new(status: 500))
+
+      expected_log_data = {
+        "code.function" => "external_cap.unsatisfied",
+        "http.status_code" => 500,
+        "gh.business.name" => @business.slug,
+        "enduser.id" => @emu,
+        "gh.external_identities.oid" => @emu.external_identities.first.external_id
+      }
+
+      policy = TestExternalConditionalAccessPolicy.new(actor: @emu, business: @business)
+
+      assert_logged **expected_log_data do
+        assert_equal({ @user_repo => { private: :unsatisfied }, @user_repo_two => { private: :unsatisfied }  }, policy.multiple_external_conditional_access_policy_satisfied([@user_repo, @user_repo_two], @target_provider))
+      end
+      assert_equal 1, GitHub.dogstats.increments("external_identities.external_cap.unsatisfied").count
+    end
+
+    test "returns satisfied resources when cache is empty and Azure returns an HTTP 200" do
+      @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+      OIDC::CapValidator.stubs(:refresh_token_access_token_request).returns(Faraday::Response.new(status: 200, body: '{"token_type":"Bearer","scope":"profile openid email User.Read","expires_in":3741,"ext_expires_in":3741,"access_token":"eyJ0eXAiOiJKV1QiLCJub25jZSI6Ik5QQ3pJdndyUGpWakdlSlJQMTBMU2NaWGViOFRkNUdyMmsxMWlpM1Buc00iLCJhbGciOiJSUzI1NiIsIng1dCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCIsImtpZCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCJ9.eyJhdWQiOiIwMDAwMDAwMy0wMDAwLTAwMDAtYzAwMC0wMDAwMDAwMDAwMDAiLCJpc3MiOiJodHRwczovL3N0cy53aW5kb3dzLm5ldC84MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUvIiwiaWF0IjoxNjM4OTE2MTU1LCJuYmYiOjE2Mzg5MTYxNTUsImV4cCI6MTYzODkyMDE5NywiYWNjdCI6MCwiYWNyIjoiMSIsImFpbyI6IkUyWmdZTEI4dFdPdjN4dnhGT0cwNEdkZVpoSXhWbmxiOXpGdXViL2pTN2lsazhudmdyc0EiLCJhbXIiOlsicHdkIl0sImFwcF9kaXNwbGF5bmFtZSI6IkdpdEh1YiBPcGVuSUQgQ29ubmVjdCIsImFwcGlkIjoiMWVlOTk1MDgtZmViMS00NDE1LWIxYTUtNTdkNDFmMDllNmU5IiwiYXBwaWRhY3IiOiIyIiwiZmFtaWx5X25hbWUiOiJQcmVtYW5hdGgiLCJnaXZlbl9uYW1lIjoiSW5kcmFqaXRoIiwiaWR0eXAiOiJ1c2VyIiwiaXBhZGRyIjoiMjQuMTguMjU0LjEzNiIsIm5hbWUiOiJJbmRyYWppdGggUHJlbWFuYXRoIiwib2lkIjoiZmJmYzJjMWUtZmZhOS00MjdkLThiNzgtNGE1YTU3OWQ5YmEyIiwicGxhdGYiOiI1IiwicHVpZCI6IjEwMDMyMDAwRUYxRjE1QTEiLCJyaCI6IjAuQVhVQWZlUTVnSjZQZEUtdzZKSUJxbnBJbFFpVjZSNnhfaFZFc2FWWDFCOEo1dWwxQUVBLiIsInNjcCI6IlVzZXIuUmVhZCBwcm9maWxlIG9wZW5pZCBlbWFpbCIsInN1YiI6IjU3Y2VSaWpUbGZfNkhacHdIMTIwanFLRW5VM1JsN0Jsa1NoUkRzX190MW8iLCJ0ZW5hbnRfcmVnaW9uX3Njb3BlIjoiTkEiLCJ0aWQiOiI4MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUiLCJ1bmlxdWVfbmFtZSI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsInVwbiI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsInV0aSI6ImVKeFZQTjVOOFUyUWNZWWdpM0VEQUEiLCJ2ZXIiOiIxLjAiLCJ3aWRzIjpbIjYyZTkwMzk0LTY5ZjUtNDIzNy05MTkwLTAxMjE3NzE0NWUxMCIsImI3OWZiZjRkLTNlZjktNDY4OS04MTQzLTc2YjE5NGU4NTUwOSJdLCJ4bXNfc3QiOnsic3ViIjoiUFVqNTRTY2YtTXNzVEFYS2VIRTdXSmpLMVUtWTdqck5OUzNlLXB6ZnI0USJ9LCJ4bXNfdGNkdCI6MTYwMjgyMDkwN30.B7gI8Ivb6ewGzTdtyNcsy_Px4iGRbGZbWWLbLekXOeM-qxVKt9ym8Xlo52Bk0T-ePZsWwYPXWcueIgvct1oadBGIT4zjtTsKMwLkHobNKX4eZWqtxln5SKv6n6qiEh2iCmsmcCeDW6iMZqdFTqmuaxOBjRRbJ_sLo_2c_po8u8KGtqKGhgpOIrbI7T74MYf-9vqDMY-KCvPKuDQAuGO45SzMfNvwrZWqyvz2zLSf99nIiukby_w6bOq5g20h0lUgmNjcwj0q2ptLGKyfERMBf79ebC6nXzjy3mT-GYhOEZs6qIqKvJ9czYLuZ11L2sgZqawt5nS-5zG-FTN5li1uhA","refresh_token":"0.AXUAfeQ5gJ6PdE-w6JIBqnpIlQiV6R6x_hVEsaVX1B8J5ul1AEA.AgABAAAAAAD--DLA3VO7QrddgJg7WevrAgDs_wQA9P-Y4ZtUtziF22eTjRBynztBiiWLO15ff3aMwiPWyhsjC2ZRpbZKbIECJxlK8AVIef6keyHj8xT02Q14U4CkZogcqQuTAoJinkJrPq3wV4am8rTHo-TgTLNI16GhTwJbdOCHJ_8TK3sNpuVDCUUH2Aa1zzoMdQhezSt7w1DfJvjnyuYrYLG5vRP3vhYlnZr5wDOuyG-k1baxMvTVwwLoT9YF24_xgyNMj4cFGZyTBcqYxf9alNWRXbe7xYba9gviyDUVjeMul07edcvrpeI7GeSXNqh0qp1uYnKACLvLiAtkFaqF7FPF-oiwZ_Li9AFZ_Afpv5DuIwXvkit1BqYME0EEJ5PH0m13YZlzLCep0uuXMLBU0utRibl__FD8NCcSHLnELRDo1MfESTO4njurQXt5TRV9mFqFu0lRlSgRCcmrtfbJBd8XRs53sRWy-TtSqHYsKTktoU7bYtQe-i18cIiicQmr1qegWZpUwT7DHQDhQxsvnrYuIwEwssUCMz2Gdz2-JoJHi2GsR9dAHK3JziSe18fCOBP2IRgnIECRV7QYYck0hO-3ut84UpUur9DRNhTuoTJnqgKoDELDKcotn1pM6LG-5e30DZ0M-eIoP0xBM9t36ChNR7WULFmMeNaDDYOLDJ3a-boqtsqlltjw8fEM1ISoP_LCYnkmRkmPZTMc0YPVxUtFkPbmzcZHH-w38QaKL5cmQtrcYFwCs-vOuD9Gk--6NPyanr79K18ZC2MpSH8kiL0JO71MS-tz3H19WSF6_86fycWQtXsUPlU1BEXVaUeJgO8fZh7DOYkQuM7vqPLZPQE5EzQPsXIlYMGX4AzEE3YaW_Vk-vktbk9a9ZITxGOvolhK2rSPatx5poOIelvGl-cr-u2O-myY3oW25W55NH0cNwuHqqIimlXUjJ1sc7V7dm-0T0MF3AgyqiTITHDZ3JP37UgYlNBIId06c8aBwXrt3LwIMp937xkHE_66cqYYr9Hn83FfvrOZWYyN5g","id_token":"eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImtpZCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCJ9.eyJhdWQiOiIxZWU5OTUwOC1mZWIxLTQ0MTUtYjFhNS01N2Q0MWYwOWU2ZTkiLCJpc3MiOiJodHRwczovL2xvZ2luLm1pY3Jvc29mdG9ubGluZS5jb20vODAzOWU0N2QtOGY5ZS00Zjc0LWIwZTgtOTIwMWFhN2E0ODk1L3YyLjAiLCJpYXQiOjE2Mzg5MTYxNTUsIm5iZiI6MTYzODkxNjE1NSwiZXhwIjoxNjM4OTIwMDU1LCJlbWFpbCI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsIm5hbWUiOiJJbmRyYWppdGggUHJlbWFuYXRoIiwibm9uY2UiOiJscEt3cmJhbVd3MnlaSzNrTFpMNEJMVnhWRGlld2VVZHhSSkxFMFRiNUJKVzdtLTFHVjRoVVEiLCJvaWQiOiJmYmZjMmMxZS1mZmE5LTQyN2QtOGI3OC00YTVhNTc5ZDliYTIiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJpbnByZW1hbkBnaGVtdS5vbm1pY3Jvc29mdC5jb20iLCJyaCI6IjAuQVhVQWZlUTVnSjZQZEUtdzZKSUJxbnBJbFFpVjZSNnhfaFZFc2FWWDFCOEo1dWwxQUVBLiIsInN1YiI6IlBVajU0U2NmLU1zc1RBWEtlSEU3V0pqSzFVLVk3anJOTlMzZS1wemZyNFEiLCJ0aWQiOiI4MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUiLCJ1dGkiOiJlSnhWUE41TjhVMlFjWVlnaTNFREFBIiwidmVyIjoiMi4wIn0.Cq83HF3zFE-35N5LQw3B3Bckw875hBn4oSd1_lLpgesIJG9mTAwZzlcIaQrfwq8vGr2fwW-8_R0cbATqerBk_IEufqWakodKSTmq0YnHL6D1l_hN8loqc9Xog8tWPJXZO7nc6tuz1uW2tTXanqRfRmuTNEGoXtQCl9O0Xf0nstn3nujl0azMyzV58Vx4yjkpw8aGXX40JkLji-m7Z50fn8JCCeOsk8lmZ-a2BgmjTzhSif5jQ1oKnlLfOFYZiwi_PO5DSd7j0NyTlERG-rHLXdZbqOSIFucUV7nfGh-G-CjqNhmCRLyoODOeLe71XaBs3B3ofF_WiJu1PhBUDDy1bQ"}'))
+
+      policy = TestExternalConditionalAccessPolicy.new(actor: @emu, business: @business)
+      assert_equal({ @user_repo => { private: :satisfied }, @user_repo_two => { private: :satisfied }  }, policy.multiple_external_conditional_access_policy_satisfied([@user_repo, @user_repo_two], @target_provider))
+      key = @business.feature_enabled?(:use_cap_validator_cache_class) ? OIDC::CapValidatorCache.cache_key(@ei, policy.actor_ip) : OIDC::CapValidator.cache_key(@ei, policy.actor_ip)
+      run_processor(GitHub::StreamProcessors::RefreshTokenProcessor.new, allowed_primary_query_count: 1)
+      assert_equal "true", ExternalIdentities::KV.get(key).value { nil }
+    end
+
+    test "returns satisfied resources when cache is full" do
+      @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+      # This stub is here to demonstrate that if the cache is full, we are not making a request to the IDP
+      OIDC::CapValidator.stubs(:refresh_token_access_token_request).returns(Faraday::Response.new(status: 500))
+
+      policy = TestExternalConditionalAccessPolicy.new(actor: @emu, business: @business)
+      # Filling the cache manually
+      key = @business.feature_enabled?(:use_cap_validator_cache_class) ? OIDC::CapValidatorCache.cache_key(@ei, policy.actor_ip) : OIDC::CapValidator.cache_key(@ei, policy.actor_ip)
+      ExternalIdentities::KV.set(key, "true", expires: 1.hour.from_now)
+      Timecop::freeze(58.minutes.from_now) do
+        assert_equal({ @user_repo => { private: :satisfied }, @user_repo_two => { private: :satisfied }  }, policy.multiple_external_conditional_access_policy_satisfied([@user_repo, @user_repo_two], @target_provider))
+        assert_equal "true", ExternalIdentities::KV.get(key).value { nil }
+        assert_in_delta 2.minutes.from_now.utc, ExternalIdentities::KV.ttl(key).value { nil }.utc, 5
+      end
+    end
+
+    test "yes when cache is full with logging" do
+      @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+      # This stub is here to demonstrate that if the cache is full, we are not making a request to the IDP
+      OIDC::CapValidator.stubs(:refresh_token_access_token_request).returns(Faraday::Response.new(status: 500))
+
+      policy = TestExternalConditionalAccessPolicy.new(actor: @emu, business: @business)
+
+      expected_log_data = {
+        "code.function" => "external_cap.satisfied_cache",
+        "gh.business.name" => @business.slug,
+        "enduser.id" => @ei.user.login,
+        "gh.external_identities.oid" => @ei.external_id,
+        "gh.external_identities.client_ip" => policy.actor_ip
+      }
+
+      # Filling the cache manually
+      key = @business.feature_enabled?(:use_cap_validator_cache_class) ? OIDC::CapValidatorCache.cache_key(@ei, policy.actor_ip) : OIDC::CapValidator.cache_key(@ei, policy.actor_ip)
+      ExternalIdentities::KV.set(key, "true", expires: 1.hour.from_now)
+      Timecop::freeze(58.minutes.from_now) do
+        assert_logged **expected_log_data do
+          assert_equal({ @user_repo => { private: :satisfied }, @user_repo_two => { private: :satisfied }  }, policy.multiple_external_conditional_access_policy_satisfied([@user_repo, @user_repo_two], @target_provider))
+        end
+
+        assert_equal "true", ExternalIdentities::KV.get(key).value { nil }
+        assert_in_delta 2.minutes.from_now.utc, ExternalIdentities::KV.ttl(key).value { nil }.utc, 5
+      end
+      assert_equal 1, GitHub.dogstats.increments("external_identities.external_cap.satisfied_cache").count
+    end
+
+    test "unsatisfied when cache is yes but skipped and the request fails for staff owned enterprise" do
+      disable_feature_flag(:oidc_cap_validator_caching_stop_checking_for_staff_ownership)
+
+      @staff_owned_business.update_ip_allowlist_configuration(actor: @staff_owned_owner, config_value: "idp")
+      @staff_owned_business.enable_idp_ip_allowlist_for_web(actor: @staff_owned_owner)
+
+      OIDC::CapValidator.stubs(:refresh_token_access_token_request).returns(Faraday::Response.new(status: 500))
+
+      policy = TestExternalConditionalAccessPolicy.new(actor: @staff_owned_emu, business: @staff_owned_business)
+      # Filling the cache manually
+      key = @business.feature_enabled?(:use_cap_validator_cache_class) ? OIDC::CapValidatorCache.cache_key(@staff_owned_ei, policy.actor_ip) : OIDC::CapValidator.cache_key(@staff_owned_ei, policy.actor_ip)
+      assert_nil ExternalIdentities::KV.get(key).value { nil }
+      run_processor(GitHub::StreamProcessors::RefreshTokenProcessor.new, allowed_primary_query_count: 1)
+      ExternalIdentities::KV.set(key, "true", expires: 1.hour.from_now)
+      Timecop::freeze(58.minutes.from_now) do
+        assert_equal({ @user_repo => { private: :unsatisfied }, @user_repo_two => { private: :unsatisfied }  }, policy.multiple_external_conditional_access_policy_satisfied([@user_repo, @user_repo_two], @target_provider))
+      end
+    end
+
+    test "no when cache is yes but skipped and the request fails for enterprise managed business with ff enabled" do
+      @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+      enable_feature_flag(:disable_oidc_cap_cache, @business)
+
+      OIDC::CapValidator.stubs(:refresh_token_access_token_request).returns(Faraday::Response.new(status: 500))
+
+      policy = TestExternalConditionalAccessPolicy.new(actor: @emu, business: @business)
+      # Filling the cache manually
+      key = @business.feature_enabled?(:use_cap_validator_cache_class) ? OIDC::CapValidatorCache.cache_key(@ei, policy.actor_ip) : OIDC::CapValidator.cache_key(@ei, policy.actor_ip)
+      ExternalIdentities::KV.set(key, "true", expires: 1.hour.from_now)
+      Timecop::freeze(58.minutes.from_now) do
+        assert_equal({ @user_repo => { private: :unsatisfied }, @user_repo_two => { private: :unsatisfied }  }, policy.multiple_external_conditional_access_policy_satisfied([@user_repo, @user_repo_two], @target_provider))
+      end
+    end
+
+    test "satisfied when cache is unavailable and Azure returns an HTTP 200" do
+      @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+      OIDC::CapValidator.stubs(:refresh_token_access_token_request).returns(Faraday::Response.new(status: 200, body: '{"token_type":"Bearer","scope":"profile openid email User.Read","expires_in":3741,"ext_expires_in":3741,"access_token":"eyJ0eXAiOiJKV1QiLCJub25jZSI6Ik5QQ3pJdndyUGpWakdlSlJQMTBMU2NaWGViOFRkNUdyMmsxMWlpM1Buc00iLCJhbGciOiJSUzI1NiIsIng1dCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCIsImtpZCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCJ9.eyJhdWQiOiIwMDAwMDAwMy0wMDAwLTAwMDAtYzAwMC0wMDAwMDAwMDAwMDAiLCJpc3MiOiJodHRwczovL3N0cy53aW5kb3dzLm5ldC84MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUvIiwiaWF0IjoxNjM4OTE2MTU1LCJuYmYiOjE2Mzg5MTYxNTUsImV4cCI6MTYzODkyMDE5NywiYWNjdCI6MCwiYWNyIjoiMSIsImFpbyI6IkUyWmdZTEI4dFdPdjN4dnhGT0cwNEdkZVpoSXhWbmxiOXpGdXViL2pTN2lsazhudmdyc0EiLCJhbXIiOlsicHdkIl0sImFwcF9kaXNwbGF5bmFtZSI6IkdpdEh1YiBPcGVuSUQgQ29ubmVjdCIsImFwcGlkIjoiMWVlOTk1MDgtZmViMS00NDE1LWIxYTUtNTdkNDFmMDllNmU5IiwiYXBwaWRhY3IiOiIyIiwiZmFtaWx5X25hbWUiOiJQcmVtYW5hdGgiLCJnaXZlbl9uYW1lIjoiSW5kcmFqaXRoIiwiaWR0eXAiOiJ1c2VyIiwiaXBhZGRyIjoiMjQuMTguMjU0LjEzNiIsIm5hbWUiOiJJbmRyYWppdGggUHJlbWFuYXRoIiwib2lkIjoiZmJmYzJjMWUtZmZhOS00MjdkLThiNzgtNGE1YTU3OWQ5YmEyIiwicGxhdGYiOiI1IiwicHVpZCI6IjEwMDMyMDAwRUYxRjE1QTEiLCJyaCI6IjAuQVhVQWZlUTVnSjZQZEUtdzZKSUJxbnBJbFFpVjZSNnhfaFZFc2FWWDFCOEo1dWwxQUVBLiIsInNjcCI6IlVzZXIuUmVhZCBwcm9maWxlIG9wZW5pZCBlbWFpbCIsInN1YiI6IjU3Y2VSaWpUbGZfNkhacHdIMTIwanFLRW5VM1JsN0Jsa1NoUkRzX190MW8iLCJ0ZW5hbnRfcmVnaW9uX3Njb3BlIjoiTkEiLCJ0aWQiOiI4MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUiLCJ1bmlxdWVfbmFtZSI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsInVwbiI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsInV0aSI6ImVKeFZQTjVOOFUyUWNZWWdpM0VEQUEiLCJ2ZXIiOiIxLjAiLCJ3aWRzIjpbIjYyZTkwMzk0LTY5ZjUtNDIzNy05MTkwLTAxMjE3NzE0NWUxMCIsImI3OWZiZjRkLTNlZjktNDY4OS04MTQzLTc2YjE5NGU4NTUwOSJdLCJ4bXNfc3QiOnsic3ViIjoiUFVqNTRTY2YtTXNzVEFYS2VIRTdXSmpLMVUtWTdqck5OUzNlLXB6ZnI0USJ9LCJ4bXNfdGNkdCI6MTYwMjgyMDkwN30.B7gI8Ivb6ewGzTdtyNcsy_Px4iGRbGZbWWLbLekXOeM-qxVKt9ym8Xlo52Bk0T-ePZsWwYPXWcueIgvct1oadBGIT4zjtTsKMwLkHobNKX4eZWqtxln5SKv6n6qiEh2iCmsmcCeDW6iMZqdFTqmuaxOBjRRbJ_sLo_2c_po8u8KGtqKGhgpOIrbI7T74MYf-9vqDMY-KCvPKuDQAuGO45SzMfNvwrZWqyvz2zLSf99nIiukby_w6bOq5g20h0lUgmNjcwj0q2ptLGKyfERMBf79ebC6nXzjy3mT-GYhOEZs6qIqKvJ9czYLuZ11L2sgZqawt5nS-5zG-FTN5li1uhA","refresh_token":"0.AXUAfeQ5gJ6PdE-w6JIBqnpIlQiV6R6x_hVEsaVX1B8J5ul1AEA.AgABAAAAAAD--DLA3VO7QrddgJg7WevrAgDs_wQA9P-Y4ZtUtziF22eTjRBynztBiiWLO15ff3aMwiPWyhsjC2ZRpbZKbIECJxlK8AVIef6keyHj8xT02Q14U4CkZogcqQuTAoJinkJrPq3wV4am8rTHo-TgTLNI16GhTwJbdOCHJ_8TK3sNpuVDCUUH2Aa1zzoMdQhezSt7w1DfJvjnyuYrYLG5vRP3vhYlnZr5wDOuyG-k1baxMvTVwwLoT9YF24_xgyNMj4cFGZyTBcqYxf9alNWRXbe7xYba9gviyDUVjeMul07edcvrpeI7GeSXNqh0qp1uYnKACLvLiAtkFaqF7FPF-oiwZ_Li9AFZ_Afpv5DuIwXvkit1BqYME0EEJ5PH0m13YZlzLCep0uuXMLBU0utRibl__FD8NCcSHLnELRDo1MfESTO4njurQXt5TRV9mFqFu0lRlSgRCcmrtfbJBd8XRs53sRWy-TtSqHYsKTktoU7bYtQe-i18cIiicQmr1qegWZpUwT7DHQDhQxsvnrYuIwEwssUCMz2Gdz2-JoJHi2GsR9dAHK3JziSe18fCOBP2IRgnIECRV7QYYck0hO-3ut84UpUur9DRNhTuoTJnqgKoDELDKcotn1pM6LG-5e30DZ0M-eIoP0xBM9t36ChNR7WULFmMeNaDDYOLDJ3a-boqtsqlltjw8fEM1ISoP_LCYnkmRkmPZTMc0YPVxUtFkPbmzcZHH-w38QaKL5cmQtrcYFwCs-vOuD9Gk--6NPyanr79K18ZC2MpSH8kiL0JO71MS-tz3H19WSF6_86fycWQtXsUPlU1BEXVaUeJgO8fZh7DOYkQuM7vqPLZPQE5EzQPsXIlYMGX4AzEE3YaW_Vk-vktbk9a9ZITxGOvolhK2rSPatx5poOIelvGl-cr-u2O-myY3oW25W55NH0cNwuHqqIimlXUjJ1sc7V7dm-0T0MF3AgyqiTITHDZ3JP37UgYlNBIId06c8aBwXrt3LwIMp937xkHE_66cqYYr9Hn83FfvrOZWYyN5g","id_token":"eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImtpZCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCJ9.eyJhdWQiOiIxZWU5OTUwOC1mZWIxLTQ0MTUtYjFhNS01N2Q0MWYwOWU2ZTkiLCJpc3MiOiJodHRwczovL2xvZ2luLm1pY3Jvc29mdG9ubGluZS5jb20vODAzOWU0N2QtOGY5ZS00Zjc0LWIwZTgtOTIwMWFhN2E0ODk1L3YyLjAiLCJpYXQiOjE2Mzg5MTYxNTUsIm5iZiI6MTYzODkxNjE1NSwiZXhwIjoxNjM4OTIwMDU1LCJlbWFpbCI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsIm5hbWUiOiJJbmRyYWppdGggUHJlbWFuYXRoIiwibm9uY2UiOiJscEt3cmJhbVd3MnlaSzNrTFpMNEJMVnhWRGlld2VVZHhSSkxFMFRiNUJKVzdtLTFHVjRoVVEiLCJvaWQiOiJmYmZjMmMxZS1mZmE5LTQyN2QtOGI3OC00YTVhNTc5ZDliYTIiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJpbnByZW1hbkBnaGVtdS5vbm1pY3Jvc29mdC5jb20iLCJyaCI6IjAuQVhVQWZlUTVnSjZQZEUtdzZKSUJxbnBJbFFpVjZSNnhfaFZFc2FWWDFCOEo1dWwxQUVBLiIsInN1YiI6IlBVajU0U2NmLU1zc1RBWEtlSEU3V0pqSzFVLVk3anJOTlMzZS1wemZyNFEiLCJ0aWQiOiI4MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUiLCJ1dGkiOiJlSnhWUE41TjhVMlFjWVlnaTNFREFBIiwidmVyIjoiMi4wIn0.Cq83HF3zFE-35N5LQw3B3Bckw875hBn4oSd1_lLpgesIJG9mTAwZzlcIaQrfwq8vGr2fwW-8_R0cbATqerBk_IEufqWakodKSTmq0YnHL6D1l_hN8loqc9Xog8tWPJXZO7nc6tuz1uW2tTXanqRfRmuTNEGoXtQCl9O0Xf0nstn3nujl0azMyzV58Vx4yjkpw8aGXX40JkLji-m7Z50fn8JCCeOsk8lmZ-a2BgmjTzhSif5jQ1oKnlLfOFYZiwi_PO5DSd7j0NyTlERG-rHLXdZbqOSIFucUV7nfGh-G-CjqNhmCRLyoODOeLe71XaBs3B3ofF_WiJu1PhBUDDy1bQ"}'))
+      ExternalIdentities::KV.stubs(:set).raises(GitHub::KV::UnavailableError)
+
+      policy = TestExternalConditionalAccessPolicy.new(actor: @emu, business: @business)
+      assert_equal({ @user_repo => { private: :satisfied }, @user_repo_two => { private: :satisfied }  }, policy.multiple_external_conditional_access_policy_satisfied([@user_repo, @user_repo_two], @target_provider))
+    end
+
+    context "logging" do
+      test "logs after business is derived from the actor" do
+        @business.enable_idp_ip_allowlist_for_web(actor: @owner)
+
+        OIDC::CapValidator.stubs(:refresh_token_access_token_request).returns(Faraday::Response.new(status: 200, body: '{"token_type":"Bearer","scope":"profile openid email User.Read","expires_in":3741,"ext_expires_in":3741,"access_token":"eyJ0eXAiOiJKV1QiLCJub25jZSI6Ik5QQ3pJdndyUGpWakdlSlJQMTBMU2NaWGViOFRkNUdyMmsxMWlpM1Buc00iLCJhbGciOiJSUzI1NiIsIng1dCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCIsImtpZCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCJ9.eyJhdWQiOiIwMDAwMDAwMy0wMDAwLTAwMDAtYzAwMC0wMDAwMDAwMDAwMDAiLCJpc3MiOiJodHRwczovL3N0cy53aW5kb3dzLm5ldC84MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUvIiwiaWF0IjoxNjM4OTE2MTU1LCJuYmYiOjE2Mzg5MTYxNTUsImV4cCI6MTYzODkyMDE5NywiYWNjdCI6MCwiYWNyIjoiMSIsImFpbyI6IkUyWmdZTEI4dFdPdjN4dnhGT0cwNEdkZVpoSXhWbmxiOXpGdXViL2pTN2lsazhudmdyc0EiLCJhbXIiOlsicHdkIl0sImFwcF9kaXNwbGF5bmFtZSI6IkdpdEh1YiBPcGVuSUQgQ29ubmVjdCIsImFwcGlkIjoiMWVlOTk1MDgtZmViMS00NDE1LWIxYTUtNTdkNDFmMDllNmU5IiwiYXBwaWRhY3IiOiIyIiwiZmFtaWx5X25hbWUiOiJQcmVtYW5hdGgiLCJnaXZlbl9uYW1lIjoiSW5kcmFqaXRoIiwiaWR0eXAiOiJ1c2VyIiwiaXBhZGRyIjoiMjQuMTguMjU0LjEzNiIsIm5hbWUiOiJJbmRyYWppdGggUHJlbWFuYXRoIiwib2lkIjoiZmJmYzJjMWUtZmZhOS00MjdkLThiNzgtNGE1YTU3OWQ5YmEyIiwicGxhdGYiOiI1IiwicHVpZCI6IjEwMDMyMDAwRUYxRjE1QTEiLCJyaCI6IjAuQVhVQWZlUTVnSjZQZEUtdzZKSUJxbnBJbFFpVjZSNnhfaFZFc2FWWDFCOEo1dWwxQUVBLiIsInNjcCI6IlVzZXIuUmVhZCBwcm9maWxlIG9wZW5pZCBlbWFpbCIsInN1YiI6IjU3Y2VSaWpUbGZfNkhacHdIMTIwanFLRW5VM1JsN0Jsa1NoUkRzX190MW8iLCJ0ZW5hbnRfcmVnaW9uX3Njb3BlIjoiTkEiLCJ0aWQiOiI4MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUiLCJ1bmlxdWVfbmFtZSI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsInVwbiI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsInV0aSI6ImVKeFZQTjVOOFUyUWNZWWdpM0VEQUEiLCJ2ZXIiOiIxLjAiLCJ3aWRzIjpbIjYyZTkwMzk0LTY5ZjUtNDIzNy05MTkwLTAxMjE3NzE0NWUxMCIsImI3OWZiZjRkLTNlZjktNDY4OS04MTQzLTc2YjE5NGU4NTUwOSJdLCJ4bXNfc3QiOnsic3ViIjoiUFVqNTRTY2YtTXNzVEFYS2VIRTdXSmpLMVUtWTdqck5OUzNlLXB6ZnI0USJ9LCJ4bXNfdGNkdCI6MTYwMjgyMDkwN30.B7gI8Ivb6ewGzTdtyNcsy_Px4iGRbGZbWWLbLekXOeM-qxVKt9ym8Xlo52Bk0T-ePZsWwYPXWcueIgvct1oadBGIT4zjtTsKMwLkHobNKX4eZWqtxln5SKv6n6qiEh2iCmsmcCeDW6iMZqdFTqmuaxOBjRRbJ_sLo_2c_po8u8KGtqKGhgpOIrbI7T74MYf-9vqDMY-KCvPKuDQAuGO45SzMfNvwrZWqyvz2zLSf99nIiukby_w6bOq5g20h0lUgmNjcwj0q2ptLGKyfERMBf79ebC6nXzjy3mT-GYhOEZs6qIqKvJ9czYLuZ11L2sgZqawt5nS-5zG-FTN5li1uhA","refresh_token":"0.AXUAfeQ5gJ6PdE-w6JIBqnpIlQiV6R6x_hVEsaVX1B8J5ul1AEA.AgABAAAAAAD--DLA3VO7QrddgJg7WevrAgDs_wQA9P-Y4ZtUtziF22eTjRBynztBiiWLO15ff3aMwiPWyhsjC2ZRpbZKbIECJxlK8AVIef6keyHj8xT02Q14U4CkZogcqQuTAoJinkJrPq3wV4am8rTHo-TgTLNI16GhTwJbdOCHJ_8TK3sNpuVDCUUH2Aa1zzoMdQhezSt7w1DfJvjnyuYrYLG5vRP3vhYlnZr5wDOuyG-k1baxMvTVwwLoT9YF24_xgyNMj4cFGZyTBcqYxf9alNWRXbe7xYba9gviyDUVjeMul07edcvrpeI7GeSXNqh0qp1uYnKACLvLiAtkFaqF7FPF-oiwZ_Li9AFZ_Afpv5DuIwXvkit1BqYME0EEJ5PH0m13YZlzLCep0uuXMLBU0utRibl__FD8NCcSHLnELRDo1MfESTO4njurQXt5TRV9mFqFu0lRlSgRCcmrtfbJBd8XRs53sRWy-TtSqHYsKTktoU7bYtQe-i18cIiicQmr1qegWZpUwT7DHQDhQxsvnrYuIwEwssUCMz2Gdz2-JoJHi2GsR9dAHK3JziSe18fCOBP2IRgnIECRV7QYYck0hO-3ut84UpUur9DRNhTuoTJnqgKoDELDKcotn1pM6LG-5e30DZ0M-eIoP0xBM9t36ChNR7WULFmMeNaDDYOLDJ3a-boqtsqlltjw8fEM1ISoP_LCYnkmRkmPZTMc0YPVxUtFkPbmzcZHH-w38QaKL5cmQtrcYFwCs-vOuD9Gk--6NPyanr79K18ZC2MpSH8kiL0JO71MS-tz3H19WSF6_86fycWQtXsUPlU1BEXVaUeJgO8fZh7DOYkQuM7vqPLZPQE5EzQPsXIlYMGX4AzEE3YaW_Vk-vktbk9a9ZITxGOvolhK2rSPatx5poOIelvGl-cr-u2O-myY3oW25W55NH0cNwuHqqIimlXUjJ1sc7V7dm-0T0MF3AgyqiTITHDZ3JP37UgYlNBIId06c8aBwXrt3LwIMp937xkHE_66cqYYr9Hn83FfvrOZWYyN5g","id_token":"eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImtpZCI6Imwzc1EtNTBjQ0g0eEJWWkxIVEd3blNSNzY4MCJ9.eyJhdWQiOiIxZWU5OTUwOC1mZWIxLTQ0MTUtYjFhNS01N2Q0MWYwOWU2ZTkiLCJpc3MiOiJodHRwczovL2xvZ2luLm1pY3Jvc29mdG9ubGluZS5jb20vODAzOWU0N2QtOGY5ZS00Zjc0LWIwZTgtOTIwMWFhN2E0ODk1L3YyLjAiLCJpYXQiOjE2Mzg5MTYxNTUsIm5iZiI6MTYzODkxNjE1NSwiZXhwIjoxNjM4OTIwMDU1LCJlbWFpbCI6ImlucHJlbWFuQGdoZW11Lm9ubWljcm9zb2Z0LmNvbSIsIm5hbWUiOiJJbmRyYWppdGggUHJlbWFuYXRoIiwibm9uY2UiOiJscEt3cmJhbVd3MnlaSzNrTFpMNEJMVnhWRGlld2VVZHhSSkxFMFRiNUJKVzdtLTFHVjRoVVEiLCJvaWQiOiJmYmZjMmMxZS1mZmE5LTQyN2QtOGI3OC00YTVhNTc5ZDliYTIiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJpbnByZW1hbkBnaGVtdS5vbm1pY3Jvc29mdC5jb20iLCJyaCI6IjAuQVhVQWZlUTVnSjZQZEUtdzZKSUJxbnBJbFFpVjZSNnhfaFZFc2FWWDFCOEo1dWwxQUVBLiIsInN1YiI6IlBVajU0U2NmLU1zc1RBWEtlSEU3V0pqSzFVLVk3anJOTlMzZS1wemZyNFEiLCJ0aWQiOiI4MDM5ZTQ3ZC04ZjllLTRmNzQtYjBlOC05MjAxYWE3YTQ4OTUiLCJ1dGkiOiJlSnhWUE41TjhVMlFjWVlnaTNFREFBIiwidmVyIjoiMi4wIn0.Cq83HF3zFE-35N5LQw3B3Bckw875hBn4oSd1_lLpgesIJG9mTAwZzlcIaQrfwq8vGr2fwW-8_R0cbATqerBk_IEufqWakodKSTmq0YnHL6D1l_hN8loqc9Xog8tWPJXZO7nc6tuz1uW2tTXanqRfRmuTNEGoXtQCl9O0Xf0nstn3nujl0azMyzV58Vx4yjkpw8aGXX40JkLji-m7Z50fn8JCCeOsk8lmZ-a2BgmjTzhSif5jQ1oKnlLfOFYZiwi_PO5DSd7j0NyTlERG-rHLXdZbqOSIFucUV7nfGh-G-CjqNhmCRLyoODOeLe71XaBs3B3ofF_WiJu1PhBUDDy1bQ"}'))
+
+        policy = TestExternalConditionalAccessPolicy.new(actor: @emu, business: @business)
+
+        GitHub.context.push(request_id: SecureRandom.uuid)
+        expected_log = {
+          "Body" => "Satisfiability of external conditional access policy for resources via filter",
+          "code.function" => "multiple_external_conditional_access_policy_satisfied",
+          "gh.request.id" => GitHub.context[:request_id],
+          "gh.business.name" => @business.slug,
+          "gh.actor.id" => @emu.id,
+          "gh.actor.login" => @emu.display_login,
+        }
+
+        assert_logged **expected_log do
+          policy.multiple_external_conditional_access_policy_satisfied([@user_repo, @user_repo_two], @target_provider)
+        end
+      end
+    end
+
+    test "early returns satisfied resources when configurable not enabled" do
+      @business.disable_idp_ip_allowlist_for_web(actor: @owner)
+      refute_predicate @business, :idp_ip_allowlist_for_web_configurable_enabled?
+
+      policy = TestExternalConditionalAccessPolicy.new(actor: @emu, business: @business)
+      assert_equal({ @user_repo => { private: :satisfied }, @user_repo_two => { private: :satisfied }  }, policy.multiple_external_conditional_access_policy_satisfied([@user_repo, @user_repo_two], @target_provider))
+    end
+  end
+end unless GitHub.single_business_environment?

@@ -1,0 +1,72 @@
+<turbo-frame id="fg_pat_confirmation_dialog">
+  <%= form_for token, url: settings_user_access_tokens_path do |form| %>
+    <%= hidden_field_tag :confirm, "1" %>
+    <%= hidden_field_tag :target_name, params[:target_name] %>
+    <%= hidden_field_tag :reason, params[:reason] %>
+    <%= hidden_field_tag :install_target, params[:install_target] %>
+
+    <% params[:repository_ids]&.each do |repository_id| %>
+      <%= hidden_field_tag "repository_ids[]", repository_id %>
+    <% end %>
+
+    <% params[:user_programmatic_access].each do |key, value| %>
+      <%= form.hidden_field key, value: value %>
+    <% end %>
+
+    <% if params[:integration]&.dig(:default_permissions) %>
+      <% params[:integration][:default_permissions].each do |key, value| %>
+        <%= hidden_field_tag "integration[default_permissions][#{key}]", value %>
+      <% end %>
+    <% end %>
+
+    <%= render(Primer::Alpha::Dialog.new(id: "confirm-fg-pat", title: "New personal access token", size: :large, test_selector: "fg-pat-confirmation-dialog")) do |d| %>
+      <% d.with_header(show_divider: true) %>
+
+      <% d.with_body do %>
+        <p>
+          Your new personal access token <strong><%= token.name %></strong> will be ready for use <%= requesting_access ? "once it is approved" : "immediately" %>.
+          <% if token.expires_at.present? %>
+            It will expire on <strong><%= token.expires_at.strftime("%A, %B %d, %Y") %></strong>.
+          <% else %>
+            It will <strong>never expire</strong>.
+          <% end %>
+        </p>
+
+        <% if repository_permissions.present? %>
+          <p>
+            <%= token.name %> grants you
+            <strong>
+              <%= pluralize(repository_permissions.size, "permission")  %> for
+              <%= grantable.repository_selection == :all ? "all repositories" : pluralize(grantable.repositories.size, "repository") %>:
+            </strong>
+          </p>
+
+          <%= render partial: "personal_access_tokens/permissions_list_box", locals: { permissions: repository_permissions } %>
+        <% end %>
+
+        <% if account_permissions.present? %>
+          <p class="mt-4">
+            <%= token.name %> grants you
+            <strong><%= pluralize(account_permissions.size, "account permission")  %></strong>:
+          </p>
+
+          <%= render partial: "personal_access_tokens/permissions_list_box", locals: { permissions: account_permissions } %>
+        <% end %>
+
+        <% if organization_permissions.present? %>
+          <p class="mt-4">
+            <%= token.name %> grants you
+            <strong><%= pluralize(organization_permissions.size, "organization permission") %></strong>:
+          </p>
+
+          <%= render partial: "personal_access_tokens/permissions_list_box", locals: { permissions: organization_permissions } %>
+        <% end %>
+      <% end %>
+
+      <% d.with_footer(show_divider: true) do %>
+        <%= render(Primer::Beta::Button.new(data: { "close-dialog-id": "confirm-fg-pat" })) { "Cancel" } %>
+        <%= render(Primer::Beta::Button.new(scheme: :primary, type: :submit, data: { disable_with: "Generating..." })) { requesting_access ? "Generate token and request access" : "Generate token" } %>
+      <% end %>
+    <% end %>
+  <% end %>
+</turbo-frame>

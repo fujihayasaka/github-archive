@@ -1,0 +1,100 @@
+#!/usr/bin/env safe-ruby
+# typed: strict
+# frozen_string_literal: true
+
+require_relative "../config/environment"
+require_relative "./seeds/objects"
+
+# This script sets up feature flags and seed data for the copilot code review feature.
+
+# Environment variable used by script/copilot-fauxpilot-api-server to start CAPI server in "code review" mode
+unless ENV["COPILOT_CODE_REVIEW_MODE"]
+  ENV["COPILOT_CODE_REVIEW_MODE"] = "true"
+end
+
+# Bail early if preconditions aren't met
+# Precondition 1: copilot-api directory exists
+COPILOT_API_CHECK = <<-COPILOT_API_CHECK
+if [ -d /workspaces/copilot-api ] ; then
+  # copilot api is good to go
+  :
+else
+  echo "The copilot-api directory does not exist in this codespace. \nRun script/setup-codespaces-copilot-api -c, then try running this script again."
+  exit 1
+fi
+COPILOT_API_CHECK
+
+copilot_api_ready = system(COPILOT_API_CHECK)
+return unless copilot_api_ready
+
+# Precondition 2: Rails server is running
+RAILS_SERVER_CHECK = <<-RAILS_SERVER_CHECK
+if lsof -Pi :8152 -sTCP:LISTEN -t >/dev/null ; then
+  # server running, check if code review mode is enabled
+  if [ -z $COPILOT_CODE_REVIEW ]; then
+    # server running in correct mode, continue
+    :
+  else
+    echo "Your Rails server is not running in "code review" mode. Please stop it, restart with script/server, then run this setup script again."
+  fi
+else
+  echo "Your Rails server is not running. Please start it with script/server and run this setup script again."
+  exit 1
+fi
+RAILS_SERVER_CHECK
+
+rails_server_running = system(RAILS_SERVER_CHECK)
+return unless rails_server_running
+
+puts "\nEnabling copilot chat..."
+system("bin/enable-copilot-chat")
+
+puts "\nRunning copilot pull request reviewer setup script..."
+system("script/enable-copilot-pull-request-reviewer")
+
+puts "\nCreating coding guideline in copilot-enterprise-org/copilot-enterprise-repo..."
+repo = Repository.with_name_with_owner("copilot-enterprise-org/copilot-enterprise-repo")
+Seeds::Objects::Copilot::CodingGuideline.create(repo: repo)
+
+puts "\nCreating pull request with changes that violate coding guideline..."
+author = User.find_by_login("monalisa")
+ref_name = "branch-#{SecureRandom.hex}"
+
+sample_code = Seeds::Objects::Copilot::CodingGuideline::GUIDELINES_SAMPLE_CODE
+
+GH::Context.enabled do
+  Seeds::Objects::Commit.create(
+    repo: repo,
+    message: "Add files that make Copilot sad",
+    committer: author,
+    branch_name: ref_name,
+    files: {
+      sample_code[:test_description_length][:filename] => sample_code[:test_description_length][:contents],
+      sample_code[:spelling][:filename] => sample_code[:spelling][:contents],
+    }
+  )
+
+  ::PullRequest.create_for!(
+    repo,
+    user: author,
+    title: "Pull request with changes that will generate CCR comments",
+    body: "This pull request has changes that should trigger Copilot coding review comments, some related to custom coding guidelines and some 'regular'.",
+    head: ref_name,
+    base: repo.default_branch,
+    draft: false,
+  )
+
+  ccr_bot = Apps::Privileged.integration(:copilot_pull_request_reviewer).bot
+  pull_requests = PullRequest.all.to_a
+
+  # Request copilot code review on existing PRs
+  pull_requests.each do |pull|
+    puts "Requesting copilot code review on #{pull.permalink(include_host: false)}..."
+    pull.request_review_from(reviewers: [ccr_bot], actor: pull.user)
+  end
+end
+
+puts "\n🎉 Done!"
+
+puts "\nRemember to run the copilot-api server with the 'code-review' option enabled:"
+puts "\ncd ../copilot-api && script/server --code-review"

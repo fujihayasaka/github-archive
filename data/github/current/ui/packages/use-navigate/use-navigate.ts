@@ -1,0 +1,99 @@
+import React, {startTransition} from 'react'
+import {
+  createPath,
+  createSearchParams,
+  matchRoutes,
+  resolvePath,
+  useLocation,
+  useNavigate as useReactRouterNavigate,
+  useSearchParams as useReactRouterSearchParams,
+  type NavigateOptions,
+  type To,
+  type URLSearchParamsInit,
+} from 'react-router-dom'
+
+import isHashNavigation from '@github-ui/is-hash-navigation'
+import {startSoftNav} from '@github-ui/soft-nav/state'
+import {PREVENT_AUTOFOCUS_KEY} from '@github-ui/react-core/prevent-autofocus'
+import {RoutesContext} from '@github-ui/react-core/routes-context'
+import {useIsDataRouterEnabled} from '@github-ui/react-core/future/use-is-data-router-enabled'
+
+export interface NavigateOptionsWithPreventAutofocus extends NavigateOptions {
+  preventAutofocus?: boolean
+}
+
+export const useNavigate = (): ((to: To, options?: NavigateOptionsWithPreventAutofocus) => void) => {
+  const {routes} = React.useContext(RoutesContext)
+  const reactRouterNavigate = useReactRouterNavigate()
+  const isDataRouterEnabled = useIsDataRouterEnabled()
+  return React.useCallback(
+    (to, navigateOptions = {}) => {
+      const pathname = resolvePath(to).pathname
+      const isExternalToApp = !matchRoutes(routes, pathname)
+
+      if (isExternalToApp) {
+        const href = typeof to === 'string' ? to : createPath(to)
+        ;(async () => {
+          const {softNavigate: turboSoftNavigate} = await import('@github-ui/soft-navigate')
+          turboSoftNavigate(href)
+        })()
+      } else {
+        if (!isHashNavigation(location.href, to.toString())) {
+          startSoftNav('react')
+        }
+        const {preventAutofocus, ...options} = navigateOptions
+        startTransition(() => {
+          reactRouterNavigate(
+            to,
+            preventAutofocus
+              ? {
+                  ...options,
+                  state: {
+                    [PREVENT_AUTOFOCUS_KEY]: true,
+                    ...options.state,
+                  },
+                }
+              : options,
+          )
+          if (!isDataRouterEnabled) {
+            /** Data router handles this in the router updates directly, merging state */
+            const {turbo, ...state} = window.history.state ?? {}
+            window.history.replaceState({...state, skipTurbo: true}, '', location.href)
+          }
+        })
+      }
+    },
+    [reactRouterNavigate, isDataRouterEnabled, routes],
+  )
+}
+
+/**
+ * An implementation of `useSearchParams` that mirrors `react-router-dom`'s `useSearchParams` hook
+ * but utilizes `@github-ui/useNavigate` instead of `react-router` `useNavigate` to handle updates.
+ */
+export const useSearchParams = () => {
+  const [searchParams] = useReactRouterSearchParams()
+  const navigate = useNavigate()
+  const {pathname} = useLocation()
+
+  const setSearchParams = React.useCallback<
+    (
+      nextInit?: URLSearchParamsInit | ((prev: URLSearchParams) => URLSearchParamsInit),
+      navigateOpts?: NavigateOptionsWithPreventAutofocus,
+    ) => void
+  >(
+    (nextInit, navigateOptions = {}) => {
+      const newSearchParams = createSearchParams(typeof nextInit === 'function' ? nextInit(searchParams) : nextInit)
+      navigate(
+        {
+          pathname,
+          search: newSearchParams.toString(),
+        },
+        navigateOptions,
+      )
+    },
+    [searchParams, navigate, pathname],
+  )
+
+  return [searchParams, setSearchParams] as const
+}

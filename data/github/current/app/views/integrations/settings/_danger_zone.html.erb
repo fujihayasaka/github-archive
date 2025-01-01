@@ -1,0 +1,184 @@
+<%# erblint:counter DeprecatedComponentsCounter 1 %>
+<%# erblint:counter DeprecatedComponentsCounter 1 %>
+<%# erblint:counter DeprecatedInPrimerCounter 2 %>
+<%= render Primer::Beta::Subhead.new(spacious: view.hook.present?, hide_border: true) do |component| %>
+  <% component.with_heading(tag: :h2, danger: true, font_size: 3) do %>Danger zone<% end %>
+<% end %>
+
+<% if view.pending_transfer? %>
+  <% if GitHub.flipper[:banner_migration].enabled?(current_user) %>
+    <%= render(Primer::Alpha::Banner.new(scheme: :warning, mb: 4)) do %>
+      This GitHub App is
+      <%= link_to_if view.transfer_target.adminable_by?(current_user), "pending transfer", gh_settings_app_transfer_path(view.transfer_target, view.transfer) %>
+      to <strong><%= link_author view.transfer_target %></strong>
+      <%= button_to "Cancel transfer",
+            gh_settings_app_transfer_path(view.transfer_target, view.transfer.id),
+            :method     => :delete,
+            :class      => "btn btn-danger btn-sm",
+            :form_class => "float-right" %>
+    <% end %>
+  <% else %>
+    <%= render(Primer::Beta::Flash.new(scheme: :warning, mb: 4)) do %>
+      This GitHub App is
+      <%= link_to_if view.transfer_target.adminable_by?(current_user), "pending transfer", gh_settings_app_transfer_path(view.transfer_target, view.transfer) %>
+      to <strong><%= link_author view.transfer_target %></strong>
+      <%= button_to "Cancel transfer",
+            gh_settings_app_transfer_path(view.transfer_target, view.transfer.id),
+            :method     => :delete,
+            :class      => "btn btn-danger btn-sm",
+            :form_class => "float-right" %>
+    <% end %>
+  <% end %>
+<% end %>
+
+<div class="Box Box--danger">
+
+  <div class="Box-row">
+    <% unless view.pending_transfer? %>
+      <%= render layout: "shared/details_dialog", locals: {
+            button_text: "Transfer ownership",
+            button_class: "btn btn-danger mt-1",
+            details_class: "float-right",
+            title: "Where should we transfer #{view.integration.name}?"
+          } do %>
+        <%= form_tag gh_transfer_settings_app_path(view.integration), method: :put, class: "d-flex flex-column flex-auto js-transfer-form" do %>
+          <div class="Box-body overflow-auto">
+            <p>
+              Transferring may be delayed until the new owner approves the transfer.
+            </p>
+            <dl class="form-group">
+              <dt>
+                <label for="confirm_integration_name">
+                  Type the name of the GitHub App to confirm:
+                </label>
+              </dt>
+              <dd>
+                <input class="form-control" type="text" id="confirm_integration_name" autofocus required
+                  pattern="<%= case_insensitive_pattern view.integration.name %>|<%= case_insensitive_pattern view.integration.name %>"
+                  aria-label="Type in the name of the GitHub App to confirm that you want to transfer this owner.">
+              </dd>
+            </dl>
+            <dl class="form-group mb-0">
+              <dt>
+                <label for="js-transfer-search-input" <%= test_selector("transfer-to-label") %>>
+                  <%= view.transfer_to_label_text %>
+                </label>
+              </dt>
+              <dd>
+                <div class="js-add-access-search">
+                  <div class="js-transfer-search-selection">
+                    <%= render(Primer::Beta::AutoComplete.new(
+                          src: gh_settings_app_transfer_suggestions_path(view.integration),
+                          label_text: "Type in the name of the new owner",
+                          visually_hide_label: true,
+                          placeholder: "Search for new owner",
+                          full_width: true,
+                          with_icon: true,
+                          list_id: "transfer-search-results",
+                          input_id: "js-transfer-search-input",
+                          input_name: "transfer_to",
+                          required: true,
+                          test_selector: "transfer-autocomplete"
+                        )) do |autocomplete| %>
+                      <% autocomplete.with_leading_visual_icon(icon: :search) %>
+                      <% autocomplete.with_input(required: true) %>
+                    <% end %>
+                    <% if view.show_unable_to_transfer_to_biz_message? %>
+                      <div class="d-flex flex-items-center mt-3">
+                        <%= render(Primer::Beta::Octicon.new(:info, size: :small, mr: 1)) %>
+                        <%= render(Primer::Beta::Text.new(color: :subtle, font_size: :small, test_selector: "info-enterprise-transfer")) do %>
+                          You cannot transfer this GitHub App to an Enterprise account because it is public.
+                        <% end %>
+                      </div>
+                    <% end %>
+                  </div>
+                  <div class="js-transfer-search-selected" hidden>
+                    <div class="js-selected-transfer-badge"></div>
+                  </div>
+                </div>
+              </dd>
+            </dl>
+          </div>
+          <div class="Box-footer">
+            <div hidden id="uninstall-warning-banner"
+                data-has-installations="<%= view.integration.installations.any? %>"
+                data-is-private-app="<%= view.integration.private_visibility? %>"
+                data-owner-type="<%= view.integration.owner.class.name %>">
+              <%= render(Primer::Alpha::Banner.new(scheme: :warning, mb: 3)) do %>
+                <p><%= view.uninstall_warning_text %></p>
+              <% end %>
+            </div>
+            <%= render Primer::Beta::Button.new(type: :submit, block: true, scheme: :danger, "data-disable-invalid": "") do %>
+              Transfer this GitHub App
+            <% end %>
+          </div>
+        <% end %>
+      <% end %>
+    <% end %>
+    <strong>Transfer ownership of this GitHub App</strong>
+    <div>
+      Transferring may be delayed until the new owner approves the transfer.
+    </div>
+  </div>
+
+  <% if view.can_delete? %>
+    <div class="Box-row">
+      <%= render Apps::DeletionDialogComponent.new(integration: view.integration) %>
+
+      <strong>Delete this GitHub App</strong>
+      <div>This cannot be undone. Please be certain.</div>
+    </div>
+  <% else %>
+    <div class="Box-row">
+      <%= render Primer::Beta::Button.new(disabled: true, scheme: :danger, float: :right, mt: 1, classes: "tooltipped tooltipped-nw", "aria-label": view.delete_tooltip_content) do %><%# erblint:disable Primer::Accessibility::TooltippedMigration %>
+        Delete GitHub App
+      <% end %>
+
+      <strong>Delete this GitHub App</strong>
+      <div>This cannot be undone. Please be certain.</div>
+    </div>
+  <% end %>
+
+  <% if view.public? && view.can_make_private? %>
+
+    <div class="Box-row">
+      <%= button_to "Make private",
+        gh_make_private_settings_app_path(view.integration),
+        method: :put,
+        form_class: "float-right",
+        class: "btn btn-danger mt-1",
+        data: {test_selector: "disabled-visibility-button"},
+        "data-confirm": "This GitHub app will only be installable on the #{view.integration.owner.display_login} account.
+Are you sure you want to make #{view.integration.name} private?" %>
+
+      <strong>Make this application private</strong>
+      <div class="">Private applications cannot be installed on other accounts.</div>
+    </div>
+
+  <% elsif view.public? && !view.can_make_private? %>
+
+    <div class="Box-row">
+      <%= render Primer::Beta::Button.new(disabled: true, scheme: :danger, float: :right, mt: 1, classes: "tooltipped tooltipped-nw", "aria-label": view.make_private_tooltip_content, test_selector: "disabled-visibility-button") do %><%# erblint:disable Primer::Accessibility::TooltippedMigration %>
+        Make private
+      <% end %>
+
+      <strong>Make this GitHub App private</strong>
+      <div>Private GitHub Apps cannot be installed on other accounts.</div>
+    </div>
+
+  <% elsif view.can_make_public? %>
+    <div class="Box-row">
+      <%= button_to "Make public",
+        gh_make_public_settings_app_path(view.integration),
+        method: :put,
+        form_class: "float-right",
+        class: "btn btn-danger mt-1",
+        "data-confirm": "Any user or organization will be able to install this GitHub App. Are you sure you want to make #{view.integration.name} public?",
+        data: { test_selector: "make-public-button" } %>
+
+      <strong>Make this GitHub App public</strong>
+      <div>Allow this GitHub App to be installed on other accounts.</div>
+    </div>
+  <% end %>
+
+</div>

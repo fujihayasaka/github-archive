@@ -1,0 +1,7 @@
+export const copilotChatTextAreaId = 'copilot-chat-textarea'
+export const copilotChatSearchInputId = 'copilot-chat-topic-search'
+export const reviewUserMessage = 'Review'
+export const copilotChatHeaderButtonID = 'copilot-chat-header-button'
+export const copilotDiffHeaderButtonID = 'copilot-diff-header-button'
+export const copilotChatPanelID = 'copilot-chat-panel'
+export const copilotChatPanelInnerID = 'copilot-chat-panel'

@@ -1,0 +1,108 @@
+<div role="region" aria-label="Caches">
+  <%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+    <% component.with_header(font_weight: :bold) do %>
+      Repository Cache Usage
+    <% end %>
+    <% component.with_row(classes: "summary") do %>
+      <% if cache_usage.nil? %>
+        <p>No cache usage data available. Either the backend data has not been synchronized yet, or there is no cache usage yet on the repository.</p>
+      <% else %>
+        <dl>
+          <dt class="mr-5"><b>Count</b></dt>
+          <dd><%= cache_usage.active_caches_count %></dd>
+        </dl>
+        <dl>
+          <dt class="mr-5"><b>Size</b></dt>
+          <dd>
+            <%= number_to_human_size(cache_usage.active_caches_size, precision: 2) %>
+            <% if is_over_limit %>
+              <span class="text-small color-fg-attention">
+                <%= primer_octicon(:alert, ml: 1) %> Exceeding limit.
+              </span>
+            <% end %>
+          </dd>
+        </dl>
+        <dl>
+          <dt class="mr-5"><b>Size Limit</b></dt>
+          <dd><%= cache_limit %> GB</dd>
+        </dl>
+        <dl>
+          <dt class="mr-5"><b>Last Synchronized</b></dt>
+          <dd><relative-time datetime="<%= cache_usage.updated_at.utc.iso8601 %>"></relative-time></dd>
+        </dl>
+        <dl>
+          <dt class="mr-5"><b>Backend</b></dt>
+          <dd><%= cache_usage.is_results_usage ? "Actions Results" : "Artifact Cache (Legacy)" %></dd>
+        </dl>
+      <% end %>
+
+      <div class="text-small my-2">
+        <%= link_to Stafftools::RepositoriesHelper.get_audit_log_link_for_repo_deleted_caches(current_repository.id) do %>
+          <%= primer_octicon(:search) %> Cache deletion audit logs
+        <% end %>
+      </div>
+
+      <% if !GitHub.enterprise? && cache_usage&.is_results_usage %>
+        <div class="text-small my-2">
+          <%= link_to Stafftools::RepositoriesHelper.get_kusto_link_for_cache_eviction(current_repository.id) do %>
+            <%= primer_octicon(:graph) %> Recent Size Based Evictions (Kusto)
+          <% end %>
+        </div>
+      <% end %>
+    <% end %>
+  <% end %>
+</div>
+<br>
+<div role="region" aria-label="Cache List">
+  <%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+    <% if caches.empty? %>
+      <% component.with_header(font_weight: :bold) do %>
+          Repository Cache List
+      <% end %>
+      <% component.with_row(classes: "summary") do %>
+        <p>No cache entries found.</p>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if caches.any? %>
+    <div class="actions-fullwidth-module color-bg-default Box color-shadow-small mb-3 pt-2 pb-1 border rounded">
+      <table class="width-full mt-n1 actions-workflow-table">
+        <thead>
+          <tr class="color-fg-muted border-bottom color-border-muted">
+            <th class="mr-4"><b>Key</b></th>
+            <th class="mr-4">Scope</th>
+            <th class="mr-4">Size</th>
+            <th class="mr-4">Last accessed at</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          <% caches.each_with_index do |cache, index| %>
+            <%
+              last = index == caches.count - 1
+            %>
+            <tr role="row">
+              <td class="compact pr-4<% unless last %> border-bottom color-border-muted<% end %>">
+                <%= cache.key %>
+              </td>
+              <td class="compact pr-4<% unless last %> border-bottom color-border-muted<% end %>">
+                <%= cache.scope %>
+              </td>
+              <td class="compact pr-4<% unless last %> border-bottom color-border-muted<% end %>">
+                <%= number_to_human_size(cache.size, precision: 2) %>
+              </td>
+              <td class="compact pr-4<% unless last %> border-bottom color-border-muted<% end %>">
+                <%= Time.at(cache.last_accessed_at.to_i).strftime("%d-%m-%Y %I:%M %p") %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+
+      <div class="paginate-container">
+        <%= will_paginate caches %>
+      </div>
+  <% end %>
+</div>

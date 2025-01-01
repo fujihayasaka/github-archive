@@ -1,0 +1,44 @@
+#!/bin/bash
+# Usage: send-warmup-request-to-alloy
+USAGE="Usage: send-warmup-request-to-alloy"
+
+if [ -z "${ASSET_HOST_URL}" ]; then
+  echo "ASSET_HOST_URL is empty"
+  exit 0
+fi
+
+if [ -z "${ALLOY_API_HMAC_KEY}" ]; then
+  echo "ALLOY_API_HMAC_KEY is empty"
+  exit 0
+fi
+
+if [ -z "${ALLOY_URL}" ]; then
+  echo "ALLOY_URL is empty"
+  exit 0
+fi
+
+MANIFEST_PATH=public/assets/manifest.alloy.json
+if [ ! -f $MANIFEST_PATH ]; then
+  echo "Could not find an Alloy manifest"
+  exit 0
+fi
+
+FINGERPRINTED_MANIFEST=$(cat $MANIFEST_PATH | grep -oP "manifest-[0-9a-fA-F]+\.json")
+
+if [ -z "${FINGERPRINTED_MANIFEST}" ]; then
+  echo "Could not extract fingerprinted manifest"
+  exit 0
+fi
+
+MANIFEST_URL=$ASSET_HOST_URL/assets/$FINGERPRINTED_MANIFEST
+TIMESTAMP=$(date +%s)
+HMAC="$TIMESTAMP.$(echo -n "$TIMESTAMP$MANIFEST_URL" | openssl dgst -sha256 -hmac "$ALLOY_API_HMAC_KEY" | cut -d ' ' -f 2)"
+
+curl -sS \
+  -H "Content-Type: application/json" \
+  -H "REQUEST_HMAC: $HMAC" \
+  --request POST \
+  --data "{\"manifestUrl\":\"$MANIFEST_URL\"}" \
+  $ALLOY_URL/warmup
+
+exit 0

@@ -1,0 +1,2999 @@
+# This file is used to track queries that violate package boundaries. There are two reasons for violations:
+#
+# - Cross domain: A query uses tables from multiple domains.
+# - Domain access: A query bypassed a domain's interface and accessed its private tables directly.
+#
+# The format of this file is as follows:
+#
+# <query_digest>:
+#   query: <query>
+#   violations:
+#     - [location: <file:line>] # never committed but only generated with the --locations flag
+#       reason: <cross_domain|domain_access>
+#
+# To add a new violation, you can run the test causing the violation with the following environment variables:
+#
+#   TEST_ALL_FEATURES=1 PERFORM_STATEMENT_CHECKING=1 DOMAIN_QUERY_VIOLATIONS=1 bin/rails test <path_to_test_file>:<line_number>
+#
+# This will update the query violation file(s) with the new violation(s). To remove a violation, you can simply
+# remove the entry from the file.
+#
+# If there are many violations to add or update, or you'd like to refresh all recorded violations, you can
+# run the following command to pull all violations from the latest completed CI build on your branch:
+#
+#     script/domain-isolation-query-violations [--locations] [--audit] [--reason <cross_domain|domain_access>]
+#
+# This will replace all query violation files with the latest violations. Use the `--locations` flag to
+# include file locations in the output, don't commit that though! Use the `--audit` flag to include
+# violations from tables with visibility level `audit`. Use the `--reason` flag to filter violations
+# by reason in case you're only interested in locations for a specific reason.
+
+---
+002ab46afd0c0dd7ba9f038cef954a58dfa986e75301b44c521350ed5df840fa:
+  query: SELECT check_runs.* FROM check_runs INNER JOIN check_suites as check_suites_for_app
+    ON check_suites_for_app.id = check_runs.check_suite_id AND check_suites_for_app.repository_id
+    = check_runs.repository_id WHERE check_runs.id IN ? AND check_runs.repository_id
+    = ? AND (check_suites_for_app.github_app_id = ? OR (check_suites_for_app.github_app_id
+    = ? AND check_runs.repository_id = ?)) ORDER BY id DESC LIMIT ? OFFSET ?
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+00d68311f67d2390fb850b6f6e3c7e06377415d29acff995e3f9691acb8575ec:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites FORCE INDEX(by_repo_app_uniqueness_key) WHERE check_suites.repository_id
+    = ? AND check_suites.github_app_id = ? AND check_suites.external_id = ? LIMIT
+    ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+'029fa8c10d99470356ad05037903474b04a32aa55551fc19fcdc16bb81609ccd':
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.check_suite_id = ? AND
+    check_runs.repository_id = ? ORDER BY id DESC LIMIT ? OFFSET ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+02ca752d5340465864b7fe18296f2fed30c8bd7c29a1f716a457e53dc22d7931:
+  query: SELECT ? AS one FROM check_runs WHERE check_runs.check_suite_id = ? AND check_runs.repository_id
+    = ? LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+02f1da2c665ded0cdc54d8c923ff93a3243e6299414dff48ff1f8ddddb7fa272:
+  query: UPDATE check_runs SET check_runs.status = ?, check_runs.conclusion = ?, check_runs.completed_at
+    = ?, check_runs.updated_at = ?, check_runs.title = x?, check_runs.summary = x?
+    WHERE check_runs.id = ? AND check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+'034801a8ce13eb1632bba33bbba4d7283222586d8a3150b84652d16c1700eb3c':
+  query: SELECT check_runs.id FROM check_runs WHERE check_runs.id = ? ORDER BY check_runs.id
+    ASC LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+03dc311019aa4464ad729524bd23b046e8d3f741707d00b35585553b1b1ee8b0:
+  query: SELECT check_annotations.* FROM check_annotations WHERE check_annotations.repository_id
+    = ? AND (check_run_id in (?)) LIMIT ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+'049a1bd9caa92c2da52d1cb8660b02a915eeff9542b8c583499494a14eaf2995':
+  query: INSERT INTO check_annotations (filename, warning_level, message, start_line,
+    end_line, created_at, updated_at, raw_details, check_run_id, start_column, end_column,
+    repository_id, step_number) VALUES (x?, ?, x?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+05f936f7cbba0432b77543143b05c635e4f4eb093a6752fc0b4163fd7c376895:
+  query: UPDATE check_suites SET check_suites.updated_at = ?, check_suites.conclusion
+    = NULL, check_suites.started_at = ? WHERE check_suites.id = ? AND check_suites.repository_id
+    = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+06c0e5579c7b9317fc6ffd7774bf5ca632f9bc1f9aa8a8de3274a026a7e4e4f0:
+  query: UPDATE check_suites SET check_suites.conclusion = ?, check_suites.status
+    = ?, check_suites.completed_at = ? WHERE check_suites.id = ? AND check_suites.repository_id
+    = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+070d24e128b038b91c8c324012411947b9f73904bd2f1f617608d2eacbc5a40e:
+  query: INSERT INTO check_suites (repository_id, github_app_id, created_at, updated_at,
+    head_branch, head_sha, head_repository_id, started_at, uniqueness_key) VALUES
+    (?, ?, ?, ?, x?, ?, ?, ?, ?)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+0a798cf21baff3731f53ea9d313ed4cbd916009325021252e4b5342b72e2d4f0:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id IN ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+0a8f9d4570d6103d8c2690b0a4b84679c40092b9409a7150caa1aafea909f49f:
+  query: SELECT MAX(check_suites.id) FROM check_suites FORCE INDEX (index_check_suites_on_head_sha_and_repository_id)
+    WHERE check_suites.head_sha IN ? AND check_suites.repository_id = ? AND check_suites.hidden
+    = ? AND check_suites.workflow_file_path IS NOT NULL GROUP BY check_suites.github_app_id,
+    check_suites.workflow_file_path, check_suites.event, check_suites.head_sha UNION
+    ALL SELECT check_suites.id FROM check_suites FORCE INDEX (index_check_suites_on_head_sha_and_repository_id)
+    WHERE check_suites.head_sha IN ? AND check_suites.repository_id = ? AND check_suites.workflow_file_path
+    IS NULL
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+0b2137a6cd844f63ad86db86421a2a1028b4ef00909d0d40d49b5ce854ebdcda:
+  query: INSERT INTO check_runs (status, name, started_at, created_at, updated_at,
+    title, summary, text, check_suite_id, repository_id) VALUES (?, x?, ?, ?, ?, x?,
+    x?, x?, ?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+0cac6d6a7fde3e690e2e9333a2f744becccef4f8afd9f80a5e09a9869bacd41a:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id IN ? AND check_runs.repository_id
+    = ? ORDER BY id DESC LIMIT ? OFFSET ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+0d43c852084be99484c66b517d76e0b285606cce14d818f04d531f35ca5a66cf:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.check_suite_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+0d844418c852570f608d777e171901d2ead4675f1243045481e8b5929b3e8300:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.repository_id = ? AND
+    check_runs.id = ? AND check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+0e12044a068b3ad4a3f098b1ef86e74a6f052cade1705d7616b94a09dd9e55ce:
+  query: SELECT check_runs.* FROM check_runs INNER JOIN check_suites ON check_suites.id
+    = check_runs.check_suite_id WHERE (check_suites.id IN ? AND check_runs.repository_id
+    = ? AND check_suites.repository_id = ?)
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+0eea8b2576e8e88813eb18f53a6177eb7ca95ccdb00d3d0ba8148fd5764c4d19:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.check_suite_id = ? AND
+    check_runs.repository_id = ? AND check_runs.external_id = ? ORDER BY check_runs.id
+    DESC LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+0ef0abdacc60e5acdd638c3a7f11842ed2ede54341a4cd90caef903ad18192e7:
+  query: INSERT INTO check_runs (status, conclusion, name, started_at, completed_at,
+    created_at, updated_at, external_id, check_suite_id, repository_id) VALUES (?,
+    ?, x?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+0f3ea40a1469ff1419f8c7ba7dbacd7d1eee6079a6f6c0671108b088522f85ed:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.repository_id = ? AND check_suites.head_sha
+    = ? AND check_suites.hidden = ? ORDER BY check_suites.id ASC LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+0fc77384d32cc9b816ad19211bb4f35fd0c3400dea42f258db1c792909e511a2:
+  query: SELECT check_suites.id FROM check_suites WHERE check_suites.repository_id
+    = ? AND check_suites.status = ? AND check_suites.head_sha IN ? AND check_suites.github_app_id
+    = ? ORDER BY FIELD(head_sha, ?, ?, ?, ?, ?, ?, ?, ?) LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+10ae09216be9ff27818b9725b4027ac03e14a8b1460c8c6e0f537466b6e9f324:
+  query: UPDATE check_suites SET check_suites.conclusion = NULL WHERE check_suites.id
+    = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+10b4d2e38f53ac0d23f42693757ac36b8f6d28230ed5bbf7733f3b5297c9b370:
+  query: SELECT check_runs.id, check_runs.creator_id, check_runs.status, check_runs.conclusion,
+    check_runs.details_url, check_runs.name, check_runs.started_at, check_runs.completed_at,
+    check_runs.created_at, check_runs.updated_at, check_runs.external_id, check_runs.title,
+    check_runs.images, check_runs.check_suite_id, check_runs.actions, check_runs.number,
+    check_runs.completed_log_url, check_runs.completed_log_lines, check_runs.streaming_log_url,
+    check_runs.display_name, check_runs.repository_id, t.associated_head_sha FROM
+    check_runs INNER JOIN (SELECT max(check_runs.id) as id, check_suites.head_sha
+    as associated_head_sha, check_runs.repository_id as repository_id FROM check_runs
+    INNER JOIN check_suites ON check_suites.id = check_runs.check_suite_id WHERE check_suites.id
+    IN (SELECT * FROM (SELECT max(id) FROM check_suites WHERE check_suites.repository_id
+    = ? AND check_suites.head_sha IN ? AND check_suites.hidden = ? AND check_suites.workflow_file_path
+    IS NOT NULL GROUP BY check_suites.head_sha, check_suites.github_app_id, check_suites.workflow_file_path,
+    check_suites.event UNION SELECT check_suites.id FROM check_suites WHERE check_suites.repository_id
+    = ? AND check_suites.head_sha IN ? AND check_suites.workflow_file_path IS NULL)
+    subquery) AND check_suites.repository_id = ? AND (check_suites.workflow_file_path
+    IS NULL OR check_runs.created_at >= IFNULL(check_suites.started_at, check_suites.created_at))
+    GROUP BY check_suites.head_sha, check_runs.name, check_runs.check_suite_id) t
+    on t.id = check_runs.id AND t.repository_id = check_runs.repository_id WHERE check_runs.repository_id
+    = ?
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+1193f64f149375ee323e440b96e7b348ecbdba87be10db8c9d8583559b78c88f:
+  query: INSERT INTO code_scanning_alerts (check_annotation_id, created_at, updated_at,
+    alert_number, repository_id, check_run_id) VALUES (?, ?, ?, ?, ?, ?)
+  tables:
+  - code_scanning_alerts
+  violations:
+  - reason: domain_access
+11ae8dd321e8e0a764b584230b612ac9f081cc8785caef6d8ccdc66b39c8b384:
+  query: UPDATE check_suites SET check_suites.updated_at = ?, check_suites.cancelled_at
+    = ? WHERE check_suites.id = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+122ffc66eca9d092f809e0155e4ad7ee5cd1421d10b078f9aff495da45ad32d4:
+  query: SELECT check_annotations.* FROM check_annotations WHERE check_annotations.repository_id
+    = ? AND check_annotations.check_run_id = ? LIMIT ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+1245f9685294da86b5b46b1ad8d4ff58af0099c727b0fdba2fbb11e0b3aa4f82:
+  query: SELECT check_annotations.* FROM check_annotations WHERE check_annotations.repository_id
+    = ? AND (check_run_id in (?, ?)) LIMIT ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+12e81b1f54e0961d19fc592fc0840a53eb0b15a65570741eba66fd044f348a97:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.repository_id = ? AND
+    check_runs.id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+151c0bc7918a6b60cb7585ce418f0175db4ecff2f3b2f403c47f72e3ce773a40:
+  query: INSERT INTO check_annotations (filename, warning_level, message, start_line,
+    end_line, created_at, updated_at, raw_details, title, start_column, end_column,
+    check_suite_id, repository_id) VALUES (x?, ?, x?, ?, ?, ?, ?, ?, x?, ?, ?, ?,
+    ?)
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+1557a31a4bb4d4ea0e0d3db3dbf9c771714cf092e033057f0db188549b3ca69f:
+  query: UPDATE check_suites SET check_suites.rerequestable = ?, check_suites.check_runs_rerunnable
+    = ?, check_suites.name = x? WHERE check_suites.id = ? AND check_suites.repository_id
+    = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+1564c09180ecb814d7056fb6b7b44174aafb5eeb582df39f9562a4ad305b2473:
+  query: SELECT DISTINCT check_suites.head_branch FROM check_suites WHERE check_suites.repository_id
+    = ? AND (check_suites.github_app_id = ? OR check_suites.github_app_id IS NULL)
+    ORDER BY check_suites.head_branch ASC
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+15790486301fcff5f5fe3e5c6c61da0e8ded3ed7da50df5ecd549d9a30a3cdd0:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites INNER JOIN check_runs ON check_runs.check_suite_id = check_suites.id
+    WHERE check_suites.head_sha = ? AND check_suites.repository_id = ? AND (check_runs.name
+    = ? AND check_runs.repository_id = ?) LIMIT ? OFFSET ?
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+16d9e8347d78919a45aecc65cf00455f449228f2053250060acefa968274d0bc:
+  query: INSERT INTO check_runs (status, name, started_at, created_at, updated_at,
+    external_id, check_suite_id, display_name, repository_id) VALUES (?, x?, ?, ?,
+    ?, ?, ?, x?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+174d4a3e7766abbb28ccc85b57b911c2606ff52de165d31d9869acf8d1f24164:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id = ? AND check_runs.status
+    = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+18a3f8f16386c3e69ca330d2bde22521d1dd0cbd725bd43d4a2e8ee47815fd6a:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.repository_id = ? AND check_suites.github_app_id
+    IS NULL AND check_suites.external_id = ? ORDER BY check_suites.id DESC LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+198199c2e09079537cb6d0ee56064e867bc5aa76087bb40ac5c16d29903748c0:
+  query: SELECT check_suites.updated_at FROM check_suites FORCE INDEX(index_check_suites_on_is_archived_updated_at)
+    WHERE (is_archived = ?) AND (updated_at > ? AND updated_at <= ?) ORDER BY updated_at
+    ASC LIMIT ? OFFSET ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+1b16d62b19d3e6128d5b0b91e2c49582a6fd03075e4963bb6aa3edb4070e7369:
+  query: SELECT DISTINCT check_run_id FROM code_scanning_alerts WHERE code_scanning_alerts.repository_id
+    = ? AND code_scanning_alerts.alert_number IN ?
+  tables:
+  - code_scanning_alerts
+  violations:
+  - reason: domain_access
+1b1c9f7b1c9d670fdddf14fc4834edf04804438ece8107ed09db24679f6658f3:
+  query: SELECT check_annotations.* FROM check_annotations WHERE check_annotations.check_suite_id
+    = ? AND check_annotations.filename = x?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+1bbcd3ee81d9ecd57f67ade43810713248e0609df78c94abdf8b37f662be0fee:
+  query: UPDATE check_runs SET check_runs.updated_at = ?, check_runs.streaming_log_url
+    = ? WHERE check_runs.id = ? AND check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+1e313f38f5d77ccb891f503aaa2dbcdeebfa3f866c8231b9a8d2c2aa9abdd88e:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.repository_id = ? AND check_suites.head_sha
+    = ? AND check_suites.github_app_id = ? AND check_suites.head_branch = x? AND check_suites.push_id
+    = ? LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+1e777ed1862581eeccc2e5322ab2d83ab17b3f938b78b917bd0fbf2fbe098262:
+  query: UPDATE check_suites SET check_suites.head_branch = x? WHERE check_suites.id
+    = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+1ec0d9e7f484a7c24f3508d92d964158da5cc34a1f9510728f1ef873d303e318:
+  query: INSERT INTO check_suites (repository_id, github_app_id, created_at, updated_at,
+    head_sha, external_id, started_at, uniqueness_key) VALUES (?, ?, ?, ?, ?, ?, ?,
+    ?)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+1f4856de573dca77e6fd1207aeafff14901ff1eeace62bacedb4087d5dd7c6d2:
+  query: SELECT COUNT(*) FROM check_runs INNER JOIN check_suites as check_suites_for_app
+    ON check_suites_for_app.id = check_runs.check_suite_id AND check_suites_for_app.repository_id
+    = check_runs.repository_id WHERE (check_suites_for_app.github_app_id = ? OR (check_suites_for_app.github_app_id
+    = ? AND check_runs.repository_id = ?)) AND (check_runs.external_id like (?) OR
+    (check_runs.external_id LIKE (?)) OR (check_runs.external_id = (?) AND check_suites_for_app.repository_id=(?)))
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+1fdb7c0809e2e3dea2979d18387831687dc5cc98a071e4de5332592ae1b0ee64:
+  query: SELECT check_suites.updated_at FROM check_suites FORCE INDEX(index_check_suites_on_is_archived_updated_at)
+    WHERE (is_archived = ?) AND (updated_at <= ?) ORDER BY updated_at ASC LIMIT ?
+    OFFSET ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+208031044f1d6a60a4c2bb081a101668b962a735b16881af6995b53e01ef7717:
+  query: INSERT INTO check_runs (status, conclusion, name, started_at, completed_at,
+    created_at, updated_at, title, summary, check_suite_id, repository_id) VALUES
+    (?, ?, x?, ?, ?, ?, ?, x?, x?, ?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+20f74f5abdab6962f7eee1e35faf6ac0e4f1f240f2d07cfa70b23abb8c0ad089:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id = ? AND check_runs.repository_id
+    = ? LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+22a3ce5ce4f6966ce480756e971425948f7b82c24416dec2025e03e312cb3da0:
+  query: SELECT COUNT(*) FROM check_runs WHERE check_runs.id IN ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+22cb13338c119923aba46be873f3e4c12b110b239d0e4f32e6b99bef5a030710:
+  query: SELECT COUNT(*) FROM (SELECT ? AS one FROM check_runs WHERE check_runs.id
+    = ? AND check_runs.repository_id = ? LIMIT ?) subquery_for_count
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+2301f0e975578c33d93040edbdac3dc6caf35dab433ae7fbca2937e8d108c43f:
+  query: SELECT MAX(check_runs.id) AS check_run_id FROM check_runs JOIN check_suites
+    ON check_runs.check_suite_id = check_suites.id AND check_suites.repository_id
+    = ? JOIN check_annotations ON check_runs.id = check_annotations.check_run_id AND
+    check_annotations.repository_id = ? AND check_annotations.check_suite_id IS NULL
+    WHERE check_suites.head_sha = ? AND check_runs.repository_id = ? AND (check_suites.workflow_file_path
+    IS NULL OR check_runs.created_at >= IFNULL(check_suites.started_at, check_suites.created_at))
+    GROUP BY check_runs.name, check_runs.check_suite_id
+  tables:
+  - check_annotations
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+237dc25cf18b659b86e9bfabda0bcccdbe484ff04184cd6edf697370e05ad655:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.repository_id = ? AND check_suites.head_sha
+    = ? AND check_suites.github_app_id = ? AND check_suites.head_branch IS NULL AND
+    check_suites.push_id IS NULL LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+24a557bf7532c12c79f6832a945379d9c9a1f5b1d68c3af95e2b26afaf7e0fe0:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id IN ? AND check_runs.status
+    = ? LIMIT ? OFFSET ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+25c4642ccda24822fdaaf3b4f70419b5df5915e4ee4cbd81665f958178a942c2:
+  query: INSERT INTO check_suites (push_id, repository_id, github_app_id, created_at,
+    updated_at, head_branch, head_sha, rerequestable, started_at, uniqueness_key)
+    VALUES (?, ?, ?, ?, ?, x?, ?, ?, ?, ?)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+26bc6290ea1f7cb3a5545321fbf0b438a6d9e9bf2f10988815199a0f28868a22:
+  query: SELECT check_suites.id FROM check_suites WHERE check_suites.repository_id
+    = ? AND check_suites.status = ? AND check_suites.head_sha = ? AND check_suites.github_app_id
+    = ? ORDER BY FIELD(head_sha, ?) LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+26f4427a5b69276cb76ac3f72d08058a76ea98d2601a8ab83d587729012e33af:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.check_suite_id = ? AND
+    check_runs.id = ? LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+27531e62886048335a8e8b974beefaef51583932cf3d7ab5ec12d813ef595025:
+  query: SELECT MAX(check_runs.id) FROM check_runs JOIN check_suites ON check_runs.check_suite_id
+    = check_suites.id WHERE check_suites.head_sha = ? AND check_runs.repository_id
+    = ? AND check_runs.created_at < ? GROUP BY check_runs.name, check_runs.check_suite_id
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+287c931b191e65d9743447e21ab23ef46cc180c1e5a9d205378a4015fcee0022:
+  query: SELECT check_runs.id FROM check_runs WHERE check_runs.check_suite_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+2a1719fb19a242778c3e454e980a89d05cb83615082a76bfeeb6518caa59ab49:
+  query: UPDATE check_runs SET check_runs.status = ?, check_runs.conclusion = ?, check_runs.completed_at
+    = ?, check_runs.title = x? WHERE check_runs.id = ? AND check_runs.repository_id
+    = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+2b45e8f1c357770318e2ce027790a6282ffa7ddda7471b7fd2fc2312a00d1c29:
+  query: SELECT check_runs.* FROM check_runs INNER JOIN check_suites ON check_suites.id
+    = check_runs.check_suite_id WHERE (check_suites.id IN ? AND check_runs.repository_id
+    = ? AND check_suites.repository_id = ?) ORDER BY id DESC LIMIT ? OFFSET ?
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+2be742b2e403eb08d5720237fa7f85b94660006773232b83f29e3b6a65193033:
+  query: INSERT INTO check_steps (check_run_id, number, conclusion, name, created_at,
+    updated_at, external_id, repository_id) VALUES (?, ?, ?, x?, ?, ?, ?, ?)
+  tables:
+  - check_steps
+  violations:
+  - reason: domain_access
+2cbc9a91d863eb9da36ccc7daed9b85a5b9ad050a56033961453113d901d7cf6:
+  query: INSERT INTO dependabot_autofix_annotations (check_annotation_id, autofix_job_id,
+    repository_id, check_run_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+  tables:
+  - dependabot_autofix_annotations
+  violations:
+  - reason: domain_access
+2e3d2843de8b22f6cab9dfee9e7e68fa8ec640847f323b4d3248c082a821c798:
+  query: SELECT check_runs.id FROM check_runs INNER JOIN check_suites as check_suites_for_app
+    ON check_suites_for_app.id = check_runs.check_suite_id AND check_suites_for_app.repository_id
+    = check_runs.repository_id WHERE check_runs.id = ? AND (check_suites_for_app.github_app_id
+    = ? OR (check_suites_for_app.github_app_id = ? AND check_runs.repository_id =
+    ?)) ORDER BY check_runs.id ASC LIMIT ?
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+2f72976e699ed024e99c7a574547f9e63c0a432c610ac781d9a13e5a46205139:
+  query: SELECT check_runs.id FROM check_runs LEFT JOIN check_runs cr2 ON ( check_runs.check_suite_id
+    = cr2.check_suite_id AND check_runs.name = cr2.name AND check_runs.id < cr2.id)
+    WHERE check_runs.name = x? AND check_runs.repository_id = ? AND check_runs.check_suite_id
+    = ? AND cr2.id IS NULL
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+3018ba095b2dd02ce2b9597497a7a53c6ba1878f872a96c9428d4fda36a9dbed:
+  query: SELECT check_annotations.* FROM check_annotations WHERE check_annotations.check_suite_id
+    = ? AND (created_at >= ?)
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+30e02a7e6201fc279edc2e09bd1da2d72d820ed4b9578bb5b273780cc6d0e292:
+  query: SELECT check_annotations.id FROM check_annotations WHERE check_annotations.repository_id
+    = ? AND check_annotations.check_suite_id = ? LIMIT ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+31d0bdb4b26fb73d714ce0f9c12f450872aa1662d1dd64932884f86aa61abf99:
+  query: SELECT MAX(check_runs.id) AS check_run_id FROM check_runs JOIN check_suites
+    ON check_runs.check_suite_id = check_suites.id WHERE check_runs.check_suite_id
+    IN ? AND check_suites.repository_id = ? AND (check_suites.workflow_file_path IS
+    NULL OR check_runs.created_at >= IFNULL(check_suites.started_at, check_suites.created_at))
+    AND check_runs.repository_id = ? GROUP BY check_runs.name, check_runs.check_suite_id
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+31dd29fc6bd0575d35bb15f7af6c9bffac19b66944fd3ec4d5b1f868df532a7e:
+  query: SELECT COUNT(*) AS total, check_runs.conclusion, check_suites.head_sha AS
+    sha FROM check_runs JOIN check_suites ON check_suites.id = check_runs.check_suite_id
+    AND check_suites.repository_id = check_runs.repository_id WHERE check_runs.id
+    IN ( SELECT id FROM ( SELECT MAX(check_runs.id) as id FROM check_runs JOIN check_suites
+    ON check_suites.id = check_runs.check_suite_id AND check_suites.repository_id
+    = check_runs.repository_id WHERE check_suites.id IN ? AND check_runs.repository_id
+    = ? AND (check_suites.workflow_file_path IS NULL OR check_runs.created_at >= IFNULL(check_suites.started_at,
+    check_suites.created_at)) GROUP BY check_runs.check_suite_id, check_runs.name
+    ) AS subquery ) AND check_runs.repository_id = ? GROUP BY check_runs.conclusion,
+    check_suites.head_sha
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+3219ef8959c1598e22ebd569cb341185ece762e4cf909899ce7b9fc306655d6a:
+  query: INSERT INTO check_suites (repository_id, github_app_id, created_at, updated_at,
+    head_sha, rerequestable, started_at, uniqueness_key) VALUES (?, ?, ?, ?, ?, ?,
+    ?, ?)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+332c2d1017682d8136881f16c9ae66848c6fb9f557b35405521e03f735d693aa:
+  query: INSERT INTO check_annotations (filename, warning_level, message, start_line,
+    end_line, created_at, updated_at, check_run_id, repository_id, step_number) VALUES
+    (x?, ?, x?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+33b0439fd97cb10b7bb12ad999ebc58c74a0ac52ebc446c2c13f340327462c64:
+  query: SELECT COUNT(*) FROM check_runs WHERE check_runs.check_suite_id = ? AND check_runs.repository_id
+    = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+352d3308e85bf1a704969c7bcfadef872368b88cfd7fd3a36020a827d20be634:
+  query: INSERT INTO check_suites (repository_id, github_app_id, creator_id, status,
+    created_at, updated_at, conclusion, head_branch, head_sha, rerequestable, event,
+    head_repository_id, workflow_file_path, external_id, started_at, completed_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, x?, ?, ?, ?, ?, x?, ?, ?, ?)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+35fa90f2b70328de9ba67543137002b55ae11f97a93f41f3ae19491b3e1355cb:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.check_suite_id = ? AND
+    check_runs.name = x? AND check_runs.repository_id = ? LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+3675302b6c2e0fdfa688a8fc75505e00f6efad3cc01de29136761a15a225ef9c:
+  query: UPDATE check_steps SET check_steps.completed_log_url = NULL, check_steps.completed_log_lines
+    = NULL WHERE check_steps.repository_id = ? AND check_steps.id IN ?
+  tables:
+  - check_steps
+  violations:
+  - reason: domain_access
+36db2d92e473bb4c561f0c39fbf8c5691ac1553fe81c2fcaa008e4b79dc14e8e:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.repository_id = ? AND check_suites.head_sha
+    = ? AND check_suites.hidden = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+373d3671ddf325668bfc9db16ce6d7d588feb4edc5df8de9d617b9c8aa1af802:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.id IN ? AND check_suites.repository_id =
+    ? AND check_suites.status != ? ORDER BY id DESC LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+3757efee50065a149f1e0fae2a6ce6ad49192e19853ede03db26650f7fe0e6c0:
+  query: SELECT ? AS one FROM check_runs WHERE check_runs.id = ? AND check_runs.repository_id
+    = ? LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+37e95758ed44a8a7bb5b3793b7a94ae67ad41d10de85c1a90be2036fd297c342:
+  query: SELECT check_suites.updated_at FROM check_suites FORCE INDEX(index_check_suites_on_is_archived_updated_at)
+    WHERE (is_archived = ?) AND (updated_at > ? AND updated_at <= ?) ORDER BY updated_at
+    ASC LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+384049ee584f898c88c0cbffaef5a1cccf478e156da76f2ed812ffcb51136e37:
+  query: SELECT ? AS one FROM check_steps WHERE check_steps.check_run_id = ? AND check_steps.repository_id
+    = ? LIMIT ?
+  tables:
+  - check_steps
+  violations:
+  - reason: domain_access
+38b33449c03be0863855477a525e9274508fc56e67e2ec013712b73f0c7da9c9:
+  query: INSERT INTO check_suites (push_id, repository_id, github_app_id, created_at,
+    updated_at, head_branch, head_sha, hidden, name, event, workflow_file_path, started_at)
+    VALUES (?, ?, ?, ?, ?, x?, ?, ?, x?, ?, x?, ?)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+38fc0a84ac253c3108db81bb99b4f1606a278ee83c64283ac3e193b8e90d095c:
+  query: SELECT check_runs.* FROM check_runs INNER JOIN check_suites as check_suites_for_app
+    ON check_suites_for_app.id = check_runs.check_suite_id AND check_suites_for_app.repository_id
+    = check_runs.repository_id WHERE check_runs.id = ? AND (check_suites_for_app.github_app_id
+    = ? OR (check_suites_for_app.github_app_id = ? AND check_runs.repository_id =
+    ?))
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+39c26d29700e0be71397b06e5035b52998313a4585dfa581a3d19e947670431f:
+  query: INSERT INTO check_suites (push_id, repository_id, github_app_id, created_at,
+    updated_at, head_branch, head_sha, name, event, explicit_completion, workflow_file_path,
+    started_at) VALUES (?, ?, ?, ?, ?, x?, ?, x?, ?, ?, x?, ?)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+39d7f5633833894b401712650fc371738ced57d330e1996747418fc035770681:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id IN ? AND (check_runs.name
+    = x? OR check_runs.display_name = x?) LIMIT ? OFFSET ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+3b2fd52f6e9bac1ac1ade29dc8336b6fe96aa79f5f548edef44171ba0afb0943:
+  query: INSERT INTO check_runs (status, name, started_at, created_at, updated_at,
+    external_id, check_suite_id, repository_id) VALUES (?, x?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+3cd30b88297b4c17998731c45ea7162a2d87b529581ad818866ca3cd6090cc2b:
+  query: SELECT check_runs.id FROM check_runs WHERE check_runs.id IN ? ORDER BY check_runs.id
+    DESC LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+3d2512ef0fbf2abd10661ecd64923225ded74593cab8fac78fa0f12c71d0d01e:
+  query: DELETE FROM check_suites WHERE check_suites.repository_id = ? AND (check_suites.id
+    IN ? OR check_suites.id IS NULL)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+3dca7e8e8b7ebae8372fdbcebaaff656c849532331960f3040e6468cec366766:
+  query: UPDATE check_suites SET check_suites.status = ?, check_suites.updated_at
+    = ?, check_suites.completed_at = ? WHERE check_suites.id = ? AND check_suites.repository_id
+    = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+3f284d60cfa1cdfd17e6b5865c64b44f4c1fe91194aa74eb7e95fd2bbe9f9a2c:
+  query: INSERT INTO check_suites (push_id, repository_id, github_app_id, creator_id,
+    created_at, updated_at, head_branch, head_sha, started_at, uniqueness_key) VALUES
+    (?, ?, ?, ?, ?, ?, x?, ?, ?, ?)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+3fc914caa0804a6b683ecc8bcb5b68a4b88b288f08f8e14634f354c4c2c3a277:
+  query: SELECT code_scanning_alerts.check_annotation_id, code_scanning_alerts.alert_number
+    FROM code_scanning_alerts WHERE code_scanning_alerts.repository_id = ? AND code_scanning_alerts.check_annotation_id
+    IN (SELECT check_annotations.id FROM check_annotations WHERE check_annotations.check_run_id
+    = ?) AND code_scanning_alerts.id = ?
+  tables:
+  - check_annotations
+  - code_scanning_alerts
+  violations:
+  - reason: domain_access
+4102c3a5b75ecabf23eac9837b05230fbb090f1272351cac5b343b95f950e784:
+  query: INSERT INTO check_steps (check_run_id, number, conclusion, name, completed_log_url,
+    created_at, updated_at, external_id, completed_log_lines, repository_id) VALUES
+    (?, ?, ?, x?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - check_steps
+  violations:
+  - reason: domain_access
+412bbe44aada6ded289d4034f3001edca8dcde5fd4892f974a44dd23493ef5d0:
+  query: UPDATE check_suites SET check_suites.status = ?, check_suites.updated_at
+    = ?, check_suites.conclusion = NULL, check_suites.completed_at = NULL WHERE check_suites.id
+    = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+4137f3af9bdc9fe5b383e23c99abe313603bde5a00b69979be9aa18f9d684fef:
+  query: INSERT INTO check_annotations (filename, warning_level, message, start_line,
+    end_line, created_at, updated_at, check_run_id, check_suite_id, repository_id)
+    VALUES (x?, ?, x?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+42632343af1b2cabed5d87688f30011c1ea508f0446174db889cacbe682848ab:
+  query: UPDATE check_suites SET check_suites.updated_at = ?, check_suites.conclusion
+    = ? WHERE check_suites.id = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+46438c0c9fdd763d958437989cce343eb69aed1c3c266a2491b613c6e924a0d2:
+  query: INSERT INTO check_suites (push_id, repository_id, github_app_id, status,
+    created_at, updated_at, conclusion, head_branch, head_sha, name, event, explicit_completion,
+    workflow_file_path, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, x?,
+    ?, x?, ?, ?, x?, ?, ?)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+4744a9f94f5fb5cf0129871bbb98c2f18b6f24be72ca6c1ccac455c00078bea1:
+  query: UPDATE check_runs SET check_runs.status = ? WHERE check_runs.id = ? AND check_runs.repository_id
+    = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+4775bec99fba510d6243b9e83b30566159b34592a5593048b6da908936134127:
+  query: SELECT COUNT(*) AS count_all, check_suites.status AS check_suites_status
+    FROM check_suites WHERE check_suites.repository_id = ? AND check_suites.head_sha
+    = ? AND check_suites.hidden = ? GROUP BY check_suites.status
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+4785e4fce8da276e8e64b8bfd796fa4661b67d7c7367035b12f40b62a3814a04:
+  query: INSERT INTO check_annotations (filename, warning_level, message, start_line,
+    end_line, created_at, updated_at, start_column, end_column, check_suite_id, repository_id)
+    VALUES (x?, ?, x?, ?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+47fba70888c41ea24cebd8371b394f0f09b9050aec917323de2f897d59674961:
+  query: INSERT INTO check_annotations (filename, warning_level, message, start_line,
+    end_line, created_at, updated_at, title, check_run_id, start_column, end_column,
+    repository_id) VALUES (x?, ?, x?, ?, ?, ?, ?, x?, ?, ?, ?, ?)
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+484e39cd6dae07fbe017404572910ac325e07dc48c17e85d8797b1c25899101d:
+  query: UPDATE check_runs SET check_runs.updated_at = ?, check_runs.title = x?, check_runs.summary
+    = x?, check_runs.text = x? WHERE check_runs.id = ? AND check_runs.repository_id
+    = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+4b2b8fb760e7e3e657adcf7d835f881af6adf14d7e3f51b3727007a91dc8a9b7:
+  query: SELECT check_runs.* FROM check_runs INNER JOIN check_suites ON check_suites.id
+    = check_runs.check_suite_id WHERE (check_suites.head_sha IN ? AND check_runs.repository_id
+    = ?) AND check_runs.name = x? LIMIT ?
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+4b451a359dfc6565fdfa3dafeaa55430ba68251ba55b413580acf8c45aa35d52:
+  query: INSERT INTO check_runs (status, name, started_at, created_at, updated_at,
+    title, summary, check_suite_id, repository_id) VALUES (?, x?, ?, ?, ?, x?, x?,
+    ?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+4b982998585c466fbd944ea02b2b77db195014630c65b00aed5ef147adfdeba8:
+  query: UPDATE check_runs SET check_runs.status = ?, check_runs.conclusion = ?, check_runs.started_at
+    = ?, check_runs.completed_at = ?, check_runs.external_id = ?, check_runs.completed_log_url
+    = x?, check_runs.completed_log_lines = ?, check_runs.streaming_log_url = ? WHERE
+    check_runs.id = ? AND check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+4bc05e72542fb8da2461d897fbf078f995db22dbc2d9e5db6cc5a7ff18c0cd11:
+  query: SELECT check_annotations.* FROM check_annotations WHERE check_annotations.repository_id
+    = ? AND check_annotations.check_run_id = ? AND check_annotations.filename = x?
+    LIMIT ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+4be2b30944f4f3423d5740a6a8f84b447f89de29e93b4edf2c212f66de5e00f9:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.id IN ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+4c05160d22ee39665344b754e51556a21ed201b9f38659b8dba26874fc1723d0:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id = ? AND check_runs.repository_id
+    = ? ORDER BY check_runs.id ASC LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+4ce52a547357efe2f6d80aca662a2861a64a627eae8f0ed177e145ba7a8ad115:
+  query: UPDATE check_suites SET check_suites.status = ? WHERE check_suites.id = ?
+    AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+4d4dc3e43baca592a6ac157310177f0938190cf040e50b560e65a115a68db4b4:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id = ? LIMIT ? OFFSET
+    ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+4dd2a0e253e6b4e2bc9333980a07dfdc9a2edda32dd76baf45e2172f0a78f3c5:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.repository_id = ? AND check_suites.head_sha
+    = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+4e0e11b5867fb11da0b74556b8e1de4b93bce21d5115575c297e098fb87aad61:
+  query: UPDATE check_suites SET check_suites.hidden = ? WHERE check_suites.id = ?
+    AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+4e2a1fb5ab150b8158a1909bbfeec1db70ccfc38873f51a830f9706acaeb5b32:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id = ? AND check_runs.repository_id
+    = ? LIMIT ? OFFSET ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+507c3c130c343c679438a23c0ff2a3dcc5587289d6ef66bb045a11104ecf99c4:
+  query: INSERT INTO check_annotations (filename, warning_level, message, start_line,
+    end_line, created_at, updated_at, check_run_id, start_column, end_column, repository_id)
+    VALUES (x?, ?, x?, ?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+50a995197998752a91994a285a63c155d9cdf1ce34558d1c56bc04a89359c9f4:
+  query: UPDATE check_suites SET check_suites.updated_at = ?, check_suites.conclusion
+    = ?, check_suites.completed_at = ? WHERE check_suites.id = ? AND check_suites.repository_id
+    = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+5220d68ccbe6f7fe69f7b3553e9b6e6735aa8f3f8d165a1fde5f9f5101e067db:
+  query: SELECT check_suites.id FROM check_suites WHERE check_suites.head_sha = ?
+    AND check_suites.repository_id = ? ORDER BY check_suites.id ASC LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+52dd946bf3fc1804f5c42a76dde36f3c7abf8598b0a23d8410feb3b72090accb:
+  query: SELECT check_suites.id FROM check_suites WHERE check_suites.repository_id
+    = ? AND check_suites.status = ? AND check_suites.head_sha IN ? AND check_suites.github_app_id
+    = ? ORDER BY FIELD(head_sha, ?, ?, ?, ?, ?) LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+53548d85fb2ca042e9f3b116760832d9e1e4e4bff269db87320c80ff70aca763:
+  query: UPDATE check_runs SET check_runs.status = ?, check_runs.conclusion = ?, check_runs.completed_at
+    = ?, check_runs.updated_at = ?, check_runs.title = x? WHERE check_runs.id = ?
+    AND check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+541db101f4b2750a754558602fe7e17a570793f5256a26ef13b9c2671ffd6913:
+  query: SELECT check_runs.id FROM check_runs WHERE check_runs.id = ? AND check_runs.conclusion
+    = ? ORDER BY check_runs.id ASC LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+54ebfd6fa0312c68879afe8229dd2dab480d244ed4294d710bb897b14fc5dbfa:
+  query: DELETE FROM check_runs WHERE check_runs.repository_id = ? AND (check_runs.id
+    IN ? OR check_runs.id IS NULL)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+5544c04a335951418fe8e47c5511d87a8797a434560ceb3efbb8278251acc743:
+  query: UPDATE check_suites SET check_suites.cancelled_at = ? WHERE check_suites.id
+    = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+55905783c63579554ca10cb7021a628f8ed5131b1148ee8ecffe74281ad9c026:
+  query: SELECT artifacts.id FROM artifacts INNER JOIN check_suites ON check_suites.id
+    = artifacts.check_suite_id WHERE check_suites.repository_id = ? AND artifacts.repository_id
+    = ? AND artifacts.name = ? order by artifacts.id desc limit ?
+  tables:
+  - check_suites
+  violations:
+  - reason: cross_domain
+  - reason: domain_access
+55dd8e3cc633be0aba9221d0c50c3fcd83570e616ce5c068b8b2c020955ca05f:
+  query: SELECT check_suites.id FROM check_suites WHERE check_suites.repository_id
+    = ? AND check_suites.head_sha = ? AND check_suites.github_app_id = ? ORDER BY
+    FIELD(head_sha, ?) LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+56ee10a30c4b375b40342f16606fecdf0df13cd233ad58b059fa3d91998d0445:
+  query: SELECT check_annotations.* FROM check_annotations WHERE check_annotations.check_run_id
+    = ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+5adaf62f64a46a72805b687f02828992d4f6b6ae3ef3c5306c61f7a9813a5c42:
+  query: SELECT check_annotations.id FROM check_annotations WHERE check_annotations.check_suite_id
+    = ? ORDER BY check_annotations.id ASC LIMIT ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+5b7414141d8e7c2538bd72ae960b395ab49a6f89b2d5a7a73503332a5f49091c:
+  query: UPDATE check_suites SET check_suites.status = ?, check_suites.conclusion
+    = ?, check_suites.cancelled_at = ? WHERE check_suites.id = ? AND check_suites.repository_id
+    = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+5c23a658aebf32e68d26b2476b846102de1274b92eab53f5f12ed76d3c350670:
+  query: SELECT COUNT(*) FROM check_runs WHERE check_runs.id = ? AND (check_runs.name
+    = x? OR check_runs.display_name = x?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+5c391f2cccae7308791878751fa1856e4663613f94c50b264fc555cd81810810:
+  query: SELECT MAX(check_runs.id) AS check_run_id FROM check_runs JOIN check_suites
+    ON check_runs.check_suite_id = check_suites.id WHERE check_suites.head_sha IN
+    ? AND check_suites.repository_id = ? AND check_suites.id = ? GROUP BY check_runs.name,
+    check_runs.check_suite_id
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+5c5155e79e4d3e4e4919e1ec87a93da78bcb57351e4d6f0e50ddd39b190c6ebf:
+  query: SELECT check_suites.updated_at, check_suites.id FROM check_suites FORCE INDEX(index_check_suites_on_is_archived_updated_at)
+    WHERE (is_archived = ?) AND (updated_at <= ?) ORDER BY updated_at ASC LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+5ccb6fd8f96432d5fcc91dabc3e954f394c2c6ca9265c8e790ad664a4631353c:
+  query: UPDATE check_suites SET check_suites.status = ?, check_suites.updated_at
+    = ? WHERE check_suites.id = ? AND check_suites.repository_id = ? AND check_suites.status
+    != ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+5d648d9d2dffb9a9da14aec66eddafe6d4f86f54f12a4acb70820cbbcabf2b80:
+  query: SELECT COUNT(*) FROM check_annotations WHERE check_annotations.repository_id
+    = ? AND (check_annotations.check_run_id IN ? OR check_annotations.check_suite_id
+    = ?)
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+5dd7ea73d2b678cae4b8fa623748ac1b15a3f84ef276ab46d1a48bb4b647e771:
+  query: SELECT dependabot_autofix_annotations.* FROM dependabot_autofix_annotations
+    WHERE dependabot_autofix_annotations.check_annotation_id = ? AND dependabot_autofix_annotations.repository_id
+    = ? LIMIT ?
+  tables:
+  - dependabot_autofix_annotations
+  violations:
+  - reason: domain_access
+60c1bd4c92ee793696dbf879def3f525ee472c7a0f611be88e01fe3f8359bb47:
+  query: SELECT check_annotations.* FROM check_annotations WHERE check_annotations.check_run_id
+    = ? LIMIT ? OFFSET ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+6180c73ac8b5aa773864a6b6fa5cfb057d306a22f66b905f5eda02c2b92ed844:
+  query: SELECT check_steps.number, check_steps.name FROM check_steps WHERE check_steps.check_run_id
+    = ? AND check_steps.repository_id = ? ORDER BY check_steps.number ASC
+  tables:
+  - check_steps
+  violations:
+  - reason: domain_access
+62bad1cd649ad25804bacf2b44761ce9533fdfa64e902a471bdac9725ea1f99a:
+  query: SELECT COUNT(*) FROM check_runs WHERE check_runs.check_suite_id = ? AND check_runs.name
+    = x? AND check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+63aefeb681a045ee5ab161f0a494415e788ce24216ba33d9e4d19ab8a95afb2a:
+  query: DELETE FROM check_suites WHERE check_suites.repository_id = ? AND (check_suites.id
+    = ? OR check_suites.id IS NULL)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+63b33df51edc0df06b87aea56ca32e5edb2c4d769b6075ae5b4c8463cde808c1:
+  query: UPDATE check_suites SET check_suites.conclusion = ?, check_suites.updated_at
+    = ? WHERE check_suites.id = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+63d7ec1f33469695810f05f6ea8b3b50aebf7a3b7997a5bb78fa8e0f16f5b3e4:
+  query: INSERT INTO check_runs (status, name, started_at, created_at, updated_at,
+    check_suite_id, actions, repository_id) VALUES (?, x?, ?, ?, ?, ?, x?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+640da401f3539cfbede1e04595ef0276a16753fdeb9bd07db4da2fc190b1ad5b:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id = ? AND check_runs.repository_id
+    = ? ORDER BY id DESC LIMIT ? OFFSET ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+657d1663a2e6c9ba89fdad666445895c33beb06276cfc7af3c31b51072cae2f9:
+  query: UPDATE check_runs SET check_runs.title = x?, check_runs.summary = x? WHERE
+    check_runs.id = ? AND check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+65a7dfa2e07ad9f21955303f2d340581c6331dd0e8fe9055393aba8a653234d3:
+  query: UPDATE check_suites SET check_suites.completed_log_url = x?, check_suites.status
+    = ?, check_suites.updated_at = ? WHERE check_suites.id = ? AND check_suites.repository_id
+    = ? AND check_suites.status != ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+66470f28447d69d73890873c4aa0fa31986c55e02634447a9499c252bc03047b:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id = ? AND check_runs.repository_id
+    = ? ORDER BY check_runs.created_at ASC
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+6681400bf850d87b9ea92c736154a9651105e6022f7ec4f4ec4508d1fc35da87:
+  query: SELECT check_annotations.* FROM check_annotations WHERE check_annotations.repository_id
+    = ? AND check_annotations.check_run_id = ? AND check_annotations.end_line >= ?
+    LIMIT ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+668576389af3c2c8c0c41f1dd0d1c6fd17d0ee5a1c2f3e8304801b400f0b21f1:
+  query: UPDATE check_runs SET check_runs.title = x?, check_runs.conclusion = ? WHERE
+    check_runs.id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+67928aadad8fe70b006243888734acdd51bbe34a931b0491fb9e96d45d56f81e:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.repository_id = ? AND
+    check_runs.id = ? AND check_runs.repository_id = ? LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+6820c8a5bbf2f984f64127dd9166cef4163305806815e2481ef323e24bbec771:
+  query: UPDATE check_suites SET check_suites.updated_at = ?, check_suites.completed_log_url
+    = NULL WHERE check_suites.id = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+68b418fa226bb6dd346bc164d7c7e0e21ae68a067002ce4480e3a6aeb4a8f0e4:
+  query: UPDATE check_suites SET check_suites.updated_at = ? WHERE check_suites.id
+    = ? AND check_suites.repository_id = ? AND check_suites.status != ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+69fe494e2bc679957aca0d8daec2fa1478df9cf8c6e379c41feed640a1f9b090:
+  query: SELECT artifacts.* FROM artifacts INNER JOIN check_suites ON check_suites.id
+    = artifacts.check_suite_id WHERE check_suites.repository_id = ? AND artifacts.id
+    = ? AND artifacts.repository_id = ? AND artifacts.name = x? ORDER BY artifacts.id
+    ASC LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: cross_domain
+  - reason: domain_access
+6a08dafbc99673fe28df1a293536ac9fe83059d6abc369f80dd86e67e924dd89:
+  query: SELECT check_steps.id FROM check_steps WHERE (created_at <= ?) ORDER BY check_steps.id
+    ASC LIMIT ?
+  tables:
+  - check_steps
+  violations:
+  - reason: domain_access
+6b419d6f83a1b608d0415ec44a6f14b6b35a643a93db4ca1223c681b69242c35:
+  query: UPDATE check_suites SET check_suites.status = ?, check_suites.updated_at
+    = ?, check_suites.conclusion = NULL, check_suites.started_at = ? WHERE check_suites.id
+    = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+6b73c99c7d0420abce1c8b2380dd29b056cee54d2f707bde71b447577cedf783:
+  query: SELECT check_runs.id, check_runs.creator_id, check_runs.status, check_runs.conclusion,
+    check_runs.details_url, check_runs.name, check_runs.started_at, check_runs.completed_at,
+    check_runs.created_at, check_runs.updated_at, check_runs.external_id, check_runs.title,
+    check_runs.images, check_runs.check_suite_id, check_runs.actions, check_runs.number,
+    check_runs.completed_log_url, check_runs.completed_log_lines, check_runs.streaming_log_url,
+    check_runs.display_name, check_runs.repository_id, check_suites.head_sha FROM
+    check_runs INNER JOIN check_suites ON check_suites.id = check_runs.check_suite_id
+    WHERE check_runs.repository_id = ? AND check_runs.id IN ( SELECT * FROM ( SELECT
+    MAX(check_runs.id) as id FROM check_runs JOIN check_suites ON check_suites.id
+    = check_runs.check_suite_id WHERE check_suites.repository_id = ? AND check_suites.head_sha
+    IN ? AND check_suites.hidden = ? AND (check_suites.workflow_file_path IS NULL
+    OR check_runs.created_at >= IFNULL(check_suites.started_at, check_suites.created_at))
+    GROUP BY check_runs.check_suite_id, check_runs.name ) AS subquery )
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+6bd155d46c13d21ee48d9b5014cc5d34373d768f30f8bbbb2a717a129f6a62e3:
+  query: UPDATE check_runs SET check_runs.status = ?, check_runs.name = x?, check_runs.external_id
+    = ?, check_runs.display_name = x? WHERE check_runs.id = ? AND check_runs.repository_id
+    = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+6c1f8ecd427a1468d3e096518a351a05552ee1e867196f605cf43ca6ca5d3ebc:
+  query: SELECT ? AS one FROM check_suites WHERE check_suites.repository_id = ? AND
+    check_suites.id = ? LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+6e74588b09516c4c58ad1466a6b60faf2cc71647eb106becd4feb88882e4a15c:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id = ? AND (check_runs.name
+    = x? OR check_runs.display_name = x?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+6f67d486a9e82a6a5da785802a95843f9589a02754168f87ddbae3efea1185f5:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+7024ccc2ccda6423e71ff683e8877ce4844e216b9b1ebd2828abc8aaeebb199a:
+  query: UPDATE check_runs SET check_runs.status = ?, check_runs.conclusion = ?, check_runs.completed_at
+    = ?, check_runs.title = x?, check_runs.summary = x? WHERE check_runs.id = ? AND
+    check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+709bc5d0d65a44d1cc718f763c0cc7eb1f40c38cf2bdc7e91143d29fa142e625:
+  query: UPDATE check_suites SET check_suites.conclusion = NULL, check_suites.status
+    = ?, check_suites.completed_at = NULL WHERE check_suites.id = ? AND check_suites.repository_id
+    = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+7109131b8c54e9a064629aad0297a64b919dce8203333e29a57c098ca6051a3a:
+  query: SELECT check_steps.* FROM check_steps WHERE check_steps.id IN ?
+  tables:
+  - check_steps
+  violations:
+  - reason: domain_access
+71cd38f8f66826ad003b14f2353790fc59018a8fe07fcd67a95fae11f2509a50:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.repository_id = ? AND
+    check_runs.id IN (SELECT workflow_job_runs.check_run_id FROM workflow_job_runs
+    WHERE workflow_job_runs.workflow_run_execution_id = ? AND workflow_job_runs.repository_id
+    = ? AND workflow_job_runs.workflow_run_id = ?) AND check_runs.external_id = ?
+    LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: cross_domain
+  - reason: domain_access
+741de7e74dfb6cca45d4f6c54345a61c8d1f002c6fda3fe86b85e38681b75887:
+  query: INSERT INTO check_suites (push_id, repository_id, github_app_id, created_at,
+    updated_at, head_branch, head_sha, started_at, uniqueness_key) VALUES (?, ?, ?,
+    ?, ?, x?, ?, ?, ?)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+7580632b6b28f2ce03abf2194134934a53ffbf5a555dc1f19e816da54a4a681b:
+  query: SELECT check_steps.id FROM check_steps WHERE check_steps.check_run_id = ?
+    AND check_steps.repository_id = ? ORDER BY check_steps.number ASC, check_steps.id
+    asc LIMIT ?
+  tables:
+  - check_steps
+  violations:
+  - reason: domain_access
+76c399755c6e2ed1d8b4ea02b06ade22775c9a96e7c0fbc480242adf9f4e003e:
+  query: SELECT ? AS one FROM check_annotations WHERE check_annotations.check_suite_id
+    = ? AND check_annotations.repository_id = ? LIMIT ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+771736cf539562ce8f0c6831c1a3a99c07a0093a5e078d098e5cd01507b454ac:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id IN ? AND check_runs.repository_id
+    = ? AND (check_runs.name = x? OR check_runs.display_name = x?) ORDER BY id DESC
+    LIMIT ? OFFSET ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+77d01155ca437b9c4eef5025d0c9767476229b7cbdd96375bb148276c133644f:
+  query: SELECT check_runs.id, check_runs.summary FROM check_runs WHERE check_runs.id
+    = ? AND check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+7815b2285bb5d75151dce491e57dd59cde776dda507c5578d179b27c4102f9ba:
+  query: SELECT COUNT(*) FROM check_runs WHERE check_runs.id = ? AND check_runs.status
+    = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+79762e58d690334d3eba8c36133f4cdf8a628b8b6cac0f8a96d563f6c8fe7606:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.repository_id = ? AND
+    check_runs.id IN ? AND check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+79d20ceb22928201cd30dab5255ec8db77a8509d23c6f9f02205ef54c955dc05:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id = ? AND check_runs.repository_id
+    = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+79d5ccb4ec842c77daa5bf187e5dce1d2262301d7f1b21e4bd72c99fa576bbe8:
+  query: SELECT ? AS one FROM check_runs WHERE check_runs.check_suite_id = ? AND check_runs.repository_id
+    = ? AND check_runs.repository_id = ? LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+7c6041aedd7abfbcbe86f49e8204e10ae1b2e3523f13ceb643bcc15177b7e24b:
+  query: SELECT check_runs.* FROM check_runs INNER JOIN check_suites ON check_suites.id
+    = check_runs.check_suite_id WHERE (check_suites.head_sha IN ? AND check_runs.repository_id
+    = ?) ORDER BY id DESC LIMIT ? OFFSET ?
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+7cff771ad7b6c0e3b4e2a7f6ecd0ced660aad58943c5250595a32bc3481d65fa:
+  query: SELECT code_scanning_alerts.check_annotation_id, code_scanning_alerts.alert_number
+    FROM code_scanning_alerts WHERE code_scanning_alerts.repository_id = ? AND code_scanning_alerts.check_annotation_id
+    IN (SELECT check_annotations.id FROM check_annotations WHERE check_annotations.check_run_id
+    = ?) AND code_scanning_alerts.id IN ?
+  tables:
+  - check_annotations
+  - code_scanning_alerts
+  violations:
+  - reason: domain_access
+7d0ea785508a959af9ff813fc9e4b6aa13b0a06a44e87022272c9d19b08b5ca3:
+  query: SELECT DISTINCT COALESCE(check_runs.display_name, check_runs.name), check_suite.github_app_id
+    FROM check_runs INNER JOIN check_suites check_suite ON check_suite.id = check_runs.check_suite_id
+    LEFT JOIN workflow_runs ON check_suite.id = workflow_runs.check_suite_id WHERE
+    check_suite.repository_id = ? AND check_suite.is_archived = ? AND check_suite.updated_at
+    >= ? AND (workflow_runs.imposer_repository_id = ? OR workflow_runs.imposer_repository_id
+    IS NULL) AND check_runs.completed_at >= ? ORDER BY check_suite.updated_at DESC
+    LIMIT ?
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: cross_domain
+  - reason: domain_access
+7e6fbacc119c6c3d6be8596ca63ec78caead34ef187f1a4b999375a0181d0294:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.repository_id = ? AND check_suites.id = ?
+    LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+7e90acbde73ed247f6154d860eb4868694c01811b003991575a28d01aed6a87e:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.github_app_id = ? AND check_suites.head_sha
+    = ? AND check_suites.repository_id = ? LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+7fc01408dfa3fc0f53fc622c4f0bd6703fb1487e0a240cef7f86a4d17d0291a4:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.head_sha = ? AND check_suites.repository_id
+    = ? AND check_suites.github_app_id = ? LIMIT ? OFFSET ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+801c327ec0e087e31a5c871bbd881930b17658e012abc3679db829e70feaa7a5:
+  query: SELECT COUNT(*) FROM check_runs WHERE check_runs.id IN ? AND check_runs.repository_id
+    = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+80272268f7a70bf4eb9f36c68edaab3c9aff002d1c49337575011867490bef76:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.id = ? AND check_suites.repository_id = ?
+    AND check_suites.status != ? ORDER BY id DESC LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+80314781d510e28c52ef6e21dffd3457cbd08cdf5e54a69f3b6fdd3378241dc8:
+  query: SELECT COUNT(*) FROM check_runs WHERE check_runs.id = ? AND check_runs.repository_id
+    = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+803787f8c7d613fe203d501f4cd228535e0ee00310e66ee7fca0767ca43c85f0:
+  query: INSERT INTO check_runs (status, name, started_at, created_at, updated_at,
+    external_id, check_suite_id, number, display_name, repository_id) VALUES (?, x?,
+    ?, ?, ?, ?, ?, ?, x?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+817659c79953ae6ebcecf4424b8b59d1332ad6a06ed10f160cb334c9cc890611:
+  query: SELECT ? AS one FROM check_suites WHERE check_suites.repository_id = ? AND
+    check_suites.head_sha = ? AND check_suites.hidden = ? LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+817a87dfcb86918d737b07f99029089b5e1072eb13a33a4abe84dfac4a4fe01d:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.id = ? LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+82ed9e2a2f8fe949c71a2fe580401ed760ce9e97dea73ebe5b987176ac704a17:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id IN ? AND check_runs.repository_id
+    = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+83e552195515246b83156faefcf83b6a621c88307c70434d1c4e892243328d6a:
+  query: SELECT code_scanning_alerts.* FROM code_scanning_alerts WHERE code_scanning_alerts.check_annotation_id
+    IN ? AND code_scanning_alerts.repository_id = ?
+  tables:
+  - code_scanning_alerts
+  violations:
+  - reason: domain_access
+84737f7b0e40c04633bba2110350a426b5c4e0035052a22a0a9391c61a0947db:
+  query: INSERT INTO check_annotations (filename, warning_level, message, start_line,
+    end_line, created_at, updated_at, check_run_id, repository_id) VALUES (x?, ?,
+    x?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+854de0a109fdc8d5e96343183783d7dee4ef3dc75714b98839dfe2a2847d7ca9:
+  query: SELECT check_runs.id, check_runs.creator_id, check_runs.status, check_runs.conclusion,
+    check_runs.details_url, check_runs.name, check_runs.started_at, check_runs.completed_at,
+    check_runs.created_at, check_runs.updated_at, check_runs.external_id, check_runs.title,
+    check_runs.images, check_runs.check_suite_id, check_runs.actions, check_runs.number,
+    check_runs.completed_log_url, check_runs.completed_log_lines, check_runs.streaming_log_url,
+    check_runs.display_name, check_runs.repository_id, t.associated_head_sha FROM
+    check_runs INNER JOIN (SELECT max(check_runs.id) as id, check_suites.head_sha
+    as associated_head_sha, check_runs.repository_id as repository_id FROM check_runs
+    INNER JOIN check_suites ON check_suites.id = check_runs.check_suite_id WHERE check_suites.id
+    IN (SELECT * FROM (SELECT max(id) FROM check_suites WHERE check_suites.repository_id
+    = ? AND check_suites.head_sha = ? AND check_suites.hidden = ? AND check_suites.workflow_file_path
+    IS NOT NULL GROUP BY check_suites.head_sha, check_suites.github_app_id, check_suites.workflow_file_path,
+    check_suites.event UNION SELECT check_suites.id FROM check_suites WHERE check_suites.repository_id
+    = ? AND check_suites.head_sha = ? AND check_suites.workflow_file_path IS NULL)
+    subquery) AND check_suites.repository_id = ? AND (check_suites.workflow_file_path
+    IS NULL OR check_runs.created_at >= IFNULL(check_suites.started_at, check_suites.created_at))
+    GROUP BY check_suites.head_sha, check_runs.name, check_runs.check_suite_id) t
+    on t.id = check_runs.id AND t.repository_id = check_runs.repository_id WHERE check_runs.repository_id
+    = ?
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+85b8c9b3416f87c7790a6a60cce69545986738fd6b01f468a7c497707301c8dd:
+  query: UPDATE check_suites SET check_suites.status = ?, check_suites.updated_at
+    = ?, check_suites.conclusion = ?, check_suites.completed_at = ? WHERE check_suites.id
+    = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+865ced695c307f7a94b98e8415bd0e941f39f30d4bda71b01ea228db0b939e6d:
+  query: INSERT INTO check_suites (push_id, repository_id, github_app_id, created_at,
+    updated_at, head_branch, head_sha, rerequestable, external_id, started_at) VALUES
+    (?, ?, ?, ?, ?, x?, ?, ?, ?, ?)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+87e9e0781cbb1f5713d005db4be9e47a012add40c85cbb1d052d76e43642683a:
+  query: SELECT dependabot_autofix_annotations.* FROM dependabot_autofix_annotations
+    WHERE dependabot_autofix_annotations.repository_id = ? AND dependabot_autofix_annotations.check_annotation_id
+    = ?
+  tables:
+  - dependabot_autofix_annotations
+  violations:
+  - reason: domain_access
+89b7bd056c13b913501d91ec4b8cd732b29234a98b7ea7b1be6cef5a1d45f835:
+  query: SELECT COUNT(*) FROM check_runs WHERE check_runs.check_suite_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+8a3b5ac580fd2a281da65448966bfdbe0ca40c581450d5412250b6ba09136347:
+  query: DELETE FROM check_runs WHERE check_runs.id = ? AND check_runs.repository_id
+    = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+8a64a8724c25630847db732c19b229b08cef434726cc52721959d1ff6562256f:
+  query: SELECT MAX(check_runs.id) AS check_run_id FROM check_runs JOIN check_suites
+    ON check_runs.check_suite_id = check_suites.id WHERE check_suites.head_sha IN
+    ? AND check_suites.repository_id = ? AND check_suites.id = ? AND check_runs.created_at
+    >= IFNULL(check_suites.started_at, check_suites.created_at) GROUP BY check_runs.name,
+    check_runs.check_suite_id
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+8acdd8109936ec22ebcaad16cfb3b12223e1e711fe7e905fe0ef6a59686cf79e:
+  query: UPDATE check_suites SET check_suites.status = ?, check_suites.conclusion
+    = ?, check_suites.completed_at = ? WHERE check_suites.id = ? AND check_suites.repository_id
+    = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+8af215c190dcf3bd7877ac2213fbad58cc2d03f4310cb66892ba261a60f31225:
+  query: SELECT check_runs.* FROM check_runs INNER JOIN check_suites ON check_suites.id
+    = check_runs.check_suite_id WHERE (check_suites.head_sha IN ? AND check_runs.repository_id
+    = ?)
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+8c25352d3f7ee3d6aa4f8ac0be073a8a7797a8afe00f124aebb4611607b84b8b:
+  query: UPDATE check_suites SET check_suites.updated_at = ?, check_suites.rerequestable
+    = ?, check_suites.check_runs_rerunnable = ?, check_suites.name = x? WHERE check_suites.id
+    = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+8c36a112ba61563e1a289d1a277b5f27a8703cab819358be6fce99c7021f6f07:
+  query: SELECT check_steps.id FROM check_steps WHERE check_steps.check_run_id = ?
+    AND check_steps.repository_id = ? ORDER BY check_steps.number ASC
+  tables:
+  - check_steps
+  violations:
+  - reason: domain_access
+8e25f41e3ad8e9e107b752220d4a7fbd3a1e7d368cad6c2f009970dae5519bc0:
+  query: SELECT COUNT(*) FROM check_runs WHERE check_runs.check_suite_id = ? AND check_runs.repository_id
+    = ? AND check_runs.name = x? AND check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+8edf7aa6780ec9b69e57db51f183c376b58408b9e844a5611d2baaa038c40cbe:
+  query: UPDATE check_runs SET check_runs.status = ?, check_runs.conclusion = ?, check_runs.started_at
+    = ?, check_runs.completed_at = ?, check_runs.updated_at = ?, check_runs.external_id
+    = ?, check_runs.number = ?, check_runs.completed_log_url = x?, check_runs.completed_log_lines
+    = ?, check_runs.streaming_log_url = ?, check_runs.display_name = x? WHERE check_runs.id
+    = ? AND check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+909ab15d04b1be065a2dbbcff5184afc73a29564a86b54e1c6c7c5fab48d2ad9:
+  query: INSERT INTO check_runs (status, name, started_at, created_at, updated_at,
+    check_suite_id, number, repository_id) VALUES (?, x?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+911a4483d0cbc4cfc0d778ea63db57035c1299da5ce2922519ad00862bf172f2:
+  query: INSERT INTO check_annotations (filename, warning_level, message, start_line,
+    end_line, created_at, updated_at, check_suite_id, repository_id) VALUES (x?, ?,
+    x?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+913e92cc0d0f6fac03faa38f6d7fb5c2fd6f412038f8a8b3ed4f528c7995fe8e:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.check_suite_id = ? AND
+    check_runs.repository_id = ? LIMIT ? OFFSET ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+91e775f3ebab4c7bac7302a2c473f9cc91d12549181852ebbaffd98965e564b2:
+  query: DELETE FROM check_annotations WHERE check_annotations.repository_id = ? AND
+    (check_annotations.id = ? OR check_annotations.id IS NULL)
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+924f44829f0efc410ca8a8ab2ef43c22a8c2eeac88c1b91a92f88b7286689871:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.id = ? ORDER BY check_suites.id ASC LIMIT
+    ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+94891ade97f527e65f338a2f4e0829c111a41399fefcecca4811ecc2fa8c1682:
+  query: UPDATE check_runs SET check_runs.images = NULL WHERE check_runs.id = ? AND
+    check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+94982ada5fec16a916e783b0b15e6eda577d203c46b7f978a689fa6c802aa79e:
+  query: SELECT check_annotations.* FROM check_annotations WHERE check_annotations.repository_id
+    = ? AND check_annotations.check_run_id IN ? AND check_annotations.end_line >=
+    ? LIMIT ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+94bc2b8c9703bed2badad2389ec30c4d2a9b6473ee7cc272c0e0a64d72a6ef45:
+  query: UPDATE check_runs SET check_runs.updated_at = ?, check_runs.actions = x?
+    WHERE check_runs.id = ? AND check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+9535fabbee34608e1a89723bd23382ae5d0860394098ec6da55aaace1756bfbd:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id IN ? LIMIT ? OFFSET
+    ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+962f8ce87198ed98658a83d0b4385df82a94bd0fbae8b5a0e210c9e7b28db414:
+  query: DELETE FROM check_annotations WHERE check_annotations.repository_id = ? AND
+    (check_annotations.id IN ? OR check_annotations.id IS NULL)
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+96e42e8b79149fc58dba165c2aaeeb756a106f739d93ba96ecd266265b6d64d2:
+  query: UPDATE check_suites SET check_suites.status = -? WHERE check_suites.id =
+    ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+9747b39458279f8a91072c6ebac5025af3aab3c9eedf1fc2ba2c27a812599677:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.check_suite_id = ? AND
+    check_runs.repository_id = ? AND check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+9780c9631ffdc66c44d12df0fcb8a96734a34e1bd10f164ff31bc5e459e73263:
+  query: UPDATE check_suites SET check_suites.conclusion = ?, check_suites.status
+    = ?, check_suites.completed_at = ?, check_suites.updated_at = ? WHERE check_suites.id
+    = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+9a059b0ded64b58cb3f905e0c80c205385c83d933d599cea29a625fea2f3cc1b:
+  query: SELECT check_runs.id, check_runs.text FROM check_runs WHERE check_runs.id
+    = ? AND check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+9ae13bb96e09303978b74121fae545a78f7b0549b8eed9ef792bf4003b3e2abf:
+  query: SELECT check_annotations.id FROM check_annotations WHERE check_annotations.check_run_id
+    = ? ORDER BY check_annotations.id ASC LIMIT ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+9af548a82b3249056fcf16ec42fcff9a486845bec5a8b0040124a58eb96f48cb:
+  query: SELECT check_annotations.* FROM check_annotations WHERE check_annotations.repository_id
+    = ? AND (check_run_id in (?, ?, ?)) LIMIT ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+9c01696b0e56d7a15861d244eca89bf284bc100836995c5a3357614534110171:
+  query: UPDATE check_suites SET check_suites.status = ?, check_suites.updated_at
+    = ? WHERE check_suites.id = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+9c2bcc41a1b924c82cdd39e7c81939aa639eb68be48b4e562ec7e242d8d9d1d7:
+  query: UPDATE check_suites SET check_suites.completed_log_url = NULL WHERE check_suites.id
+    = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+9c9f3bbfb228138319ea76eaa876536361fa54d1b972d7132027baeb91cd95f4:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites FORCE INDEX(by_repo_app_and_name) WHERE check_suites.github_app_id
+    = ? AND check_suites.repository_id = ? AND check_suites.name = x? AND check_suites.conclusion
+    IN ? AND check_suites.head_repository_id = ? AND check_suites.head_branch = x?
+    AND check_suites.event = ? ORDER BY id DESC LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+9d0cf156457f26fd2bb025c2fcd248037559930de4bb5709d66307e4aa238d14:
+  query: SELECT ? AS one FROM check_suites WHERE check_suites.id = ? LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+9dab609c6481895523060f313f3952faee53cd457b2f7aecb5913dc03226662a:
+  query: SELECT check_annotations.* FROM check_annotations WHERE check_annotations.id
+    = ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+9ebfaa1f4afe8e9e2d69892dadae78185bdcd9a59dc7489bba1e99c364c74672:
+  query: UPDATE check_suites SET check_suites.completed_log_url = x?, check_suites.updated_at
+    = ? WHERE check_suites.id = ? AND check_suites.repository_id = ? AND check_suites.status
+    != ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+9f0c0153cb2477f1046b64371e8db895e3958bad10e28123453d7ccb7741d394:
+  query: UPDATE check_runs SET check_runs.status = ?, check_runs.conclusion = ?, check_runs.completed_at
+    = ?, check_runs.updated_at = ? WHERE check_runs.id = ? AND check_runs.repository_id
+    = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+9f8d2517d85b1d20edc1b660bafe50a7a28e10abbf2f233c9b04dc2ebf8332b3:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id IN ? AND check_runs.repository_id
+    = ? ORDER BY check_runs.created_at ASC
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+9fbef3bb6bdad6873ebafe8c157059488fe6d67b2744cf3fa23581dba9e14292:
+  query: INSERT INTO check_suites (push_id, repository_id, github_app_id, created_at,
+    updated_at, head_branch, head_sha, name, event, started_at, uniqueness_key) VALUES
+    (?, ?, ?, ?, ?, x?, ?, x?, ?, ?, ?)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+a03b6bba9092f81f056c31b82fdf700ff0c08b5b6ebcb118127b34c163d272b9:
+  query: UPDATE check_suites SET check_suites.updated_at = ?, check_suites.started_at
+    = ? WHERE check_suites.id = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+a0581cead72f7bd628e034fac65d2e2b2619db7ad537ad60f33c4f209f1a2384:
+  query: SELECT check_annotations.id FROM check_annotations WHERE check_annotations.repository_id
+    = ? AND check_annotations.check_run_id IN ? LIMIT ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+a1edf4b1f1c1589c313577dd8562c1271308d33f129a08a5f908349887d48d6c:
+  query: SELECT COUNT(*) FROM (SELECT ? AS one FROM check_runs WHERE check_runs.repository_id
+    = ? AND check_runs.id = ? AND check_runs.repository_id = ? LIMIT ?) subquery_for_count
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+a3d48136659b71a20f7d86b85fd5d11a00c4efa06d0f03b446b0ac1b6903a3fd:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.head_sha = ? AND check_suites.repository_id
+    = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+a421885ba4a48be6f8e7e8a340b8f03b857cf86f1ff21f3c0d26641c35440bfa:
+  query: INSERT INTO check_runs (status, conclusion, name, started_at, completed_at,
+    created_at, updated_at, external_id, check_suite_id, number, repository_id) VALUES
+    (?, ?, x?, ?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+a54abe0842a6f4e5c44dcc0e3f25b7fac75aac82fedc59f271cb0de903dba5fc:
+  query: INSERT INTO check_runs (status, name, started_at, created_at, updated_at,
+    check_suite_id, streaming_log_url, repository_id) VALUES (?, x?, ?, ?, ?, ?, ?,
+    ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+a58e4b7f6e69b763bb398cff6a22a2cb4e9c6a3a2141957544604a74c316c38e:
+  query: DELETE FROM check_suites WHERE check_suites.id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+a64b500c00ffb45a027af4513e76dea4d8b9c4438c02cdf999ee4aac20af84a5:
+  query: INSERT INTO check_runs (status, name, started_at, created_at, updated_at,
+    check_suite_id, number, completed_log_url, completed_log_lines, repository_id)
+    VALUES (?, x?, ?, ?, ?, ?, ?, x?, ?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+a6c7b23a81c1b01e57502ea2067526ebb374df0933a7c720638e11e962d3264a:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.repository_id = ? AND
+    check_runs.id IS NULL LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+a785ff9e805501039ee03727f781341bfec7d65ba76e0d9ae7e195241c388346:
+  query: SELECT MAX(check_runs.id) AS check_run_id FROM check_runs JOIN check_suites
+    ON check_runs.check_suite_id = check_suites.id WHERE check_suites.head_sha IN
+    ? AND check_runs.repository_id = ? AND (check_suites.workflow_file_path IS NULL
+    OR check_runs.created_at >= IFNULL(check_suites.started_at, check_suites.created_at))
+    GROUP BY check_runs.name, check_runs.check_suite_id
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+a796c1d790ee9215409b2b28e65371c3a0147c89197a155f044f2bf1f99ae16d:
+  query: SELECT check_annotations.* FROM check_annotations WHERE check_annotations.id
+    IN ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+a8a3554fd0676271213ca66a2cd5a7d9f5cae5b65870fc82f8bf386de28b85fa:
+  query: SELECT check_annotations.id FROM check_annotations WHERE check_annotations.repository_id
+    = ? AND check_annotations.check_suite_id IN ? LIMIT ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+a8eaae46d7cd28a045150a39bd451edad7c1e0d0c926570d98d18c1bf8128ab7:
+  query: INSERT INTO check_runs (status, conclusion, name, started_at, completed_at,
+    created_at, updated_at, check_suite_id, number, repository_id) VALUES (?, ?, x?,
+    ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+a9df8f274f935c3aa4fbd8ffbd91d74fbc18ae6a53618f4acf0ef49c9d3d846e:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id = ? AND check_runs.conclusion
+    = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+aa4719d0f27ae76ea0ecc66405fe4c91f67e6cf77d876177b4ac1c91be5612de:
+  query: UPDATE check_suites SET check_suites.status = ?, check_suites.updated_at
+    = ?, check_suites.conclusion = NULL WHERE check_suites.id = ? AND check_suites.repository_id
+    = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+aa60a290b417c40430585b0e8dc9e531de78e78cb24c12a7fa1f06568c86f8e5:
+  query: INSERT INTO check_runs (status, conclusion, name, started_at, completed_at,
+    created_at, updated_at, external_id, check_suite_id, number, completed_log_url,
+    completed_log_lines, display_name, repository_id) VALUES (?, ?, x?, ?, ?, ?, ?,
+    ?, ?, ?, x?, ?, x?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+ab8fa61c82770266b7ba36de158d166ad6383588a8927ff6bfa58310cfa7b70e:
+  query: SELECT check_runs.* FROM check_runs INNER JOIN check_suites ON check_suites.id
+    = check_runs.check_suite_id WHERE (check_runs.repository_id = check_suites.repository_id)
+    AND check_runs.conclusion IS NULL AND check_suites.github_app_id = ? AND check_suites.conclusion
+    IS NULL AND (check_suites.updated_at < NOW() - INTERVAL ? HOUR) LIMIT ?
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+abc25ab52105eb1609f818768b640c6cc9c4787c6b23677594aba2599905f1ba:
+  query: UPDATE check_suites SET check_suites.conclusion = ?, check_suites.completed_at
+    = ? WHERE check_suites.id = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+abdfdee59fd939f13fec0e4bc48f7a105b041bb5b7ae7579c1cd8e502c0616ad:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id = NULL ORDER BY check_runs.id
+    ASC LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+ad6263d8d97dd3b0fff1ec62c8ab82e1d01f8650f183cfa214ae40e0bf513853:
+  query: INSERT INTO check_runs (name, started_at, created_at, updated_at, check_suite_id,
+    repository_id) VALUES (x?, ?, ?, ?, ?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+ae14aeba83901884b8da98283f5af546ea9bae8ae20c43cfaafad655d80b2da3:
+  query: INSERT INTO check_suites (push_id, repository_id, github_app_id, created_at,
+    updated_at, head_branch, head_sha, started_at) VALUES (?, ?, ?, ?, ?, x?, ?, ?)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+ae21c21f4e96d60fb161a951bc8055710c11ae24e026383b75c5ea28272e2163:
+  query: SELECT id, github_app_id FROM check_suites FORCE INDEX (index_check_suites_on_head_sha_and_repository_id)
+    WHERE check_suites.head_sha = ? AND check_suites.repository_id = ? ORDER BY id
+    DESC LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+ae2d1d8df841ced8ca45ab89a36cc45688a7bf7a38c3b1eb55beee9cfaf1ab90:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.repository_id = ? AND check_suites.head_sha
+    = ? AND check_suites.github_app_id = ? LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+af765903499a57ac5a98238941afaecc3e5b168882ee1d6a4a850b067911b180:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.repository_id = ? AND (check_suites.github_app_id
+    = ? OR check_suites.github_app_id IS NULL) AND check_suites.external_id = ? ORDER
+    BY check_suites.id DESC LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+af93c8f92c21ff4290d230bba5c95970ae89a5bf1141d1bc4cd0f933be870f74:
+  query: INSERT INTO check_annotations (filename, warning_level, message, start_line,
+    end_line, created_at, updated_at, raw_details, check_run_id, start_column, end_column,
+    repository_id) VALUES (x?, ?, x?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+b09682e985d718212c71b6986e8a248f16a9947f5c32923e21c859f2c4a07523:
+  query: INSERT INTO check_annotations (filename, warning_level, message, start_line,
+    end_line, created_at, updated_at, raw_details, check_run_id, repository_id) VALUES
+    (x?, ?, x?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+b097352645c0b37b650727c96af44101e5a0e851c588e01f8c3e47878411dcca:
+  query: SELECT check_annotations.* FROM check_annotations WHERE check_annotations.check_suite_id
+    = ? AND (created_at BETWEEN ? and ?) LIMIT ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+b0a461c16ab76a0403ab6a9966539b5bf12129f803a70e1ad8d54f75cee85914:
+  query: INSERT INTO check_suites (repository_id, github_app_id, created_at, updated_at,
+    head_branch, head_sha, started_at, uniqueness_key) VALUES (?, ?, ?, ?, x?, ?,
+    ?, ?)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+b0d2243248d42efb9bacf353750f473ebdd096093524fa69570f30d309183d41:
+  query: SELECT MAX(check_runs.id) AS check_run_id FROM check_runs JOIN check_suites
+    ON check_runs.check_suite_id = check_suites.id AND check_suites.repository_id
+    = ? JOIN check_annotations ON check_runs.id = check_annotations.check_run_id AND
+    check_annotations.repository_id = ? AND check_annotations.check_suite_id IS NULL
+    WHERE check_suites.id IN ? AND check_runs.repository_id = ? AND (check_suites.workflow_file_path
+    IS NULL OR check_runs.created_at >= IFNULL(check_suites.started_at, check_suites.created_at))
+    GROUP BY check_runs.name, check_runs.check_suite_id
+  tables:
+  - check_annotations
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+b1758b074763efe6b6f35c8293143021df71042cd3c853678cdab1bd44ac12fb:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.head_sha = ? AND check_suites.repository_id
+    = ? LIMIT ? OFFSET ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+b22a18e1ec6105426404c794b0e437e68c00c135ced1ee0df1c6e7040fc44cda:
+  query: SELECT check_runs.id FROM check_runs WHERE check_runs.repository_id = ? AND
+    check_runs.check_suite_id = ? LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+b257bec516c3aadb259d05833c78b9f19a460a6ef1a780bdee234fd0a161f48a:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id = ? ORDER BY check_runs.id
+    ASC LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+b39d925ae64468d2a7d476f4411ef324d2548f116f1f0364028b8038f146ece1:
+  query: DELETE FROM check_runs WHERE check_runs.id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+b5562fdefb05a3ae7c2509b0dcd45ba7929a61d8b52b55c5059bf9d2e1c8b941:
+  query: INSERT INTO check_suites (push_id, repository_id, github_app_id, created_at,
+    updated_at, head_branch, head_sha, name, event, workflow_file_path, started_at)
+    VALUES (?, ?, ?, ?, ?, x?, ?, x?, ?, x?, ?)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+b6345c7f250e74fe7b3507cabbd50a9ad5a790d772ed4c9bc7ac8b9ba22f028f:
+  query: SELECT check_runs.id FROM check_runs WHERE check_runs.repository_id = ? AND
+    check_runs.check_suite_id IN ? LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+b648c223f743e4158abcfb4c7b9b5603c0323885fc709d87fe70d23b04fbf3f1:
+  query: SELECT COUNT(*) FROM check_runs INNER JOIN check_suites as check_suites_for_app
+    ON check_suites_for_app.id = check_runs.check_suite_id AND check_suites_for_app.repository_id
+    = check_runs.repository_id WHERE check_runs.id = ? AND (check_suites_for_app.github_app_id
+    = ? OR (check_suites_for_app.github_app_id = ? AND check_runs.repository_id =
+    ?))
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+b68f98f3304e3b4cc5c40c02a2e65e62c6b37aa37076af2e037748c80798efd7:
+  query: UPDATE check_suites SET check_suites.updated_at = ?, check_suites.completed_log_url
+    = x? WHERE check_suites.id = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+b7205d92c02f3a6db6cb737bc0609ff63182d20ca8cef9ce06baea86b31e48a9:
+  query: INSERT INTO check_suites (push_id, repository_id, github_app_id, created_at,
+    updated_at, head_branch, head_sha, head_repository_id, started_at, uniqueness_key)
+    VALUES (?, ?, ?, ?, ?, x?, ?, ?, ?, ?)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+b84d55f9cc982dc623707bddc0b84a150ea13cb672ef09dc765e79c9f4081013:
+  query: SELECT code_scanning_alerts.* FROM code_scanning_alerts WHERE code_scanning_alerts.check_annotation_id
+    = ? AND code_scanning_alerts.repository_id = ?
+  tables:
+  - code_scanning_alerts
+  violations:
+  - reason: domain_access
+ba67b76820c9cd7677405a844c6f98905b286810fe8b15223f692a28bef6f922:
+  query: SELECT check_annotations.* FROM check_annotations WHERE check_annotations.repository_id
+    = ? AND check_annotations.check_run_id IN ? LIMIT ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+bac23853548fafc1a8216fee84e1fa5b8f78e2aa1d5ebcb4571e67e02a8390a4:
+  query: UPDATE check_suites SET check_suites.status = ?, check_suites.conclusion
+    = NULL, check_suites.started_at = ? WHERE check_suites.id = ? AND check_suites.repository_id
+    = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+bb97b1d1252728a332881d72310c3c25abe07ee9d41f6a8181a0fd7a3516a495:
+  query: SELECT check_suites.id FROM check_suites WHERE check_suites.repository_id
+    = ? AND check_suites.status = ? AND check_suites.head_sha IN ? AND check_suites.github_app_id
+    = ? ORDER BY FIELD(head_sha, ?, ?) LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+bce05f7c6ac3fa85cf8aea023a11135f52ff3366b197e55a7900f7d975076503:
+  query: UPDATE check_suites SET check_suites.status = -?, check_suites.updated_at
+    = ? WHERE check_suites.id = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+bd02a7f87c7fd283ec92f602d0d5fdb30a90ce60aa0d88f2a69f95894b344568:
+  query: UPDATE check_suites SET check_suites.external_id = ? WHERE check_suites.id
+    = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+bd2d69ef39788af729b3c3f2a849e7db3c88f5d88c9932ad44d19a3059a90753:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id IN ? AND check_runs.repository_id
+    = ? LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+bd941066b351342f49b3e417614b2476e4b2981a865e9f43fbc5ef9883d7e207:
+  query: INSERT INTO check_runs (creator_id, status, conclusion, details_url, name,
+    started_at, completed_at, created_at, updated_at, title, summary, check_suite_id,
+    repository_id) VALUES (?, ?, ?, ?, x?, ?, ?, ?, ?, x?, x?, ?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+bdfb8d1bc4300defbdccd7a804df9f876c64ce1ae33abb67a77f44c6402cba0f:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id = ? LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+bebe860d5826e56049441db98aa3b870763fcc0a5170cb21ae0ce92b77d599b5:
+  query: SELECT check_steps.* FROM check_steps WHERE check_steps.check_run_id = ?
+    AND check_steps.repository_id = ? ORDER BY check_steps.number ASC
+  tables:
+  - check_steps
+  violations:
+  - reason: domain_access
+bf2bf4a2ab87c4b93010b0d2e3e890431c85402da2035c3e39b5fe31eab8accd:
+  query: SELECT check_steps.* FROM check_steps WHERE check_steps.repository_id = ?
+    AND check_steps.check_run_id = ? ORDER BY check_steps.number ASC
+  tables:
+  - check_steps
+  violations:
+  - reason: domain_access
+bf85ac6b89f81d1e255cd62bce623cf08497218ddbdb59223baef7c1fc4aae88:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.push_id = ? ORDER BY check_suites.id DESC
+    LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+c03f7192ab54185ab71a899712bad8820cfbc5abce6e40c43ac9489f9a22216f:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id IS NULL AND check_runs.repository_id
+    = ? LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+c08bf80015e155ccbe2c27ca181e67fb1f6307641d1adb6f9ff867da5718f2d3:
+  query: INSERT INTO check_runs (status, conclusion, name, started_at, completed_at,
+    created_at, updated_at, title, summary, text, check_suite_id, repository_id) VALUES
+    (?, ?, x?, ?, ?, ?, ?, x?, x?, x?, ?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+c0ec811ca5b393ea56104a82cfe4e81de94d4c2c99d8ee5fd7a350a3f629ae23:
+  query: SELECT id, repository_id, github_app_id FROM check_suites WHERE conclusion
+    = ? AND event IN ? AND created_at BETWEEN (NOW() - interval ? day - interval ?
+    minute) AND (NOW() - interval ? day) AND github_app_id IN ? ORDER BY id DESC LIMIT
+    ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+c2f036cbe78c6f643a831046f1dad9f07ba69c295ee71691e5fd7e6444e6ea6a:
+  query: INSERT INTO check_suites (push_id, repository_id, github_app_id, created_at,
+    updated_at, head_branch, head_sha, rerequestable, started_at) VALUES (?, ?, ?,
+    ?, ?, x?, ?, ?, ?)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+c2f4124bdbbf8d19a5a8231e18512c1c7e281f3482c5ba2252b283eddc027705:
+  query: UPDATE check_suites SET check_suites.status = ?, check_suites.conclusion
+    = NULL WHERE check_suites.id = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+c39b9667072ac0fe1d9d090551d0e0d0204cbea528defc97f8ab70ce2f6b80f6:
+  query: SELECT check_suites.id FROM check_suites WHERE check_suites.repository_id
+    = ? AND check_suites.status = ? AND check_suites.head_sha IN ? AND check_suites.github_app_id
+    = ? ORDER BY FIELD(head_sha, ?, ?, ?, ?) LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+c3acdfb8f6163eca1805ea37ffc7a2a61bf776d6514df206cf5e21027d17b41b:
+  query: SELECT COUNT(*) FROM check_runs WHERE check_runs.id = ? AND check_runs.conclusion
+    = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+c461e2715967b5b8a3559798e6932122d39046b9531fa4941ad06abdf2d4c44a:
+  query: SELECT COUNT(*) FROM check_runs WHERE check_runs.id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+c52477ea6869e03f3dd684605ab34e4a929bcf15e7bb1a8ac343d592167cd9d2:
+  query: SELECT COUNT(*) FROM (SELECT ? AS one FROM check_runs WHERE check_runs.id
+    IN ? AND check_runs.repository_id = ? LIMIT ?) subquery_for_count
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+c576f9ff76f10faf00e89166472bfdea96481998abb6168c1bcd251a422c23f0:
+  query: SELECT check_suites.id FROM check_suites WHERE check_suites.repository_id
+    = ? AND check_suites.status = ? AND check_suites.head_sha IN ? AND check_suites.github_app_id
+    = ? ORDER BY FIELD(head_sha, ?, ?, ?) LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+c62d5f6035ef8a62a6a05eebbac6195a84de0707e3d3e10ac6cbc59ef2752267:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.repository_id = ? AND check_suites.head_sha
+    = ? ORDER BY id DESC LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+c85b5dd0f2e53a19d5e8d3ba22da677bcd7fee5c199d50fb635128762437b0d9:
+  query: UPDATE check_runs SET check_runs.status = ?, check_runs.conclusion = ?, check_runs.details_url
+    = ?, check_runs.name = x?, check_runs.started_at = ?, check_runs.completed_at
+    = ?, check_runs.updated_at = ?, check_runs.external_id = ? WHERE check_runs.id
+    = ? AND check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+c8a8acbcfbea756ddfc53c93e966cced1bfd01391104d84b67b1532fd1b95c6b:
+  query: UPDATE check_runs SET check_runs.status = ?, check_runs.updated_at = ? WHERE
+    check_runs.id = ? AND check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+c98cd13f072c6228b7ba929329c3f989ec365be369f78be8b45a8a76a3220261:
+  query: SELECT COUNT(*) AS count_all, check_annotations.filename AS check_annotations_filename
+    FROM check_annotations WHERE check_annotations.repository_id = ? AND check_annotations.check_run_id
+    IN ? AND check_annotations.filename IN (x?, x?, x?, x?) GROUP BY check_annotations.filename
+    LIMIT ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+ca01b54243b7539635e7f9b17af57fbdadfbd3cddee24eac35604164fb35b7da:
+  query: SELECT check_steps.repository_id, check_steps.id FROM check_steps WHERE (created_at
+    <= ? AND id BETWEEN ? AND ?) ORDER BY check_steps.id ASC LIMIT ?
+  tables:
+  - check_steps
+  violations:
+  - reason: domain_access
+caef5140060f625f31aa99f0fcaf44e027f37d5be59c1da2f79527d40350751d:
+  query: SELECT check_runs.id FROM check_runs INNER JOIN check_suites as check_suites_for_app
+    ON check_suites_for_app.id = check_runs.check_suite_id AND check_suites_for_app.repository_id
+    = check_runs.repository_id WHERE (check_suites_for_app.github_app_id = ? OR (check_suites_for_app.github_app_id
+    = ? AND check_runs.repository_id = ?)) AND (check_runs.external_id like (?) OR
+    (check_runs.external_id LIKE (?)) OR (check_runs.external_id = (?) AND check_suites_for_app.repository_id=(?)))
+    ORDER BY check_runs.id ASC LIMIT ?
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+cb4cfdde4ad27704a5f5725dd088dc6384dcb0be01b87bfa7202c26156adcd11:
+  query: UPDATE check_suites SET check_suites.status = ?, check_suites.completed_log_url
+    = x? WHERE check_suites.id = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+cd510e35e0f07fa5d50b9fdba691282f60fb1585de2d3b0981a713dcdaaccc9e:
+  query: UPDATE check_runs SET check_runs.updated_at = ?, check_runs.title = x?, check_runs.summary
+    = x?, check_runs.images = ? WHERE check_runs.id = ? AND check_runs.repository_id
+    = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+cd5d61121188e650dbe5ddb00d6c2537f661e0d98cd15e6c99d971b7ee02a43b:
+  query: UPDATE check_suites SET check_suites.conclusion = NULL, check_suites.status
+    = ?, check_suites.completed_at = NULL, check_suites.updated_at = ? WHERE check_suites.id
+    = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+cfe70db1bbaa85f6ea4f8b4ad45791132a1f716cb374b7246cf12bf46f1c1c72:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.repository_id = ? AND
+    check_runs.id = ? LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+d0124352d3dfa74204020052abff8149dffb2cec097ba70fc9516f55b4a496ac:
+  query: UPDATE check_suites SET check_suites.status = ?, check_suites.updated_at
+    = ?, check_suites.conclusion = NULL, check_suites.started_at = ?, check_suites.completed_at
+    = NULL WHERE check_suites.id = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+d09dd0e197ae5ca596a27d65a8861e65f23ad1e611d7518c462df69315fa96f0:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites FORCE INDEX(by_repo_app_and_name) WHERE check_suites.github_app_id
+    = ? AND check_suites.repository_id = ? AND check_suites.name = x? AND check_suites.conclusion
+    IN ? AND check_suites.head_repository_id = ? AND check_suites.head_branch = x?
+    ORDER BY id DESC LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+d0e0c9e16d439dfe7b8dbfbcc8de0815cc62b87ab1d4844c634cfad95d58b37b:
+  query: INSERT INTO check_annotations (filename, warning_level, message, start_line,
+    end_line, created_at, updated_at, raw_details, title, check_run_id, start_column,
+    end_column, repository_id) VALUES (x?, ?, x?, ?, ?, ?, ?, ?, x?, ?, ?, ?, ?)
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+d0ffc5ac80f959c9683fa3ca3c1e08c2f7fbb7b39b42b93db0221fd1b2ff3078:
+  query: SELECT COUNT(*) FROM check_annotations WHERE check_annotations.repository_id
+    = ? AND (?=? OR check_annotations.check_suite_id = ?)
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+d1527d6abb0999d48732ab9e5ace0d0ff77788d464d23777d45ae01e02ed42dd:
+  query: INSERT INTO check_annotations (filename, warning_level, message, start_line,
+    end_line, created_at, updated_at, title, check_run_id, repository_id) VALUES (x?,
+    ?, x?, ?, ?, ?, ?, x?, ?, ?)
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+d19c97422b1b0944c46fb2f99a8c3223c0c5a1fb774632ba48581a755aa1936a:
+  query: SELECT COUNT(*) FROM check_suites WHERE check_suites.head_sha = ? AND check_suites.repository_id
+    = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+d1d87455fa12f8863116f0bcb8198b95e48383b88990b904cae0e88f445aa3fe:
+  query: UPDATE check_suites SET check_suites.updated_at = ?, check_suites.external_id
+    = ? WHERE check_suites.id = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+d3e85d34e6091667929b9b91041d7a2fcf6839811f326393c162f3113c77d789:
+  query: INSERT INTO check_runs (status, name, started_at, created_at, updated_at,
+    title, summary, images, check_suite_id, repository_id) VALUES (?, x?, ?, ?, ?,
+    x?, x?, ?, ?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+d401aa5c94d36682298de8ba320c756bfc99581dc1ca81e9c409af8c999a4fca:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.check_suite_id = ? AND
+    check_runs.display_name = x? AND check_runs.id != ? ORDER BY check_runs.id DESC
+    LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+d4c60816cb60c3448fbd11579d2ebca9363474d549c13d0a63bf53b4a18dbd90:
+  query: SELECT DISTINCT check_run_id FROM code_scanning_alerts WHERE code_scanning_alerts.repository_id
+    = ? AND code_scanning_alerts.alert_number = ?
+  tables:
+  - code_scanning_alerts
+  violations:
+  - reason: domain_access
+d4d5366155d14a44d2c9f8c0096bba8f420e3c04e6168c5dc1d3652b0ff6cef2:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+d6748235c780640b3dd1e482d6846a7b8af4ab552e523bf97a4917b2c714f829:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.id = ? AND check_suites.repository_id = ?
+    AND check_suites.github_app_id = ? LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+d69f672a43bdbefd2ad6229493f4eb169a65f3591fcc93d9aa7846235ab4e28b:
+  query: SELECT check_runs.id FROM check_runs WHERE check_runs.check_suite_id = ?
+    AND check_runs.repository_id = ? AND check_runs.name = x? AND check_runs.repository_id
+    = ? ORDER BY check_runs.id ASC LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+d7cdb232360b5b175f522fa4e51cc9b6576484e38264373a5e71b2c7791eae19:
+  query: INSERT INTO check_runs (status, conclusion, name, started_at, completed_at,
+    created_at, updated_at, check_suite_id, repository_id) VALUES (?, ?, x?, ?, ?,
+    ?, ?, ?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+d9de76aac554d1c8ac871150350b9379a57bbc06edd44a0eaf1b14017e4bac55:
+  query: SELECT check_annotations.id FROM check_annotations WHERE check_annotations.repository_id
+    = ? AND check_annotations.check_run_id = ? AND check_annotations.end_line >= ?
+    ORDER BY check_annotations.id ASC LIMIT ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+db2a93c96e4c9dc51f82eb2273ce8605cb24dc15d123fc6e71b3e4047754b565:
+  query: SELECT check_annotations.* FROM check_annotations WHERE check_annotations.repository_id
+    = ? AND (check_run_id in (NULL)) LIMIT ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+ddfef7921833337045996af5c2d09662c08bb46676870e437bd88385b8d08646:
+  query: DELETE FROM check_steps WHERE check_steps.repository_id = ? AND (check_steps.id
+    = ? OR check_steps.id IS NULL)
+  tables:
+  - check_steps
+  violations:
+  - reason: domain_access
+de9a42f097c17ce8b281456a4df2d9ef9741c1948cbc1f4032ea7ddc7b17d0c4:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.repository_id = ? AND check_suites.external_id
+    = ? AND check_suites.github_app_id = ? ORDER BY check_suites.id ASC LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+de9c0e30c40f4ca8498d22ee9eeb52c9d5f45e4d4bd95c2df55fd99cfee93ef0:
+  query: UPDATE check_suites SET check_suites.status = ?, check_suites.conclusion
+    = NULL, check_suites.completed_at = NULL WHERE check_suites.id = ? AND check_suites.repository_id
+    = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+e018420dde0242479f46a09d061a6b6d3d42fe64925afb28b5a06626a452852f:
+  query: SELECT MAX(check_runs.id) FROM check_runs JOIN check_suites ON check_runs.check_suite_id
+    = check_suites.id WHERE check_suites.head_sha = ? AND check_suites.repository_id
+    = ? AND check_runs.repository_id = ? AND check_runs.created_at < ? GROUP BY check_runs.name,
+    check_runs.check_suite_id
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+e079e5570f343beaddd3672db4ff4c29cea1250709448854feb2d7fa48772dbf:
+  query: SELECT check_runs.id FROM check_runs WHERE check_runs.check_suite_id = ?
+    ORDER BY id DESC LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+e1324ee66b7e52f7ea1a23c5eea848c8412c07e91ed1558e2e6e951724c050ef:
+  query: SELECT DISTINCT head_sha FROM check_suites WHERE check_suites.repository_id
+    = ? AND head_sha IN ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+e1d1f4f28025f585d728aadec1e772033a0d7a67897a1b4a0450d49e1d704ed4:
+  query: INSERT INTO check_runs (status, name, started_at, created_at, updated_at,
+    check_suite_id, repository_id) VALUES (?, x?, ?, ?, ?, ?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+e33c7cef6d493e578456e9041491a57d382095691107cff10bd411f130504104:
+  query: UPDATE check_suites SET check_suites.status = ?, check_suites.conclusion
+    = NULL, check_suites.started_at = ?, check_suites.completed_at = NULL WHERE check_suites.id
+    = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+e3e3cec44e001241368b1fc455b2c9ccb6c1306d1e773df5639948f8fc621def:
+  query: DELETE FROM check_steps WHERE check_steps.repository_id = ? AND (check_steps.id
+    IN ? OR check_steps.id IS NULL)
+  tables:
+  - check_steps
+  violations:
+  - reason: domain_access
+e52cb5acf888a755d72bd25be0be5b48b300dfbae92257f9b5e8f16499d80b37:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.repository_id = ? AND check_suites.head_sha
+    = ? AND check_suites.hidden = ? AND check_suites.conclusion = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+e5eb227e857fb2ff870060ecfc533acbf7f90bcf39b474a414722dd2f3b23672:
+  query: SELECT COUNT(*) FROM check_runs WHERE check_runs.repository_id = ? AND check_runs.id
+    = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+e75f858184563a038563495fd1faa4f0987859ee1690d13c3ea8dd03116cc555:
+  query: UPDATE check_runs SET check_runs.updated_at = ?, check_runs.completed_log_url
+    = x?, check_runs.completed_log_lines = ? WHERE check_runs.id = ? AND check_runs.repository_id
+    = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+e7d8b66d6b3b34d08a7db464930dd59ab8be441226818aecefbbd2f91df9f5c2:
+  query: SELECT COUNT(*) FROM check_annotations WHERE check_annotations.repository_id
+    = ? AND (check_annotations.check_run_id = ? OR check_annotations.check_suite_id
+    = ?)
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+ea2035bf2d19f71b94ffab7e67a380b98a54baea4c9240197adb8a866bac641b:
+  query: SELECT COUNT(*) FROM check_annotations WHERE check_annotations.check_run_id
+    = ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+eba57241f29a6cd67b942b927888d3c83fed23e3c492aa23a66d68dc1d2606b5:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites FORCE INDEX(by_repo_app_and_name) WHERE check_suites.github_app_id
+    = ? AND check_suites.repository_id = ? AND check_suites.name = x? AND check_suites.conclusion
+    IN ? AND check_suites.head_repository_id = ? ORDER BY id DESC LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+ed4aab3135177b2e340c0dafdc0aac4fd2ffec42f23e4cbfb6d90da412617b44:
+  query: SELECT ? AS one FROM check_annotations WHERE check_annotations.check_run_id
+    = ? AND check_annotations.repository_id = ? LIMIT ?
+  tables:
+  - check_annotations
+  violations:
+  - reason: domain_access
+ee5d7521d2606804bd7c17580b3a62f16550d2fb1e8f7ceb80bc4aa589aad3eb:
+  query: UPDATE check_suites SET check_suites.conclusion = ? WHERE check_suites.id
+    = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+efef007b9ceb69c1d5b39604663100c4b1e14b3275d2ff93559d6126f8645dfb:
+  query: INSERT INTO check_suites (repository_id, github_app_id, created_at, updated_at,
+    head_sha, started_at, uniqueness_key) VALUES (?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+f0a22f4d1fbde06ccb699b59a1bf95ba9831eb673cae2a421132a91bd4d556ac:
+  query: SELECT check_runs.id FROM check_runs WHERE check_runs.id = ? AND (check_runs.name
+    = x? OR check_runs.display_name = x?) ORDER BY check_runs.id ASC LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+f0d29bd0ca269bad12fde6943edf53bde1ed1e61f849904dbfb6658d485e71f9:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.repository_id = ? AND
+    check_runs.id IN ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+f17fb3864adedfa9bcee38c622732556710b4bc0e6b87edda29804fd4850b3e8:
+  query: INSERT INTO check_suites (repository_id, github_app_id, created_at, updated_at,
+    head_sha, name, event, external_id, started_at, uniqueness_key) VALUES (?, ?,
+    ?, ?, ?, x?, ?, ?, ?, ?)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+f1e74ae861902a2b971dff66a684cbf3edb5fa812a80bb21043f814d31269210:
+  query: SELECT MAX(check_suites.id) FROM check_suites WHERE check_suites.head_sha
+    IN ? AND check_suites.repository_id = ? AND check_suites.hidden = ? AND check_suites.workflow_file_path
+    IS NOT NULL GROUP BY check_suites.github_app_id, check_suites.workflow_file_path,
+    check_suites.event, check_suites.head_sha UNION SELECT check_suites.id FROM check_suites
+    WHERE check_suites.head_sha IN ? AND check_suites.repository_id = ? AND check_suites.workflow_file_path
+    IS NULL
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+f214ace087c64bc90e9a71c6b9e2d2692da22371d3b2c57495ef0fc7c2925261:
+  query: SELECT check_runs.* FROM check_runs INNER JOIN check_suites ON check_suites.id
+    = check_runs.check_suite_id WHERE (check_suites.head_sha IN ? AND check_runs.repository_id
+    = ?) AND check_runs.id = ? LIMIT ?
+  tables:
+  - check_runs
+  - check_suites
+  violations:
+  - reason: domain_access
+f25fbced01f5f2ebf34c8235610b541c05311c8eb2fc1029c84b805394b4ea4d:
+  query: UPDATE check_runs SET check_runs.updated_at = ?, check_runs.title = x?, check_runs.summary
+    = x? WHERE check_runs.id = ? AND check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+f2b7072b838aefbb19382a50a37c743ad9613004ed7f796cc76afd649f9a6e1e:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id IN ? AND check_runs.status
+    = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+f2d080b3dba7a1832ba3212758b1875d9830887c91276c96b045142ed5b938ad:
+  query: UPDATE check_suites SET check_suites.completed_log_url = x? WHERE check_suites.id
+    = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+f2fd36bc49b7cfa84cd258e492e5b6a1da167ddec2f857722af58468404a9ba7:
+  query: INSERT INTO check_runs (status, conclusion, name, started_at, completed_at,
+    created_at, updated_at, check_suite_id, number, completed_log_url, completed_log_lines,
+    repository_id) VALUES (?, ?, x?, ?, ?, ?, ?, ?, ?, x?, ?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+f3a50aeb4d772fcada7f9ab3729e65eb4f2caf0c8c60b6679275fb8ecfc2e132:
+  query: UPDATE check_suites SET check_suites.updated_at = ?, check_suites.head_branch
+    = x? WHERE check_suites.id = ? AND check_suites.repository_id = ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+f3e1e27f11eb679e5daa0d5ffc9788e09fbecb9d206ae9a89efb9162c7a07158:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.id = ? AND check_suites.repository_id = ?
+    LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+f404d4445744f2a3c27a419dd2ea3f0604b00242f843c7fbac10e45e14176fa9:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.check_suite_id = ? AND
+    check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+f4968e80e9f51c5b958c61db05cbd055929dad550dbb2ec2125d4e57d4d33fbd:
+  query: SELECT check_suites.repository_id, check_suites.id FROM check_suites FORCE
+    INDEX(index_check_suites_on_is_archived_updated_at) WHERE (is_archived = ?) AND
+    (updated_at between ? AND ?) AND (updated_at <= ?) ORDER BY check_suites.id ASC
+    LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+f50de628665547775778f8f43c8603e94af0173e87a5fc8dd767e25c289687d3:
+  query: SELECT COUNT(*) FROM check_steps WHERE check_steps.check_run_id = ? AND check_steps.repository_id
+    = ?
+  tables:
+  - check_steps
+  violations:
+  - reason: domain_access
+f68bfd624927dab0cd40224c89d5f3e97d41cd390bb50b303933a538851290a1:
+  query: SELECT ? AS one FROM check_suites WHERE check_suites.repository_id = ? AND
+    check_suites.uniqueness_key = ? AND check_suites.github_app_id = ? LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+f8ec88a496af97b9b1fbf8525622cb49c32edc8b03bdc97d2955b074ba8bcf1e:
+  query: UPDATE check_runs SET check_runs.status = ?, check_runs.conclusion = ?, check_runs.details_url
+    = ?, check_runs.name = x?, check_runs.started_at = ?, check_runs.completed_at
+    = ?, check_runs.updated_at = ?, check_runs.external_id = ?, check_runs.display_name
+    = x? WHERE check_runs.id = ? AND check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+fa114cf5bba51de15b98dfbc4bbb29267be64dd75aac02d1b768f9c0f79d9919:
+  query: UPDATE check_suites SET check_suites.conclusion = ?, check_suites.status
+    = ?, check_suites.completed_at = ?, check_suites.updated_at = ? WHERE check_suites.id
+    = ? AND check_suites.repository_id = ? AND check_suites.status != ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+fa8d5beb92e59252f079e3635ee8a58a060da6f6c533af1b6847ba760fa16a66:
+  query: UPDATE check_runs SET check_runs.status = ?, check_runs.conclusion = ?, check_runs.completed_at
+    = ? WHERE check_runs.id = ? AND check_runs.repository_id = ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+fb3d8f9b69fb22fab7e349fd6df9450401fbccba8fc961258859ce423bfd7d25:
+  query: INSERT INTO check_runs (status, conclusion, name, started_at, completed_at,
+    created_at, updated_at, check_suite_id, completed_log_url, completed_log_lines,
+    repository_id) VALUES (?, ?, x?, ?, ?, ?, ?, ?, x?, ?, ?)
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+fb5d6449e82df14e3c87f20057d6e2e840eed38f2838f624827c45c06b1a7820:
+  query: SELECT check_suites.id, check_suites.push_id, check_suites.repository_id,
+    check_suites.github_app_id, check_suites.creator_id, check_suites.status, check_suites.created_at,
+    check_suites.updated_at, check_suites.conclusion, check_suites.head_branch, check_suites.head_sha,
+    check_suites.rerequestable, check_suites.check_runs_rerunnable, check_suites.hidden,
+    check_suites.completed_log_url, check_suites.name, check_suites.event, check_suites.explicit_completion,
+    check_suites.head_repository_id, check_suites.workflow_file_path, check_suites.external_id,
+    check_suites.started_at, check_suites.completed_at, check_suites.cancelled_at,
+    check_suites.uniqueness_key, check_suites.archived_at, check_suites.is_archived
+    FROM check_suites WHERE check_suites.repository_id = ? AND check_suites.id = ?
+    AND check_suites.repository_id = ? LIMIT ?
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+fdac6d4977952b18a4c2cc5e12fe9eb54fbdc24c8bc7d631f03cd9c05db86ffd:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.id IN ? AND check_runs.repository_id
+    = ? AND check_runs.status = ? ORDER BY id DESC LIMIT ? OFFSET ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+fdc545230bef3e53f26dc47ad19176ad29ca800c3ac81fc45041fa4d252f3366:
+  query: INSERT INTO check_suites (push_id, repository_id, github_app_id, created_at,
+    updated_at, head_sha, started_at, uniqueness_key) VALUES (?, ?, ?, ?, ?, ?, ?,
+    ?)
+  tables:
+  - check_suites
+  violations:
+  - reason: domain_access
+fddc0c3104c653242d72019372d5ec0bded6e4cb95113e678ec1a68c097c0fe3:
+  query: SELECT check_runs.id FROM check_runs WHERE check_runs.id = ? AND check_runs.status
+    = ? ORDER BY check_runs.id ASC LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+fe075b3e1d86a14b47764f88cc977307f444b42561520e11855a07b969eaa63c:
+  query: SELECT dependabot_autofix_annotations.* FROM dependabot_autofix_annotations
+    WHERE dependabot_autofix_annotations.repository_id = ? AND dependabot_autofix_annotations.check_annotation_id
+    IN ?
+  tables:
+  - dependabot_autofix_annotations
+  violations:
+  - reason: domain_access
+fe695d9001be15d54fafaa15f1f98d3c9957910320ac7c2d66d591d7b6c28417:
+  query: SELECT check_runs.* FROM check_runs WHERE check_runs.check_suite_id = ? AND
+    check_runs.repository_id = ? AND check_runs.name = x? AND check_runs.external_id
+    = ? ORDER BY check_runs.id DESC LIMIT ?
+  tables:
+  - check_runs
+  violations:
+  - reason: domain_access
+ff5fa02a9f6548586eb4a7c8d041e531c1d9ecec87297f447ddd32a71a133504:
+  query: SELECT code_scanning_alerts.id FROM code_scanning_alerts WHERE code_scanning_alerts.repository_id
+    = ? AND code_scanning_alerts.check_annotation_id IN (SELECT check_annotations.id
+    FROM check_annotations WHERE check_annotations.check_run_id = ?) ORDER BY code_scanning_alerts.id
+    ASC LIMIT ?
+  tables:
+  - check_annotations
+  - code_scanning_alerts
+  violations:
+  - reason: domain_access

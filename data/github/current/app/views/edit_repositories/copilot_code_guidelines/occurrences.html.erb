@@ -1,0 +1,99 @@
+<% page_info \
+  container_xl: true,
+  title: "Coding guidelines · #{current_repository.name_with_display_owner}",
+  selected_link: :repo_settings_copilot_coding_guidelines,
+  hide_footer: true
+%>
+
+<div class="p-3">
+  <div class="d-flex flex-md-items-center flex-justify-between gap-3 flex-column flex-sm-row">
+    <div class="d-flex flex-items-center gap-1">
+      <%= render(Primer::Beta::IconButton.new(
+        scheme: :invisible,
+        tag: :a,
+        href: copilot_code_guidelines_path(user_id: current_repository.owner_display_login, repository: current_repository),
+        icon: :"arrow-left",
+        "aria-label": "Back to coding guidelines",
+        show_tooltip: false
+      )) %>
+      <h1 class="sr-only">Occurrences</h1>
+      <h2 class="text-semibold">Edit guideline</h2>
+    </div>
+  </div>
+  <%= render(Primer::Alpha::UnderlineNav.new(label: "custom coding guideline", tag: :div, mb: 2)) do |nav| %>
+    <% nav.with_tab(href: edit_copilot_code_guideline_path(user_id: current_repository.owner, repository: current_repository.name, id: guideline)) do %>
+      Overview
+    <% end %>
+    <% nav.with_tab(href: "#", selected: true) do %>
+      Occurrences
+    <% end %>
+  <% end %>
+  <% if total_count.zero? %>
+    <%= render Primer::Beta::Blankslate.new(spacious: true) do |c| %>
+      <% c.with_heading(tag: :h2) do %>
+        There are no occurrences yet for this guideline
+      <% end %>
+      <% c.with_description do %>
+        Copilot didn't comment on anything just yet
+      <% end %>
+    <% end %>
+  <% else %>
+    <%= render(Primer::Alpha::Layout.new(first_in_source: :sidebar)) do |component| %>
+      <% component.with_sidebar(col_placement: :start) do %>
+        <%= render(Primer::Alpha::ActionList.new(select_variant: :single)) do |list| %>
+          <% filters.each do |filter| %>
+            <% list.with_item(label: filter[:label], href: filter[:href], active: filter[:active]) do |item| %>
+              <% item.with_leading_visual_icon(icon: filter[:icon]) %>
+              <% filter[:label] %>
+              <% item.with_trailing_visual_counter(count: filter[:count], align_self: :center, test_selector: "feedback-#{filter[:icon]}-count") if filter[:count].present? %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+      <% component.with_main do %>
+        <% code_review_comments.each do |code_review_comment| %>
+          <%= render(Primer::Beta::BorderBox.new(padding: :condensed, mb: 2, test_selector: "code-review-comment")) do |border_box| %>
+            <%= border_box.with_header do %>
+              <div class="d-flex flex-row flex-justify-between flex-items-center">
+                <div class="d-flex flex-column">
+                  <%= render PullRequests::Copilot::CodeReviewCommentOccurrencePullRequestLinkComponent.new(pull_request: code_review_comment.subject.pull_request) %>
+                  <div class="d-flex flex-items-center pt-2 pl-3">
+                    <span class="fgColor-muted"><%= code_review_comment.subject.path %></span>
+                  </div>
+                </div>
+                <% if code_review_comment.positive_feedback_count > 0 || code_review_comment.negative_feedback_count > 0 %>
+                  <div class="d-flex flex-items-center">
+                    <div class="circle border p-2 bgColor-default">
+                      <% if code_review_comment.positive_feedback_count > 0 %>
+                        <span class="m-1 fgColor-muted" role="status" aria-label="<%= code_review_comment.positive_feedback_count %> positive feedbacks">👍️ <%= code_review_comment.positive_feedback_count %></span>
+                      <% end %>
+                      <% if code_review_comment.negative_feedback_count > 0 %>
+                        <span class="m-1 fgColor-muted" role="status" aria-label="<%= code_review_comment.negative_feedback_count %> negative feedbacks">👎️ <%= code_review_comment.negative_feedback_count %></span>
+                      <% end %>
+                    </div>
+                  </div>
+                <% end %>
+              </div>
+            <% end %>
+            <%# this will render the equivalent of multiple border_box rows %>
+            <%= render PullRequests::ReviewThreadDiffLinesComponent.new(pull_request_review_thread: code_review_comment.subject.pull_request_review_thread) %>
+            <%= border_box.with_row do %>
+              <%= render_react_partial name: "copilot-code-guideline-review-comment", props: { thread: thread_props[code_review_comment], threadSubject: thread_subjects[code_review_comment], comment: thread_comments[code_review_comment] }, disable_ssr: false %>
+            <% end %>
+          <% end %>
+          <%= will_paginate code_review_comments %>
+        <% end %>
+        <% if code_review_comments.empty? %>
+          <%= render Primer::Beta::Blankslate.new(spacious: true) do |c| %>
+            <% c.with_heading(tag: :h2) do %>
+              There are no occurrences rated <%= rated_parameter %> yet for this guideline
+            <% end %>
+            <% c.with_description do %>
+              Users didn't submit <%= rated_parameter %> feedback yet
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+</div>
