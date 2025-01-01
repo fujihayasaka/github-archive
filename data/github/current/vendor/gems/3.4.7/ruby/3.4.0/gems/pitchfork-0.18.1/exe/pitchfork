@@ -1,0 +1,110 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+# -*- encoding: binary -*-
+require 'pitchfork/launcher'
+require 'optparse'
+
+ENV["RACK_ENV"] ||= "development"
+rackup_opts = Pitchfork::Configurator::RACKUP
+options = rackup_opts[:options]
+
+op = OptionParser.new("", 24, '  ') do |opts|
+  cmd = File.basename($0)
+  opts.banner = "Usage: #{cmd} " \
+                "[ruby options] [#{cmd} options] [rackup config file]"
+  opts.separator "Ruby options:"
+
+  lineno = 1
+  opts.on("-e", "--eval LINE", "evaluate a LINE of code") do |line|
+    eval line, TOPLEVEL_BINDING, "-e", lineno
+    lineno += 1
+  end
+
+  opts.on("-d", "--debug", "set debugging flags (set $DEBUG to true)") do
+    $DEBUG = true
+  end
+
+  opts.on("-w", "--warn", "turn warnings on for your script") do
+    $-w = true
+  end
+
+  opts.on("-I", "--include PATH",
+          "specify $LOAD_PATH (may be used more than once)") do |path|
+    $LOAD_PATH.unshift(*path.split(':'))
+  end
+
+  opts.on("-r", "--require LIBRARY",
+          "require the library, before executing your script") do |library|
+    require library
+  end
+
+  opts.separator "#{cmd} options:"
+
+  # some of these switches exist for rackup command-line compatibility,
+
+  opts.on("-o", "--host HOST",
+          "listen on HOST (default: #{Pitchfork::Const::DEFAULT_HOST})") do |h|
+    rackup_opts[:host] = h
+    rackup_opts[:set_listener] = true
+  end
+
+  opts.on("-p", "--port PORT", Integer,
+          "use PORT (default: #{Pitchfork::Const::DEFAULT_PORT})") do |port|
+    rackup_opts[:port] = port
+    rackup_opts[:set_listener] = true
+  end
+
+  opts.on("-E", "--env RACK_ENV",
+          "use RACK_ENV for defaults (default: development)") do |e|
+    ENV["RACK_ENV"] = e
+  end
+
+  opts.on("-s", "--server SERVER",
+          "this flag only exists for compatibility") do |s|
+    warn "-s/--server only exists for compatibility with rackup"
+  end
+
+  # Pitchfork-specific stuff
+  opts.on("-l", "--listen {HOST:PORT|PATH}",
+          "listen on HOST:PORT or PATH",
+          "this may be specified multiple times",
+          "(default: #{Pitchfork::Const::DEFAULT_LISTEN})") do |address|
+    options[:listeners] << address
+  end
+
+  opts.on("-c", "--config-file FILE", "Pitchfork-specific config file") do |f|
+    options[:config_file] = f
+  end
+
+  # I'm avoiding Pitchfork-specific config options on the command-line.
+  # IMNSHO, config options on the command-line are redundant given
+  # config files and make things unnecessarily complicated with multiple
+  # places to look for a config option.
+
+  opts.separator "Common options:"
+
+  opts.on_tail("-h", "--help", "Show this message") do
+    puts opts.to_s.gsub(/^.*DEPRECATED.*$/s, '')
+    exit
+  end
+
+  opts.on_tail("-v", "--version", "Show version") do
+    puts "#{cmd} v#{Pitchfork::VERSION} (based on Unicorn v#{Pitchfork::Const::UNICORN_VERSION})"
+    exit
+  end
+
+  opts.parse! ARGV
+end
+
+app = Pitchfork.builder(ARGV[0] || 'config.ru', op)
+op = nil
+
+if $DEBUG
+  require 'pp'
+  pp({
+    :pitchfork_options => options,
+    :app => app,
+  })
+end
+
+exit(Pitchfork::HttpServer.new(app, options).start(false).join)

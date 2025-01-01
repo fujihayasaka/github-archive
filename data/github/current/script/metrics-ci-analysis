@@ -1,0 +1,54 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "csv"
+require "fileutils"
+require "set"
+require "yaml"
+
+services = {}
+metrics = Set.new
+
+# Get all directories in ./tmp/ci-artifacts/**
+directories = Dir.glob("./tmp/ci-artifacts/**").select { |f| File.directory?(f) }
+
+# Check if each directory contains a metrics_tracking.out file
+directories.each do |dir|
+  unless File.exist?(File.join(dir, "metrics_tracking.out")) || dir.include?("openapi") # ignore github-openapi-artifact as it contains no metrics
+    raise "Missing expected metrics_tracking.out file in #{dir}. No mapping file will be generated."
+  end
+end
+
+Dir.glob("./tmp/ci-artifacts/**/metrics_tracking.out").each do |f|
+  content = File.read(f)
+
+  CSV.parse(content) do |row|
+    metric = row[0]
+    service = row[1]
+    line = row[2]
+
+    services[service] ||= Set.new
+    services[service].add("#{metric}")
+    metrics.add(metric) if !metric.nil? && !metric.empty?
+  end
+end
+
+services["none"] = services.delete(nil)
+
+if services.size == 1 && services["none"].nil?
+  raise "No metrics found in any metrics_tracking.out files. No mapping file will be generated."
+end
+
+services.transform_values! { |metrics| metrics.to_a.sort }
+
+# sort by service name
+services = services.sort.to_h
+
+# Create the .tmp directory if it doesn't exist
+FileUtils.mkdir_p(".tmp")
+
+# Write the YAML to .tmp/mapping.yml
+yaml = YAML.dump(services)
+File.open(".tmp/mapping.yml", "w") do |file|
+  file.write(yaml)
+end

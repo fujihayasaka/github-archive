@@ -1,0 +1,311 @@
+<%
+  page_info(
+    title: "Sign up for GitHub",
+    class: "header-overlay",
+    full_height: true,
+  )
+
+  octocaptcha = Octocaptcha.new(session, page: :signup_redesign)
+  show_captcha = octocaptcha.show_captcha?
+  dynamically_load_captcha = show_captcha && octocaptcha.is_more_data_exchange_enabled.call
+  octocaptcha_timeout = Octocaptcha::HIGHER_BROWSER_LOAD_TIMEOUT
+  enable_msft_analytics ||= enable_msft_analytics
+  custom_page_param ||= custom_page_param
+  contentful_custom_content_entry ||= contentful_custom_content_entry
+  social_signup_enabled ||= social_signup_enabled
+  social_info_url = "#{social_signup_info_path}?social=true"
+  social_redirect_url = login_path
+  show_social_login_buttons ||= show_social_login_buttons
+  show_dynamic_social_different_account_link ||= show_dynamic_social_different_account_link
+  start_with_captcha ||= start_with_captcha
+%>
+
+<% content_for :signups_left_panel do %>
+  <%= render(Signups::SignupsContentPanelComponent.new(custom_page_param: custom_page_param, contentful_custom_content_entry: contentful_custom_content_entry)) %>
+<% end %>
+
+<div class="signup-text-suggester width-full" <%= test_selector("signup-form-component") %>>
+  <div class="my-4 text-mono color-fg-attention" <%= test_selector("signup-errors") %>>
+    <%= user.errors.full_messages.to_sentence %>
+  </div>
+    <%# Setting bg: :transparent here, and opting to set the background color in signups_rebrand.html.erb .form-component to avoid setting border-radius in 2 places.%>
+  <%= render(Primer::Box.new(bg: :transparent, classes: "nux-new__container-box")) do %>
+    <div <%= test_selector("signup-component") %>>
+      <signup-form id="signup-form"
+        <% if social_signup_enabled %>
+          data-social-info-url="<%= social_info_url %>"
+          data-social-redirect-url="<%= social_redirect_url %>"
+        <% end %>
+        <% if start_with_captcha %>
+          data-start-with-captcha="<%= start_with_captcha.to_s %>"
+          hidden
+        <% end %>
+      >
+        <div class="js-octocaptcha-hide mb-4">
+          <%= render(Primer::Beta::Text.new(
+            id: "signup-form-fields",
+            tag: :h2,
+            classes: "signup-form-fields__h2"
+            ).with_content("Sign up for GitHub")) %>
+        </div>
+        <div id="social-login-buttons-container" class="js-octocaptcha-hide">
+          <%= render partial: "sessions/social_buttons", locals: { show_social_buttons: show_social_login_buttons, show_divider: true, from: :signup } %>
+        </div>
+        <%= form_with(
+          model: user,
+          url: nux_signup_index_path(return_to: params[:return_to], get_started_with: params[:get_started_with].presence, social: social_signup_enabled),
+          class: class_names({ "position-relative js-octocaptcha-parent": show_captcha })
+        ) do |form| %>
+          <%= hidden_field_tag :return_to, params[:return_to] %>
+          <%= hidden_field_tag :invitation_token, params[:invitation_token] %>
+          <%= hidden_field_tag :repo_invitation_token, params[:repo_invitation_token] %>
+          <noscript>
+            <style>
+              /* If JS is disabled, hide the sign up form and buttons and display a warning message */
+              #signup-form-fields-container{display:none;}
+            </style>
+            <%= render(Primer::Alpha::Banner.new(icon: :stop, scheme: :danger, dismiss_scheme: :none, mt: -5)) {
+              "GitHub requires JavaScript to proceed with the sign up process. Please enable JavaScript."
+            } %>
+          </noscript>
+
+          <div id="signup-form-fields-container">
+            <% if social_signup_enabled %>
+              <div id="social-email-container" class="js-octocaptcha-hide">
+                <div class="d-flex flex-column">
+                  <p class="text-bold mb-1">Email</p>
+                  <div class="FormControl-input FormControl-large bgColor-inset fgColor-muted mb-0" <%= test_selector("social-signup-email")%>>
+                    <span id="social-email" aria-live="polite" data-target="signup-form.SocialEmailSpan">Loading your email address, please wait…</span>
+                  </div>
+                </div>
+
+                <p class="note mt-1 mb-3" <%= test_selector("social-different-account-link") %>>
+                  <% if show_dynamic_social_different_account_link %>
+                    <%= link_to(
+                      "",
+                      login_path,
+                      "class": "Link--inTextBlock",
+                      "aria-describedby": "social-different-account-link",
+                      "hidden": true,
+                      "data-target": "signup-form.SocialDifferentAccountLink"
+                    ) %>
+                  <% else %>
+                    <%= link_to(
+                      "Use a different Google account",
+                      login_path,
+                      "class": "Link--inTextBlock",
+                      "aria-label": "Use a different Google account",
+                      "aria-describedby": "social-different-account-link",
+                    ) %>
+                  <% end %>
+                </p>
+              </div>
+            <% else %>
+              <div id="email-container" class="js-octocaptcha-hide" <%= test_selector("signup-form-fields-component")%>>
+                <label for="email" class="text-semibold">
+                  Email<sup aria-hidden="true">*</sup>
+                </label>
+                <div class="mb-3 mt-1" <%= test_selector("email-input")%>>
+                  <%# Adding dirty here to indicate to auto-check that this input has not yet been validated when it is prefilled %>
+                  <auto-check src="<%= email_validity_checks_path %>" required dirty class="signup-form-fields__validate">
+                    <%= form.email_field(
+                      :email,
+                      id: "email",
+                      class: "width-full js-octocaptcha-data-field js-auto-check-input js-nux-input signup-form-fields__input",
+                      required: true,
+                      placeholder: "Email",
+                      autocomplete: "off",
+                      "dir": "auto",
+                      "data-target": "text-suggester.input",
+                      "data-octocaptcha-field-name": "email_address",
+                      "aria-describedby": "email-err"
+                    ) %>
+                    <%= csrf_hidden_input_for email_validity_checks_path %>
+                  </auto-check>
+                </div>
+              </div>
+
+              <div id="password-container" class="js-octocaptcha-hide">
+                <label for="password" class="text-semibold">
+                  Password<sup aria-hidden="true">*</sup>
+                </label>
+                <div class="mb-3 mt-1" <%= test_selector("password-input")%>>
+                  <div>
+                    <visible-password>
+                        <auto-check src="<%= password_validity_checks_url(hide_strength_sentence: true, hide_password_validity_pills: true) %>" required class="signup-form-fields__validate">
+                        <%= form.password_field(
+                          :password,
+                          id: "password",
+                          placeholder: "Password",
+                          value: GitHub.default_password,
+                          class: "width-full js-auto-check-input js-nux-input signup-form-fields__input",
+                          required: true,
+                          passwordrules: User::PASSWORD_RULES,
+                          autocapitalize: "off",
+                          autocomplete: "off",
+                          "aria-describedby": "password-helper",
+                          "autocorrect": "off",
+                          "data-target": "visible-password.input",
+                          "dir": "auto"
+                        ) %>
+                        <%= csrf_hidden_input_for password_validity_checks_path %>
+                      </auto-check>
+                    </visible-password>
+                  </div>
+                  <div id="password-helper" class="text-small mt-1 signup-form-fields__helper-text">
+                    Password should be at least 15 characters OR at least 8 characters including a number and a lowercase letter.
+                  </div>
+                </div>
+              </div>
+            <% end %>
+
+            <div id="username-container" class="js-octocaptcha-hide">
+              <div>
+                <label for="login" class="text-semibold">
+                  Username<sup aria-hidden="true">*</sup>
+                </label>
+              </div>
+              <div class="mb-3 mt-1">
+                <% if social_signup_enabled %>
+                  <div>
+                    <auto-check
+                      id="login-auto-check"
+                      src="<%= username_check_get_path(suggest_usernames: true) %>"
+                      http-method="GET"
+                      class="width-full mr-2 signup-form-fields__validate"
+                      data-target="signup-form.AutoCheckLogin"
+                      dirty
+                      required
+                    >
+                      <%= form.text_field(
+                        :login,
+                        id: "login",
+                        class: "width-full js-octocaptcha-data-field js-auto-check-input js-nux-input signup-form-fields__input",
+                        required: true,
+                        placeholder: "Username",
+                        autocapitalize: "off",
+                        autocomplete: "none",
+                        "aria-describedby": "username-helper",
+                        "autocorrect": "off",
+                        "data-target": "signup-form.LoginTextfield",
+                        "dir": "auto",
+                        "data-octocaptcha-field-name": "login",
+                      ) %>
+                      <%# Div to keep the markup structure for username the same as email and password inputs %>
+                      <%# This is important when adding/removing validation messages %>
+                      <div></div>
+                    </auto-check>
+                  </div>
+                <% else %>
+                  <div>
+                    <auto-check src="<%= username_check_get_path(suggest_usernames: true) %>" http-method="GET" class="width-full mr-2 signup-form-fields__validate" required>
+                      <%= form.text_field(
+                        :login,
+                        id: "login",
+                        class: "width-full js-octocaptcha-data-field js-auto-check-input js-nux-input signup-form-fields__input",
+                        required: true,
+                        placeholder: "Username",
+                        autocapitalize: "off",
+                        autocomplete: "none",
+                        "aria-describedby": "username-helper",
+                        "autocorrect": "off",
+                        "dir": "auto",
+                        "data-octocaptcha-field-name": "login"
+                      ) %>
+                      <%# Div to keep the markup structure for username the same as email and password inputs %>
+                      <%# This is important when adding/removing validation messages %>
+                      <div></div>
+                    </auto-check>
+                  </div>
+                  <div id="username-helper" class="text-small mt-1 signup-form-fields__helper-text">
+                    Username may only contain alphanumeric characters or single hyphens, and cannot begin or end with a hyphen.
+                  </div>
+                <% end %>
+              </div>
+            </div>
+            <% if !FeatureFlag.vexi.enabled?(:hide_marketing_consent_fields, default: false) %>
+              <%= render(
+                Signups::MarketingConsentFieldsComponent.new(
+                  actor_country_code: local_assigns[:actor_country_code]
+                )
+              ) %>
+            <% end %>
+          </div>
+
+          <% if show_captcha %>
+            <div class="js-octocaptcha-hide">
+              <%= render(
+                Primer::Beta::Button.new(
+                  type: :button,
+                  scheme: :primary,
+                  block: true,
+                  test_selector: "continue-to-captcha-button",
+                  classes: "js-octocaptcha-load-captcha signup-form-fields__button",
+                  "aria-describedby": "terms-of-service",
+                  "data-target": "signup-form.SignupButton"
+              )) do %>
+                Create account
+                <%= render(Primer::Beta::Octicon.new(:"chevron-right", size: :small)) %>
+              <% end %>
+            </div>
+          <% end %>
+
+          <div id="captcha-container-nux" class="captcha-container-nux position-relative top-0"
+          <%= "hidden" if show_captcha %>>
+            <% if show_captcha %>
+              <h2 id="verify-account-header" class="h3">Verify your account</h2>
+              <div class="js-octocaptcha-focus-target" tabindex="-1" style="outline: none;">
+                <%= render partial: "shared/octocaptcha", locals: {
+                  origin_page: "github_signup_redesign",
+                  octocaptcha_timeout: octocaptcha_timeout,
+                  include_header: false,
+                  version: 2,
+                  captcha_demo: captcha_demo,
+                  dynamically_load_captcha: dynamically_load_captcha,
+                  style_theme: "light"
+                } %>
+              </div>
+            <% end %>
+
+            <%= spamurai_form_signals %>
+          </div>
+
+          <div class="px-sm-0 px-4 ">
+            <%= render(
+              Primer::Beta::Button.new(
+                type: :submit,
+                scheme: :primary,
+                block: true,
+                test_selector: "create-account-button",
+                classes: class_names([
+                  "form-control", "signup-form-fields__button",
+                  {
+                    "js-octocaptcha-form-submit": show_captcha,
+                  },
+                ]),
+                data: { disable_invalid: true },
+                disabled: show_captcha,
+                hidden: show_captcha,
+                "aria-describedby": "terms-of-service",
+            )) do %>
+                Create account
+                <%= render(Primer::Beta::Octicon.new(:"chevron-right", size: :small)) %>
+              <% end %>
+          </div>
+
+          <div class="js-octocaptcha-hide">
+            <%= render Signups::TermsOfServiceComponent.new %>
+          </div>
+        <% end %>
+      </signup-form>
+    </div>
+  <% end %>
+</div>
+
+<% if enable_msft_analytics %>
+  <microsoft-analytics>
+    <% if content_for?(:microsoft_analytics_addition) %>
+      <%= yield :microsoft_analytics_addition %>
+    <% end %>
+  </microsoft-analytics>
+<% end %>

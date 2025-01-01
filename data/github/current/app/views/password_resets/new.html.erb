@@ -1,0 +1,71 @@
+<%# rubocop:disable Lint/InstanceVariable %>
+<% page_info title: "Forgot your password?" %>
+<%
+show_captcha = !GitHub.enterprise? && Octocaptcha.new(session, page: :password_reset, user: @requested_reset_user).show_captcha?
+
+input_options = {
+  :class       => "input-block",
+  :id          => "email_field",
+  :autofocus   => "autofocus"
+}
+
+form_attributes = {
+  :id    => "forgot_password_form",
+  :class => show_captcha ? "js-octocaptcha-parent" : ""
+}
+
+if logged_in? && !current_user&.is_emu_and_not_first_owner?
+  input_options[:value] = current_user.email
+elsif params[:email].present?
+  input_options[:value] = params[:email]
+else
+  input_options[:placeholder] = "Enter your email address"
+end
+
+description = if GitHub.email_verification_enabled?
+  "Enter your user account's verified email address and we will send you a password reset link."
+else
+  "Enter your email address and we will send you a link to reset your password."
+end
+%>
+
+<%= render Sessions::AuthenticationWrapperComponent.new(
+    classes: (show_captcha ? "container-sm" : ""),
+    html_attributes: { "data-test-selector" => "password-reset-standard-view" }
+  ) do |component| %>
+
+  <% component.with_header do %>
+    <%= render_react_partial name: "sessions-auth-header", props: { variant: "github", title: "Reset your password", description: description } %>
+  <% end %>
+
+  <% component.with_body do %>
+    <%= render "shared/flash" %>
+     <% if show_captcha %>
+      <noscript>
+        <p class="flash flash-error">GitHub requires JavaScript enabled during password reset, for our captcha. Please enable JavaScript during password reset.</p>
+      </noscript>
+    <% end %>
+    <%= form_tag password_reset_path, form_attributes do %>
+      <div class="width-full">
+        <% if FeatureFlag.vexi.enabled_or_raise?(:resend_initial_first_emu_admin_password_reset) && params[:slug].present? # rubocop:disable GitHub/FeatureManagement/NoVexiEnabledOrRaiseUsage %>
+          <%= hidden_field_tag :slug, params[:slug] %>
+        <% end %>
+        <label for="email_field" class="d-block mb-2">Email</label>
+        <%= text_field_tag :email, @failed_auth_email, input_options %>
+        <% if show_captcha %>
+          <%= render partial: "shared/octocaptcha", locals: { origin_page: "github_password_reset", octocaptcha_timeout: @octocaptcha_timeout } %>
+        <% end %>
+        <input
+          name="commit"
+          type="submit"
+          value="Send password reset email"
+          class="<%= "btn btn-primary btn-block #{"js-octocaptcha-form-submit" if show_captcha}" %>"
+          <% if show_captcha %>
+            disabled
+          <% end%>
+        >
+      </div>
+      <%= spamurai_form_signals %>
+    <% end %>
+  <% end %>
+<% end %>

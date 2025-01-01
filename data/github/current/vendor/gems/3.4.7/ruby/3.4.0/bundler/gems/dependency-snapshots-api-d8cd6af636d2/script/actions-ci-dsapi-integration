@@ -1,0 +1,42 @@
+#!/bin/bash
+
+source script/helpers/wait_for_db
+
+echo "running integration tests..."
+if [[ $(docker ps -q) ]]; then
+  echo "there are existing docker container on this host - refusing to run"
+  exit 1
+fi
+
+echo "::group:: Building integration test images..."
+docker-compose -f docker-compose.yml -f docker-compose.mysql8.yml -f docker-compose.integration.yml build integration_tests dsapi
+echo "::endgroup::"
+echo "::group:: Starting supporting containers..."
+docker-compose -f docker-compose.yml up -d
+echo "::endgroup::"
+echo "::group:: Starting db..."
+docker-compose -f docker-compose.yml -f docker-compose.integration.yml up -d integration_db
+container_name=$(docker inspect -f '{{.Name}}' $(docker-compose -f docker-compose.yml -f docker-compose.integration.yml ps -q integration_db) | cut -c2-)
+wait_for_db_healthy "${container_name}"
+wait_for_mysql_ready_twice "${container_name}"
+echo "::endgroup::"
+echo "::group:: Awaiting database warm-up..."
+docker-compose -f docker-compose.yml -f docker-compose.integration.yml run --rm --entrypoint /app/bin/ds-migrate dsapi await
+echo "::endgroup::"
+echo "::group:: Starting api..."
+docker-compose -f docker-compose.yml -f docker-compose.integration.yml run --rm --entrypoint /app/bin/ds-migrate dsapi reset
+docker-compose -f docker-compose.yml -f docker-compose.integration.yml up -d dsapi
+echo "::endgroup::"
+echo "::group:: Running integration tests..."
+docker-compose -f docker-compose.yml -f docker-compose.mysql8.yml -f docker-compose.integration.yml run integration_tests --no-server
+
+TEST_EXIT_CODE=$?
+echo "%%%END FOLD%%%"
+
+if [[ -z "$SNAPSHOTS_DEVCONTAINER" && -z "$DS_DEVCONTAINER" ]]; then
+  echo "%%%FOLD {Saving docker DB container logs...}%%%"
+  docker-compose logs --no-color --no-log-prefix integration_db
+  echo "%%%END FOLD%%%"
+fi
+
+exit $TEST_EXIT_CODE

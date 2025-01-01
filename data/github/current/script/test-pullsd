@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -e
+
+# Function to show usage
+show_help() {
+  echo "Usage: $0 [OPTIONS] [TEST_FILES...]"
+  echo ""
+  echo "Run pullsd integration tests"
+  echo ""
+  echo "OPTIONS:"
+  echo "  --update-pullsd    Update pullsd to latest commit, update config/pullsd-version, and rebuild"
+  echo "  --help, -h         Show this help message"
+  echo ""
+  echo "If TEST_FILES are not provided, automatically finds relevant tests"
+  echo ""
+  echo "Examples:"
+  echo "  $0                                             # Run all pullsd-related tests"
+  echo "  $0 --update-pullsd                             # Update pullsd and run all tests"
+  echo "  $0 test/integration/api/pulls_test.rb:552      # Run specific test"
+}
+
+# Function to pull latest pullsd hash from remote and write it to config file
+pull_latest_pullsd() {
+  echo "Fetching latest pullsd changes..."
+
+  # Get current and latest hashes
+  local current_hash=$(cat config/pullsd-version | grep -v ^#)
+  local latest_hash=$(cd vendor/pullsd && git fetch origin && git rev-parse origin/main)
+
+  echo "Current pullsd hash: $current_hash"
+  echo "Latest pullsd hash: $latest_hash"
+
+  if [ "$current_hash" != "$latest_hash" ]; then
+    echo "Writing latest hash to config/pullsd-version..."
+    echo "$latest_hash" > config/pullsd-version
+  fi
+  echo "Ensuring we have all pullsd changes (via script/build-subproject pullsd)..."
+  script/build-subproject pullsd
+}
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --update-pullsd)
+      pull_latest_pullsd
+      shift
+      ;;
+    --help|-h)
+      show_help
+      exit 0
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+export TEST_PULLSD=1
+# Necessary since we depend on a rails server that takes some time to boot up
+export TEST_SERVICES_STARTUP_TIMEOUT=30
+
+# Gracefully terminate any existing processes on port 1343 (pullsd port)
+if pids=$(lsof -t -i :1343 2>/dev/null); then
+  echo "Terminating existing process(es) on port 1343: $pids"
+  kill $pids
+  sleep 1
+fi
+
+# If arguments are provided, use them directly; otherwise use the find script
+if [ $# -gt 0 ]; then
+  TESTS="$@"
+else
+  TESTS=$(script/find-tests-for-pullsd)
+fi
+
+echo Running tests: "$TESTS"
+
+./bin/rails test $TESTS

@@ -1,0 +1,94 @@
+<%
+experiment_id = "dashboard_spark_public_preview_nudge"
+
+variant = hawaii_experiment_variant(
+  experiment_id: experiment_id,
+  user_id: current_user.id,
+  variant_count: 3
+)
+
+variant = 0 if variant < 0 # default to control
+variant = 0 if current_user.feature_flag_enabled?(:force_dashboard_spark_public_preview_nudge_0, default: false)
+variant = 1 if current_user.feature_flag_enabled?(:force_dashboard_spark_public_preview_nudge_1, default: false)
+variant = 2 if current_user.feature_flag_enabled?(:force_dashboard_spark_public_preview_nudge_2, default: false)
+
+render_variant_map = {
+  0 => :spark_public_preview_no_experience,
+  1 => :spark_public_preview_treatment_1,
+  2 => :spark_public_preview_treatment_2
+}
+
+render_variant = render_variant_map[variant]
+
+nudge_location = "dashboard"
+nudge_category_base = "dashboard_spark_public_preview_nudge"
+nudge_id = :dashboard_spark_public_preview_nudge
+nudge_group = :engage
+
+nudge_category = "#{nudge_category_base}_#{variant}"
+current_user.track_nudge_impression(id: nudge_id, group: nudge_group)
+%>
+<div class="js-notice marketing-banner" <%= test_selector(nudge_category) %>>
+  <% case render_variant %>
+  <% when :spark_public_preview_no_experience %>
+    <%# We still want tracking as we'll need this for the experiment %>
+    <%= content_tag(
+      :span,
+      data: {
+        **analytics_visible_attributes(
+          category: nudge_category,
+          group: nudge_group,
+        )
+      }
+    ) do %>
+    <% end %>
+  <% when :spark_public_preview_treatment_1, :spark_public_preview_treatment_2 %>
+    <div class="spark-public-preview-nudge-container variant1">
+
+      <%= form_tag(
+        dismiss_notice_path(nudge_id, { nudge: true, group: nudge_group }),
+        class: "spark-public-preview-nudge-dismiss-form",
+        data: analytics_visible_attributes(category: nudge_category, group: nudge_group)
+      ) do %>
+        <%= render(Primer::Beta::IconButton.new(
+          type: :submit,
+          icon: :x,
+          scheme: :invisible,
+          aria: { label: "Dismiss" },
+          color: :on_emphasis,
+          data: analytics_click_attributes(
+            category: nudge_category,
+            tag: "a",
+            action: "dismiss",
+            location: nudge_location,
+            group: nudge_group,
+          ))) %>
+      <% end %>
+
+      <img class="spark-public-preview-nudge-image" src="<%= image_path("modules/dashboard/promos/spark-public-preview-nudge/sparkle-fill.svg") %>" alt="Spark star Logo">
+
+      <h2 class="spark-public-preview-nudge-header">GitHub Spark</h2>
+
+      <h3 class="spark-public-preview-nudge-description">
+      Build and deploy full-stack AI-powered apps using natural language — in a flash.
+      </h3>
+
+      <%= render Primer::Beta::Button.new(
+        size: :medium,
+        tag: :a,
+        scheme: :secondary,
+        href: "/in-product-messaging/dismiss-and-redirect?group=#{nudge_group}&notice=#{nudge_id}&destination_key=#{nudge_id}",
+        block: true,
+        classes: "nudge-inverse-button",
+        data: analytics_click_attributes(
+          category: nudge_category,
+          action: "get_started",
+          location: nudge_location,
+          )
+      ) do %>
+        Get started
+      <% end %>
+
+    </div>
+  <% end %>
+</div>

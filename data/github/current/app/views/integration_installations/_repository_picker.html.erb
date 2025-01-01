@@ -1,0 +1,107 @@
+<%# erblint:counter DeprecatedComponentsCounter 3 %>
+<div class="integrations-repository-picker mt-2 position-relative js-integrations-install-repo-selection
+  <% unless view.install_target_radio_checked?(:selected) %>has-removed-contents<% end %>">
+
+  <% if view.use_select_panel? %>
+    <%= render(Primer::Alpha::SelectPanel.new(
+      use_experimental_non_local_form: user_feature_enabled?(:primer_select_panel_use_experimental_non_local_form),
+      id: "repository-menu-list",
+      title: "Select repositories",
+      src: view.repository_suggestions_path,
+      select_variant: :multiple,
+      no_results_label: "No repositories found",
+    )) do |menu| %>
+      <% menu.with_show_button do |button| %>
+        <% button.with_leading_visual_icon(icon: :repo) %>
+        <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+        Select repositories
+        <%= render(Primer::Beta::Counter.new(count: nil, round: true, hide_if_zero: true, classes: "js-integration-total-repos-badge")) %>
+      <% end %>
+      <% if view.suggestions.size == IntegrationInstallations::SuggestionsView::MAX_SUGGESTIONS %>
+        <% menu.with_footer(classes: 'flex-justify-center') do %>
+          <span>
+            Displaying maximum <%= IntegrationInstallations::SuggestionsView::MAX_SUGGESTIONS %> suggestions
+          </span>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% else %>
+    <details class="select-menu js-apps-install-select-repositories-container details-reset details-overlay mb-3">
+      <%= render Primer::ButtonComponent.new(tag: :summary, classes: "select-menu-button") do %>
+        <%= primer_octicon(:repo) %>
+        <span>Select repositories</span>
+      <% end %>
+      <details-menu class="select-menu-modal width-full position-absolute js-apps-install-select-repositories-menu" style="z-index: 99;"><%# erblint:disable Primer::Accessibility::DetailsMenuMigration %>
+        <div class="select-menu-filters">
+          <div class="select-menu-text-filter">
+            <remote-input
+              role="menuitem"
+              aria-owns="repository-menu-list"
+              src="<%= view.repository_suggestions_path %>">
+              <input
+                type="text"
+                class="form-control"
+                placeholder="Search for a repository"
+                aria-label="Search for a repository"
+                autocomplete="off"
+                autofocus>
+            </remote-input>
+          </div>
+        </div>
+        <div class="select-menu-list" id="repository-menu-list">
+          <%= render(Primer::Beta::Spinner.new(my: 3, mx: :auto, display: :block, role: 'menuitem')) %>
+        </div>
+      </details-menu>
+    </details>
+  <% end %>
+
+  <div class="js-integration-total-repos text-small color-fg-muted my-3" <% if view.initial_repository_ids.length == 0 %>hidden<% end %>>
+    <% if view.initial_repository_ids.length > 0 %>
+      Selected <%= pluralize(view.initial_repository_ids.length, "repository") %>.
+    <% end %>
+  </div>
+
+  <% if FeatureFlag.vexi.enabled?(:banner_migration, current_user, default: false) %>
+    <%= render(Primer::Alpha::Banner.new(scheme: :warning, classes: "js-max-repository-warning", my: 3, p: 2, hidden: true)) do %>
+      Finish installing to select more than <strong><%= view.max_repositories %></strong> repositories.
+    <% end %>
+  <% else %>
+    <%= render(Primer::Beta::Flash.new(scheme: :warning, classes: "js-max-repository-warning", my: 3, p: 2, hidden: true)) do %>
+      Finish installing to select more than <strong><%= view.max_repositories %></strong> repositories.
+    <% end %>
+  <% end %>
+
+  <div class="js-min-repository-error color-fg-danger text-small mt-2" hidden>
+    <span class="d-inline-flex flex-items-center">
+      <%= render(Primer::Beta::Octicon.new(icon: :alert, size: :xsmall, classes: "mr-2")) %>
+      Select at least one repository.
+    </span>
+    <%# repository admins get the option to uninstall an app from all repositories that they manage %>
+
+    <% if repository_target_switching_disabled %>
+      <div>
+        <%= render Primer::ButtonComponent.new(scheme: :danger, mt: 2, type: :submit) do %>Uninstall integration on all my repositories<% end %>
+      </div>
+    <% end %>
+  </div>
+
+  <div class="integrations-select-repos js-integrations-install-repo-picked">
+    <% if view.edit_installed_repositories? %>
+      <% view.installed_repositories.each do |repo| %>
+        <%= render :partial => "integration_installations/suggestion_selection", locals: {repository: repo, label: {}, use_select_panel: view.use_select_panel? } %>
+      <% end %>
+    <% end %>
+
+    <% if view.installation_request_available? %>
+      <% view.installation_request.repositories.each do |repo| %>
+        <%= render :partial => "integration_installations/suggestion_selection", locals: {repository: repo, label: {text: view.installation_request_verb, title: view.label_title}, use_select_panel: view.use_select_panel? } %>
+      <% end %>
+    <% end %>
+
+    <% unless view.integration %>
+      <% view.programmatic_access_selected_repositories.each do |repo| %>
+        <%= render :partial => "integration_installations/suggestion_selection", locals: {repository: repo, label: {}, use_select_panel: view.use_select_panel?} %>
+      <% end %>
+    <% end %>
+  </div>
+</div>

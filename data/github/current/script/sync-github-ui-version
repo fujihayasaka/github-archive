@@ -1,0 +1,188 @@
+#!/bin/bash
+
+# This script fetches the earliest matching git SHA from the main branch of the github/github-ui repo
+# and writes it to config/github-ui-version. It is resilient to errors and will try multiple strategies
+# for determining the base SHA/date and the UI SHA.
+# Once we have the UI SHA, it downloads the ui-manifest.json file from the CDN or Blob storage and places it in public/assets.
+
+set -euo pipefail
+source script/ui-manifest-functions.sh
+
+# --- Utility Functions ---
+
+log() {
+  echo "[sync-github-ui-version] $1"
+}
+
+# --- Base Commit Strategies ---
+
+detect_base_from_head() {
+  BASE_SHA=$(git rev-parse HEAD 2>/dev/null) || return 1
+  BASE_DATE=$(git show -s --format=%ci "$BASE_SHA" 2>/dev/null) || return 1
+  BASE_METHOD="head"
+  return 0
+}
+
+detect_base_from_current_commit_on_master() {
+  local current_ref=${GITHUB_REF:-$(git branch --show-current)}
+  # Strip refs/heads/ if present (for GitHub Actions)
+  local current_branch="${current_ref#refs/heads/}"
+
+  # Use the current commit as the base if already on master
+  if [ "$current_branch" != "master" ]; then return 1; fi
+
+  detect_base_from_head || return 1
+  BASE_METHOD="current_commit_on_master"
+  return 0
+}
+
+detect_base_from_api() {
+  # Use the GitHub API in CI to find the merge base with master in cases where we don't have master locally
+  # On mirror we need a different token and host
+  if [ -n "${GITHUB_SERVER_URL:-}" ] && [ "$GITHUB_SERVER_URL" = "${MIRROR_SERVER_URL:-}" ]; then
+    # If we're on the resiliency mirror, use the BP_GITHUB_MIRROR_TOKEN and override the GH_HOST
+    if [ -z "${BP_GITHUB_MIRROR_TOKEN:-}" ]; then
+      log "WARNING: BP_GITHUB_MIRROR_TOKEN is required for mirror but not set, skipping API strategy"
+      return 1
+    fi
+    export GH_ENTERPRISE_TOKEN="$BP_GITHUB_MIRROR_TOKEN"
+    # Extract hostname from MIRROR_SERVER_URL (remove https:// prefix)
+    export GH_HOST="${MIRROR_SERVER_URL#https://}"
+  else
+    # Otherwise use the GITHUB_TOKEN or BP_GITHUB_TOKEN
+    local token="${GITHUB_TOKEN:-${BP_GITHUB_TOKEN:-}}"
+    if [ -z "$token" ]; then
+      log "WARNING: GITHUB_TOKEN or BP_GITHUB_TOKEN is required for API but not set, skipping API strategy"
+      return 1
+    fi
+    export GH_TOKEN="$token"
+  fi
+
+  # Fetch the merge base commit using the GitHub API
+  local commit_sha=${GITHUB_SHA:-$(git rev-parse HEAD)}
+  local merge_base_commit=$(gh api "repos/github/github/compare/master...$commit_sha" | jq -r '.merge_base_commit') || return 1
+
+  # Verify we got a valid merge base commit
+  if [ -z "$merge_base_commit" ] || [ "$merge_base_commit" = "null" ]; then
+    log "ERROR: Could not determine merge base commit via API."
+    return 1
+  fi
+
+  BASE_SHA=$(echo "$merge_base_commit" | jq -r '.sha') || return 1
+  BASE_DATE=$(echo "$merge_base_commit" | jq -r '.commit.committer.date') || return 1
+  BASE_METHOD="api"
+  return 0
+}
+
+detect_base_from_merge_base() {
+  # When we are in CI, we use a shallow clone so merge-base won't be accurate
+  if [ -n "${GITHUB_ACTIONS:-}" ]; then
+    return 1
+  fi
+
+  BASE_SHA=$(git merge-base HEAD origin/master 2>/dev/null) || return 1
+  BASE_DATE=$(git show -s --format=%ci "$BASE_SHA" 2>/dev/null) || return 1
+  BASE_METHOD="merge_base"
+  return 0
+}
+
+detect_base_from_master() {
+  BASE_SHA=$(git rev-parse master 2>/dev/null) || return 1
+  BASE_DATE=$(git show -s --format=%ci "$BASE_SHA" 2>/dev/null) || return 1
+  BASE_METHOD="master"
+  return 0
+}
+
+detect_base() {
+  if detect_base_from_current_commit_on_master; then return 0; fi
+  if detect_base_from_merge_base; then return 0; fi
+  if detect_base_from_api; then return 0; fi
+  if detect_base_from_master; then return 0; fi
+
+  # If all strategies fail, use HEAD as a fallback
+  log "WARNING: Could not determine base SHA/date, using HEAD as fallback."
+  detect_base_from_head || return 1
+  BASE_METHOD="fallback_head"
+  return 0
+}
+
+# --- UI SHA Strategies ---
+
+detect_github_ui_sha_since_base_date() {
+  # Try to find the earliest commit on main newer than the base date
+  local sha=$(git log refs/remotes/origin/main --first-parent --since="$BASE_DATE" --reverse --format="%H" | head -n 1 || true)
+  if [ -n "$sha" ]; then
+    GITHUB_UI_SHA="$sha"
+    UI_SHA_METHOD="since_base_date"
+    return 0
+  fi
+  return 1
+}
+
+detect_github_ui_sha_latest() {
+  # Fallback: use the latest commit on main
+  local sha=$(git rev-parse origin/main 2>/dev/null) || return 1
+  GITHUB_UI_SHA="$sha"
+  UI_SHA_METHOD="latest"
+  return 0
+}
+
+detect_github_ui_sha() {
+  # Grab the git URL for github-ui. use gh-clone-url to ensure it works in all environments including mirror
+  giturl="$(./script/gh-clone-url github/github-ui)" || {
+    log "ERROR: Failed to get clone URL for github-ui"
+    return 1
+  }
+
+  # Create a temporary directory for the git operations with github-ui
+  TMP_DIR=$(mktemp -d)
+  trap 'rm -rf "$TMP_DIR"' EXIT
+  pushd "$TMP_DIR" > /dev/null
+
+  # Set up a git environment for fetching github-ui
+  git init --quiet
+  git remote add origin "$giturl"
+  git config extensions.partialClone origin
+
+  # Try to fetch commit history since base date, fallback to latest if needed
+  if ! git fetch --shallow-since="$BASE_DATE" --filter=tree:0 --no-tags --quiet origin main 2>/dev/null; then
+    if ! git fetch --depth=1 --filter=tree:0 --no-tags --quiet origin main 2>/dev/null; then
+      log "ERROR: Failed to fetch from github-ui repository"
+      popd > /dev/null
+      return 1
+    fi
+  fi
+
+  local result=1
+  if detect_github_ui_sha_since_base_date; then
+    result=0
+  elif detect_github_ui_sha_latest; then
+    result=0
+  else
+    log "ERROR: Could not determine GITHUB_UI_SHA from github-ui repository."
+  fi
+
+  popd > /dev/null
+  return $result
+}
+
+# --- Main Script ---
+
+# Skip ui version sync for enterprise builds
+if [ -n "${ENTERPRISE:-}" ]; then
+  log "Skipping github-ui version sync for enterprise build."
+  exit 0
+fi
+
+# Get the BASE_SHA and BASE_DATE
+detect_base
+
+# Get the GITHUB_UI_SHA
+detect_github_ui_sha
+
+# Download the ui-manifest.json. We need it on disk for the Rails tests and dev server
+download_ui_manifest $GITHUB_UI_SHA
+
+# Store the github-ui sha in config/github-ui-version
+echo "$GITHUB_UI_SHA" > config/github-ui-version
+log "github-ui-version synced: UI_SHA=$GITHUB_UI_SHA UI_SHA_METHOD=$UI_SHA_METHOD BASE_SHA=$BASE_SHA BASE_DATE=\"$BASE_DATE\" BASE_METHOD=$BASE_METHOD"

@@ -1,0 +1,75 @@
+<% is_oidc = sso_label == "OIDC" %>
+<%= render Primer::Box.new(display: :flex) do %>
+  <%= render Primer::Box.new(w: :full) do %>
+    <%= render Primer::Beta::Heading.new(tag: :h3, font_size: 4) do %>
+      <%= sso_label %> single sign-on
+    <% end %>
+
+    <%= render Primer::Box.new(mt: 1, color: :subtle) do %>
+      <% if is_oidc %>
+        Supported IdPs include Microsoft Entra ID (previously known as Azure AD).
+        <%= render(Primer::Beta::Link.new(
+            underline: true,
+            href: "#{GitHub.help_url}/admin/managing-iam/configuring-authentication-for-enterprise-managed-users/configuring-oidc-for-enterprise-managed-users"
+          )) { "Learn more about OpenID Connect (OIDC)" }
+        %>.
+      <% else %>
+        Supported IdPs include Azure, Okta, OneLogin, Ping Identity, or a custom SAML 2.0 provider.
+        <%= render(Primer::Beta::Link.new(
+            underline: true,
+            href: "#{GitHub.help_url}/admin/managing-iam/configuring-authentication-for-enterprise-managed-users/configuring-saml-single-sign-on-for-enterprise-managed-users"
+          )) { "Learn more about SAML single sign-on" }
+        %>.
+      <% end %>
+
+      <% unless can_user_disable_emu_sso?(user: current_user, business: this_business) %>
+        <%= render Primer::Box.new(mt: 2, test_selector: "disable_sso_setup_user_message") do %>
+          <%= render(Primer::Beta::Octicon.new(icon: :"alert-fill", size: :xsmall, color: :subtle)) %>
+          <%= render(Primer::Beta::Text.new(vertical_align: :middle)) { "Disabling #{sso_label} single sign-on for your enterprise is only allowed if you are logged in as the setup user." } %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <div>
+    <%= render Primer::Alpha::ToggleSwitch.new(
+      aria: { label: "#{sso_label} single sign-on status" },
+      size: :small,
+      checked: is_oidc ? this_business.oidc_enabled? : this_business.saml_sso_enabled?,
+      csrf_token: "",
+      enabled: can_user_disable_emu_sso?(user: current_user, business: this_business),
+      mt: 1,
+      test_selector: "sso_toggle_switch",
+      classes: "js-business-sso-configuration-status",
+    ) %>
+    <% if can_user_disable_emu_sso?(user: current_user, business: this_business) %>
+      <% dialog_id = "sso-configuration-status" %>
+      <%= render Primer::Alpha::Dialog.new(
+        id: dialog_id,
+        header_variant: :medium,
+        width: :medium,
+        title: "Are you sure you want to disable single-sign on with #{sso_label}?",
+        style: "margin-top: 10vh;",
+        test_selector: "disable_sso_confirmation"
+      ) do |d| %>
+        <% d.with_body(mt: 3) do %>
+          <p>
+            Disabling <%= sso_label %> single sign-on for the <%= this_business.name %> enterprise will not remove existing members.
+          </p>
+        <% end %>
+
+        <% d.with_footer do %>
+          <%= render Primer::Beta::Button.new(type: :button, data: { "close-dialog-id": dialog_id }) do %>
+            Cancel
+          <% end %>
+          <% path = is_oidc ? settings_oidc_provider_enterprise_path(this_business.slug) : settings_saml_provider_enterprise_path(this_business.slug)%>
+          <%= form_tag path, method: :delete do %>
+            <%= render Primer::Beta::Button.new(scheme: :danger, type: :submit, data: { disable_with: "Disable #{sso_label} single sign-on" }) do %>
+              Disable <%= sso_label %> single sign-on
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  </div>
+<% end %>

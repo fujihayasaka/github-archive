@@ -1,0 +1,75 @@
+<% if copilot_seat_assignments.total_entries > 0 %>
+  <div style="overflow-x:auto;">
+    <table class="site-admin-table" style="white-space:nowrap;">
+      <tr>
+        <th>Type</th>
+        <th>Assignable</th>
+        <th>Assignable ID</th>
+        <th>Sync Status</th>
+        <th>Created</th>
+        <th>Pending Cancellation</th>
+        <th>Access Revoked</th>
+        <th>Actions</th>
+      </tr>
+      <% copilot_seat_assignments.each do |assignment| %>
+        <tr>
+          <td>
+            <%= assignment.assignable_type %>
+          </td>
+          <td>
+            <% if assignment.assignable.present? %>
+              <%= assignment.assignable_display_name %>
+            <% else %>
+              <%= render(Primer::Beta::Octicon.new(:alert, color: :danger)) %>&nbsp;<%= "nil (id was: #{assignment.assignable_id})" %>
+            <% end %>
+          </td>
+          <td>
+            <%= assignment.assignable_id %>
+          </td>
+          <td align="center">
+            <% if assignment.requires_conversion? %>
+              <%= render Primer::Beta::Label.new(scheme: :severe, title: "Out Of Sync", "aria-label": "Out Of Sync") do %>
+                <%= assignment.assignable_member_seat_count %> of <%= assignment.assignable_members_eligible_for_seats_count %>
+              <% end %>
+            <% else %>
+              <%= render Primer::Beta::Label.new(scheme: :success, title: "In Sync", "aria-label": "In Sync") do %>
+                <%= assignment.assignable_member_seat_count %> of <%= assignment.assignable_members_eligible_for_seats_count %>
+              <% end %>
+            <% end %>
+          </td>
+          <td>
+            <span id="created_at_<%= assignment.id %>"> <%= assignment.created_at %></span>
+            <%= render(Primer::Alpha::Tooltip.new(for_id: "created_at_#{assignment.id}", type: :description, text: "Created by #{assignment.assigning_user.display_login}", direction: :ne)) %>
+          </td>
+          <td>
+            <%= assignment.pending_cancellation_date %>
+          </td>
+          <td>
+            <%= assignment.access_revoked_at&.utc %>
+          </td>
+          <td>
+            <%= render Stafftools::Copilot::ResyncStandaloneSeatAssignmentComponent.new(assignment) %>
+            &nbsp;
+            <% if assignment.assignable.present? %>
+              <%= render(Primer::Beta::Link.new(href: stafftools_enterprise_team_path(business.slug, assignment.assignable), target: "_blank", title: "View Team", muted: true, id: "team-link-#{assignment.assignable_id}")) do |component| %>
+                <% component.with_tooltip(text: "#{assignment.assignable_type.underscore.titleize} page for #{assignment.assignable_display_name}") %>
+                <%= render(Primer::Beta::Octicon.new(:"link-external")) %>
+              <% end %>
+            <% end %>
+            &nbsp;
+            <%= render Stafftools::Copilot::StandaloneCancelSeatAssignmentComponent.new(
+                assignment,
+                business.next_metered_billing_cycle_starts_at.to_date - 1.day
+              )
+            %>
+          </td>
+        </tr>
+      <% end %>
+    </table>
+  </div>
+  <div class="paginate-container">
+    <%= helpers.will_paginate copilot_seat_assignments %>
+  </div>
+<% else %>
+    This enterprise has no seat assignments.
+<% end %>

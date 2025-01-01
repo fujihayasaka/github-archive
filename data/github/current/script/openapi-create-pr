@@ -1,0 +1,67 @@
+#!/bin/bash
+
+set -e
+
+source script/cibuild-github-openapi
+
+# Opens a PR against https://github.com/github/rest-api-description containing the
+# OpenAPI bundles that were genererated in the above script
+
+
+# we only want to generate the bundles using the master branch
+if [ "$BUILD_BRANCH" = "master" ] || [ "$BUILD_BRANCH" = "main" ] || [ ! -z "$OPENAPI_BUILD_TEST_MODE" ] ; then
+  # generate a checksum for the 3.1 schema
+  CHECKSUM_OAS_31=$(bin/openapi checksum)
+
+  gh_pat="$OPENAPI_BOT_TOKEN"
+  gh_name="github-openapi-bot"
+  gh_email="security+github-openapi-bot@github.com"
+
+  generated_folder="/tmp/openapi/generated"
+  branch="openapi-update-$CHECKSUM_OAS_30"
+
+  next_generated_folder="/tmp/openapi_next/generated"
+  next_branch="openapi-update-$CHECKSUM_OAS_31"
+
+  checkout_branch () {
+    cd $repo_dir
+    git checkout $1 2>/dev/null || git checkout -b $1;
+
+    # Copy into repo
+    cp -r $2/* $repo_dir/$3
+
+    pr_description=":wave: humans. This PR updates the OpenAPI $4 description with the latest changes. :sparkles:"
+    commit_push "github/$OPENAPI_PUBLIC_REPOSITORY_TARGET" "$1" "main" "$pr_description" "$4"
+  }
+
+  # Args: Repo, HeadBranch, BaseBranch, PRDescription
+  commit_push() {
+    # If changes happened, commit
+    if [ "$(git status --porcelain)" ]; then
+      git add .
+      git commit -m "Update OpenAPI $5 Descriptions"
+      git status
+      git push -u origin $2
+      curl -X POST https://api.github.com/repos/$1/pulls \
+        -H "Authorization: token $gh_pat" \
+        -d '{"title": "Update OpenAPI '"$5"' Descriptions", "body": "'"$4"'", "head": "'"$2"'", "base": "'"$3"'"}'
+    fi
+  }
+
+  git config --global user.name $gh_name
+  git config --global user.email $gh_email
+
+  if [ ! -z "$OPENAPI_PUBLIC_REPOSITORY_TARGET" ]; then
+    # Sync with github/rest-api-description
+    repo_dir="/tmp/$OPENAPI_PUBLIC_REPOSITORY_TARGET"
+
+    git clone --depth 1 --no-single-branch "https://$gh_pat@github.com/github/$OPENAPI_PUBLIC_REPOSITORY_TARGET.git" $repo_dir
+
+    checkout_branch "$branch" "$generated_folder" "descriptions" "3.0"
+
+    git checkout main
+    mkdir -p "descriptions-next"
+
+    checkout_branch "$next_branch" "$next_generated_folder" "descriptions-next" "3.1"
+  fi
+fi

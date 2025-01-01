@@ -1,0 +1,158 @@
+<%# rubocop:disable Lint/InstanceVariable %>
+<%
+  if current_user.feature_flag_enabled_or_raise?(:native_reindex) # rubocop:disable GitHub/FeatureManagement/NoVexiActorFeatureFlagEnabledOrRaiseUsage
+    reindex_job = @index.reindex_job
+    reindex_job_exists = reindex_job.nil? ? false : reindex_job.exists?
+    job_exists = repair_job.exists? || reindex_job_exists
+    stats = repair_job.exists? ? repair_job.stats : reindex_job_exists ? reindex_job.stats : {}
+    progress = repair_job.exists? ? repair_job.progress : reindex_job_exists ? reindex_job.progress : 0
+    job_enabled = repair_job.enabled?
+    dotcom_caption = "Reindex existing Elasticsearch data when updating shard counts and analyzers. See #{link_to('the documentation on The Hub', 'https://thehub.github.com/epd/engineering/products-and-services/dotcom/search/repair-an-index/#3-choose-which-index-repair-to-use')} for more information.".html_safe # rubocop:disable Rails/OutputSafety
+    enterprise_caption = "Reindex existing Elasticsearch data when updating shard counts and analyzers."
+  else
+    stats = repair_job.stats
+    job_exists = repair_job.exists?
+  end
+%>
+<div data-index-name="<%= repair_job.index_name %>" <%= repair_job.active? ? "id=js-repair-index" : nil %>>
+  <% if job_exists %>
+    <% if stats[:reindex_error].blank? %>
+    <table class="es-index-repair">
+      <tr>
+        <td class="es-repair-stats-label">Progress:</td>
+        <% if current_user.feature_flag_enabled_or_raise?(:native_reindex) # rubocop:disable GitHub/FeatureManagement/NoVexiActorFeatureFlagEnabledOrRaiseUsage %>
+          <td class="es-repair-progress"><%= progress_bar(progress, percentage: true, precision: 1) %></td>
+        <% else %>
+          <td class="es-repair-progress"><%= progress_bar(repair_job.progress, percentage: true, precision: 1) %></td>
+        <% end %>
+      </tr>
+    </table>
+    <table class="es-index-repair es-index-repair--responsive">
+      <tr><td class="es-repair-stats-label">Total database records read:</td><td><%= number_with_delimiter(stats[:total]) %></td></tr>
+      <tr><td>Records to add:</td><td><%= number_with_delimiter(stats[:added]) %></td></tr>
+      <tr><td>Records to update:</td><td><%= number_with_delimiter(stats[:updated]) %></td></tr>
+      <tr><td>Records to remove:</td><td><%= number_with_delimiter(stats[:removed]) %></td></tr>
+      <% if current_user.feature_flag_enabled_or_raise?(:native_reindex) # rubocop:disable GitHub/FeatureManagement/NoVexiActorFeatureFlagEnabledOrRaiseUsage %>
+        <% if repair_job.exists? %>
+          <tr><td class="es-repair-stats-label pt-3">Records with indexing errors:</td><td class="pt-3"><%= number_with_delimiter(stats[:error]) %></td></tr>
+          <tr><td colspan="2"><p class="note">The number of records with errors may be greater than the number of logged exceptions due to batching.</p></td></tr>
+        <% end %>
+      <% else %>
+        <tr><td class="es-repair-stats-label pt-3">Records with indexing errors:</td><td class="pt-3"><%= number_with_delimiter(stats[:error]) %></td></tr>
+        <tr><td colspan="2"><p class="note">The number of records with errors may be greater than the number of logged exceptions due to batching.</p></td></tr>
+      <% end %>
+    </table>
+    <% else %>
+      <%= render Primer::Beta::Blankslate.new(mt: 2) do |c| %>
+        <% c.with_visual_icon(icon: "alert") %>
+
+        <% c.with_heading(tag: :h2) do %>
+          <%= stats[:reindex_error] %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <% if current_user.feature_flag_enabled_or_raise?(:native_reindex) # rubocop:disable GitHub/FeatureManagement/NoVexiActorFeatureFlagEnabledOrRaiseUsage %>
+      <% if repair_job.exists? %>
+        <% if stats[:finished] %>
+          <p><strong>Repair complete:</strong> <%= stats[:finished] %></p>
+        <% else %>
+          <p><strong>Repair jobs set:</strong> <%= repair_job.workers %></p>
+          <!-- Active jobs: <%= repair_job.working %> -->
+        <% end %>
+      <% elsif reindex_job_exists %>
+        <% if stats[:finished] %>
+          <p><strong>Reindex complete:</strong> <%= stats[:finished] %></p>
+        <% end %>
+      <% end %>
+    <% else %>
+      <% if stats[:finished] %>
+        <p><strong>Repair complete:</strong> <%= stats[:finished] %></p>
+      <% else %>
+        <p><strong>Repair jobs set:</strong> <%= repair_job.workers %></p>
+        <!-- Active jobs: <%= repair_job.working %> -->
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if !stats[:finished] %>
+    <% if current_user.feature_flag_enabled_or_raise?(:native_reindex) # rubocop:disable GitHub/FeatureManagement/NoVexiActorFeatureFlagEnabledOrRaiseUsage %>
+      <div>
+        <% if repair_job.exists? %>
+          <div class="mt-4 d-flex flex-justify-between flex-items-center">
+            <%= form_tag(update_workers_stafftools_search_index_path(repair_job.index_name), method: "put", style: "display: flex; align-items: center;") do %>
+              <%= render(Primer::Beta::Text.new(font_weight: :bold, tag: :span)) { "Set number of repair jobs:" } %>
+              <%= render(Primer::Alpha::TextField.new(full_width: false, placeholder: "1", type: :number, name: "worker_count", label: "Set number of repair jobs", visually_hide_label: "true", mx: 2, style: "width: 100px;")) %>
+              <%= render(Primer::Beta::Button.new(type: :submit)) { job_enabled ? "Update workers" : "Update workers and resume repair" } %>
+            <% end %>
+          </div>
+        <% elsif reindex_job_exists %>
+          <div class="mt-4 d-flex flex-justify-between flex-items-center">
+            <%= form_tag(update_reindex_job_stafftools_search_index_path(repair_job.index_name), method: "put", style: "display: flex; align-items: center;") do %>
+              <%= render(Primer::Beta::Text.new(font_weight: :bold, tag: :span)) { "Set Reindex Requests Per Second:" } %>
+              <%= render(Primer::Alpha::TextField.new(full_width: false, placeholder: "-1", type: :number, name: "request_per_second", label: "Set the Request Per Second for the Reindex Job", visually_hide_label: "true", mx: 2, style: "width: 100px;")) %>
+              <%= render(Primer::Beta::Button.new(type: :submit)) { "Update Request Per Second" } %>
+            <% end %>
+          </div>
+        <% else %>
+          <div>
+            <%= form_tag(repair_stafftools_search_index_path(repair_job.index_name), method: "post") do %>
+              <%= render(Primer::Beta::Text.new(font_weight: :bold, tag: :div)) { "Backfill Type" } %>
+              <%= render(Primer::Alpha::RadioButtonGroup.new(name: "repair_type_group")) do |component| %>
+                <% if GitHub.enterprise?%>
+                  <% component.radio_button(name: "repair_type", label: "Native Reindex", value: "native_reindex", disabled: reindex_job.nil?, caption: enterprise_caption) %>
+                <% else %>
+                  <% component.radio_button(name: "repair_type", label: "Native Reindex", value: "native_reindex", disabled: reindex_job.nil?, caption: dotcom_caption) %>
+                <% end %>
+                <% component.radio_button(name: "repair_type", label: "Index Repair", value: "index_repair", caption: "Traditional Index Repair that obtains data from MySQL to Elasticseach.") %>
+              <% end %>
+              <%= render(Primer::Beta::Button.new(type: :submit)) { "Start repair" } %>
+            <% end %>
+          </div>
+        <% end %>
+
+        <% if repair_job.exists? %>
+          <div class="mt-4">
+            <%= form_tag(pause_repair_stafftools_search_index_path(repair_job.index_name), method: "put") do %>
+              <%= render(Primer::Beta::Button.new(type: :submit, float: :right, disabled: !job_enabled)) { job_enabled ? "Pause repair" : "Resume repair" } %>
+            <% end %>
+            <% if job_enabled %>
+              <p>Pause the repair</p>
+            <% else %>
+              <p><strong>The repair is paused</strong></p>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
+    <% else %>
+      <div>
+        <div class="mt-4 d-flex flex-justify-between flex-items-center">
+          <% if job_exists %>
+            <%= form_tag(update_workers_stafftools_search_index_path(repair_job.index_name), method: "put", style: "display: flex; align-items: center;") do %>
+              <%= render(Primer::Beta::Text.new(font_weight: :bold, tag: :span)) { "Set number of repair jobs:" } %>
+              <%= render(Primer::Alpha::TextField.new(full_width: false, placeholder: "1", type: :number, name: "worker_count", label: "Set number of repair jobs", visually_hide_label: "true", mx: 2, style: "width: 100px;")) %>
+              <%= render(Primer::Beta::Button.new(type: :submit)) { job_enabled ? "Update workers" : "Update workers and resume repair" } %>
+            <% end %>
+          <% else %>
+            <%= render(Primer::Beta::Text.new(tag: :span)) { "Start a repair job for this index" } %>
+              <%= form_tag(repair_stafftools_search_index_path(repair_job.index_name), method: "post") do %>
+              <%= render(Primer::Beta::Button.new(type: :submit)) { "Start repair" } %>
+            <% end %>
+          <% end %>
+        </div>
+          <% if job_exists %>
+            <div class="mt-4">
+              <%= form_tag(pause_repair_stafftools_search_index_path(repair_job.index_name), method: "put") do %>
+                <%= render(Primer::Beta::Button.new(type: :submit, float: :right, disabled: !job_enabled)) { job_enabled ? "Pause repair" : "Resume repair" } %>
+              <% end %>
+              <% if job_enabled %>
+                <p>Pause the repair</p>
+              <% else %>
+                <p><strong>The repair is paused</strong></p>
+              <% end %>
+            </div>
+          <% end %>
+        </div>
+    <% end %>
+  <% end %>
+</div>

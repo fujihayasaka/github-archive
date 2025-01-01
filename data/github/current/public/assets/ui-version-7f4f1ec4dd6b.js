@@ -1,0 +1,2 @@
+(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["ui-version"],{22206:(i,u,h)=>{"use strict";h(48907)},48907:()=>{globalThis.UI_VERSION="github-ui-0.0.1"}},i=>{i(i.s=22206)}]);
+//# sourceMappingURL=ui-version-2a8656272f81.js.map

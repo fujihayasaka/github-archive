@@ -1,0 +1,241 @@
+<% page_info title: view.name, selected_link: :business_licenses %>
+
+<style>
+  #enterprise-accounts-licenses-explanation-details > summary::-webkit-details-marker {
+    display: none;
+  }
+  #enterprise-accounts-licenses-explanation-details > summary {
+    list-style: none;
+  }
+</style>
+
+<div class="d-flex flex-column">
+  <%= render "stafftools/businesses/enterprise_licensing/navigation" %>
+  <%= render Primer::Beta::Subhead.new(test_selector: "license-overview") do |component| %>
+    <% component.with_heading(tag: :h1) do %>Overview<% end %>
+  <% end %>
+
+  <div class="d-flex flex-justify-between mb-3">
+    <div class="d-flex">
+      <%= render(Stafftools::Licensing::LicensingModelComponent.new(billable_entity: this_business, tag: :div)) %>
+      &nbsp
+      <span>
+        <a
+          <%= test_selector("licensing-model-changes-link") %>
+          target="_blank"
+          rel="noopener"
+          href="<%= stafftools_licensing_model_changes_audit_log_path(this_business, current_user) %>"
+        >
+          (View change history)
+        </a>
+      </span>
+    </div>
+    <div>
+      <a
+        target="_blank"
+        rel="noopener"
+        href="<%= kusto_link_for_licensing_report(this_business) %>"
+      >
+        View licensing report in Kusto
+      </a>
+    </div>
+  </div>
+
+  <% unless this_business.metered_plan? %>
+    <%= render partial: "stafftools/businesses/license_overview", locals: { view: } %>
+  <% end %>
+
+  <% if !(this_business.copilot_licensing_enabled? && this_business.seats_plan_basic?) # hide GHE card for copilot-only businesses %>
+    <%= render_fallback_on_error(fallback: render("stafftools/businesses/enterprise_licensing/error_fallback", message: "Could not load Enterprise Cloud data.")) do %>
+      <%= render_react_partial(
+        name: "licensing-enterprise-overview",
+        props: {
+          enterpriseContactUrl: ent_contact_url,
+          ghe: ghe_overview_react_payload(business: this_business, is_stafftools: true, current_user:),
+          slug: this_business.slug,
+          isStafftools: true
+        }
+      ) %>
+    <% end %>
+  <% end %>
+
+  <%= render_fallback_on_error(fallback: render("stafftools/businesses/enterprise_licensing/error_fallback", message: "Could not load Advanced Security data.")) do %>
+    <%= render_react_partial(
+      name: "licensing-advanced-security-overview",
+      props: {
+        enterpriseContactUrl: ent_contact_url,
+        ghas: ghas_overview_react_payload(business: this_business, viewer: current_user, use_licensify: false),
+        slug: this_business.slug,
+        isStafftools: true
+      }
+    ) %>
+  <% end %>
+
+  <% if current_user.feature_flag_enabled?(:advanced_security_licensify_view, default: false) %>
+    <%= render_fallback_on_error(fallback: render("stafftools/businesses/enterprise_licensing/error_fallback", message: "Could not load Advanced Security data.")) do %>
+      <%= render_react_partial(
+        name: "licensing-advanced-security-overview",
+        props: {
+          enterpriseContactUrl: ent_contact_url,
+          ghas: ghas_overview_react_payload(business: this_business, viewer: current_user, use_licensify: true),
+          slug: this_business.slug,
+          isStafftools: true
+        }
+      ) %>
+    <% end %>
+  <% end %>
+
+  <% if this_business.feature_flag_enabled?(:enterprise_copilot_licensing, default: false) && !enterprise_copilot_licensing_enabled?(this_business) %>
+    <%= render_fallback_on_error(fallback: render("stafftools/businesses/enterprise_licensing/error_fallback", message: "Could not load Copilot data.")) do %>
+      <%= render_react_partial(
+        name: "licensing-copilot-overview",
+        props: {
+          enterpriseContactUrl: ent_contact_url,
+          copilot: copilot_overview_react_payload(business: this_business),
+          slug: this_business.slug,
+          isStafftools: true
+        }
+      ) %>
+    <% end %>
+  <% end %>
+
+  <% if this_business.metered_ghes_eligible? || this_business.advanced_security_products_metered? %>
+    <%= render_fallback_on_error(fallback: render("stafftools/businesses/enterprise_licensing/error_fallback", message: "Could not load Enterprise Server data.")) do %>
+      <%= render_react_partial(
+        name: "licensing-enterprise-server-overview",
+        props: {
+          ghesUsage: ghes_overview_react_payload(business: this_business)
+        }
+      ) %>
+    <% end %>
+  <% end %>
+  <% if this_business.metered_ghes_eligible? %>
+    <%= render_fallback_on_error(fallback: render("stafftools/businesses/enterprise_licensing/error_fallback", message: "Could not load Enterprise Server licenses data.")) do %>
+      <%= render_react_partial(
+        name: "metered-enterprise-server-licenses",
+        props: {
+          business: this_business.as_json(only: [:slug], root: false),
+          isBillingManager: false,
+          isGhasBundled: this_business.advanced_security_products_bundled?,
+          enableGhasBundleMismatchWarning: this_business.feature_flag_enabled?(:enable_ghas_bundle_mismatch_warning, default: true),
+          serverLicenses: this_business.metered_server_licenses,
+          consumedEnterpriseLicenses: this_business.consumed_ghec_only_users_access_licenses,
+          isStafftools: true,
+          auditLogQueryUrl: stafftools_ghes_license_audit_log_path(this_business, current_user),
+        })
+      %>
+    <% end %>
+  <% end %>
+
+  <details id="enterprise-accounts-licenses-explanation-details" class="mb-3">
+    <summary>
+      <%= render Primer::Beta::Subhead.new(display: :inline) do |component| %>
+        <% component.with_heading(tag: :h2) do %>
+          <span class="d-flex flex-items-center flex-justify-between">
+            Cool story, but how are these numbers calculated?
+            <span class="d-flex flex-items-center">
+              <%= render Primer::Beta::Octicon.new(icon: :"chevron-down", size: :medium, aria: { label: "Enterprise Accounts Licenses Explanation" }) %>
+            </span>
+          </span>
+        <% end %>
+      <% end %>
+    </summary>
+    <%= render "shared/enterprise_accounts_licenses_explanation" %>
+  </details>
+</div>
+
+<%= render Primer::Beta::Subhead.new(hide_border: true) do |component| %>
+  <% component.with_heading(tag: :h2, danger: true) do %>Danger zone<% end %>
+<% end %>
+
+<div class="Box Box--danger">
+  <div class="Box-row">
+    <div class="form-group d-flex mt-0">
+      <div class="d-flex flex-column col-12">
+        <label>Recalculate license usage</label>
+      </div>
+    </div>
+    <div class="form-group d-flex mt-0">
+      <div class="d-flex flex-column col-7">
+        <span class="note">
+          If the numbers in Overview don't match up, you can try recalculating the stored license usage.
+          This is a safe operation, that is normally run automatically. For example, when a new user is added
+          to one of the enterprise organizations.
+        </span>
+      </div>
+      <div class="d-flex flex-1 flex-justify-center flex-column">
+        <%= form_tag stafftools_enterprise_licensing_path(this_business), method: :patch do %>
+          <%= render Primer::Beta::Button.new(type: :submit, scheme: :danger,  block: true) do %>Recalculate license usage<% end %>
+        <% end %>
+      </div>
+    </div>
+  </div>
+  <div class="Box-row">
+    <div class="form-group d-flex mt-0">
+      <div class="d-flex flex-column col-7">
+        <label>Synchronize licenses with Licensify</label>
+        <span class="note">
+          If the numbers in Overview or Licenses don't match up, you can try synchronizing licenses in Licensify.
+          This is a safe operation.
+        </span>
+      </div>
+      <div class="d-flex flex-1 flex-justify-center flex-column">
+        <%= form_tag sync_licenses_stafftools_customer_licensify_licenses_path(this_business.customer_id), method: :post do %>
+          <%= render(Primer::Alpha::Dialog.new(
+              title: "Confirm license synchronization",
+              id: dom_id(this_business, :licensify_licenses_sync),
+              size: :medium_portrait,
+            )) do |dialog| %>
+            <% dialog.with_show_button(
+              scheme: :danger,
+              block: true,
+              id: dom_id(this_business, :licensify_licenses_sync)
+            ) { "Synchronize licenses" } %>
+            <% dialog.with_body do %>
+              Use this to make sure we're tracking up-to-date licenses owned by the business in Licensify.
+            <% end %>
+            <% dialog.with_footer do %>
+              <%= render(Primer::Beta::Button.new(data: { "close-dialog-id": dom_id(this_business, :licensify_licenses_sync) })) { "Cancel" } %>
+              <%= render(Primer::Beta::Button.new(type: :submit, scheme: :danger)) { "Confirm" } %>
+            <% end %>
+          <% end %>
+        <% end %>
+      </div>
+    </div>
+  </div>
+  <div class="Box-row">
+    <div class="form-group d-flex mt-0">
+      <div class="d-flex flex-column col-7">
+        <label>Synchronize customer with Licensify</label>
+        <span class="note">
+          This syncs the customer's info with Licensify. If the licenses look incorrect you can try synchronizing the customer info.
+          This is a safe operation.
+        </span>
+      </div>
+      <div class="d-flex flex-1 flex-justify-center flex-column">
+        <%= form_tag sync_customer_stafftools_customer_licensify_licenses_path(this_business.customer_id), method: :post do %>
+          <%= render(Primer::Alpha::Dialog.new(
+              title: "Confirm customer synchronization",
+              id: dom_id(this_business, :licensify_customer_sync),
+              size: :medium_portrait,
+            )) do |dialog| %>
+            <% dialog.with_show_button(
+              scheme: :danger,
+              block: true,
+              id: dom_id(this_business, :licensify_customer_sync)
+            ) { "Synchronize customer" } %>
+            <% dialog.with_body do %>
+              Use this to make sure we're tracking up-to-date info for the customer in Licensify.
+            <% end %>
+            <% dialog.with_footer do %>
+              <%= render(Primer::Beta::Button.new(data: { "close-dialog-id": dom_id(this_business, :licensify_customer_sync) })) { "Cancel" } %>
+              <%= render(Primer::Beta::Button.new(type: :submit, scheme: :danger)) { "Confirm" } %>
+            <% end %>
+          <% end %>
+        <% end %>
+      </div>
+    </div>
+  </div>
+  <%= render Licensing::MeteredLicenseTransitionComponent.new(business: this_business, current_user: current_user, transition: transition) %>
+  <%= render Licensing::GhasTransitionComponent.new(business: this_business, transition: transition) %>
+</div>

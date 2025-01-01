@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: resque-worker
+    annotations:
+        heaven.githubapp.com/deploy-requirement: "true"
+        heaven.githubapp.com/image-placeholder: advisory-db
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: resque-worker
+        heaven.githubapp.com/replace-pods-even-if-unchanged: "true"
+spec:
+    minReadySeconds: 10
+    replicas: 4
+    selector:
+        matchLabels:
+            app: resque-worker
+    template:
+        metadata:
+            labels:
+                app: resque-worker
+            annotations:
+                observability.github.com/logger: fluent-bit
+                fluentbit.io/parser: logfmt_sloppy
+        spec:
+            volumes:
+                - name: github-metadata
+                  hostPath:
+                    path: /etc/github/metadata.json
+            containers:
+                - name: resque-worker
+                  volumeMounts:
+                    - mountPath: /etc/github/metadata.json
+                      name: github-metadata
+                      readOnly: true
+                  image: advisory-db
+                  command:
+                    - bin/resqued
+                    - config/resqued.rb
+                  envFrom:
+                    - configMapRef:
+                        name: rails
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: ADVISORY_DB_ROLE
+                      value: "worker"
+                    - name: WORKER_COUNT
+                      value: "5"
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                    - name: TERM_CHILD
+                      value: "1"
+                    - name: RESQUE_PRE_SHUTDOWN_TIMEOUT
+                      value: "10"
+                    - name: RESQUE_TERM_TIMEOUT
+                      value: "10"
+                    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                      value: "https://opentelemetry-collector-production.service.iad.github.net/v1/traces"
+                    - name: GITHUB_API_BASE_URL
+                      value: "https://api.github.com"
+                  resources:
+                    requests:
+                        memory: 1Gi
+                    limits:
+                        cpu: 3
+                        memory: 4Gi

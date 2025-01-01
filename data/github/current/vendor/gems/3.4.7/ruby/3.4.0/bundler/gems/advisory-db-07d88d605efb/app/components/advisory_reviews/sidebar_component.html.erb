@@ -1,0 +1,349 @@
+<div class="position-sticky top-0 mt-n4 pt-4">
+  <% if show_advisory_review_buttons? %>
+    <% if show_update_button? %>
+      <%= render(Primer::ButtonComponent.new(
+        type: :submit,
+        form: "advisory-review-form",
+        display: :flex,
+        align_items: :center,
+        mb: 2,
+        data: { targets: "form-tracker.disableWhenUnchanged" },
+        classes: "btn-large width-full",
+        test_selector: "advisory-review-sidebar-button"
+      )) do %>
+        <%= render IconComponent.new(icon: "check", mr: 3) %>
+        Save advisory review
+      <% end %>
+    <% end %>
+
+    <% if show_revert_button? %>
+      <%= button_to revert_advisory_review_path(advisory_review), {
+        method: :put,
+        class: "d-flex flex-items-center btn btn-block btn-large mb-2 btn-danger",
+        **test_selector_data_hash("advisory-review-sidebar-button")
+      } do %>
+          <%= render IconComponent.new(icon: "reply", mr: 3) %>
+          Revert advisory review
+      <% end %>
+    <% end %>
+
+    <% if show_close_button? %>
+      <%= button_to close_advisory_review_path(advisory_review), {
+        method: :put,
+        class: "d-flex flex-items-center btn btn-block btn-large mb-2 btn-danger",
+        "data-targets": "form-tracker.disableWhenChanged",
+        **test_selector_data_hash("advisory-review-sidebar-button")
+      } do %>
+        <%= render IconComponent.new(icon: "x-circle", mr: 3) %>
+        Close advisory review
+      <% end %>
+    <% end %>
+
+    <% if show_reopen_button? %>
+      <%= button_to reopen_advisory_review_path(advisory_review), {
+        method: :put,
+        class: "d-flex flex-items-center btn btn-block btn-large mb-2",
+        "data-targets": "form-tracker.disableWhenChanged",
+        **test_selector_data_hash("advisory-review-sidebar-button")
+      } do %>
+        <%= render IconComponent.new(icon: "issue-opened", mr: 3) %>
+        Reopen advisory review
+      <% end %>
+    <% end %>
+
+    <hr>
+  <% end %>
+
+  <% if show_advisory_buttons? %>
+    <% if show_grouped_buttons? %>
+      <% if show_grouped_publish_buttons? %>
+        <%= render(AdvisoryReviews::TwoStageApprovals::ApprovalComponent.new(**grouped_publish_stages, test_selector: "two-stage-publish-approval")) do |approval| %>
+          <% approval.with_stage_two_confirmation_preamble do %>
+            <% if publish_updates_withdrawn_advisory? %>
+              <p>This advisory was previously withdrawn. Publishing will update the existing withdrawn advisory, which will remain withdrawn.</p>
+            <% elsif publish_updates_published_advisory? %>
+              <p>This advisory was previously published. Publishing will update the existing advisory.</p>
+            <% end %>
+          <% end %>
+          <% approval.with_stage_two_confirmation_diff do %>
+            <% if show_publish_diff? %>
+              <div class="diff-container my-3 border rounded-2 color-bg-subtle">
+                <%= publish_diff.to_s.html_safe %>
+              </div>
+            <% end %>
+          <% end %>
+        <% end %>
+
+        <% if show_publish_button? && publish_disabled_reason %>
+          <h4 class="h6 color-fg-muted"><%= publish_disabled_reason %></h4>
+        <% end %>
+      <% end %>
+
+      <% if show_grouped_withdraw_buttons? %>
+        <%= render(AdvisoryReviews::TwoStageApprovals::ApprovalComponent.new(**grouped_withdraw_stages, test_selector: "two-stage-withdraw-approval")) %>
+      <% end %>
+    <% else %>
+      <% if show_approve_for_publication_button? %>
+        <%= render Primer::Beta::Details.new(reset: true, overlay: :dark) do |details| %>
+          <% details.with_summary(
+            display: :flex,
+            align_items: :center,
+            scheme: :primary,
+            mb: 2,
+            data: { targets: !publish_disabled? ? "form-tracker.disableWhenChanged" : nil },
+            aria: { disabled: publish_disabled?, haspopup: true },
+            test_selector: "advisory-review-sidebar-button",
+            classes: "btn-large"
+          ) do %>
+            <%= render IconComponent.new(icon: "thumbsup", mr: 3, flex_shrink: 0) %>
+            Ready to publish
+          <% end %>
+          <% details.with_body(tag: :"details-dialog", animation: :fade_in, classes: "fast no-outline #{"col-5" if show_publish_diff?}") do %>
+            <%= render Primer::Beta::BorderBox.new do |border_box| %>
+              <% border_box.with_body(font_size: 4) do %>
+                <% if show_publish_diff? %>
+                  <div class="diff-container my-3 border rounded-2 color-bg-subtle">
+                    <%= publish_diff.to_s.html_safe %>
+                  </div>
+                <% end %>
+                <p class="mb-0">Are you sure this advisory is ready for publication?</p>
+              <% end %>
+              <% border_box.with_footer(display: :flex, justify_content: :flex_end) do %>
+                <%= render(Primer::ButtonComponent.new(mr: 2, data: { close_dialog: true })) { "Cancel" } %>
+                <%= button_to approve_advisory_review_path(advisory_review), { method: :put, params: { approval_type: "publish" }, class: "btn btn-primary"} do %>
+                  Ready
+                <% end %>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+      <% if show_publish_button? %>
+        <%= render Primer::Beta::Details.new(reset: true, overlay: :dark) do |details| %>
+          <% details.with_summary(
+            display: :flex,
+            align_items: :center,
+            scheme: :primary,
+            mb: 2,
+            data: { targets: !publish_disabled? ? "form-tracker.disableWhenChanged" : nil },
+            aria: { disabled: publish_disabled?, haspopup: true },
+            test_selector: "advisory-review-sidebar-button",
+            classes: "btn-large"
+          ) do %>
+            <%= render IconComponent.new(icon: "rocket", mr: 3, flex_shrink: 0) %>
+            <%= publish_button_label %>
+          <% end %>
+          <% details.with_body(tag: :"details-dialog", animation: :fade_in, classes: "fast no-outline #{"col-5" if show_publish_diff?}") do %>
+            <%= render Primer::Beta::BorderBox.new do |border_box| %>
+              <% border_box.with_body(font_size: 4) do %>
+                <% if publish_updates_withdrawn_advisory? %>
+                  <p>This advisory was previously withdrawn. Publishing will update the existing withdrawn advisory, which will remain withdrawn.</p>
+                <% elsif publish_updates_published_advisory? %>
+                  <p>This advisory was previously published. Publishing will update the existing advisory.</p>
+                <% end %>
+                <% if show_publish_diff? %>
+                  <div class="diff-container my-3 border rounded-2 color-bg-subtle">
+                    <%= publish_diff.to_s.html_safe %>
+                  </div>
+                <% end %>
+                <p class="mb-0">Are you sure you want to publish? This is not reversible!</p>
+              <% end %>
+              <% border_box.with_footer(display: :flex, justify_content: :flex_end) do %>
+                <%= render(Primer::ButtonComponent.new(mr: 2, data: { close_dialog: true })) { "Cancel" } %>
+                <%= button_to publish_advisory_review_path(advisory_review), { method: :put, class: "btn btn-primary"} do %>
+                  Publish
+                <% end %>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+        <% if publish_disabled_reason %>
+          <h4 class="h6 color-fg-muted"><%= publish_disabled_reason %></h4>
+        <% end %>
+      <% end %>
+      <% if show_approve_for_withdrawal_button? %>
+        <%= render Primer::Beta::Details.new(reset: true, overlay: :dark) do |details| %>
+          <% details.with_summary(
+            display: :flex,
+            align_items: :center,
+            scheme: :danger,
+            mb: 2,
+            data: { targets: checks_passed? ? "form-tracker.disableWhenChanged" : nil },
+            aria: { disabled: !checks_passed?, haspopup: true },
+            test_selector: "advisory-review-sidebar-button",
+            classes: "btn-large"
+          ) do %>
+            <%= render IconComponent.new(icon: "no-entry", mr: 3) %>
+            Ready to withdraw
+          <% end %>
+          <% details.with_body(tag: :"details-dialog", animation: :fade_in, classes: "fast no-outline") do %>
+            <%= render Primer::Beta::BorderBox.new do |border_box| %>
+              <% border_box.with_body(font_size: 4) { "Are you sure this advisory is ready for withdrawal?" } %>
+              <% border_box.with_footer(display: :flex, justify_content: :flex_end) do %>
+                <%= render(Primer::ButtonComponent.new(mr: 2, data: { close_dialog: true })) { "Cancel" } %>
+                <%= button_to approve_advisory_review_path(advisory_review), { method: :put, params: { approval_type: "withdraw" }, class: "btn btn-primary"} do %>
+                  Ready
+                <% end %>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+      <% if show_withdraw_button? %>
+        <%= render Primer::Beta::Details.new(reset: true, overlay: :dark) do |details| %>
+          <% details.with_summary(
+            display: :flex,
+            align_items: :center,
+            scheme: :danger,
+            mb: 2,
+            data: { targets: checks_passed? ? "form-tracker.disableWhenChanged" : nil },
+            aria: { disabled: !checks_passed?, haspopup: true },
+            test_selector: "advisory-review-sidebar-button",
+            classes: "btn-large"
+          ) do %>
+            <%= render IconComponent.new(icon: "no-entry", mr: 3) %>
+            Withdraw advisory
+          <% end %>
+          <% details.with_body(tag: :"details-dialog", animation: :fade_in, classes: "fast no-outline") do %>
+            <%= render Primer::Beta::BorderBox.new do |border_box| %>
+              <% border_box.with_body(font_size: 4) { "Are you sure you want to withdraw the published advisory? This is not reversible!" } %>
+              <% border_box.with_footer(display: :flex, justify_content: :flex_end) do %>
+                <%= render(Primer::ButtonComponent.new(mr: 2, data: { close_dialog: true })) { "Cancel" } %>
+                <%= button_to withdraw_advisory_review_path(advisory_review), { method: :put, class: "btn btn-primary"} do %>
+                  Withdraw
+                <% end %>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+    <hr>
+  <% end %>
+  <% if show_approvals? %>
+    <h4 class="h6 color-fg-muted mb-2">Assigned curators</h4>
+    <div class="d-flex flex-column js-assign-curator-list">
+      <% approvals.each do |approval| %>
+        <%= render "advisory_reviews/sidebar_assigner", { approval: approval, advisory_review: advisory_review, curators: curators } %>
+      <% end %>
+      <template id="drop-down-curator">
+        <%= render "advisory_reviews/sidebar_assigner", { approval: new_approval, advisory_review: advisory_review, curators: curators } %>
+      </template>
+    </div>
+    <div>
+      <button type="button" class="js-assignment btn-link Link--secondary no-underline mt-2">
+        <%= render IconComponent.new(icon: "plus", mr: 1) %>
+        Add a curator
+      </button>
+    </div>
+    <hr class="mt-2">
+  <% end %>
+
+  <h4 class="h6 color-fg-muted mb-2">
+    Labels
+    <label-picker class="d-block float-right" data-action="newLabelsSelected:label-picker#submitLabels">
+      <%= render Primer::Beta::Details.new(reset: true, overlay: :default, display: :inline_block, position: :relative, data: { action: "toggle:label-picker#toggleOverlay" }) do |details| %>
+        <% details.with_summary(classes: "btn-octicon", aria: { haspopup: true }) do %>
+          <%= render IconComponent.new(icon: "gear") %>
+        <% end %>
+
+        <% details.with_body(classes: "SelectMenu right-0") do %>
+          <div class="SelectMenu-modal">
+            <%= form_tag(set_labels_advisory_review_path(advisory_review), method: :put, data: { target: "label-picker.form" }) do %>
+              <input type="hidden" name="labels[]" value="">
+              <input type="hidden" name="advisory_reviews[]" value="<%= ghsa_id %>">
+              <div class="SelectMenu-list">
+                <%= render "labels/label_options", advisory_reviews: [advisory_review] %>
+              </div>
+            <% end %>
+          </div>
+        <% end %>
+      <% end %>
+    </label-picker>
+  </h4>
+
+  <% labels.each do |label| %>
+    <%= render Labels::LabelComponent.new(name: label.name, color: label.color, link: label_path(label)) %>
+  <% end %>
+  <hr>
+
+  <% if show_checks? %>
+    <h4 class="h6 color-fg-muted">Checks</h4>
+
+    <% checks.each do |check| %>
+      <%= render CheckComponent.new(check: check) %>
+    <% end %>
+
+    <hr>
+  <% end %>
+
+  <% if show_blocklist? %>
+    <h4 class="h6 color-fg-muted">Blocklisted terms</h4>
+
+    <ul class="pl-3">
+      <% blocklisted_terms.each do |term| %>
+        <li class="text-mono mt-2"><%= link_to term.pattern, term %></li>
+      <% end %>
+    </ul>
+
+    <hr>
+  <% end %>
+
+  <h4 class="h6 color-fg-muted">Identifiers</h4>
+
+  <ol class="list-style-none">
+    <li class="d-flex mt-2 flex-items-baseline">
+      <span class="sidebar-key">GHSA</span>
+      <% if advisory %>
+        <%= render(Primer::Beta::Link.new(
+          classes: "text-mono",
+          test_selector: "ghsa-id",
+          href: advisory.database_url,
+          target: :_blank
+        )) { ghsa_id } %>
+      <% else %>
+        <span class="text-mono" <%= test_selector("ghsa-id") %>><%= ghsa_id %></span>
+      <% end %>
+      <%= render ClipboardCopyComponent.new(value: ghsa_id, ml: 2) %>
+    </li>
+
+    <% if cve_id.present? %>
+      <li class="d-flex mt-2 flex-items-baseline">
+        <span class="sidebar-key">CVE</span>
+        <%= render(Primer::Beta::Link.new(
+          classes: "text-mono",
+          test_selector: "cve-id",
+          href: cve_url,
+          target: :_blank
+        )) { cve_id } %>
+        <%= render ClipboardCopyComponent.new(value: cve_id, ml: 2) %>
+      </li>
+    <% end %>
+
+    <% if npm_id %>
+      <li class="d-flex mt-2 flex-items-baseline">
+        <span class="sidebar-key">npm</span>
+        <span id="npm-id" class="text-mono" <%= test_selector("npm-id") %>><%= npm_id %></span>
+        <%= render ClipboardCopyComponent.new(for: "npm-id", ml: 2) %>
+      </li>
+    <% end %>
+    <hr>
+  </ol>
+
+  <include-fragment src="<%= epss_path(ghsa_id: advisory_review.ghsa_id) %>">
+    <p>Checking for EPSS data…</p>
+  </include-fragment>
+
+  <% if show_campaign? %>
+    <h4 class="h6 color-fg-muted">Associated campaigns</h4>
+    <ul class="pl-3">
+      <% associated_campaigns.each do |campaign| %>
+        <li class="mt-2">
+          <%= render(Primer::Beta::Link.new(href: campaign_path(campaign.id), target: :_blank, scheme: :secondary)) do %>
+            <% campaign.name %>
+          <% end %>
+        </li>
+      <% end %>
+    </ul>
+  <% end %>
+</div>

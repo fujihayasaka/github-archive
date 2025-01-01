@@ -1,0 +1,142 @@
+<% page_info title: "Current Billing Platform Customers" %>
+
+<%= render layout: "stafftools/stafftools" do %>
+  <%= render(Stafftools::Billing::BillingPlatformOnboardingHeaderComponent.new) %>
+
+  <%= render Primer::Box.new(display: :flex, mb: 2) do %>
+    <%= form_with(url: stafftools_billing_onboard_billing_platform_customers_path, method: :get) do |form| %>
+      <div class="auto-search-group">
+        <input class="form-control input-contrast auto-search-input"
+          type="text"
+          name="customer_id"
+          value="<%= params[:customer_id] %>"
+          placeholder="Find a customer by id"
+          aria-label="Find a customer by id…"
+          autocomplete="off"
+          data-throttled-autosubmit>
+        <%= render Primer::Beta::Octicon.new(icon: "search") %>
+        <% if params[:product].present? %>
+          <input type="hidden" name="product" value="<%= params[:product] %>" data-throttled-autosubmit>
+        <% end %>
+      </div>
+
+      <% if params[:customer_id].present? %>
+        <div class="mb-2">
+          <%= link_to stafftools_billing_onboard_billing_platform_customers_path(product: params[:product].presence), class: "text-bold color-fg-muted" do %>
+            <%= render(Primer::Beta::Octicon.new(icon: :x, color: :muted)) %>
+            Clear current search query
+          <% end %>
+        </div>
+      <% end %>
+    <% end %>
+
+    <%= render Primer::Alpha::ActionMenu.new(menu_id: "product-filter-menu", select_variant: :single, dynamic_label: true, ml: 2, mr: :auto) do |menu| %>
+      <% menu.with_show_button do |button| %>
+        <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+        <% "Product" %>
+      <% end %>
+      <% menu.with_item(active: params[:product].nil?, tag: :a, href: stafftools_billing_onboard_billing_platform_customers_path(customer_id: params[:customer_id].presence)) do %>
+        All products
+      <% end %>
+      <% product_options = products.map { |product| product.serialize } %>
+      <% product_options.each do |product_option| %>
+        <% menu.with_item(active: product_option == params[:product], tag: :a, href: stafftools_billing_onboard_billing_platform_customers_path(product: product_option, customer_id: params[:customer_id].presence)) do %>
+          <%= product_option.humanize %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <%= render(Primer::Beta::Button.new(href: new_stafftools_billing_onboard_billing_platform_customer_path, tag: :a, scheme: :primary)) do %>
+      Onboard Customers
+    <% end %>
+  <% end %>
+
+  <% if params[:customer_id].present? %>
+    <% if customers.any? %>
+      <%= render(Primer::Beta::BorderBox.new(overflow: :hidden)) do |box| %>
+        <% box.with_body(p: 0, overflow: :hidden) do %>
+          <table class="stafftools-table">
+            <thead>
+              <th class="p-3">Customer ID</th>
+              <th class="p-3">Customer Name</th>
+              <th class="p-3">Customer Type</th>
+              <th class="p-3">Products Enabled in BP</th>
+              <th class="p-3">Migration Date?</th>
+            </thead>
+            <tbody>
+              <% customers.each do |customer| %>
+              <% billable_owner = customer.billable_owner %>
+                <tr>
+                  <td class="p-3">
+                    <%= customer.id %>
+                  </td>
+                  <td class="p-3 wb-break-word width-md-auto">
+                    <% if billable_owner.is_a?(Business) && customer.business %>
+                      <%= link_to(customer.business.name, stafftools_enterprise_path(customer.business)) %>
+                    <% elsif billable_owner.is_a?(Business) && customer.business.nil? %>
+                      <%= link_to(customer.organizations.first.name, stafftools_user_path(customer.organizations.first)) %>
+                    <% elsif billable_owner.is_a?(Organization) %>
+                      <%= link_to(customer.organizations.first.name, stafftools_user_path(customer.billable_owner)) %>
+                    <% elsif billable_owner.is_a?(User) %>
+                      <%= link_to(customer.name, stafftools_user_path(customer.billable_owner)) %>
+                    <% else %>
+                      &nbsp;
+                    <% end %>
+                  </td>
+                  <td class="p-3">
+                    <% if billable_owner.is_a?(Business) && customer.business %>
+                      Enterprise
+                    <% elsif billable_owner.is_a?(Business) && customer.business.nil? %>
+                      Upgraded Organization (now billed through <%= billable_owner.slug %> enterprise account)
+                    <% elsif billable_owner.is_a?(Organization) %>
+                      Organization
+                    <% elsif billable_owner.is_a?(User) %>
+                      User
+                    <% else %>
+                      &nbsp;
+                    <% end %>
+                  </td>
+                  <td class="p-3 width-md-auto" <%= test_selector("#{customer.id}-bp-status") %> >
+                    <% if bp_customers[customer.id].present? && bp_customers[customer.id][:enabledProducts].any? %>
+                      <% bp_customers[customer.id][:enabledProducts].sort.each do |product| %>
+                        <%= render Primer::Beta::Label.new(
+                          title: product.humanize,
+                          scheme: :success,
+                          test_selector: "collection-featured-badge",
+                        ) do %>
+                          <%= product %>
+                        <% end %>
+                      <% end %>
+                    <% elsif bp_customers[customer.id].present? && bp_customers[customer.id][:enabledProducts].empty? %>
+                      No products enabled
+                    <% else %>
+                      Customer not found in BP
+                    <% end %>
+                  </td>
+
+                  <td class="p-3 width-md-auto" <%= test_selector("#{customer.id}-migration-date") %>>
+                    <% if customer&.billing_platform_enabled_product&.migration_date %>
+                      <%= customer.billing_platform_enabled_product.migration_date %>
+                    <% else %>
+                      N/A
+                    <% end %>
+                  </td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        <% end %>
+      <% end %>
+
+    <% else %>
+      <p class="mb-2">
+        Could not find a billing platform customer for ID <strong><%= params[:customer_id] %></strong>.
+      </p>
+    <% end %>
+
+  <% else %>
+    <p class="mb-2">
+      Please filter by the customer ID you are looking for.
+    </p>
+  <% end %>
+<% end %>

@@ -1,0 +1,51 @@
+# This file is used to track queries that violate package boundaries. There are two reasons for violations:
+#
+# - Cross domain: A query uses tables from multiple domains.
+# - Domain access: A query bypassed a domain's interface and accessed its private tables directly.
+#
+# The format of this file is as follows:
+#
+# <query_digest>:
+#   query: <query>
+#   violations:
+#     - [location: <file:line>] # never committed but only generated with the --locations flag
+#       reason: <cross_domain|domain_access>
+#
+# To add a new violation, you can run the test causing the violation with the following environment variables:
+#
+#   TEST_ALL_FEATURES=1 PERFORM_STATEMENT_CHECKING=1 DOMAIN_QUERY_VIOLATIONS=1 bin/rails test <path_to_test_file>:<line_number>
+#
+# This will update the query violation file(s) with the new violation(s). To remove a violation, you can simply
+# remove the entry from the file.
+#
+# If there are many violations to add or update, or you'd like to refresh all recorded violations, you can
+# run the following command to pull all violations from the latest completed CI build on your branch:
+#
+#     script/domain-isolation-query-violations [--locations] [--audit] [--reason <cross_domain|domain_access>]
+#
+# This will replace all query violation files with the latest violations. Use the `--locations` flag to
+# include file locations in the output, don't commit that though! Use the `--audit` flag to include
+# violations from tables with visibility level `audit`. Use the `--reason` flag to filter violations
+# by reason in case you're only interested in locations for a specific reason.
+
+---
+395ce6d906b8608ea00e32091edd6171618fc490055ea42cfb9c875dfeb3b84b:
+  query: DELETE FROM global_notices WHERE global_notices.id = ?
+  tables:
+  - global_notices
+  violations:
+  - reason: domain_access
+62a4ac5e2034019f5f12693332c3f34a6d242e846ed216b4b4f4b1997bcf9472:
+  query: INSERT INTO global_notices (user_id, created_at, updated_at) VALUES (?, ?,
+    ?)
+  tables:
+  - global_notices
+  violations:
+  - reason: domain_access
+d0d234cefe4eb52f869a168b81198d1d8451c985be0c21a792c0a0de38693579:
+  query: SELECT global_notices.* FROM global_notices WHERE global_notices.user_id
+    = ? LIMIT ?
+  tables:
+  - global_notices
+  violations:
+  - reason: domain_access

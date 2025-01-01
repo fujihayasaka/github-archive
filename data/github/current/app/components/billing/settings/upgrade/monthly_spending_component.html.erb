@@ -1,0 +1,103 @@
+<div class="text-normal color-fg-muted mt-2 mb-3">
+  Includes usage across all organizations and repositories within <%= business.name %>.
+</div>
+
+<%= render(Primer::Beta::BorderBox.new(padding: :default)) do |component| %>
+  <% billed_items.each do |billed_item| %>
+    <%= component.with_row(classes: "d-flex flex-items-center py-2", test_selector: billed_item[:id]) do %>
+      <div>
+        <span class="h5">
+          <%= billed_item[:label] %>
+        </span>
+      </div>
+
+      <div class="ml-auto">
+        <% if billed_item[:quantity] %>
+          <%= billed_item[:cost]&.format(no_cents: true) || 'N/A' %> x
+          <%= billed_item[:quantity] %> <%= billed_item[:unit].pluralize(billed_item[:quantity]) %>
+        <% else %>
+          <%= billed_item[:cost]&.format(no_cents: true) || 'N/A'  %> x <%= billed_item[:unit] %>
+        <% end %>
+      </div>
+
+      <% if billed_item[:allow_removal] %>
+        <div class="ml-2">
+          <%= render(Primer::Alpha::Dialog.new(title: "#{billed_item[:removal_button_text]} #{billed_item[:label]}")) do |d| %>
+            <% d.with_show_button(
+              scheme: :invisible,
+              color: :muted,
+              icon: :trash,
+              size: :small,
+              p: 0,
+              show_tooltip: false,
+              aria: { label: "#{billed_item[:removal_button_text].downcase} #{billed_item[:label]}" },
+              test_selector: "#{billed_item[:removal_button_text].downcase}-#{billed_item[:id]}",
+              ) %>
+
+            <div class="Box-body overflow-auto border-bottom-0">
+              <div class="d-flex flex-column flex-justify-center">
+                <span class="color-fg-muted">
+                  <%= billed_item[:removal_text] %>
+                </span>
+              </div>
+            </div>
+
+            <%= form_tag settings_billing_cancel_addon_trial_enterprise_path(business), method: :put do %>
+              <%= hidden_field_tag :addon_id, billed_item[:id] %>
+              <%= hidden_field_tag :addon_label, billed_item[:label] %>
+              <div class="Box-footer border-top-0">
+                <% if billed_item[:removal_button_text] == "Disable" %>
+                  <div class="d-flex flex-items-center flex-justify-end">
+                    <div class="mr-2">
+                      <%= render Primer::Beta::Button.new(scheme: :secondary, type: :button, data: { "close-dialog-id": d.id }) do %>Cancel<% end %>
+                    </div>
+                    <div>
+                      <%= render Primer::Beta::Button.new(scheme: :primary, type: :submit) do %><%= billed_item[:removal_button_text] %> <%= billed_item[:label] %><% end %>
+                    </div>
+                  </div>
+                <% else %>
+                  <div class="d-flex flex-justify-end">
+                    <%= render Primer::Beta::Button.new(scheme: :danger, type: :submit) do %><%= billed_item[:removal_button_text] %><% end %>
+                  </div>
+                <% end %>
+              </div>
+            <% end %>
+          <% end %>
+        </div>
+      <% end %>
+
+      <% if billed_item[:show_info] %>
+        <div class="ml-2" <%= test_selector("info-#{billed_item[:id]}") %>>
+          <% if billed_item[:id] == "consumed-user-licenses" && billed_item[:show_info] %>
+           <%= render partial: "businesses/activations/enterprise_seats", locals: {
+              billed_item: billed_item,
+              business: business
+            } %>
+          <% else %>
+            <%= render(Primer::Alpha::Overlay.new(
+                title: "#{billed_item[:label]}",
+                role: :dialog,
+                size: :small,
+                anchor_side: :outside_top)) do |o| %>
+              <% o.with_show_button(
+                icon: "info",
+                scheme: :invisible,
+                p: 0,
+                size: :small,
+                "aria-label": "Learn more about how to modify #{billed_item[:label]} usage",
+                show_tooltip: false) %>
+              <% o.with_header %>
+              <div class="Box-body overflow-hidden border-bottom-0 pt-0">
+                <div class="d-flex flex-column flex-justify-center">
+                  <span class="color-fg-muted">
+                    <%= billed_item[:info] %>
+                  </span>
+                </div>
+              </div>
+            <% end %>
+          <% end %>
+        </div>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

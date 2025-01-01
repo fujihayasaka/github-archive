@@ -1,0 +1,86 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unicorn-internal-api
+  annotations:
+    heaven.githubapp.com/deploy-requirement: "true"
+    moda.github.net/allow-missing-ready-pods: 5
+    moda.github.net/canary-v2: "true"
+    moda.github.net/canary-replicas: 10
+    moda.github.net/canary-label: "role"
+    moda.github.net/cluster-preferences: |
+      {
+        "dotcom-7-ac4-iad": {
+          "spec": {
+            "template": {
+              "metadata": {
+                "annotations": {
+                  "sidecar.istio.io/bootstrapOverride": "istio-custom-bootstrap",
+                  "sidecar.istio.io/proxyCPULimit": "12",
+                  "proxy.istio.io/config": "concurrency: 8"
+                }
+              }
+            }
+          }
+        },
+        "dotcom-8-ac4-iad": {
+          "spec": {
+            "template": {
+              "metadata": {
+                "annotations": {
+                  "sidecar.istio.io/bootstrapOverride": "istio-custom-bootstrap",
+                  "sidecar.istio.io/proxyCPULimit": "12",
+                  "proxy.istio.io/config": "concurrency: 8"
+                }
+              }
+            }
+          }
+        },
+        "dotcom-9-ac4-iad": {
+          "spec": {
+            "template": {
+              "metadata": {
+                "annotations": {
+                  "sidecar.istio.io/bootstrapOverride": "istio-custom-bootstrap",
+                  "sidecar.istio.io/proxyCPULimit": "12",
+                  "proxy.istio.io/config": "concurrency: 8"
+                }
+              }
+            }
+          }
+        }
+      }
+spec:
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 6%
+  template:
+    metadata:
+      labels:
+        sidecar.istio.io/inject: "true"
+        istio.io/rev: "stable"
+        moda.github.net/proxy-bypass: "outbound-non-mesh"
+    spec:
+      dnsPolicy: "ClusterFirst"
+      containers:
+        - name: nginx
+        - env:
+            - name: API_HOST_NAME
+              value: internal-api.service.iad.github.net
+            - name: SERVICE_MESH_ENABLED
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['sidecar.istio.io/inject']
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  key: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT_INGRESS
+                  name: observability-config
+            - name: GH_HOSTNAME
+              value: github.com
+            - name: MONOLITH_REDIS_RATE_LIMITER_TIMEOUT
+              value: '0.2'
+            - name: UNICORN_CHECK_CLIENT_CONNECTION_ENABLED
+              value: "1"
+          name: unicorn

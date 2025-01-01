@@ -1,0 +1,100 @@
+#!/bin/bash
+
+set -e
+
+programname=$0
+
+function usage {
+    echo "usage: $programname [-dv] [-n next-page-token] [-p packages] [-r repo_id]"
+    echo "For running dev/test queries against the ListAdvisories Twirp API"
+    echo "To query against the production API, run this script in a deployed inbox console"
+    echo "To query against a local dotcom codespace, copy the script to the codespace and run with the developer flag -d"
+    echo "Options:"
+    echo "  -d  Turn on developer mode for running the script in a dotcom codespace"
+    echo "  -v  Turn on verbose mode"
+    echo "  -n <next page token>"
+    echo "    Specify the next page token to pass to the query"
+    echo "  -p <packages>"
+    echo "    A json list of package name/ecosystem objects to pass to the query."
+    echo "  -r <repo_id>"
+    echo "    A repository id to query for innersource advisories"
+    exit 1
+}
+
+development_mode=false
+packages='[{"name":"ghost","ecosystem":"ECOSYSTEM_NPM"}]'
+repo_id=0
+verbose=false
+next_page_token=''
+base_url='https://internal-api.service.iad.github.net'
+
+
+while getopts "dn:p:r:v" flag; do
+  case $flag in
+    d) # Development Mode for running in a dotcom codespace
+      development_mode=true;;
+
+    n) # Next page token
+      next_page_token=$OPTARG;;
+
+    p) # A list of packages to query
+      packages=$OPTARG;;
+
+    r) # A repo id to query
+      repo_id=$OPTARG;;
+
+    v) # Enable verbose mode
+      verbose='true';;
+
+    \?)
+      usage;;
+  esac
+done
+
+function log () {
+    if [[ $verbose -eq true ]]; then
+        echo "$@"
+    fi
+}
+
+# Uses our stored HMAC key, or if not found the default test key for working with
+# a locally hosted dotcom
+hmac_key="${MONOLITH_TWIRP_HMAC_KEY:-octocathmac}"
+
+# In practice your client will switch URLs depending on the runtime environment
+# (e.g., development vs production) and use the specific, assigned HMAC key
+# value for your application.
+#
+# Check the Usage Guide for more information on the correct URLs for
+# different deployment scenarios. Hosts and paths differ;
+# https://github.com/github/monolith-twirp/blob/master/docs/usage.md#api-urls
+if [ "$development_mode" = true ]; then
+  base_url="http://api.github.localhost"
+fi
+
+if [[ $verbose -eq true ]]; then
+  curl -sL $base_url -o /dev/null -f || {
+    echo "Can't reach $base_url"
+    echo "Are you sure the API is running?"
+    exit 1
+  }
+fi
+
+log "Running against $base_url"
+
+# Build HMAC signature
+ts=$(date +%s)
+signature=$ts.$(echo -n $ts | openssl sha256 -hmac ${hmac_key} | sed 's/^.* //')
+
+# Build message
+data="{\"packages\":$packages,\"repo_id\":$repo_id,\"next_page_token\":\"$next_page_token\"}"
+
+log "Querying the api for the following: $data"
+
+# Send request
+curl \
+     -H "Request-HMAC: $signature" \
+     -H "Content-Type: application/json" \
+     -X POST \
+     "${base_url}/internal/twirp/advisorydb.advisories.v1.ListAdvisoriesAPI/ListAdvisories" \
+     --data $data \

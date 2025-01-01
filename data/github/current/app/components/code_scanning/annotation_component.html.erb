@@ -1,0 +1,153 @@
+<div <%= test_selector("code-scanning-annotation") %>>
+  <% annotation_classes = "Details js-details-container check-annotation py-3" %>
+  <% annotation_classes += show_as_code_quality_annotation? ? " check-annotation-neutral" : " check-annotation-#{warning_level}" %>
+  <%= div_if_inline(class: annotation_classes, id: "annotation_#{annotation_id}", data: {"test-selector" => "inline-code-scanning-annotation"}) do %>
+    <%# We don't display check warning for a code quality annotation %>
+    <% if inline && !show_as_code_quality_annotation? %>
+      <div class="text-small pl-3 mb-2 d-inline-block">
+        <span class="annotation-octicon text-center d-inline-block">
+          <% if warning_level == "failure" %>
+            <%= primer_octicon(:x, color: :danger) %>
+          <% elsif warning_level == "warning" %>
+            <%= render(Primer::Beta::Octicon.new(icon: "alert")) %>
+          <% else %>
+            <%= primer_octicon(:info, color: :muted) %>
+          <% end %>
+        </span>
+        <h2 class="color-fg-muted d-inline-block ml-1 text-normal f6">
+          Check <%= warning_level %>
+        </h2>
+      </div>
+    <% end %>
+    <p class="ml-3 mb-2 pl-4 mr-2 flex-shrink-0 d-flex flex-items-center">
+      <%= primer_octicon(:"mark-github") %>
+      <%= annotation_title %>
+    </p>
+
+    <p class="ml-3 mb-0 pl-4 text-bold d-flex flex-items-start">
+      <span class="annotation-title pr-2 " >
+        <%= alert_title %>
+      </span>
+      <% if show_alert_severity? %>
+        <%= render CodeScanning::AlertSeverityComponent.new(
+          severity: rule_severity,
+          security_severity: security_severity,
+          large_label: false,
+          additional_classes: "mr-2 flex-shrink-0",
+        ) %>
+      <% end %>
+
+      <% alert_classifications.each do |classification| %>
+        <%= render Primer::Beta::Label.new(scheme: :secondary, mr: 2) do %>
+          <%= classification %>
+        <% end %>
+      <% end %>
+
+      <% if show_experimental_query_info? %>
+        <%= render Primer::Beta::Label.new(scheme: :secondary, mr: 2) do %>Experimental<% end %>
+      <% end %>
+    </p>
+    <div class="pt-2 pl-4 ml-3 overflow-auto code-scanning-font-size-inherit cs-message">
+      <%= alert_message %>
+    </div>
+
+    <% if alerts_readable_by_current_user? %>
+      <div class="ml-3 pl-4">
+        <%# We hide the `Show more details` link for code quality annotations %>
+        <% unless show_as_code_quality_annotation? %>
+          <a href="<%= repository_code_scanning_result_path(repository.owner, repository, number: alert_number) %>" class="f6" <%= test_selector("cs-details-link") %>>
+            Show more details
+          </a>
+        <% end %>
+
+        <% if show_interactive_elements? %>
+          <div class="my-1 d-flex">
+            <div class="d-flex flex-column flex-sm-row flex-justify-between flex-items-end width-full mr-2">
+
+              <div class="d-flex mb-2 mb-sm-0 mr-sm-2">
+                <% if has_code_paths? %>
+                  <% code_paths_url = repository_code_scanning_code_paths_path(repository.owner, repository, number: alert_number, ref: alert_instance&.ref_name_bytes) %>
+                  <%= render(Primer::Alpha::Dialog.new(title: alert_title, size: :xlarge)) do |d| %>
+                    <% d.with_show_button(size: :small, mt: 2, mr: [1, 2], test_selector: "show-paths-button") { 'Show paths' } %>
+                    <% d.with_body do %>
+                      <%= render Primer::Alpha::IncludeFragment.new(my: 6, src: code_paths_url) do %>
+                          <div class="text-center" data-show-on-error hidden>
+                            <%= primer_octicon(:alert) %>
+                            Error loading code paths
+                          </div>
+                          <div class="text-center" data-hide-on-error>
+                            <%= render(Primer::Beta::Spinner.new) %>
+                          </div>
+                        <% end %>
+                    <% end %>
+                  <% end %>
+                <% end %>
+
+                <% if show_reopen_alert_button? %>
+                  <% if show_as_code_quality_annotation? %>
+                    <div <%= test_selector("cs-reopen-finding-button-code-quality")%>>
+                      <% reopen_path = security_code_quality_reopen_path(repository.owner, repository, pull_request_review_thread: pull_request_review_thread&.id) %>
+                      <%= button_to "Reopen finding", reopen_path, method: :put, class: "btn btn-sm", form_class: "mt-2", form: {"data-turbo" => "true", "data-turbo-frame" => "_self"} %>
+                    </div>
+                  <% else %>
+                    <div <%= test_selector("cs-reopen-alert-button")%>>
+                      <% reopen_path = repository_code_scanning_reopen_path(repository.owner, repository, number: alert_number, ref_names: ref_names) %>
+                      <%= button_to "Reopen alert", reopen_path, method: :put, class: "btn btn-sm", form_class: "mt-2", form: {"data-turbo" => "true", "data-turbo-frame" => "_self"} %>
+                    </div>
+                  <% end %>
+                <% elsif show_dismiss_alert_button? %>
+                  <% if feature_enabled_globally_or_for_user?(feature_name: :code_scanning_react_partials, subject: current_user) %>
+                    <span class="js-alert-actions-portal-root mt-2" style="z-index: 99;">
+                      <%= render_react_partial name: "code-scanning-alert-dismissal", disable_ssr: true, props: {
+                        alertClosureReasons: alert_closure_reasons,
+                        closeReasonDetails: dismiss_reasons_menu_singular,
+                        prReviewThreadID: pull_request_review_thread&.id,
+                        number: alert_number,
+                        refNames: base64_ref_names,
+                        path: dismiss_alert_path,
+                        buttonLabel: dismiss_alert_button_label,
+                        hasPendingRequest: has_pending_dismissal_request,
+                        delegatedAlertDismissalEnabled: delegated_alert_dismissal_enabled?,
+                      } %>
+                    </span>
+                  <% else %>
+                    <% if has_pending_dismissal_request %>
+                      <%= render Primer::Beta::Button.new(size: :small, mt: 2, disabled: true, "aria-label": "#{pending_dismissal_requester} requested to dismiss as #{pending_dismissal_resolution} at #{pending_dismissal_requested_at}") do %>
+                        Request pending
+                      <% end %>
+                    <% else %>
+                      <%= render(CodeScanning::AlertDismissalDetailsComponent.new(
+                        close_path: dismiss_alert_path,
+                        button_label: dismiss_alert_button_label,
+                        close_reasons_singular: dismiss_reasons_menu_singular,
+                        close_reasons_plural: dismiss_reasons_menu_plural,
+                        number: alert_number,
+                        pull_request_review_thread: pull_request_review_thread,
+                        ref_names: ref_names,
+                        pluralize: true,
+                        mt: 2,
+                        summary_system_arguments: {
+                          variant: :small,
+                          "aria-haspopup": "true",
+                        },
+                        position: :static,
+                        require_dismissal_comment: require_dismissal_comment?
+                      )) do |c| %>
+                        <% c.with_summary do %>
+                          <span <%= test_selector("dismiss-button-title") %>> <%= dismiss_button_title %> </span>
+                          <div class="dropdown-caret" <%= test_selector("dismiss-alert-button") %>></div>
+                        <% end %>
+                      <% end %>
+                    <% end %>
+                  <% end %>
+                <% end %>
+              </div>
+
+              <%= disclaimer %>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
+  <% end %>
+</div>

@@ -1,0 +1,24 @@
+# typed: true
+# frozen_string_literal: true
+# This migration was generated using `script/generate-vitess-migrations`, for more information please visit https://thehub.github.com/epd/engineering/products-and-services/dotcom/data-partitioning/vitess-for-application-developers/#vitess-migrations-within-the-monolith
+
+class <%= keyspace_migration_name.camelize %> < ActiveRecord::Migration[8.1]
+  # Please uncomment the below line and provide the appropriate connection class for the migration
+  # self.use_connection_class(ApplicationRecord::YourConnectionClass)
+
+  def change
+    create_table :<%= keyspace_table_name %>, id: false, charset: "utf8mb4", collation: "utf8mb4_unicode_520_ci" do |t|
+      t.column :id, "bigint(20)", primary_key: true, auto_increment: false, unsigned: true, null: false, default: nil
+      t.column :keyspace_id, "varbinary(128)", null: false
+    end
+
+    # Primary vindex for keyspace table.
+    add_vindex :<%= keyspace_table_name %>, :hash, :id
+
+    # Lookup vindex for keyspace table. The "owner" table needs to exist before this migration is run.
+    create_vindex :<%= keyspace_table_name %>, :lookup_unique, owner: "<%= name %>", from: "id", table: "<%= keyspace_table_name %>", to: "keyspace_id", autocommit: true, read_lock: "none"
+
+    # Column vindex for "owner" table. This table needs to exist before this migration is run.
+    add_vindex :<%= name %>, :<%= keyspace_table_name %>, :id
+  end
+end

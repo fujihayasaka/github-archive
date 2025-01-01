@@ -1,0 +1,72 @@
+name: Enterprise2 CI Integration Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      enterprise2-branch:
+        type: string
+        description: 'Enterprise2 Branch to run the tests on'
+        required: false
+        default: 'master'
+      enterprise2-tests-to-run:
+        type: string
+        description: 'Enterprise2 Tests to run'
+        required: false
+        default: 'cibuild'
+  push:
+    paths-ignore:
+      - ownership.yaml
+      - docs/**
+      - CODEOWNERS
+      - SERVICEOWNERS
+      - README.md
+
+concurrency:
+  # Skip auto-cancel for `push` events on master and release/backport branches by setting the concurrency group to the workflow run id.
+  # For all other cases the concurrency group is set to the ref and will auto-cancel.
+  group: ${{ (github.event_name == 'push' && !contains(github.ref, 'refs/heads/master') && !contains(github.ref, 'refs/heads/enterprise-') && format('{0}-{1}', github.workflow, github.ref)) || format('{0}-{1}', github.workflow, github.run_id) }}
+  cancel-in-progress: true
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      enterprise2-branch: ${{ steps.setup-enterprise2-branch.outputs.enterprise2-branch }}
+    steps:
+      - name: Setup Enterprise2 Branch
+        id: setup-enterprise2-branch
+        shell: bash
+        env:
+          GITHUB_BRANCH: ${{ github.ref_name }}
+          DEFAULT_BRANCH: 'master'
+        run: |
+          case "$GITHUB_BRANCH" in
+            enterprise-*-release)
+              # use release branch as-is
+              echo "enterprise2-branch=$GITHUB_BRANCH" >> "$GITHUB_OUTPUT"
+              ;;
+            enterprise-*-backport-*)
+              # backport branch needs to be parsed to get its associated release branch
+              RELEASE_BRANCH=$(echo "$GITHUB_BRANCH" | sed -E 's/(enterprise-[0-9]+\.[0-9]+)-backport-.*/\1-release/')
+              echo "enterprise2-branch=$RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              # fallback to the default branch
+              echo "enterprise2-branch=$DEFAULT_BRANCH" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+  build-and-publish:
+    uses: ./.github/workflows/actions-cibuild-enterprise.yml
+    secrets: inherit
+
+  enterprise2-ci:
+    needs: ["setup", "build-and-publish"]
+    uses: github/enterprise2/.github/workflows/enterprise2-project-ci.yml@v1-enterprise2-project-ci
+    secrets: inherit
+    with:
+      enterprise2-branch: ${{ inputs.enterprise2-branch || needs.setup.outputs.enterprise2-branch }}
+      enterprise2-tests-to-run: ${{ inputs.enterprise2-tests-to-run || 'cibuild' }}
+      project-name: ${{ github.event.repository.name }}
+      project-version: ${{ github.sha }}
+      project-type: 'container'

@@ -1,0 +1,88 @@
+#!/bin/bash
+set -e
+
+# This script sets up the github/models-gateway repository for a github/github codespace.
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+ORANGE='\033[0;33m'
+NC='\033[0m' # No Color
+GATEWAY_DIR="/workspaces/models-gateway"
+
+# Function to print help message
+help() {
+   echo "Sets up the github/models-gateway repository for a github/github codespace."
+   echo
+   echo "Usage: setup-codespaces-models-gateway [-b branch] [-d|h] "
+   echo "Options:"
+   echo "-b     Specify the models-gateway branch to clone. Defaults to main if not provided."
+   echo "-d     Before starting, delete the existing models-gateway directory in the codespace."
+   echo "-h     Print this help message."
+   echo
+}
+
+BRANCH=main
+
+# Get the options
+while getopts ":hdwpb:c" opt; do
+   case $opt in
+      h) # display help message
+         help
+         exit;;
+      d) # Delete the repository if it exists
+         DELETE_REPO=true;;
+      b) # If a branch was provided, re-set the variable
+         BRANCH=$OPTARG;;
+     :)
+      echo -e "${RED}Error: Option -$OPTARG requires an argument."
+      exit 1;;
+     \?) # Invalid option
+         echo -e "${RED}Error: Invalid option -$OPTARG"
+         exit 1;;
+   esac
+done
+
+if [[ -d "$GATEWAY_DIR" ]]; then
+   # If the models-gateway repo already exists and the delete argument hasn't been specified, say as much.
+   if [[ -z "$DELETE_REPO" ]]; then
+      echo -e "${ORANGE}The models-gateway directory already exists in this codespace.${NC} \nYou can rerun the setup script with the -d argument to force the deletion of the existing repository."
+   fi
+
+   if [ "$DELETE_REPO" = true ]; then
+      echo -e "\n${GREEN}➡️ Deleting the existing models-gateway repo...\n${NC}"
+      rm -rf $GATEWAY_DIR
+   fi
+fi
+
+if [[ ! -d "$GATEWAY_DIR" ]]; then
+   # Do a clone of models-gateway to the same dir as what contains the github/github repo.
+   # If a branch was supplied, use that branch for the clone.
+   echo -e "\n${GREEN}➡️ Cloning models-gateway repo...\n${NC}"
+   git clone https://github.com/github/models-gateway $GATEWAY_DIR --branch $BRANCH
+else
+   echo -e "\n${GREEN}➡️ models-gateway repo already exists, skipping clone...\n${NC}"
+fi
+
+# Bootstrap models-gateway
+echo -e "\n${GREEN}➡️ Bootstrapping models-gateway...\n${NC}"
+( cd $GATEWAY_DIR ; script/setup; )
+
+echo -e ""
+echo -e "${GREEN}🎉🎉 FINISHED! The models-gateway repo has been set up! 🎉🎉${NC}"
+echo -e ""
+
+if $(script/overmind-running); then
+   echo -e "Overmind is running, restarting models-gateway server..."
+   overmind restart models-gateway
+   echo -e "${GREEN}The models-gateway server is now running${NC}"
+else
+   echo -e "${GREEN}Start the models-gateway server by running the github server like usual:"
+   echo -e "${ORANGE}script/server${NC}"
+fi
+
+echo -e ""
+echo -e "If you want to see models-gateway server logs, run:"
+echo -e "${ORANGE}overmind echo | grep models-gateway${NC}"
+echo -e ""
+echo -e "If you need to restart the models-gateway server, run:"
+echo -e "${ORANGE}overmind restart models-gateway${NC}"

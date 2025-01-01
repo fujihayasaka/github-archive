@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -e
+
+TEST_GOTAUTH=${TEST_GOTAUTH:-0}
+TEST_REPOSD=${TEST_REPOSD:-0}
+
+if [[ "$TEST_GOTAUTH" -eq 0 && "$TEST_REPOSD" -eq 0 ]]; then
+  echo "TEST_GOTAUTH or TEST_REPOSD must be set to 1"
+  exit 1
+fi
+
+GOTAUTH_TESTS=""
+REPOSD_TESTS=""
+
+if [ "$TEST_REPOSD" = "1" ]; then
+  REPOSD_TESTS=(
+    test/integration/api/repository_contents/delete_content_test.rb
+    test/integration/api/repository_contents/create_content_test.rb
+    test/integration/api/repository_contents/create_content_web_flow_test.rb
+    test/integration/api/repository_contents/update_content_test.rb
+    test/integration/api/repository_contents/get_contents_test.rb
+    test/integration/api/internal/raw/raw_pub_test.rb
+    test/integration/api/repository_contents/get_contents_authz_test.rb
+    test/integration/api/repository_contents/get_contents_authzd_extraction_test.rb
+  )
+fi
+
+if [ "$TEST_GOTAUTH" = "1" ]; then
+  DEFAULT_GOTAUTH_TEST_PATTERNS=(
+    test/lib/git_auth/access_characterization_test.rb
+  )
+
+  MATCHING_GOTAUTH_TESTS=$(grep -rl --include="*_test.rb" -e "GitHub::GitAuthTestCase" -e "GitAuthCertificateFixturesTest" -e ":gotauth" test/)
+  GOTAUTH_TESTS="${DEFAULT_GOTAUTH_TEST_PATTERNS[*]} ${MATCHING_GOTAUTH_TESTS[*]}"
+fi
+
+TESTS=("${REPOSD_TESTS[@]}" ${GOTAUTH_TESTS[@]})
+EXPANDED_TESTS=""
+for pattern in "${TESTS[@]}"; do
+  for file in $pattern; do
+    EXPANDED_TESTS="$EXPANDED_TESTS $file"
+  done
+done
+TESTS=$EXPANDED_TESTS
+
+echo "$TESTS"

@@ -1,0 +1,43 @@
+<%= render(Primer::Beta::BorderBox.new(padding: :default, )) do |component| %>
+  <%= component.with_header(scheme: :warning) do |header| %>
+    <% header.with_title(tag: :h2) do %>
+      Quotas
+    <% end %>
+  <% end %>
+  <%= component.with_row(scheme: :default) do %>
+    <% if (limited_user.present? && limited_user.subscribed?) || copilot_user.consumptive_user? %>
+      <%= primer_form_with(url: copilot_quota_update_path(this_user), method: :put) do |f| %>
+        <%= render(Primer::Alpha::TextField.new(hidden: true, label: "", name: "mode", value: "quotas")) %>
+        <% if user_or_global_feature_enabled?(:copilot_premium_quota_reset) %>
+          <% copilot_user.quota_snapshots.each do |feature, details| %>
+            <% if copilot_user.can_access_feature?(feature) %>
+              <%= render(
+                Primer::Alpha::TextField.new(
+                  name: "quotas[#{feature}]",
+                  label: "#{feature.titleize} Quota Remaining (of #{details[:entitlement]} entitlement)",
+                  value: details[:quota_remaining],
+                  data: { test_selector: "quotas_#{feature}" },
+                )
+              ) %>
+            <% end %>
+          <% end %>
+        <% elsif limited_user.present? && limited_user.subscribed? %>
+          <% ::Copilot::LimitedUser::ALLOWED_FEATURES.each do |feature| %>
+            <div>
+              <%= render(
+                Primer::Alpha::TextField.new(
+                  name: "quotas[#{feature}]",
+                  label: "#{feature.titleize} Quota",
+                  value: limited_user.feature_quota_remaining(feature: feature),
+                )
+              ) %>
+            </div>
+          <% end %>
+        <% end %>
+        <%= render Primer::Beta::Button.new(scheme: :primary, type: :submit, display: :inline, mr: 2, mt: 2, "aria-label": "Save Quotas") do %>
+          Save quotas
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

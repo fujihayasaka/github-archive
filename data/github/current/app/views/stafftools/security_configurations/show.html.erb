@@ -1,0 +1,110 @@
+<%= page_info title: "Security configuration details • #{owner.display_login}" %>
+
+<%= render Primer::Beta::Heading.new(tag: :h2, mb: 4) do %>
+  <%= render Primer::Beta::Breadcrumbs.new do |component| %>
+    <% if owner.is_a?(Business) %>
+      <% component.with_item(href: security_configurations_stafftools_enterprise_path(owner)) { "Security configurations" } %>
+      <% component.with_item(href: security_configuration_stafftools_enterprise_path(owner, security_configuration)) { security_configuration.name } %>
+    <% else %>
+      <% component.with_item(href: security_configurations_stafftools_user_path(owner)) { "Security configurations" } %>
+      <% component.with_item(href: security_configuration_stafftools_user_path(owner, security_configuration)) { security_configuration.name } %>
+    <% end %>
+  <% end %>
+<% end %>
+
+<%= render Primer::Beta::BorderBox.new(padding: :condensed, mb: 2) do |component| %>
+  <% component.with_header(font_weight: :bold) { "Details" } %>
+  <% component.with_row(test_selector: "config_name") do %>
+    <%= content_tag :b, "Name:" %>
+    <%= security_configuration.name %>
+  <% end %>
+  <% component.with_row(test_selector: "config_type") do %>
+    <%= content_tag :b, "Type:" %>
+    <%= security_configuration.type == "UnbundledSecurityConfiguration" ? "Unbundled" : "Bundled" %>
+  <% end %>
+  <% component.with_row(test_selector: "config_description") do %>
+    <%= content_tag :b, "Description:" %>
+    <%= security_configuration.description %>
+  <% end %>
+<% end %>
+
+<%= render Primer::Beta::BorderBox.new(padding: :condensed, mb: 2) do |component| %>
+  <% component.with_header(font_weight: :bold) { "Advanced Security" } %>
+  <% component.with_row(test_selector: "feature_enable_ghas_status") do %>
+    <%= content_tag :b, "Bundled GHAS enabled?" %>
+    <%= security_configuration.enable_ghas(billable_entity:) ? "Yes" : "No" %>
+  <% end %>
+  <% component.with_row(test_selector: "feature_enable_cs_status") do %>
+    <%= content_tag :b, "Code Security SKU enabled?" %>
+    <%= security_configuration.display_sku_state(security_configuration.code_security_sku_enabled(billable_entity:)) %>
+  <% end %>
+  <% component.with_row(test_selector: "feature_enable_sp_status") do %>
+    <%= content_tag :b, "Secret Protection SKU enabled?" %>
+    <%= security_configuration.display_sku_state(security_configuration.secret_protection_sku_enabled(billable_entity:)) %>
+  <% end %>
+<% end %>
+
+<%= render Primer::Beta::BorderBox.new(padding: :condensed, mb: 2) do |component| %>
+  <% component.with_header(font_weight: :bold) { "Features" } %>
+  <% SecurityConfiguration::ALL_FEATURES.without(:enable_ghas).each do |feature| %>
+    <% component.with_row(test_selector: "feature_#{feature}_status") do %>
+      <%= content_tag :b, "#{feature.to_s.titleize}:" %>
+      <% if security_configuration.attributes[feature.to_s] != nil %>
+        <%= security_configuration.attributes[feature.to_s].humanize %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>
+
+<%= render Primer::Beta::BorderBox.new(padding: :condensed, mb: 2) do |component| %>
+  <% component.with_header(font_weight: :bold) { "Policy" } %>
+  <% component.with_row(test_selector: "policy_enforced") do %>
+    <%= content_tag :b, "Enforced?" %>
+    <%= security_configuration.enforced?(owner) ? "Yes" : "No" %>
+  <% end %>
+<% end %>
+
+<%= render Primer::Beta::BorderBox.new(padding: :condensed, mb: 2) do |component| %>
+  <% component.with_header(font_weight: :bold) { "Repository application counts" } %>
+  <% if repo_application_counts.present? %>
+    <% repo_application_counts.each do |state, count| %>
+      <% component.with_row(test_selector: "repos_#{state}_count") do %>
+        <%= state.titleize %>: <%= ActiveSupport::NumberHelper.number_to_delimited(count) %>
+      <% end %>
+    <% end %>
+  <% else %>
+    <% component.with_row.with_content("This configuration has not been applied to any repositories.") %>
+  <% end %>
+<% end %>
+
+<%= render Primer::Beta::BorderBox.new(padding: :condensed, mb: 2) do |component| %>
+  <% component.with_header(font_weight: :bold) { "Audit logs" } %>
+  <% component.with_row(test_selector: "audit_logs_all_events") do %>
+    <%= content_tag :b, "All events for this configuration:" %>
+    <% if owner.business? %>
+      <%= link_to "View", stafftools_audit_log_path(query: "webevents | where business_id == #{owner.id} and data.security_configuration_id == '#{security_configuration.id}'") %>
+    <% else %>
+      <%= link_to "View", stafftools_audit_log_path(query: "webevents | where org == '#{owner.display_login}' and data.security_configuration_id == '#{security_configuration.id}'") %>
+    <% end %>
+  <% end %>
+  <% component.with_row(test_selector: "audit_logs_update_events") do %>
+    <%= content_tag :b, "Configuration updates:" %>
+    <% if owner.business? %>
+      <%= link_to "View", stafftools_audit_log_path(query: "webevents | where business_id == #{owner.id} and data.security_configuration_id == '#{security_configuration.id}' and action == 'security_configuration.update'") %>
+    <% else %>
+      <%= link_to "View", stafftools_audit_log_path(query: "webevents | where org == '#{owner.display_login}' and data.security_configuration_id == '#{security_configuration.id}' and action == 'security_configuration.update'") %>
+    <% end %>
+  <% end %>
+  <% component.with_row(test_selector: "audit_logs_repo_events") do %>
+    <%= content_tag :b, "Repo applied or failed events for this configuration:" %>
+    <% if owner.business? %>
+      <%= link_to "View", stafftools_audit_log_path(query: "webevents | where business_id == #{owner.id} and data.security_configuration_id == '#{security_configuration.id}' and (action == 'repository_security_configuration.applied' or action == 'repository_security_configuration.failed')") %>
+    <% else %>
+      <%= link_to "View", stafftools_audit_log_path(query: "webevents | where org == '#{owner.display_login}' and data.security_configuration_id == '#{security_configuration.id}' and (action == 'repository_security_configuration.applied' or action == 'repository_security_configuration.failed')") %>
+    <% end %>
+  <% end %>
+  <% component.with_row(test_selector: "audit_logs_reference_docs") do %>
+    <%= content_tag :b, "Audit log reference documentation:" %>
+    <%= link_to "View", "https://github.com/github/security-products-enablement/blob/main/docs/playbook-audit-logs.md", target: "_blank", rel: "noopener" %>
+  <% end %>
+<% end %>

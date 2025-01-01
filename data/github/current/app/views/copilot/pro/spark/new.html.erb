@@ -1,0 +1,83 @@
+<%
+  page_info(
+    title: "GitHub Copilot Pro Checkout",
+    class: "bgColor-inset",
+    full_height_scrollable: true,
+    full_height: true,
+    hide_footer: logged_in?,
+  )
+
+  has_no_billing_and_payment_info = !current_user.has_saved_billing_information? && !current_user.has_valid_payment_method?
+  has_billing_but_no_payment_info = current_user.has_saved_billing_information? && !current_user.has_valid_payment_method?
+  has_billing_and_payment_info = current_user.has_valid_payment_method?
+
+  steps = [
+    { title: "Billing frequency", is_current: false },
+    { title: "Billing information", is_current: has_no_billing_and_payment_info },
+    { title: "Payment method", is_current: has_billing_but_no_payment_info },
+    { title: "Review", is_current: has_billing_and_payment_info }
+  ]
+
+  if FeatureFlag.vexi.enabled?(:copilot_pro_premium_requests, current_user, default: false)
+    steps.insert(1, { title: "Premium request settings", is_current: premium_requests.blank? })
+    steps[2][:is_current] = premium_requests.present? && has_no_billing_and_payment_info
+    steps[3][:is_current] = premium_requests.present? && has_billing_but_no_payment_info
+    steps[4][:is_current] = premium_requests.present? && has_billing_and_payment_info
+  end
+
+  current_step_index = steps.find_index { |step| step[:is_current] } || 0
+
+  # segment points based on steps, e.g. [0, 25, 50, 75, 100]
+  segment_points = (0...steps.size).map { |i| (i * 100) / (steps.size) }
+%>
+
+<% if current_user.feature_flag_enabled?(:copilot_pro_new_billing_flow_progress_bar, default: false) %>
+  <%= render_react_partial name: "copilot-activation-progress-bar", props: {
+      segmentPoints: segment_points,
+      currentSegmentIndex: current_step_index,
+      color: 'gradient',
+      shouldUseLocalStorage: true,
+    }
+  %>
+<% end %>
+
+<%= render Primer::Box.new(container: :lg, px: [3, 4], py: [5, 7]) do %>
+  <% if copilot_user.eligible_for_trial? %>
+    <%= render Primer::Beta::Label.new(scheme: :done, mb: 2) do %>
+      Free for 30 days
+    <% end %>
+  <% end%>
+
+  <%= render Primer::Beta::Heading.new(tag: :h1, mb: 2, font_size: 2, text_align: :left, data: {hpc: true}) do %>
+    Access Spark with a GitHub Copilot Pro subscription
+  <% end %>
+
+  <% unless current_user.feature_flag_enabled?(:copilot_pro_new_billing_flow_progress_bar, default: false) %>
+    <%= render "copilot/signup/steps_list", steps: steps %>
+  <% end %>
+
+  <billing-checkout data-trial-allowed="<%= copilot_user.eligible_for_trial? %>" data-payment-period="<%= payment_duration %>">
+    <%= render Primer::Alpha::Layout.new(gutter: :spacious, first_in_source: :main) do |component| %>
+      <% component.with_main do %>
+        <%= render Copilot::ProBillingComponent.new(
+          user: current_user,
+          payment_duration: payment_duration,
+          premium_requests: defined?(premium_requests) ? premium_requests : nil,
+          return_to_path: return_to_path,
+          update_path: update_path,
+          tracking_params: tracking_params
+        ) %>
+      <% end %>
+
+      <% component.with_sidebar(col_placement: :end, row_placement: :end, mt: [2, 2, 0]) do %>
+        <%= render "copilot/pro/billing_summary",
+          payment_duration: payment_duration,
+          subscribe_path: subscribe_path,
+          return_to_path: return_to_path,
+          success_path: success_path,
+          copilot_user: copilot_user
+        %>
+      <% end %>
+    <% end %>
+  </billing-checkout>
+<% end %>

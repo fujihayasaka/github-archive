@@ -1,0 +1,41 @@
+#!/bin/bash
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+PACKAGE_MANAGER=$1
+
+usage() {
+  echo "Usage: script/build PACKAGE_MANAGER"
+  echo
+  echo "Build a Docker image for the given package manager adapter."
+}
+
+. script/utils
+
+validate
+shift
+
+curl -s --connect-timeout 5 --head https://octofactory.githubapp.com/ >/dev/null || {
+  echo "Can't reach Octofactory. (Are you on the Developer VPN?)"
+  # The connection often fails the first time and then immediately succeeds
+  # TODO(adonovan): Find out why. In the meantime, this is only a warning.
+  # exit 1
+} >&2
+
+# The context is the root directory tree visible to the Docker build.
+# Most PMA Dockerfiles use the PMA directory (e.g. rubygems/) as the context,
+# but Go and Nuget need to build Go code in ../go/.
+# TODO(adonovan): adjust all PMAs to use .. as the context.
+context="$PACKAGE_MANAGER"
+case "$PACKAGE_MANAGER" in
+  go|nuget)
+    context=..
+    ;;
+esac
+
+docker build \
+  --tag $(container-tag) \
+  --file "$PACKAGE_MANAGER/Dockerfile" \
+  "$context"

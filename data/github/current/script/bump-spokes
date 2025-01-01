@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Bump spokes-proto & spokesd to the latest commit on main.
+
+set -e
+
+# help command
+usage () {
+  echo "Usage: $0 [--help]"
+  echo "Bump spokes-proto & spokesd to the latest commit on main."
+}
+
+# parse command line arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1"
+      usage
+      exit 1
+      ;;
+  esac
+  shift
+done
+
+# display some details about the a commit (as context so users know the correct version is being used)
+commit_details () {
+  COMMIT_DETAILS=$(gh api repos/github/$1/git/commits/$2)
+  echo "  $(echo "$COMMIT_DETAILS" | jq -r '.message' | head -n 1)"
+  echo "  committed $(echo "$COMMIT_DETAILS" | jq -r '.committer.date') by $(echo "$COMMIT_DETAILS" | jq -r '.committer.name')"
+  echo "  $(echo "$COMMIT_DETAILS" | jq -r '.html_url')"
+}
+
+
+SPOKESD_SHA=$(gh api repos/github/spokesd/git/refs/heads/main --jq '.object.sha')
+echo "Bumping spokesd to $SPOKESD_SHA"
+commit_details "spokesd" "$SPOKESD_SHA"
+echo $SPOKESD_SHA > config/spokesd-version
+
+SPOKES_PROTO_SHA=$(gh api repos/github/spokes-proto/git/refs/heads/main --jq '.object.sha')
+echo "Bumping spokes-proto to $SPOKES_PROTO_SHA"
+commit_details "spokes-proto" "$SPOKES_PROTO_SHA"
+# Update spokes-proto gem
+sed -i -E "s/(gem \"spokes-proto\".*ref: \")[0-9a-f]+(\".*)/\1$SPOKES_PROTO_SHA\2/" Gemfile
+script/bootstrap
+# add generated spokes code
+bin/rails db:migrate db:test:soft_reset
+bin/tapioca dsl -e test
+bin/tapioca gem

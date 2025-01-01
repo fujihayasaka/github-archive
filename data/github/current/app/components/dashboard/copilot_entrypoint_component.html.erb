@@ -1,0 +1,100 @@
+<div class="copilotPreview__container" <%= test_selector("copilot-entrypoint-component")%>>
+  <% copilot_enabled = !limited_user || limited_user.feature_allowed?(feature: "chat") %>
+  <% if copilot_enabled && current_user.feature_flag_enabled?(:copilot_dashboard_react_input, default: false) %>
+    <%= javascript_bundle "copilot-chat-input-partial" %>
+    <%= render_react_partial name: "copilot-chat-input-partial", props: input_props %>
+  <% elsif copilot_enabled %>
+    <copilot-dashboard-entrypoint>
+      <h2 class="copilotPreview__header f5 mb-4">Copilot</h2>
+      <div class="copilotPreview">
+        <label class="sr-only" for="copilot-dashboard-entrypoint-textarea">Ask Copilot</label>
+        <textarea
+          id="copilot-dashboard-entrypoint-textarea"
+          data-target="copilot-dashboard-entrypoint.textarea"
+          class="copilotPreview__input"
+          placeholder="Ask Copilot"
+          rows="1"
+        ></textarea>
+        <div class="copilotPreview__trailingItems">
+          <%= render(
+            Primer::Beta::IconButton.new(
+              icon: "paper-airplane",
+              "aria-label": "Send",
+              scheme: :invisible,
+              size: :small,
+              data: { target: "copilot-dashboard-entrypoint.send_button" }
+            )
+          ) %>
+        </div>
+      </div>
+
+      <div class="copilotPreview__footer" data-target="copilot-dashboard-entrypoint.footer">
+        <ul
+          class="copilotPreview__suggestions"
+          data-target="copilot-dashboard-entrypoint.suggestions"
+        >
+          <% icebreakers.each do |suggestion| %>
+            <li>
+              <button
+                type="button"
+                class="copilotPreview__suggestionButton"
+                data-raw="<%= suggestion["message"].gsub("$$USERNAME$$", current_user.display_login) %>"
+                data-action="click:copilot-dashboard-entrypoint#handleSuggestionClick"
+                data-id="<%= suggestion["id"] %>"
+                <%= safe_analytics_click_attributes(
+                  category: "copilot-dashboard-entrypoint",
+                  action: "click",
+                  label: "ref_cta:copilot-icebreaker-#{suggestion["id"]};ref_loc:dashboard"
+                ) %>
+                <%= test_selector("copilot-chat-icebreaker-button") %>
+              >
+                <div style="color: <%= suggestion["color"] %>;">
+                  <%= render(Primer::Beta::Octicon.new(suggestion["icon"], size: :small)) %>
+                </div>
+                <%# rubocop:disable Rails/OutputSafety %>
+                <div><%= raw(suggestion["titleHtml"]) %></div>
+              </button>
+            </li>
+          <% end %>
+        </ul>
+
+        <div
+          class="copilotPreview__disclaimer"
+          data-target="copilot-dashboard-entrypoint.disclaimer"
+        >
+          <%= render(
+            Primer::Beta::Link.new(
+              href: "https://docs.github.com/en/copilot/responsible-use-of-github-copilot-features/responsible-use-of-github-copilot-chat-in-githubcom",
+              scheme: :secondary,
+              classes: "Link--inTextBlock"
+            )
+          ) { "Copilot" } %>
+          uses AI. Check for mistakes.
+        </div>
+      </div>
+    </copilot-dashboard-entrypoint>
+  <% elsif current_user.settings.get(:copilot_dashboard_quota_notification_dismissed) != reset_date %>
+    <%# quota exhausted %>
+    <copilot-dashboard-no-quota data-reset-date="<%= reset_date %>">
+      <h2 class="copilotPreview__header f4 mb-2 text-normal">Copilot</h2>
+      <div class="copilotPreview-disabled">
+        <div class="copilotPreview-disabled__left">
+          <%= render Primer::Beta::Octicon.new(:copilot, classes: "copilotPreview-disabled__icon") %> Ask Copilot
+        </div>
+        <div class="copilotPreview-disabled__right">
+          <%= render(Primer::Beta::Button.new(size: :small, tag: :a, href: "https://github.com/features/copilot#pricing")) { "Upgrade" } %>
+          <%= render(Primer::Beta::Button.new(
+              size: :small,
+              scheme: :invisible,
+              classes: "copilotPreview-disabled__dismiss",
+              data: { action: "click:copilot-dashboard-no-quota#handleDismissClick" }
+            )) { "Dismiss" }
+          %>
+        </div>
+      </div>
+      <div class="copilotPreview-disabled__message">
+        You have reached your free plan limit. It will reset on <%= reset_date %>.
+      </div>
+    </copilot-dashboard-no-quota>
+  <% end %>
+</div>

@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: extract-npm-packages
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "extract-npm-packages"
+        heaven.githubapp.com/image-placeholder: "dependency-graph-api"
+        heaven.githubapp.com/deploy-requirement: "true"
+spec:
+    replicas: 1
+    strategy:
+        type: RollingUpdate
+    selector:
+        matchLabels:
+            app: dependency-graph-api
+            role: extract-npm-packages
+    template:
+        metadata:
+            labels:
+                app: dependency-graph-api
+                role: extract-npm-packages
+        spec:
+            dnsPolicy: ClusterFirst
+            volumes:
+                - name: github-metadata
+                  hostPath:
+                    path: /etc/github/metadata.json
+            containers:
+                - name: extract-npm-packages
+                  image: dependency-graph-api
+                  resources:
+                    requests:
+                        cpu: 750m
+                        memory: "1Gi"
+                    limits:
+                        cpu: 2000m
+                        memory: "4Gi"
+                  workingDir: "/src/app/package_manager_adapters"
+                  command: ["script/start_kube"]
+                  args: ["npm"]
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                  volumeMounts:
+                    - mountPath: /etc/github/metadata.json
+                      name: github-metadata
+                      readOnly: true

@@ -1,0 +1,55 @@
+<%# erblint:counter DeprecatedComponentsCounter 1 %>
+<%# erblint:counter DeprecatedComponentsCounter 1 %>
+<%
+  page_info title: billing_page_title(selected_tab),
+    hide_marketplace_retargeting_notice: true,
+    hide_marketplace_pending_installations_notice: true,
+    selected_link: selected_link
+%>
+
+<%= render Sponsors::Orgs::LowCreditBalanceComponent.new(
+  sponsor: account,
+  container_size: :xl,
+) %>
+
+<%= render layout: "orgs/settings/layout" do %>
+  <%= render Organizations::MissingPaymentInfoBannerComponent.new(
+    organization: account,
+    current_user: current_user
+  ) %>
+
+  <% if account.business.nil? %>
+    <% invitations.each do |invitation| %>
+      <%= render Organizations::Settings::BusinessOrganizationInvitationComponent.new(
+        invitation: invitation,
+        organization: account,
+        terms_of_service: account.terms_of_service
+      ) %>
+    <% end %>
+    <%= render Organizations::EnterpriseCloudOnboarding::UpgradeToEnterpriseComponent.new(
+      organization: account
+    ) %>
+    <% if account.billing_email.present? %>
+      <%= render "billing_settings/overview",
+            target: account,
+            view: BillingSettings::OverviewView.new(account: account, current_user: current_user),
+            selected_tab: selected_tab,
+            sponsors_tab: sponsors_tab %>
+    <% else %>
+      <% if FeatureFlag.vexi.enabled?(:banner_migration, current_user, default: false) %>
+        <%= render(Primer::Alpha::Banner.new(scheme: :warning)) do %>
+          <strong>Your billing email is missing.</strong> Please go to your <%= link_to "organization’s profile settings", settings_org_profile_url(account), 'data-pjax' => true, class: "Link--inTextBlock" %> and add it.
+        <% end %>
+      <% else %>
+        <%= render(Primer::Beta::Flash.new(scheme: :warning)) do %>
+          <strong>Your billing email is missing.</strong> Please go to your <%= link_to "organization’s profile settings", settings_org_profile_url(account), 'data-pjax' => true, class: "Link--inTextBlock" %> and add it.
+        <% end %>
+      <% end %>
+    <% end %>
+  <% else %>
+    <%= render "billing_settings/overview_org_business", target: account,
+      view: create_view_model(BillingSettings::OverviewView, account: account),
+      business: account.business,
+      sponsors_tab: sponsors_tab %>
+  <% end %>
+<% end %>

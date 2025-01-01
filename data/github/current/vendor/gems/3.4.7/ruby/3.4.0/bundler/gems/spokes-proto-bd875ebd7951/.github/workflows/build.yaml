@@ -1,0 +1,85 @@
+name: Build
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  id-token: write  # for setup-goproxy OIDC
+  contents: read
+  packages: read
+
+jobs:
+  linting:
+    name: Linting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - run: script/lint
+
+  # NOTE: This job should not be required. It is sometimes necessary to introduce breaking changes.
+  breaking:
+    name: Check for breaking changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - run: |
+          # Need to fetch main branch to check breaking changes
+          git fetch origin main --depth 1
+          script/buf breaking --against ./.git#branch=origin/main,subdir=proto
+
+  generation:
+    name: Code generation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/setup-goproxy@v1.1.0
+      - name: Set GITHUB_TOKEN for generate-go Dockerfile
+        run: |
+          echo "GITHUB_TOKEN=$(cut -d " " -f 6 $HOME/.netrc)" >> $GITHUB_ENV
+      - run: |
+          echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Generate Go code
+        run: script/test-generate-go
+      - name: Generate Ruby code
+        run: script/test-generate-ruby
+      - name: Generate docs
+        run: script/test-generate-docs
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/setup-goproxy@v1.1.0
+      - name: Set GITHUB_TOKEN for generate-go Dockerfile
+        run: |
+          echo "GITHUB_TOKEN=$(cut -d " " -f 6 $HOME/.netrc)" >> $GITHUB_ENV
+      - run: |
+          echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Code generation
+        run: script/generate
+      - name: Run Go tests
+        run: script/test-go
+      - name: Run Ruby tests
+        run: script/test-ruby
+      - name: Testing examples
+        run: |
+          echo "::group::script/bootstrap"
+          script/bootstrap
+          echo "::endgroup::"
+
+          echo "::group::vendor deps"
+          docker run -e "GOPROXY=$GOPROXY" -e"GONOSUMDB=$GONOSUMDB" -v "$HOME/.netrc:/root/.netrc" -v "$PWD:/app" -w /app/examples/go golang:1.17.7 go mod vendor
+          echo "::endgroup::"
+
+          echo "::group::docker compose up"
+          docker compose --ansi never up -d
+          echo "::endgroup::"
+
+          echo "::group::script/test-examples"
+          script/test-examples
+          echo "::endgroup::"

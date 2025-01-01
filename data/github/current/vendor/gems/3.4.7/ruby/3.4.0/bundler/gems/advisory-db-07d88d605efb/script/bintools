@@ -1,0 +1,171 @@
+#!/bin/sh
+
+output_fold() {
+  # Exit early if no label provided
+  if [ -z "$1" ]; then
+    echo "output_fold(): requires a label argument."
+    return
+  fi
+
+  exit_value=0  # exit_value is used to record exit status of the given command
+  label=$1      # human-readable label describing what's being folded up
+  shift 1       # having retrieved the output_fold()-specific arguments, strip them off $@
+
+  # Only echo the tags when in CI_MODE
+  if [ "$CI_MODE" ]; then
+    echo "%%%FOLD {$label}%%%"
+  fi
+
+  # run the remaining arguments. If the command exits non-0, the `||` will
+  # prevent the `-e` flag from seeing the failure exit code, and we'll see
+  # the second echo execute
+  "$@" || exit_value=$?
+
+  # Only echo the tags when in CI_MODE
+  if [ "$CI_MODE" ]; then
+    echo "%%%END FOLD%%%"
+  fi
+
+  # preserve the exit code from the subcommand.
+  return $exit_value
+}
+
+output_highlight() {
+  # Exit early if no style provided
+  if [ -z "$1" ]; then
+    echo "output_highlight(): requires a style argument."
+    return
+  fi
+
+  exit_value=0  # exit_value is used to record exit status of the given command
+  style=$1      # Color style that highlight will be styled with
+  shift 1       # having retrieved the output_highlight()-specific arguments, strip them off $@
+
+  # Only echo the tags when in CI_MODE
+  if [ "$CI_MODE" ]; then
+    echo "%%%HIGHLIGHT {$style}%%%"
+  fi
+
+  # run the remaining arguments. If the command exits non-0, the `||` will
+  # prevent the `-e` flag from seeing the failure exit code, and we'll see
+  # the second echo execute
+  "$@" || exit_value=$?
+
+  # Only echo the tags when in CI_MODE
+  if [ "$CI_MODE" ]; then
+    echo "%%%END HIGHLIGHT%%%"
+  fi
+
+  # preserve the exit code from the subcommand.
+  return $exit_value
+}
+
+upload_file() {
+  # exit early if a path was not provided
+  if [ -z "$1" ]; then
+    echo "upload_file(): requires a path argument."
+    return
+  fi
+
+  # exit early if a path does not exist
+  if [ ! -f $1 ]; then
+      echo "upload_file(): $1 does not exist."
+      return
+  fi
+
+  # exit early if the appropriate creds do not exist
+  if [ -z "$CI_UPLOAD_AWS_KEY" ] || [ -z "$CI_UPLOAD_AWS_SECRET" ] || [ -z "$CI_UPLOAD_S3_BUCKET" ] ; then
+    echo "upload_file(): There doesn't seem to be any credentials available for uploading."
+    return
+  fi
+
+  filePath=$1  # Path to file to upload
+  shift 1       # having retrieved the upload_file()-specific arguments, strip them off $@
+
+  s3_name=$(basename "$filePath")
+  aws_path='/artifacts/files/'
+
+  AWS_ACCESS_KEY_ID=$CI_UPLOAD_AWS_KEY AWS_SECRET_ACCESS_KEY=$CI_UPLOAD_AWS_SECRET aws s3 cp --acl "public-read" $filePath "s3://$CI_UPLOAD_S3_BUCKET$aws_path$s3_name" 2>/dev/null 1>&2
+
+  echo "https://$CI_UPLOAD_S3_BUCKET.s3.amazonaws.com$aws_path$s3_name"
+}
+
+output_image_tag() {
+  # exit early if a url was not provided
+  if [ -z "$1" ]; then
+    echo "image_tag(): requires a url argument."
+    return
+  fi
+
+  url=$1    # URL for image to place in image tag
+  shift 1   # having retrieved the output_image_tag()-specific arguments, strip them off $@
+
+  echo "%%%IMAGE {$url}%%%"
+}
+
+output_image_tag_with_file() {
+  # exit early if a path was not provided
+  if [ -z "$1" ]; then
+    echo "image_tag_with_file(): requires an image path argument."
+    return
+  fi
+
+  imagePath=$1  # Path to image to upload and place in image tag
+  shift 1       # having retrieved the output_image_tag_with_file()-specific arguments, strip them off $@
+
+  result=`upload_file "$imagePath"`
+
+  # ensure we got back a url
+  urlPattern="^http"
+
+  if echo "$result" | egrep $urlPattern >/dev/null ; then
+    output_image_tag "$result"
+  else
+    echo $result
+  fi
+}
+
+to_statsd() {
+  if [ -z "$CI_STATSD_HOSTNAME" ] || [ -z "$CI_STATSD_PORT" ]; then
+    echo "to_statsd(): There doesn't seem to be any credentials available for datadog."
+    return
+  fi
+
+  name=$1   # Metric name
+  value=$2  # Metric value
+  type=$3   # Metric type
+  shift 3   # having retrieved the to_statsd()-specific arguments, strip them off $@
+
+  tags=$4
+  if [ -n "$tags" ]
+  then
+    tags="|#${tags}"
+    shift
+  fi
+
+  echo "$name:$value|$type$tags" | nc -w 1 -u $CI_STATSD_HOSTNAME $CI_STATSD_PORT
+}
+
+count() {
+  to_statsd "$1" "$2" c
+}
+
+increment() {
+  count "$1" 1
+}
+
+decrement() {
+  count "$1" -1
+}
+
+gauge() {
+  to_statsd "$1" "$2" g
+}
+
+histogram() {
+  to_statsd "$1" "$2" h
+}
+
+timing() {
+  to_statsd "$1" "$2" ms
+}

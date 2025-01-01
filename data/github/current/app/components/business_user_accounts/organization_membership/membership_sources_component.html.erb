@@ -1,0 +1,83 @@
+<div data-justify="start" data-gap="1" data-direction="horizontal" data-align="center" data-wrap="wrap" data-padding="none" class="Stack gap-1 width-fit color-fg-muted f6">
+  <% if membership_sources.one? %>
+    Membership via:
+    <%= render(BusinessUserAccounts::OrganizationMembership::MembershipSourceComponent.new(
+      direct: membership_sources.first.direct?,
+      business_team: membership_sources.first.business_team,
+      organization: organization
+    )) %>
+    <% unless membership_sources.first.direct? %>
+      enterprise team.
+    <% end %>
+  <% elsif membership_sources.size > 1 %>
+    Membership via <%= pluralize(membership_sources.size, "source") %>:
+
+    <% if membership_sources.first.direct? %>
+      <%= render(BusinessUserAccounts::OrganizationMembership::MembershipSourceComponent.new(
+        direct: true
+      )) %>
+      , and
+    <% end %>
+
+    <% indirect_membership_sources.first(indirect_membership_sources_list_limit).each do |source| %>
+      <%= render(BusinessUserAccounts::OrganizationMembership::MembershipSourceComponent.new(
+        direct: source.direct?,
+        business_team: source.business_team,
+        organization: organization
+      )) %>
+    <% end %>
+    enterprise <%= "team".pluralize(indirect_membership_sources.size) %>.
+
+    <% if indirect_membership_sources.size > indirect_membership_sources_list_limit %>
+      <%= render(Primer::Alpha::Dialog.new(
+        id: "org-membership-dialog-#{organization.id}",
+        title: "Organization membership",
+        size: :medium_portrait,
+        test_selector: "org-membership-dialog-#{organization.id}"
+      )) do |dialog| %>
+        <% dialog.with_show_button(
+          scheme: :link,
+          classes: "Link--primary no-underline",
+          test_selector: "org-membership-dialog-show-button-#{organization.id}"
+        ) { "View all #{membership_sources.size}" } %>
+        <%= render(Primer::Alpha::Dialog::Body.new) do %>
+          <p>
+            <%= user.safe_profile_name %> has access to the
+            <%= organization.safe_profile_name %> via
+            <% if membership_sources.first.direct? %>
+              direct assignment and
+            <% end %>
+            the following enterprise teams:
+          </p>
+
+          <div style="overflow-y: auto" tabindex="0" role="region"
+            aria-label="Organization membership sources">
+            <%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |box| %>
+              <% indirect_membership_sources.each do |source| %>
+                <% box.with_row(
+                  display: :flex,
+                  test_selector: "indirect-org-membership-dialog-row"
+                ) do %>
+                  <%= helpers.avatar_for(source.business_team, 20, class: "avatar") %>
+                  <div class="ml-2">
+                    <strong><%= source.business_team.name %></strong>
+                  </div>
+                  <div class="ml-2 color-fg-muted">
+                    @<%= source.business_team.slug %>
+                  </div>
+                <% end %>
+              <% end %>
+            <% end %>
+          </div>
+        <% end %>
+        <%= render(Primer::Alpha::Dialog::Footer.new(show_divider: false)) do %>
+          <%= render(Primer::Beta::Button.new(
+            data: {
+              "close-dialog-id": "org-membership-dialog-#{organization.id}"
+            }
+          )) { "Close" } %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+</div>

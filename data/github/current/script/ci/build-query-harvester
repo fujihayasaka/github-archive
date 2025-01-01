@@ -1,0 +1,89 @@
+#!/bin/bash
+#/ Usage: build-query-harvester
+#/ Build an app local version of Query Harvester from https://github.com/github/query-harvester
+
+set -e
+
+echo "Building query-harvester"
+
+# Check if the docker image already exists
+if [ "$(docker images -q query-harvester:latest 2> /dev/null)" ]; then
+  echo "Docker image already exists. Finishing early"
+else
+  # Change this to experiment with your own branch of query-harvester
+  QUERY_HARVESTER_SHA=$(cat config/query-harvester-version)
+  if docker pull "ghcr.io/github/query-harvester/query-harvester:$QUERY_HARVESTER_SHA"; then
+    echo "Query harvester prebuild pulled from ghcr"
+    docker tag ghcr.io/github/query-harvester/query-harvester:$QUERY_HARVESTER_SHA query-harvester:latest
+  else
+    echo "Failed to pull prebuild image from ghcr; Building query harvester from scratch."
+    cd "$(dirname "${BASH_SOURCE[0]}")/../.."
+    SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
+
+    ensure_ghcr_docker_login() {
+      # Ensure that the user is logged into the GitHub Container Registry.
+      # If the user is already logged in, don't do anything.
+      CONF_FILENAME="${DOCKER_CONFIG:-"$HOME/.docker"}/config.json"
+      if grep -q "ghcr.io" ${CONF_FILENAME}; then
+        return 0
+      fi
+      # Attempt to use GITHUB_TOKEN if GITHUB_PACKAGES_TOKEN is unset.
+      if [[ -z "$GITHUB_PACKAGES_TOKEN" && -n "$GITHUB_TOKEN" ]]; then
+        GITHUB_PACKAGES_TOKEN="$GITHUB_TOKEN"
+      fi
+      if [ -z "$GITHUB_PACKAGES_TOKEN" ]; then
+        echo "${SCRIPT_NAME}: error: no GITHUB_PACKAGES_TOKEN or GITHUB_TOKEN set!"
+        exit 1
+      fi
+      echo "${GITHUB_PACKAGES_TOKEN}" | docker login ghcr.io --username "github" --password-stdin
+    }
+
+    if [ -n "$BOOTSTRAP_NUKE_FROM_ORBIT" ]; then
+      rm -rf "vendor/query-harvester"
+    fi
+
+    # resolve vendor/query-harvester symlink (if any)
+    installdir="vendor/query-harvester"
+    mkdir -p $installdir
+    cd $installdir
+
+    echo "Cloning query-harvester repository"
+    if [ ! -d "./.git" ] ; then
+      git init .
+    fi
+
+    # clone the repo and ensure a clean state
+    git fetch --depth=1 https://github.com/github/query-harvester.git $QUERY_HARVESTER_SHA
+    git reset --hard $QUERY_HARVESTER_SHA
+    git clean -fdx > /dev/null
+
+    START_TIME="$(date +%s)"
+
+    echo "Building Docker image for Query Harvester"
+
+    build_and_cleanup() {
+      docker build -t query-harvester:latest .
+
+      # Clean up $installdir folder after building
+      cd ../..
+      rm -rf $installdir
+    }
+
+    if [ -z "$BP_GITHUB_TOKEN" ]; then
+      echo "BP_GITHUB_TOKEN is not set."
+      if [ -z "$GITRPCD_GITHUB_TOKEN" ]; then
+        echo "GITRPCD_GITHUB_TOKEN is not set either. Exiting early"
+      else
+        # Janky doesn't have BP_GITHUB_TOKEN, so use GITRPCD_GITHUB_TOKEN instead
+        echo -n "$GITRPCD_GITHUB_TOKEN" > .goproxytoken
+        build_and_cleanup
+      fi
+    else
+      # Write BP_GITHUB_TOKEN into .goproxytoken so we can install private go packages
+      echo -n "$BP_GITHUB_TOKEN" > .goproxytoken
+      build_and_cleanup
+    fi
+
+    echo "Built Query Harvester in $(($(date +%s) - $START_TIME)) seconds."
+  fi
+fi

@@ -1,0 +1,186 @@
+<% page_info title: "Verify your identity with a payment method", stafftools: stafftools_enterprise_path(this_business), hide_subnav: true %>
+
+<div class="my-5" <%= test_selector("activate-copilot-business") %>>
+  <div class="container-lg p-responsive">
+    <div class="border-bottom pb-3 mb-5">
+      <h3 class="color-fg-default text-semibold">
+        Verify your identity with a payment method
+      </h3>
+      <h4 class="color-fg-muted text-normal">
+        Start your free trial of GitHub's Copilot-powered developer platform
+      </h4>
+    </div>
+    <div class="d-md-flex gutter-md" data-hpc>
+      <div class="col-md-7">
+        <div <%= test_selector("business-billing-information") %>>
+          <%= render Primer::Beta::Button.new(
+            float: :right,
+            size: :small,
+            test_selector: "edit-billing-info-button",
+            classes: "js-billing-settings-billing-information-edit-button",
+            hidden: !completed_billing_information || !this_business.is_allowed_to_edit_billing_information?
+          ) do %>
+            Edit
+          <% end %>
+          <h4>Billing information</h4>
+          <%= render Primer::Beta::BorderBox.new(mt: 3) do |component| %>
+            <% component.with_body do %>
+              <%= render "businesses/billing_settings/payment_information",
+                business: this_business,
+                show_form: !completed_billing_information,
+                return_to: enterprise_trial_activations_path(this_business)
+              %>
+            <% end %>
+          <% end %>
+        </div>
+        <business-shipping-information>
+          <div class="mt-5" <%= test_selector("business-shipping-information") %>>
+            <% if this_business.is_allowed_to_edit_billing_information? ||
+              this_business.shipping_contact.persisted? %>
+              <% if completed_billing_and_shipping_information %>
+                <%= render Primer::Beta::Button.new(
+                  float: :right,
+                  scheme: :secondary,
+                  size: :small,
+                  test_selector: "edit-business-shipping-information-button",
+                  hidden: !this_business.is_allowed_to_edit_billing_information?,
+                  data: {
+                    target: "business-shipping-information.editShippingInformationButton",
+                    action: "click:business-shipping-information#showEditShippingInformationForm"
+                  }
+                ) do %>
+                  Edit
+                <% end %>
+              <% end %>
+              <h4>Shipping information</h4>
+              <%= render Primer::Beta::BorderBox.new(mt: 3) do |component| %>
+                <% component.with_body do %>
+                  <% if completed_billing_information %>
+                    <%= render partial: "businesses/billing_settings/shipping_information", locals: {
+                      business: this_business,
+                      show_form: (completed_billing_information && this_business.shipping_contact.new_record?) ||
+                        flash[:shipping_address_validation_error].present?
+                    } %>
+                  <% else %>
+                    You have not added billing information for your account.
+                  <% end %>
+                <% end %>
+              <% end %>
+            <% end %>
+          </div>
+        </business-shipping-information>
+        <%= render(TradeCompliance::TradeScreeningRestrictionNoticeComponent.new(
+          target: this_business,
+          title: "You can't proceed with your payment",
+          class_name: "container-sm ml-5",
+        )) %>
+        <% unless is_trade_restricted %>
+          <div class="mt-5" <%= test_selector("business-payment-method") %>>
+            <h4>Payment method</h4>
+            <%= render Primer::Beta::BorderBox.new(mt: 3) do |component| %>
+              <% component.with_body do %>
+                <% if completed_billing_and_shipping_information %>
+                  <%= render Billing::Settings::PaymentMethodFormComponent.new(
+                    target: this_business,
+                    new_name_address_design: true,
+                    signature_view_context: Billing::Zuora::HostedPaymentsPage::BUSINESS_SELF_SERVE_SIGNATURE_VIEW_CONTEXT,
+                    return_to: enterprise_trial_activations_path(this_business)
+                  ) %>
+                <% else %>
+                  <span class="color-fg-muted">
+                    <% if completed_billing_information %>
+                      You have not added shipping information for your account.
+                    <% else %>
+                      You have not added billing and shipping information for your account.
+                    <% end %>
+                  </span>
+                <% end %>
+              <% end %>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
+      <div class='col-md-5'>
+        <%= render Primer::Beta::BorderBox.new do |component| %>
+          <% component.with_body do %>
+            <div class="pb-2">
+              <h4 class="mb-3">Validate your payment method</h4>
+              <p class="color-fg-muted">
+                Valid payment method and billing address are required to provide full access to the GitHub trial.
+              </p>
+              <% if GitHub.multi_tenant_enterprise? %>
+                <p class="color-fg-muted" <%= test_selector("enabling-copilot-in-data-residency-enterprise-note") %>>
+                  Your enterprise’s use of GitHub Copilot is governed by the
+                  <%= render Primer::Beta::Link.new(
+                    href: Copilot::COPILOT_SPECIFIC_TERMS,
+                    classes: "Link--inTextBlock",
+                    target: "_blank"
+                  ) do %>
+                    Copilot Product Specific Terms
+                  <% end %> <%= render(Primer::Beta::Octicon.new(:"link-external", size: :xsmall, color: :accent)) %>.
+                  By enabling GitHub Copilot you are acknowledging that some data will no longer be stored in region.
+                  For more information, please see
+                  <%= render Primer::Beta::Link.new(
+                    href: "#{GitHub.help_url}/admin/data-residency/about-storage-of-your-data-with-data-residency",
+                    classes: "Link--inTextBlock",
+                    target: "_blank"
+                  ) do %>
+                    GitHub’s Copilot Data Residency documentation
+                  <% end %> <%= render(Primer::Beta::Octicon.new(:"link-external", size: :xsmall, color: :accent)) %>.
+                </p>
+              <% end %>
+              <p class="color-fg-muted">
+                Your payment method may receive a $10 pre-authorization request. This is not a charge.
+              </p>
+              <p class="color-fg-default text-semibold">
+                Your payment method will not be charged automatically at the end of the trial.
+              </p>
+            </div>
+            <%= form_tag enterprise_trial_activations_path(this_business), method: :post do %>
+              <%= render Primer::Beta::Button.new(
+                scheme: :primary,
+                type: :submit,
+                block: true,
+                classes: "btn-medium",
+                mb: 2
+              ) do %>
+                Validate and continue
+              <% end %>
+            <% end %>
+            <%= render Primer::Beta::Button.new(
+              scheme: :secondary,
+              tag: :a,
+              block: true,
+              classes: "btn-medium",
+              href: next_path
+            ) do %>
+              Skip for now
+            <% end %>
+          <% end %>
+        <% end %>
+        <% if validate_payment_method_error.present? %>
+          <%= render Primer::Alpha::Banner.new(
+            scheme: :danger,
+            icon: :stop,
+            mt: 2,
+            test_selector: "validate-payment-method-error"
+          ) do %>
+            <%= validate_payment_method_error %>
+          <% end %>
+        <% end %>
+      </div>
+    </div>
+  </div>
+</div>
+
+<% microsoft_analytics_metadata ||= microsoft_analytics_metadata %>
+
+<% if microsoft_analytics_metadata.present? %>
+  <% content_for(:microsoft_analytics_addition) do %>
+    <%= content_tag "microsoft-analytics-event", nil, data: {
+        behavior: "trial",
+        "product-title": microsoft_analytics_metadata[:product_title],
+        "order-id": microsoft_analytics_metadata[:order_id],
+    } %>
+  <% end %>
+<% end %>

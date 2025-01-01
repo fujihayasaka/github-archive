@@ -1,0 +1,96 @@
+<%
+  stealth_preference = GitHub.stealth_email_enabled? && current_user.use_stealth_email? && !current_user.is_enterprise_managed?
+%>
+
+<div id="settings-emails">
+  <p class="color-fg-muted">
+    <% if current_user.scim_managed_user?  %>
+      Email addresses are managed by your external Identity Provider. Please contact your administrator to request changes. Your primary email is the first one assigned to you in your Identity Provider.
+    <% else %>
+      Emails you can use to sign in to your account.
+      <% if stealth_preference %>
+        Your emails will not be used as the 'from' address for web-based Git operations, e.g. edits and merges. All web-based Git operations will be linked to <%= StealthEmail.new(current_user).email %>.
+      <% elsif current_user.emails.any?(&:verified?) %>
+        Verified emails can be used as the author or committer addresses for web-based Git operations, e.g. edits and merges.
+      <% end %>
+    <% end %>
+  </p>
+
+  <%= render Primer::Beta::BorderBox.new(border_radius: 2, mt: 3, mb: 3) do |component| %>
+    <% social_infos = GitHub.social_sisu_enabled?(user: current_user) ? SocialIdentities::domain.social_linked_email_ids_and_providers(current_user.id) : [] %>
+    <% user_emails.each do |email| %>
+      <%
+        if email.is_a?(String)
+          display_email = email
+        else
+          display_email = current_user.is_first_emu_owner? ? current_user.remove_shortcode(email.email) : email.email
+          social_info = social_infos.find { |info| info[:email_id] == email.id }
+        end
+      %>
+      <% component.with_row(h: :full, ml: 0, display: :flex, justify_content: :space_between, vertical_align: :middle) do %>
+        <span>
+          <%= display_email %>
+
+          <%
+            email_verified = email.is_a?(UserEmail) && verification_enabled && email.verified?
+            email_unverified = email.is_a?(UserEmail) && verification_enabled && email.unverified?
+            emu_email_claimed = !GitHub.single_or_multi_tenant_enterprise? && current_user.is_enterprise_managed? && current_user.primary_user_email.claimed?
+            emu_email_unclaimed = !GitHub.single_or_multi_tenant_enterprise? && current_user.is_enterprise_managed? && !current_user.primary_user_email.claimed?
+          %>
+          <span id="labels" class="ml-1">
+            <% if (email.is_a?(UserEmail) && email.primary_role?) || current_user.is_enterprise_managed? %>
+              <%= render Primer::Beta::Label.new(scheme: :accent) do %>Primary<% end %>
+            <% end %>
+            <% if email.is_a?(UserEmail) && email.backup_role? %>
+              <%= render Primer::Beta::Label.new(scheme: :default) do %>Backup<% end %>
+            <% end %>
+            <% if email_verified || emu_email_claimed %>
+              <%= render Primer::Beta::Label.new(scheme: :success) do %>Verified<% end %>
+            <% end %>
+            <% if email_unverified || emu_email_unclaimed %>
+              <%= render Primer::Beta::Label.new(scheme: :warning) do %>Unverified<% end %>
+            <% end %>
+            <% if stealth_preference %>
+              <%= render Primer::Beta::Label.new(scheme: :default) do %>Private<% end %>
+            <% end %>
+            <% if social_info %>
+              <%= render Primer::Beta::Label.new(scheme: :default) do %>Connected to <%= social_info[:provider].to_s.downcase.camelize %><% end %>
+            <% end %>
+          </span>
+
+          <% if current_user.scim_managed_user? || email.primary_role? %>
+            <div class="note">
+              This email address is the default for GitHub notifications, such as replies to issues, pull requests, and similar activity.
+            </div>
+          <% end %>
+          <% if !current_user.change_email_enabled? %>
+            <div class="note">
+              Your email address is managed in your Identity Provider: <%= GitHub.auth.name %>
+            </div>
+          <% end %>
+        </span>
+        <div>
+          <% if current_user.change_email_enabled? %>
+            <%= render partial: "settings/email_preferences/emails_list_action_menu", locals: {
+              email: email,
+              display_email: display_email,
+              social_info: social_info,
+              verification_enabled: verification_enabled,
+              social_disconnect_disabled: social_disconnect_disabled_func&.call(email, email_social_info: social_info),
+              deletion_disabled: deletion_disabled_func&.call(email, email_social_info: social_info),
+              deletion_tooltip: deletion_tooltip_func&.call(email, email_social_info: social_info),
+              deletion_message: deletion_message_func&.call(email),
+              } %>
+          <% elsif !GitHub.single_or_multi_tenant_enterprise? && current_user.is_emu_and_not_first_owner? %>
+            <%= render partial: "settings/email_preferences/emails_list_emu_action_menu", locals: {
+              email: current_user.primary_user_email,
+              display_email: current_user.profile_email,
+              } %>
+          <% else %>
+            <span class="team-label-ldap text-small color-fg-muted"><%= GitHub.auth.name %></span>
+          <% end %>
+        </div>
+      <% end %>
+    <% end %>
+  <% end %>
+</div>

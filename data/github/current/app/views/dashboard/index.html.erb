@@ -1,0 +1,257 @@
+<%# erblint:counter DeprecatedComponentsCounter 4 %>
+<%
+  analytics_dimensions = {
+    currently_following_users_count: current_user.following_count(viewer: current_user),
+    page_type: "activity"
+  }
+  instrument_dashboard_page_view(current_user, payload: analytics_dimensions)
+%>
+
+<% feed = private_feed_path(:atom) %>
+<% content_for :head do %>
+  <%= auto_discovery_link_tag :atom, feed %>
+<% end %>
+
+<%
+  page_info title: current_page?(home_path) ? "GitHub" : "GitHub Dashboard",
+            class: "full-width",
+            footer: false
+%>
+
+<%
+  show_productivity_dashboard_modules =
+    FeatureFlag.vexi.enabled?(:productivity_dashboard, current_user, default: false) || FeatureFlag.vexi.enabled?(:dashboard_lists, current_user, default: false)
+  show_public_preview_features = FeatureFlag.vexi.enabled?(:dashboard_public_preview, current_user, default: false)
+%>
+
+<% billing_manager_orgs = current_user.billing_manager_organizations %>
+<% is_billing_manager = user_is_billing_manager?(current_user, billing_manager_orgs) %>
+<% if is_billing_manager %>
+  <div class="billing-manager-banner clearfix">
+    <div class="container"><%# erblint:disable DeprecatedCustomCss %>
+      <%= primer_octicon(:"credit-card", :height => 32, classes: "billing-manager-icon") %>
+      <div class="billing-manager-banner-text">
+        <div class="billing-manager-banner-title">Manage billing for</div>
+        <% billing_manager_orgs.each do |organization| %>
+          <%= link_to settings_org_billing_path(organization), :class => "btn" do %>
+            <%= organization.safe_profile_name %>
+          <% end %>
+        <% end %>
+      </div>
+    </div>
+  </div>
+<% end %>
+
+<% if display_private_repo_limit_banner? %>
+  <div class="flash-messages">
+    <%= render Primer::Beta::Flash.new(scheme: :warning) do %>
+      <%= form_tag ignore_upgrade_path, method: :post do %>
+        <%= render(Primer::Beta::IconButton.new(
+          icon: :x,
+          type: :submit,
+          scheme: :invisible,
+          classes: "flash-close",
+          mt: -2,
+          aria: { label: "Hide this notice forever" },
+        ))%>
+      <% end %>
+      It appears you're at the private repository limit for your current plan. You can <a class="Link--inTextBlock" href="<%= plan_upgrade_url %>">upgrade now</a> for more private repositories!
+    <% end %>
+  </div>
+<% end %>
+
+<% if display_copilot_snippy_warning? %>
+  <div class="flash-messages">
+    <%= render(Primer::Beta::Flash.new(scheme: :warning, mb: 4, test_selector: "snippy-dashboard-flash-warning"))  do |component| %>
+      <div class="d-flex flex-justify-between">
+        <%= render(Primer::Beta::Octicon.new(icon: :alert, mt: 1)) %>
+        <div>
+          Your GitHub Copilot setup is incomplete. Please go to your settings page and complete your setup.
+        </div>
+        <%= render(Primer::Beta::Link.new(href: "/settings/copilot", classes: "Link--inTextBlock")) do %>
+          <%= render(Primer::ButtonComponent.new(size: :small)) { "GitHub Copilot Setup" } %>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+<% end %>
+
+<% cfb_trial = copilot_business_trial %>
+
+<% if display_copilot_trial_warning? %>
+  <%= render Primer::Beta::Flash.new(icon: :copilot, mb: 4, test_selector: "cfi-trial-expiring-warning") do %>
+    You have <%= pluralize(copilot_days_left_on_trial, "day") %> left on your GitHub Copilot trial.
+  <% end %>
+<% else %>
+  <% if cfb_trial && cfb_trial.days_left < 5 && cfb_trial.ends_at >= 3.days.ago %>
+    <%= render Copilot::BusinessTrialStatusBannerComponent.new(
+      business_trial: cfb_trial, show_after_expired: true, within_tile: false
+    ) %>
+  <% end %>
+<% end %>
+
+<%= render Sponsors::PotentialSponsorableBannerComponent.new %>
+
+<% if show_new_user_github_education_banner? %>
+  <%= render "dashboard/github_education_banner_new_user" %>
+<% end %>
+
+<div data-issue-and-pr-hovercards-enabled data-sponsors-listing-hovercards-enabled>
+  <div id="dashboard" class="dashboard">
+    <% content_for :left_column do %>
+      <% if show_profile_navigation? %>
+          <%= render partial: "dashboard/profile_navigation" %>
+      <% else %>
+      <div class="dashboard-sidebar">
+        <%= render partial: "dashboard/left_column",
+                   locals: { teams: teams, viewer: current_user, user_repo_query: query, team_query: team_query } %>
+      </div>
+      <% end %>
+    <% end %>
+
+    <% content_for :right_column do %>
+      <% track_render_partial("dashboard/right_column") do %>
+        <%= render partial: "dashboard/right_column" %>
+      <% end %>
+    <% end %>
+
+    <h1 class="sr-only">Dashboard</h1>
+
+    <% if FeatureFlag.vexi.enabled?(:productivity_dashboard, current_user, default: false) %>
+      <div class="news" data-hpc>
+        <%= notices_for(current_user) %>
+
+        <%=
+          render(
+            ConditionalAccess::UnauthorizedAccountsComponent.new(
+              resource_label: "activity",
+              classes: "Box mb-1 color-bg-default",
+              container_classes: "mb-3",
+              cap_filter: cap_filter,
+              group_saml: true,
+              return_to: "/"
+            )
+          )
+        %>
+
+        <%= render Dashboard::CopilotEntrypointComponent.new %>
+
+        <% if show_nudges_section %>
+          <%= render partial: "dashboard/promos/digital_front_door_new_tasks_nudge" %>
+        <% end %>
+
+        <%= render partial: "dashboard/left_column_content_to_center_for_narrow_screens", locals: {query: query, teams: teams, team_query: team_query} %>
+
+        <% if show_zero_user_dashboard %>
+          <%= render_react_partial(props: dashboard_refresh_props, name: "nux-dashboard-refresh") %>
+        <% end %>
+
+        <dashboard-tab-panels class="position-relative">
+          <div class="position-absolute right-0 mt-3 d-none d-sm-block">
+            <% if show_public_preview_features %>
+              <%= render(Primer::Beta::Label.new(scheme: :success)) { "Preview" } %>
+            <% else %>
+              <%= render(Primer::Beta::Label.new(scheme: :secondary)) { "Private preview" } %>
+            <% end %>
+            <% if current_user.employee? || show_public_preview_features %>
+              <%= render(Primer::Beta::Link.new(href: "https://gh.io/dashboard-vnext-feedback", font_size: :small, ml: 1, "data-test-selector": "dashboard-vnext-feedback-link")) { "Give feedback" } %>
+            <% end %>
+          </div>
+          <%= render(Primer::Alpha::UnderlinePanels.new(label: "Dashboard navigation", test_selector: "dashboard-tab-nav")) do |component| %>
+            <% component.with_tab(
+                selected: selected_tab == "my-work-tab",
+                id: "my-work-tab",
+                data: {
+                  action: "click:dashboard-tab-panels#tabClick",
+                  **analytics_click_attributes(
+                    category: "productivity_dashboard",
+                    action: "click.my_work_tab",
+                  )
+                }
+              ) do |tab| %>
+              <% tab.with_text { "My work" } %>
+              <% tab.with_panel(mt: 3) do %>
+                <%= render_react_partial(
+                  name: "dashboard-lists",
+                  props: {
+                    userDisplayLogin: current_user.display_login,
+                    showProductivityDashboardModules: show_productivity_dashboard_modules,
+                    showAgentsModule: show_agents_module
+                  }
+                ) %>
+              <% end %>
+            <% end %>
+            <% component.with_tab(
+                selected: selected_tab == "feed-tab",
+                id: "feed-tab",
+                data: {
+                  action: "click:dashboard-tab-panels#tabClick",
+                  **analytics_click_attributes(
+                    category: "productivity_dashboard",
+                    action: "click.feed_tab"
+                  )
+                }
+              ) do |tab| %>
+              <% tab.with_text { "Feed" } %>
+              <% tab.with_panel(mt: 3) do %>
+                <%= render partial: "dashboard/feed_container", locals: { turbo_src: turbo_src, feed_title: feed_title} %>
+              <% end %>
+            <% end %>
+          <% end %>
+        </dashboard-tab-panels>
+      </div>
+    <% else %>
+
+      <h2 class="mb-2">Home</h2>
+
+      <div class="news" data-hpc>
+
+        <%= notices_for(current_user) %>
+
+        <%=
+          render(
+            ConditionalAccess::UnauthorizedAccountsComponent.new(
+              resource_label: "activity",
+              classes: "Box mb-1 color-bg-default",
+              container_classes: "mb-3",
+              cap_filter: cap_filter,
+              group_saml: true,
+              return_to: "/"
+            )
+          )
+        %>
+
+        <%= render Dashboard::CopilotEntrypointComponent.new %>
+
+        <% if show_nudges_section %>
+          <%= render partial: "dashboard/promos/digital_front_door_new_tasks_nudge" %>
+        <% end %>
+
+        <% if user_feature_enabled?(:dashboard_lists) || user_feature_enabled?(:dashboard_pull_request_list) %>
+          <%= render_react_partial(
+            name: "dashboard-lists",
+            props: {
+              userDisplayLogin: current_user.display_login,
+              showProductivityDashboardModules: show_productivity_dashboard_modules,
+              showAgentsModule: show_agents_module
+            }
+          ) %>
+        <% end %>
+
+        <%= render partial: "dashboard/left_column_content_to_center_for_narrow_screens", locals: {query: query, teams: teams, team_query: team_query} %>
+
+        <% if show_zero_user_dashboard %>
+          <%= render_react_partial(props: dashboard_refresh_props, name: "nux-dashboard-refresh") %>
+        <% end %>
+
+        <% unless onboarding_hide_feed %>
+          <%= render partial: "dashboard/feed_container", locals: { turbo_src: turbo_src, feed_title: feed_title} %>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+</div>
+
+<% content_for :scripts do %><%# erblint:disable NoContentForScripts %>
+  <%= javascript_bundle :dashboard %>
+<% end %>

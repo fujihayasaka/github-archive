@@ -1,0 +1,46 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: rebuild-package-release-vulnerabilities-count
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "rebuild-package-release-vulnerabilities-count"
+        heaven.githubapp.com/image-placeholder: "dependency-graph-api"
+spec:
+    schedule: "*/45 * * * *" # Every 45 minutes.
+    concurrencyPolicy: Forbid # Do not allow multiple instances of the same job to run, at the same time.
+    successfulJobsHistoryLimit: 2
+    failedJobsHistoryLimit: 5
+    jobTemplate:
+        spec:
+            template:
+                spec:
+                    dnsPolicy: ClusterFirst
+                    volumes:
+                        - name: github-metadata
+                          hostPath:
+                            path: /etc/github/metadata.json
+                    restartPolicy: Never
+                    containers:
+                        - name: rebuild-package-release-vulnerabilities-count
+                          image: dependency-graph-api
+                          command: ["/usr/bin/tools/istio-job-wrapper", "script/run-with-lock", "-lock=rebuild_package_release_vulnerabilities_count", "-wait=false", "bundle", "exec", "rake", "rebuild_package_release_vulnerabilities_count"]
+                          envFrom:
+                            - configMapRef:
+                                name: environment
+                            - secretRef:
+                                name: vault-secrets
+                          env:
+                            - name: DOGSTATSD_HOST
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: spec.nodeName
+                          volumeMounts:
+                            - mountPath: /etc/github/metadata.json
+                              name: github-metadata
+                              readOnly: true
+                          resources:
+                            requests:
+                                memory: "500Mi"
+                            limits:
+                                cpu: 8000m
+                                memory: "8Gi"

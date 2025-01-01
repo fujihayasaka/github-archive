@@ -1,0 +1,50 @@
+# typed: true
+# frozen_string_literal: true
+
+require "test_helper"
+
+class <%= value_test_class_name %> < GitHub::TestCase
+  fixtures do
+    @org = create :enterprise_linked_organization
+    @business = @org.business
+
+    # TODO: Update this to use the right factory and create appropriate test data for your domain
+    @<%= target_class_name.underscore %> = create :<%= target_class_name.underscore %>
+
+    @definition = create :<%= target_class_name.underscore %>_custom_property_definition, source: @org, property_name: "environment"
+    @biz_definition = create :<%= target_class_name.underscore %>_custom_property_definition, source: @business, property_name: "biz_environment"
+  end
+
+  context "save and validate" do
+    test "should not save without data" do
+      assert_raises ActiveRecord::NotNullViolation do
+        <%= value_class_name %>.new.save
+      end
+    end
+
+    test "should not save without target_id" do
+      assert_raises ActiveRecord::NotNullViolation do
+        <%= value_class_name %>.create(
+          definition_id: @definition.id,
+          value: "production"
+        )
+      end
+    end
+
+    test "should save when valid params" do
+      assert <%= value_class_name %>.create(
+        target_id: @<%= target_class_name.underscore %>.id,
+        definition_id: @definition.id,
+        value: "production"
+      )
+    end
+  end
+
+  context "instrumentation" do
+    test "should instrument with the correct class name when a <%= target_class_name.underscore %>_custom_property_value is created" do
+      events = subscribe("<%= target_class_name.underscore %>_custom_property_value.create")
+      create :<%= target_class_name.underscore %>_custom_property_value, definition: @definition, target: @<%= target_class_name.underscore %>, value: "production"
+      refute_nil event = events.pop, "an event was expected"
+    end
+  end
+end

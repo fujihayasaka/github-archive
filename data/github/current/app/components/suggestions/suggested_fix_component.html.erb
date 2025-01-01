@@ -1,0 +1,129 @@
+<%= render Primer::Box.new(mb: 3, block: true, border: true, border_radius: 2, test_selector: "ai-suggested-fix") do %>
+  <%= render Primer::Box.new(
+    pl: 2,
+    pr: 3,
+    py: 2,
+    display: :flex,
+    block: true,
+    border: :bottom,
+    bg: :subtle,
+    style: "border-radius: 0.375rem 0.375rem 0 0;"
+  ) do %>
+    <%= render Primer::Beta::Octicon.new(:copilot, color: :muted, m: 1) %>
+    <%= render Primer::Beta::Text.new(tag: :p, m: 0, ml: 1) do %>
+      <strong>Copilot Autofix</strong>
+      <%= render(Primer::Beta::Label.new(scheme: :secondary)) { "AI" } %>
+      <span class="color-fg-muted">
+        generated a fix
+        <% if generated_at %>
+          <%= time_ago_in_words(generated_at) %> ago
+        <% end %>
+      </span>
+    <% end %>
+  <% end %>
+
+  <div class="comment-body markdown-body soft-wrap css-overflow-wrap-anywhere user-select-contain d-block" <%= test_selector("ai-suggested-fix-description") %>>
+    <%= suggested_fix_description %>
+  </div>
+<% end %>
+
+<div class="soft-wrap">
+  <% suggested_fix_diff_entries.each do |diff_entry| %>
+    <%= render Suggestions::SplitDiffComponent.new(
+      diff_entry: diff_entry,
+      repository: repository,
+      alert_commit_oid: alert_commit_oid,
+      file_highlighting: suggested_fix_file_highlighting.fetch(diff_entry.path, nil),
+      alert_location: alert_location,
+    ) do |c| %>
+      <% c.with_annotation_on_alert_location do %>
+        <%= render Suggestions::AlertAnnotationComponent.new(
+          alert_title: alert_title,
+          alert_description_html: alert_description_html,
+          alert_code_paths_url: alert_code_paths_url,
+          alert_rule_severity: alert_rule_severity,
+          alert_help_html: alert_help_html
+        ) %>
+      <% end %>
+    <% end %>
+  <% end %>
+</div>
+
+<%= render CodeScanning::SuggestedFixDependencyMetadataComponent.new(dependency_metadata: suggested_fix_dependency_metadata) %>
+
+<div class="d-flex pb-3" <%= test_selector("ai-commit-autofix-actions") %>>
+  <%= render Primer::Box.new(display: :flex, justify_content: :center) do %>
+    <%= render(GitHub::BetaFlagComponent.new(ml: 1, display: :block, align_self: :center, test_selector: "thirdparty-autofix-beta-label")) if is_from_thirdparty_tool? %>
+    <%= render Primer::Box.new(display: :flex, justify_content: :center) do %>
+    <%= render Primer::Beta::Text.new(
+          tag: :p,
+          m: 0,
+          ml: 1,
+          mr: 1,
+          font_size: :small,
+          color: :muted,
+          align_self: :center,
+        ) do %>
+          <%= render Primer::Beta::Link.new(
+            classes: "Link--inTextBlock",
+            muted: false,
+            scheme: :default,
+            href: autofix_docs_url,
+            font_size: :small,
+          ).with_content("Copilot Autofix for #{alert_tool_name}")%>
+          is powered by AI and may make mistakes. Always verify output.
+        <% end %>
+    <% end %>
+  <% end %>
+  <react-partial-anchor class="ml-auto">
+    <commit-autofix-action>
+      <%= render(Primer::Beta::ButtonGroup.new(scheme: :primary, size: :medium)) do |component| %>
+        <% component.with_button(
+          id: "suggested-fix-component-anchor",
+          classes: "cursor-wait",
+          data: {
+            "target": "react-partial-anchor.anchor",
+            "branch-type": "new",
+            "inital-disabled": disable_suggested_fix_button?
+          },
+          disabled: disable_suggested_fix_button?,
+          style: ("cursor: not-allowed;" if disable_suggested_fix_button?),
+          test_selector: "suggested-fix-component-anchor"
+        ) do |b| %>
+          Commit to new branch
+          <% if disable_suggested_fix_button? %>
+            <% b.with_tooltip(
+              type: :description,
+              text: "You don't have permission to commit to a branch.",
+              direction: :n,
+              test_selector: "disable-suggested-fix-tooltip"
+            ) %>
+          <% end %>
+        <% end %>
+        <% component.with_menu_button(
+          button_arguments: {
+            "aria-label": "Branch commit options",
+            disabled: disable_suggested_fix_button?,
+            test_selector: "branch-commit-options-button",
+          },
+          menu_arguments: { anchor_align: :end, select_variant: :single }
+        ) do |menu, button| %>
+          <% menu.with_item(label: "Commit to new branch", active: true, data: { action: "click:commit-autofix-action#menuSelect", label: "Commit to new branch" }, "data-branch-type": "new") do |item| %>
+            <% item.with_description.with_content("Fix this alert by committing the autofix suggestion to a new branch") %>
+          <% end %>
+          <% menu.with_divider %>
+          <% menu.with_item(label: "Commit to branch", data: { action: "click:commit-autofix-action#menuSelect", label: "Commit to branch" }, "data-branch-type": "existing") do |item| %>
+            <% item.with_description.with_content("Fix this alert by committing the autofix suggestion to an existing branch") %>
+          <% end %>
+        <% end %>
+      <% end %>
+    </commit-autofix-action>
+    <template data-target="react-partial-anchor.template">
+      <%= render_react_partial(
+        name: "create-branch-dialog",
+        props: create_branch_dialog_props,
+        disable_ssr: true,
+      ) %>
+    </template>
+  </react-partial-anchor>
+</div>

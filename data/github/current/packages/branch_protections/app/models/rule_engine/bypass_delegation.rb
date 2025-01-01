@@ -1,0 +1,104 @@
+# typed: strict
+# frozen_string_literal: true
+
+module RuleEngine
+  module BypassDelegation
+    extend T::Helpers
+    extend self
+    requires_ancestor { Kernel }
+
+    sig { params(rule_suite: RuleSuite, request_type: String, repo: T.nilable(Repository)).returns(String) }
+    def create_ruleset_bypass_url(rule_suite, request_type, repo = nil)
+      repo = T.must(repo || rule_suite.repository)
+      id = Base64.urlsafe_encode64("#{request_type}-#{rule_suite.id}-#{rule_suite.repository_id}")
+      UrlHelpers.ruleset_new_bypass_request_url(repo.owner, repo, id, host: GitHub.url)
+    end
+
+    sig { params(request: Exemptions::ExemptionRequest, repo: T.nilable(Repository)).returns(String) }
+    def ruleset_bypass_url(request, repo = nil)
+      repo = T.must(repo || request.repository)
+      UrlHelpers.ruleset_bypass_request_url(repo.owner, repo, request.number, host: GitHub.url)
+    end
+
+    sig { params(rule_suite: RuleSuite, requester: RuleEngine::Types::Actor, request_type: String, requester_comment: T.nilable(String), repo: T.nilable(Repository)).returns(Exemptions::ExemptionRequest) }
+    def create_ruleset_request!(rule_suite, requester, request_type, requester_comment = nil, repo = nil)
+      repo = T.must(repo || rule_suite.repository)
+      raise UnauthorizedOnRoot unless repo.readable_by?(requester)
+
+      existing_requests = existing_ruleset_requests(rule_suite, requester, request_type)
+      existing_requests.each do |request|
+        request.status = :cancelled
+        request.save!
+      end
+
+      resource_identifier = case request_type
+      when "push_ruleset_bypass"
+        rule_suite.after_oid
+      when "repository_policy_ruleset_bypass"
+        rule_suite.id
+      else
+        rule_suite.after_oid
+      end
+
+      Exemptions::ExemptionRequest.create!(
+        resource_owner: rule_suite,
+        requester: requester,
+        resource_identifier:,
+        repository: repo,
+        request_type: request_type,
+        requester_comment:)
+    end
+
+    sig { params(rule_suite: RuleSuite, requester: T.any(User, PublicKey), request_type: String).returns(T.nilable(Exemptions::ExemptionRequest)) }
+    def existing_ruleset_request(rule_suite, requester, request_type)
+      existing_requests = existing_ruleset_requests(rule_suite, requester, request_type)
+        .sort_by { |request| request.resource_owner.created_at }
+        .reverse
+
+      existing_request = existing_requests.first
+
+      return nil if existing_request.blank?
+      return nil if existing_request.resource_owner != rule_suite && rule_suite.created_at >= existing_request.resource_owner.created_at
+
+      existing_request
+    end
+
+    private
+
+    sig { params(rule_suite: RuleSuite, requester: T.any(User, PublicKey), request_type: String).returns(T::Array[Exemptions::ExemptionRequest]) }
+    def existing_ruleset_requests(rule_suite, requester, request_type)
+      resource_identifier = case request_type
+      when "push_ruleset_bypass"
+        rule_suite.after_oid
+      when "repository_policy_ruleset_bypass"
+        if rule_suite.event_action_type == "RuleEngine::EventActionRepositoryOperation"
+          if FeatureFlag.vexi.enabled?(:existing_ruleset_requests_join_on_repo, default: false)
+            # Find all RulesSuites with the same repository, same actor, and same event action operation
+            RuleEngine::RuleSuite.where(repository_id: rule_suite.repository_id, actor: requester, event_action_type: rule_suite.event_action.class.to_s)
+            .joins("INNER JOIN event_action_repository_operations ON repository_rule_suites.event_action_id = event_action_repository_operations.id AND event_action_repository_operations.repository_id = repository_rule_suites.repository_id")
+            .where("event_action_repository_operations.operation = '#{rule_suite.event_action.operation}'").pluck(:id)
+          else
+            # Find all RulesSuites with the same repository, same actor, and same event action operation
+            RuleEngine::RuleSuite.where(repository_id: rule_suite.repository_id, actor: requester, event_action_type: rule_suite.event_action.class.to_s)
+            .joins("LEFT JOIN event_action_repository_operations ON event_action_repository_operations.repository_id = #{rule_suite.event_action.repository_id} AND event_action_repository_operations.operation = '#{rule_suite.event_action.operation}'")
+            .where("repository_rule_suites.event_action_id = event_action_repository_operations.id").pluck(:id)
+          end
+        else
+          return []
+        end
+      else
+        rule_suite.after_oid
+      end
+
+      Exemptions::ExemptionRequest.pending.not_expired.where(
+        request_type: request_type,
+        resource_owner_type: rule_suite.class.name,
+        resource_identifier:,
+        repository_id: T.must(rule_suite.repository).id,
+        requester:,
+      ).to_a
+    end
+
+    class UnauthorizedOnRoot < StandardError; end
+  end
+end

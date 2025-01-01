@@ -1,0 +1,87 @@
+<%# erblint:counter DeprecatedComponentsCounter 3 %>
+<%# rubocop:disable Lint/InstanceVariable %>
+<%
+  page_info(
+    title: %{Edit release · #{current_repository.name_with_display_owner}},
+    container_xl: true,
+    selected_link: :repo_releases,
+  )
+  @disable_branch_selector = true
+
+  marketplace_view = Releases::ActionMarketplaceView.new(
+    release: @release,
+    current_user: current_user,
+    marketplace_enabled: GitHub.marketplace_enabled?,
+    query_params: params
+  )
+%>
+
+<%= render layout: "layouts/repository_container", locals: { repository: current_repository } do %>
+<div class="clearfix container-xl px-3 px-md-4 px-lg-5 mt-4">
+  <%= render(Primer::Beta::Breadcrumbs.new(mb: 2, test_selector: "release-edit-breadcrumb")) do |component| %>
+    <% component.with_item(href: releases_path(current_repository)) do %>Releases<% end %>
+    <% component.with_item(href: request.path) do %>
+      Edit <%= @release.tagged? ? @release.tag.name_for_display : @release.name %>
+    <% end %>
+  <% end %>
+  <%= render Primer::Beta::Subhead.new(mb: 4) do |component| %>
+    <% component.with_heading(tag: :h3, size: :medium) do %>
+      <strong>Edit <%= @release.display_name %></strong>
+    <% end %>
+  <% end %>
+ <h1 class='sr-only'>Edit <%= @release.display_name %></h1>
+  <div class="clearfix">
+    <div class="float-left col-12 col-md-9 pr-md-3">
+      <% if @release.immutable? %>
+        <%= render(Primer::Alpha::Banner.new(icon: :info, mb: 4, test_selector: "immutable-release-banner")) do %>
+          As an immutable release, only release title and notes can be updated after publishing.
+          <%= render(Primer::Beta::Link.new(href: "#{GitHub.help_url}/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases", classes: "Link--inTextBlock", scheme: :default, underline: true)) { "Learn more about immutable releases" } %>
+        <% end %>
+      <% end %>
+      <% if !@release.new_record? && @release.draft? %>
+        <div class="flash-messages">
+          <%= render Primer::Beta::Flash.new(scheme: :warning) do %>
+            <%= render layout: "shared/details_dialog", locals: {
+              button_text: "Discard draft",
+              title: "Are you sure?",
+              button_class: "btn btn-sm btn-danger",
+              details_class: "flash-action"
+            } do %>
+              <%= render Primer::Beta::Flash.new(full: true, scheme: :danger, icon: :alert) do %>
+                This will delete the information for this draft.
+              <% end %>
+              <div class="Box-body overflow-auto">
+                <%= form_for 'delete_release_path',
+                  :url  => release_path(@release),
+                  :html => { :method => :delete } do %>
+                  <%= render Primer::ButtonComponent.new(type: :submit, scheme: :danger, block: true) do %>Delete this draft<% end %>
+                <% end %>
+              </div>
+            <% end %>
+            This is a draft and won’t be seen by the public unless it’s published.
+          <% end %>
+        </div>
+      <% end %>
+
+      <% if marketplace_view.show_locked? %>
+        <% if marketplace_view.potential_marketplace_action? && !marketplace_view.action_package_listed_to_marketplace? %>
+          <%= render partial: "releases/action_marketplace_locked", locals: { view: marketplace_view } %>
+        <% end %>
+      <% end %>
+      <%= form_for @release,
+          :url => release_path(@real_release),
+          :html => {
+            :method => :put,
+            :class => "js-release-form",
+            :"data-repo-url" => repository_path(current_repository)
+          } do |f| %>
+        <%= render partial: "releases/release_form", locals: { f: f, marketplace_view: marketplace_view } %>
+      <% end %>
+    </div>
+
+    <div class="float-left col-12 col-md-3 pl-md-2 pt-4 pt-md-0">
+      <%= render :partial => "releases/suggestions" %>
+    </div>
+  </div>
+</div>
+<% end %>

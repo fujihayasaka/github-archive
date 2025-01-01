@@ -1,0 +1,35 @@
+#!/bin/bash
+
+set -euo pipefail
+source script/ui-manifest-functions.sh
+
+if [ -z "$UI_MANIFEST_SHA" ]; then
+  echo "UI_MANIFEST_SHA environment variable must be set"
+  exit 1
+fi
+
+# Pull the manifest from the CDN
+max_attempts=120
+attempt=1
+
+function is_manifest_available() {
+  # Check if download succeeds (return 0) or fails (return 1) without exiting the script
+  if download_ui_manifest "$UI_MANIFEST_SHA"; then
+    return 0  # Available
+  else
+    return 1  # Not available
+  fi
+}
+
+# Check if the manifest is available at the URL
+while ! is_manifest_available; do
+  if [ "$attempt" -ge "$max_attempts" ]; then
+    echo "UI manifest not available after $max_attempts attempts."
+    exit 1
+  fi
+  echo "UI manifest not available yet. Attempt $attempt/$max_attempts. Retrying in 5 seconds..."
+  attempt=$((attempt + 1))
+  sleep 5
+done
+
+echo "UI manifest is available for sha ${UI_MANIFEST_SHA}."

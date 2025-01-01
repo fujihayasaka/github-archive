@@ -1,0 +1,62 @@
+<% if review.user %>
+  <p class="d-flex">
+    <%= render "issues/sidebar/user", user: review.user %>
+
+    <% if review.commented? && enforced_review = pull_request.latest_enforced_review_for(review.user) %>
+      <% review = enforced_review %>
+    <% end %>
+
+    <%
+      review_status_id="review-status-#{review.user}"
+      reviewer_display_name = review.is_a?(Team) ? review.user : review.user.display_login
+
+      if review.approved?
+        review_status_label = "#{reviewer_display_name} approved these changes"
+        if review_by_writer[review]
+          review_status_icon = primer_octicon(:check, color: :success)
+        else
+          review_status_icon = primer_octicon(:check, color: :muted)
+        end
+      elsif review.changes_requested?
+        review_status_label = "#{reviewer_display_name} requested changes"
+        if review_by_writer[review]
+          review_status_icon = review_state_icon("changes_requested", :class => "color-fg-danger")
+        else
+          review_status_icon = review_state_icon("changes_requested", :class => "color-fg-muted")
+        end
+      else
+        review_status_label = "#{reviewer_display_name} left review comments"
+        review_status_icon = primer_octicon(:comment, color: :muted)
+      end
+    %>
+    <a id="<%=review_status_id%>" class="flex-order-1" href="<%= pull_request_files_with_range_path(pull_request.repository.owner, pull_request.repository, pull_request.number, review.head_sha) %>">
+      <span class="reviewers-status-icon text-center">
+        <%= review_status_icon %>
+      </span>
+    </a>
+    <%= render Primer::Alpha::Tooltip.new(for_id: review_status_id, text: review_status_label, type: :label, direction: :nw) %>
+
+    <% if pull_request.open? && can_request_bot_review(current_user, review.user, current_repository) && issue_permissions(pull_request.issue, current_user, :review_re_requestable) %>
+      <%
+        hydro_tracking = hydro_click_tracking_attributes("rerequest_review.sidebar", { pull_request_id: pull_request.id, subject_id: review.user.id, actor_id: current_user.id, action: "REREQUESTED" })
+        review_sync_id="re-request-review-#{review.user}"
+      %>
+      <%= button_tag(id: review_sync_id, name: "re_request_reviewer_id", value: review.user_id, type: "submit", class: "mr-2 btn-link muted-icon", data: hydro_tracking) do %>
+        <span class="reviewers-status-icon">
+          <%= primer_octicon(:sync) %>
+        </span>
+      <% end %>
+      <%= render Primer::Alpha::Tooltip.new(for_id: review_sync_id, text: "Re-request review", type: :label, direction: :nw) %>
+    <% end %>
+    <% render_nothing_if_database_fails do %>
+      <% if codeowners.include?(review.user) %>
+        <%= button_tag(id: "codeowner-#{review.user}", type: "button", class: "mr-2 btn-link muted-icon") do %>
+          <span class="reviewers-status-icon">
+            <%= primer_octicon(:"shield-lock") %>
+          </span>
+        <% end %>
+        <%= render Primer::Alpha::Tooltip.new(for_id: "codeowner-#{review.user}", text: "#{reviewer_display_name} is a code owner", type: :label, direction: :nw) %>
+      <% end %>
+    <% end %>
+  </p>
+<% end %>

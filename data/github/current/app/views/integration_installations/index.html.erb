@@ -1,0 +1,107 @@
+<%# view is an instance of IntegrationInstallations::IndexView %>
+
+<% if current_context.is_a?(Repository) %>
+  <% page_info \
+    container_xl: true,
+    title: "GitHub Apps",
+    selected_link: :integration_installations,
+    hide_marketplace_retargeting_notice: true,
+    hide_marketplace_pending_installations_notice: true %>
+<% else %>
+  <% page_info \
+    title: "Installed GitHub Apps",
+    selected_link: :integration_installations,
+    sidebar: :settings,
+    hide_marketplace_retargeting_notice: true,
+    hide_marketplace_pending_installations_notice: true %>
+<% end %>
+
+<% content = capture do %>
+  <% case current_context %>
+  <% when Repository, Organization %>
+    <%= render Primer::Beta::Subhead.new do |component| %>
+     <% component.with_heading(tag: :h2) do %>Installed GitHub Apps<% end %>
+    <% end %>
+  <% when Business %>
+    <%= render Primer::Beta::Subhead.new do |component| %>
+
+    <% end %>
+  <% else %>
+    <%= render partial: "navigation/application_settings" %>
+  <% end %>
+
+  <% if view.installations.any? %>
+    <p class="text-small color-fg-muted">
+      <%= render partial: "integration_installations/subhead_description" %>
+    </p>
+    <div class="Box">
+      <% view.installations.each do |install| %>
+        <%= render partial: "integration_installations/installation_row", locals: { view: view, installation: install } %>
+      <% end %>
+    </div>
+
+    <div class="paginate-container">
+      <%= will_paginate view.installations %>
+    </div>
+
+  <% end %>
+
+  <% if view.installations.empty? && view.installation_requests.empty? %>
+    <%=render Primer::Beta::Blankslate.new(spacious: :spacious) do |component| %>
+      <% component.with_visual_icon(icon: :download) %>
+      <% component.with_heading(tag: :h2).with_content("No installed GitHub Apps") %>
+      <% component.with_description { "You have no GitHub Apps installed on this account." } %>
+
+      <% if GitHub.multi_tenant_enterprise? || GitHub.enterprise? %>
+        <% component.with_primary_action(href: gh_settings_apps_path(current_user)).with_content("My GitHub Apps") %>
+      <% else %>
+        <% component.with_primary_action(href: marketplace_path).with_content("Visit Marketplace") %>
+        <% component.with_secondary_action(href: gh_settings_apps_path(current_user)).with_content("My GitHub Apps") %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if view.can_review_pending_requests? %>
+    <hr class="border-0 border-top my-3">
+    <%= render(Primer::Beta::Heading.new(tag: :h4, mb: 1)) { "Pending GitHub Apps installation requests" }  %>
+    <p>Members in your organization can request that GitHub Apps be installed. Pending requests are listed below.</p>
+    <% if view.installation_requests.any? %>
+      <div class="Box">
+        <% view.installation_requests.each do |installation_request| %>
+          <%= render partial: "integration_installations/installation_request", locals: {view: view, installation_request: installation_request} %>
+        <% end %>
+      </div>
+    <% end %>
+  <% end %>
+
+
+
+
+<% end %>
+
+
+<%# We capture and render within the view so that we can use the appropriate layout partial, not an actual layout file %>
+<% if current_context.is_a?(Repository) %>
+  <%= render layout: "edit_repositories/edit" do %>
+    <%= content %>
+  <% end %>
+<% elsif current_context.is_a?(Organization) %>
+  <%= render layout: "orgs/settings/layout" do %>
+    <%= content %>
+  <% end %>
+<% elsif current_context.is_a?(Business) %>
+  <%= render layout: "businesses/layout",
+    locals: {
+      business: this_business,
+      title: "GitHub Apps",
+      container_attributes: "itemscope itemtype='http://schema.org/Business'",
+      header_component_action: new_enterprise_integration_button_for(current_context),
+      } do %>
+    <%= render "businesses/integrations/tabs" %>
+    <%= content %>
+  <% end %>
+<% else %>
+  <%= render layout: "settings/settings" do %>
+    <%= content %>
+  <% end %>
+<% end %>

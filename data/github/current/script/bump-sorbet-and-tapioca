@@ -1,0 +1,36 @@
+#!/bin/bash
+# Bump Sorbet and Tapioca versions, regenerate Tapioca RBI files, check for new errors.
+
+set -euo pipefail
+set -x
+
+SORBET_NEXT_VERSION=$(awk '$1 == "sorbet_next_version" {gsub(/"/, "",$3); print $3}' Gemfile)
+SORBET_CURRENT_VERSION=$(grep -E "sorbet-runtime \([0-9]+\.[0-9]+\.[0-9]+\)$" Gemfile.lock | sed -n 's/.*(\(.*\))/\1/p')
+
+if [ $SORBET_CURRENT_VERSION == $SORBET_NEXT_VERSION ] ; then
+  echo "The current version of Sorbet is the same as the next version. Skipping update."
+else
+  export SORBET_NEXT=1
+  bundle update sorbet-runtime sorbet sorbet-static-and-runtime --conservative
+fi
+
+TAPIOCA_NEXT_VERSION=$(awk '$1 == "tapioca_next_version" {gsub(/"/, "",$3); print $3}' Gemfile)
+TAPIOCA_CURRENT_VERSION=$(grep -E "tapioca \([0-9]+\.[0-9]+\.[0-9]+\)$" Gemfile.lock | sed -n 's/.*(\(.*\))/\1/p')
+
+if [ $TAPIOCA_CURRENT_VERSION == $TAPIOCA_NEXT_VERSION ] ; then
+  echo "The current version of Tapioca is the same as the next version. Skipping update."
+else
+  export SORBET_NEXT=1
+  bundle update tapioca
+fi
+
+script/bootstrap
+
+echo "Regenerating Tapioca gem RBI files..."
+bin/tapioca gem
+
+echo "Regenerating Tapioca DSL RBI files..."
+bin/tapioca dsl
+
+echo "Checking for new errors..."
+bin/parse-sorbet-errors

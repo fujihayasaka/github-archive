@@ -1,0 +1,217 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - unicorn-api-graphql/
+  - ../../base/commonBase
+  - ../../base/proxima
+
+components:
+  - ../../base/istio
+  - ../../base/metric-attribution
+
+configMapGenerator:
+  - name: elasticsearch
+    behavior: merge
+    literals:
+      - DUMMY=dummy
+  - name: unicorn-nginx-conf
+    behavior: merge
+    files:
+      - nginx.conf
+  # This is duplicated here because it does not inherity from the overlay/proxima
+  - name: observability-config
+    behavior: merge
+    literals:
+      - SERVICE_MESH_ENABLED=true
+      - OTEL_EXPORTER_OTLP_COMPRESSION=none
+
+images:
+  - name: octofactory.service.private-us-east-1.github.net/moda-artifacts-docker/docker-nginx
+    digest: sha256:d0ef7e93ea4b71d6e84acc0d9860e4d6dd4e219afdce99b2481bfa9506446cdc
+
+replicas:
+  - name: sharedworker
+    count: 4
+  - name: unicorn
+    count: 9
+  - name: unicorn-api
+    count: 19
+  - name: unicorn-api-graphql
+    count: 5
+  - name: unicorn-gitauth-api
+    count: 4
+  - name: unicorn-internal-api
+    count: 6
+  - name: dependabot-alerts-alerting-progress-processor
+    count: 3
+  - name: dependabot-alerts-vulnerable-dependency-processor
+    count: 3
+  - name: memex-events-processor
+    count: 3
+  - name: memex-live-updates-processor
+    count: 3
+  - name: unicorn-performance
+    count: 3
+
+# unicorn-api is 3x unicorn web on dotcom
+patches:
+  - target:
+      kind: Deployment
+      name: unicorn-api
+    patch: |-
+      - op: test
+        path: /spec/template/spec/containers/1/env/14/name
+        value: CPS_NETWORK_SERVICE_URL
+      - op: replace
+        path: /spec/template/spec/containers/1/env/14/value
+        value: "https://cps-network-service-staffship.githubapp.com/api/v1"
+      - op: add
+        path: /spec/template/spec/containers/1/env/-
+        value:
+          name: REDIS2_TIMEOUT
+          value: '0.2'
+  - target:
+      kind: Deployment
+      name: unicorn-api
+    patch: |-
+      - op: add
+        path: /metadata/annotations/moda.github.net~1allow-missing-ready-pods
+        value: "1"
+  - target:
+      kind: Deployment
+
+      name: unicorn
+    patch: |-
+      - op: test
+        path: /spec/template/spec/containers/2/env/14/name
+        value: CPS_NETWORK_SERVICE_URL
+      - op: replace
+        path: /spec/template/spec/containers/2/env/14/value
+        value: "https://cps-network-service-staffship.githubapp.com/api/v1"
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: BLACKBIRD_MW_URL
+          value: "http://blackbird-query.blackbird-mw-%stamp%.svc.cluster.local:8080/twirp"
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: BLACKBIRD_MW_ANALYSIS_URL
+          value: "http://blackbird-mw-analysis.blackbird-%stamp%.svc.cluster.local:8080/twirp"
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: TREELIGHTS_ENDPOINT
+          value: "http://treelights.treelights-%stamp%.svc.cluster.local:8002"
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: REDIS2_TIMEOUT
+          value: '0.2'
+      - op: replace
+        path: /metadata/annotations/moda.github.net~1latest-image-placeholders-for
+        value: "geoip"
+  - target:
+      kind: Deployment
+
+      name: unicorn-internal-api
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/1/env/-
+        value:
+          name: PROXIMA_REQUEST_SCOPING_DISABLED
+          value: "1"
+      - op: add
+        path: /spec/template/spec/containers/1/env/-
+        value:
+          name: PROXIMA_INTERNAL_API_UNIQUE_LOGINS_REQUIRED
+          value: "1"
+      - op: add
+        path: /spec/template/spec/containers/1/env/-
+        value:
+          name: PROXIMA_INTERNAL_API_PRIVATE_MODE_BYPASS
+          value: "1"
+  - target:
+      kind: Namespace
+
+      name: base-namespace
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: github-staff-wus2-01
+      - op: replace
+        path: "/metadata/labels/github.com~1name"
+        value: github-staff-wus2-01
+  - target:
+      kind: ResourceQuota
+
+      name: pod-object-count
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: github-staff-wus2-01
+  - target:
+      kind: Service
+
+      name: unicorn-internal-api
+    patch: |-
+      - op: add
+        path: "/metadata/annotations/moda.github.net~1dns-registration-enabled"
+        value: "true"
+      - op: add
+        path: "/metadata/annotations/moda.github.net~1domain-name"
+        value: internal-api.service.%site%.github.net,internal-api.service.%stamp%.github.net
+  - target:
+      kind: Service
+
+      name: unicorn
+    patch: |-
+      - op: replace
+        path: "/metadata/annotations/moda.github.net~1domain-name"
+        value: ghe.com
+      - op: replace
+        path: "/metadata/annotations/moda.github.net~1load-balancer-type"
+        value: glb-http:multitenant
+      - op: replace
+        path: "/metadata/annotations/haproxy.org~1backend-config-snippet"
+        value: |-
+            option redispatch 1
+            option httpchk
+            http-check connect
+            http-check send meth GET uri /site/sha ver HTTP/1.1 hdr host ghe.com
+  - target:
+      kind: Deployment
+      name: unicorn-gitauth-api
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/1/env/-
+        value:
+          name: REDIS2_TIMEOUT
+          value: '0.2'
+  - target:
+      kind: Service
+
+      name: unicorn-gitauth-api
+    patch: |-
+      - op: add
+        path: "/metadata/annotations/moda.github.net~1domain-name"
+        value: gitauth.service.%site%.github.net,gitauth.service.%stamp%.github.net
+  - target:
+      kind: Service
+
+      name: unicorn(|-api|-api-graphql)
+    patch: |-
+      - op: replace
+        path: "/metadata/annotations/moda.github.net~1load-balancer-type"
+        value: glb-tcp:multitenant
+      - op: remove
+        path: "/metadata/annotations/moda.github.net~1domain-name"
+  - target:
+      kind: Service
+
+      name: unicorn(|-api|-api-graphql|-internal-api|-gitauth-api)
+    patch: |-
+      - op: add
+        path: "/metadata/annotations/moda.github.net~1istio-ingress-enabled"
+        value: "true"

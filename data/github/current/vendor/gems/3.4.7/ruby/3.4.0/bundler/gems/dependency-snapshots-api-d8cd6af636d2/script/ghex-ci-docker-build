@@ -1,0 +1,31 @@
+#!/bin/bash
+
+#
+# ghex-ci-docker-build --
+# called by workflows/actions-cibuild, builds GHES/GHAE compliant container
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+DOCKERFILE=Dockerfile
+DOCKERTAG=dependency-snapshots-api
+PREFIX=ghcr.io/github/dependency-snapshots-api
+
+export DOCKER_BUILDKIT=1
+
+time \
+  docker build -f $DOCKERFILE \
+               --progress=plain \
+               -t "$PREFIX/$DOCKERTAG:latest" \
+               -t "$PREFIX/$DOCKERTAG:$GITHUB_SHA" \
+               --secret id=netrc,src="$HOME/.netrc" \
+               --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+               --target run-enterprise \
+               .
+
+docker image history "$PREFIX/$DOCKERTAG:latest"
+
+echo '::endgroup::'
+
+echo "All done."

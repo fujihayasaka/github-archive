@@ -1,0 +1,1092 @@
+<copilot-user-settings
+  data-onboarding="<%= onboarding? %>"
+  data-enabled="<%= !(@disabled || @copilot_user.is_enterprise_managed?) %>"
+  data-dashboard-entry-point-path="<%= copilot_dashboard_entry_point_enabled_path %>"
+>
+  <% if error? %>
+    <%= render(Primer::Alpha::Banner.new(scheme: :danger)) do %>
+      <% if !@error_message.nil? %>
+        <%= @error_message %>
+      <% else %>
+        <span id="cfi-error-text">Select an option below to continue.</span>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if has_single_seat? %>
+    <%= render(Primer::Box.new(display: :flex, justify_content: :space_between, direction: :row, align_items: :center, mb: 3)) do %>
+      <%= render(Primer::Box.new) do %>
+        <%= render(Primer::Beta::Octicon.new(icon: "shield-lock", size: :small, color: :muted)) %>
+        <%= render(Primer::Beta::Text.new(color: :muted)) do %>
+          Managed by <%= link_to(copilot_provider&.display_login, h(copilot_provider_path), class: "Link--inTextBlock") %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <%= form_with(
+    url: @submit_path,
+    method: "put",
+    data: {
+      target: "copilot-user-settings.form",
+    }
+  ) do |f| %>
+    <% if show_custom_instructions_sso_banner? %>
+      <%= render ConditionalAccess::UnauthorizedAccountsComponent.new(
+        classes: "Box my-1",
+        container_classes: "mb-3",
+        resource_label: "organizations",
+        cap_filter: cap_filter,
+        accounts: orgs_with_custom_instructions,
+      )%>
+    <% end %>
+
+
+    <%# ============== START OF BILLING POLICIES SECTION ============== %>
+    <%# today, overages is the only billing policy %>
+    <%# if more billing policies are added in the future, the conditions need to be modified/removed %>
+    <% if render_billing_section? %>
+      <%= render(Primer::Box.new(display: :flex, justify_content: :space_between, direction: :row, align_items: :center, mb: 3)) do %>
+        <%= render(Primer::Beta::Text.new(tag: :h3, font_size: 4, font_weight: :bold)) { "Billing" } %>
+      <% end %>
+
+      <%= render(Primer::Beta::BorderBox.new(padding: :default, mb: 3)) do |component| %>
+        <% if render_copilot_overages_policy? %>
+          <%= component.with_row do %>
+            <input type="hidden" name="overages" value="<%= overages_value %>">
+            <%= render(Primer::Box.new(id: "copilot-overages-policy", display: :flex, justify_content: :space_between, flex: 1, direction: :row, align_items: :center)) do %>
+              <%= render(Primer::Box.new(display: :inline_flex, justify_content: :space_between, flex: 1, direction: :column)) do %>
+                <%= render(Primer::Box.new(display: :inline_flex, align_items: :center, justify_content: :space_between, direction: :row)) do %>
+                  <%= render(Primer::Beta::Text.new(tag: :span, mb: 1, font_weight: :bold)) do %>
+                    <%= Copilot::COPILOT_OVERAGES %>
+                  <% end %>
+                  <% if is_readonly_mode? %>
+                    <%= render(Primer::Box.new) do %>
+                      <%= render_enablement_text("overages", copilot_policy_overages_text) %>
+                    <% end %>
+                  <% else %>
+                    <%= render(
+                      Primer::Alpha::ToggleSwitch.new(
+                        size: :small,
+                        status_label_position: :start,
+                        csrf_token: "",
+                        id: "overagesToggle",
+                        checked: @copilot_user.overages_enabled?,
+                        aria: { label: "Opt in for access to Copilot overages" },
+                        data: {
+                          action: "click:copilot-user-settings#updateOveragesSetting",
+                          target: "copilot-user-settings.overagesToggle",
+                          checked: @copilot_user.overages_enabled?,
+                        }
+                      )
+                    ) %>
+                  <% end %>
+                <% end %>
+                <%= render(Primer::Beta::Text.new(tag: :p, mb: 2, mr: 6, color: :muted, id: "copilot_overages_label", col: 10)) do %>
+                  Enables usage of additional premium requests beyond the amount included in your plan, applicable across all Copilot interfaces, including Mobile. You will be billed at $0.04 per premium request.
+                  <%= render(Primer::Beta::Text.new(tag: :p, mb: 0, mr: 6, color: :muted, col: 10)) do %>
+                    <%= inline_docs_link("", "Learn more.") %>
+                  <% end %>
+                  <% if !has_single_seat? && @copilot_user.overages_disabled? && !@copilot_user.has_cfi_access? %>
+                    <%= render(Primer::Beta::Text.new(tag: :p, mb: 0, mr: 6, color: :muted, id: "copilot_overages_setting_managed_by_label", col: 10)) do %>
+                      <%= render(Primer::Beta::Octicon.new(icon: "shield-lock", size: :small, color: :muted)) %>
+                      <%= policy_blocked_by(:overages) %>
+                    <% end %>
+                  <% end %>
+                <% end %>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+
+        <% if render_billable_customer_menu? %>
+          <%= component.with_row do %>
+            <input type="hidden" name="billable_customer" value="<%= @copilot_user.billable_customer_id %>">
+            <%= render(Primer::Box.new(id: "copilot-overages-billable-customer", display: :flex, justify_content: :space_between, flex: 1, direction: :row, align_items: :center)) do %>
+              <%= render(Primer::Box.new(display: :inline_flex, justify_content: :space_between, flex: 1, direction: :column)) do %>
+                <%= render(Primer::Box.new(display: :inline_flex, justify_content: :space_between, direction: :row)) do %>
+                  <div>
+                    <%= render(Primer::Beta::Text.new(tag: :span, mb: 1, font_weight: :bold)) do %>
+                      <%= Copilot::COPILOT_BILLABLE_CUSTOMER %>
+                    <% end %>
+                    <%= render(Primer::Beta::Text.new(tag: :p, mb: 2, color: :muted, id: "billable_customer_label", col: 10)) do %>
+                      Choose who pays for your Copilot premium requests usage<%= enabled_copilot_premium_products %>. Included usage from their license applies.
+                    <% end %>
+                  </div>
+                  <%= render Primer::Alpha::ActionMenu.new(
+                    select_variant: :single,
+                    anchor_align: :end,
+                    dynamic_label: true,
+                    data: {
+                      action: "click:copilot-user-settings#updateBillableCustomer",
+                      target: "copilot-user-settings.billableCustomerMenu",
+                    }) do |menu| %>
+                    <% menu.with_show_button do |button|
+                      button.with_trailing_action_icon(icon: :"triangle-down")
+                      billable_customer_button_text
+                    end %>
+                    <% copilot_customers.each do |customer| %>
+                      <% menu.with_item(
+                          label: customer[:name],
+                          data: { value: customer[:id] },
+                          active: @copilot_user.billable_customer_id == customer[:id],
+                      ) %>
+                    <% end %>
+                  <% end %>
+                <% end %>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+    <%# ============== END OF BILLING POLICIES SECTION ============== %>
+
+    <%# =================== START OF USAGE SECTION ====================== %>
+
+    <% if limited_access_user? && @copilot_user.feature_flag_enabled?(:copilot_ftp_settings_upgrade, default: false) %>
+      <%= render(Primer::Box.new(display: :flex, justify_content: :space_between, direction: :row, align_items: :center, mb: 3)) do %>
+        <%= render(Primer::Beta::Text.new(tag: :h3, font_size: 4, font_weight: :bold)) { "Usage" } %>
+      <% end %>
+
+      <%= render(Primer::Beta::BorderBox.new(mb: 3)) do |component| %>
+        <%= component.with_row do %>
+          <% if show_new_quota_ui? %>
+            <div <%= test_selector("copilot-quota-usage-partial") %>>
+              <%= render_react_partial name: "copilot-quota-usage", props: quota_usage_partial_props %>
+            </div>
+          <% else %>
+            <%= render(Primer::Box.new(test_selector: "copilot-usage-policy", display: :flex, justify_content: :space_between, flex: 1, direction: :row, align_items: :center)) do %>
+              <%= render(Primer::Box.new(display: :inline_flex, justify_content: :space_between, flex: 1, direction: :column)) do %>
+                <%= render(Primer::Box.new(display: :inline_flex, align_items: :center, justify_content: :space_between, direction: :row)) do %>
+                  <%= render(Primer::Beta::Text.new(tag: :span, mb: 1, font_weight: :bold)) do %>
+                    You are using Copilot for free
+                  <% end %>
+                <% end %>
+                <%= render(Primer::Beta::Text.new(tag: :p, mb: 2, mr: 6, color: :muted, test_selector: "copilot-usage-policy-label", col: 10)) do %>
+                  Responses are limited to 2,000 code completions and 50 chat messages per month.
+                <% end %>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+        <%= component.with_footer(py: new_ui_any_quota_exhausted? ? 3 : 2, **usage_footer_args) do %>
+          <%= render(Primer::Box.new(display: :flex, justify_content: :space_between, flex: 1, direction: :row, align_items: :center)) do %>
+            <%= render(Primer::Box.new(display: :inline_flex, justify_content: :space_between, flex: 1, direction: :column)) do %>
+              <%= render(Primer::Box.new(display: :inline_flex, align_items: :center, justify_content: :space_between, direction: :row)) do %>
+                <%= render(Primer::Box.new(display: :inline_flex, direction: :row, align_items: :center)) do %>
+                  <% if new_ui_any_quota_exhausted? %>
+                    <%= render(Primer::Beta::Octicon.new(icon: :info, size: :small, color: :attention, mx: 2, aria_hidden: true)) %>
+                  <% end %>
+                  <%= render(Primer::Beta::Text.new(test_selector: "copilot-usage-reset-indicator", tag: :span, color: new_ui_any_quota_exhausted? ? :default : :muted)) do %>
+                    <% if new_ui_any_quota_exhausted? %>You've reached your free plan limit.<% end %>
+                    Upgrade for higher limits, premium models, AI reviews.
+                    <% if limited_user_reset_date %>
+                      <% if new_ui_any_quota_exhausted? %><br><% end %>
+                      Free responses reset in <%= pluralize((limited_user_reset_date - Date.current).to_i, 'day') %>.
+                    <% end %>
+                  <% end %>
+                <% end %>
+                <%= render Primer::Beta::Button.new(
+                  tag: :a,
+                  ml: 2,
+                  scheme: new_ui_any_quota_exhausted? ? :primary : :default,
+                  href: copilot_pro_signup_path,
+                  data: analytics_click_attributes(
+                    category: "user_copilot_settings",
+                    action: "upgrade_clicked",
+                    label: new_ui_any_quota_exhausted? ? "ref_cta:quota_exhausted_upgrade_button" : "ref_cta:quota_not_exhausted_upgrade_button"
+                  )
+                ).with_content("Upgrade") %>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+    <%# ==================== END OF USAGE SECTION ======================= %>
+
+    <%# ============== START OF FEATURES POLICIES SECTION ============== %>
+    <%= render(Primer::Box.new(display: :flex, justify_content: :space_between, direction: :row, align_items: :center, mb: 3)) do %>
+      <%= render(Primer::Beta::Text.new(tag: :h3, font_size: 4, font_weight: :bold)) { "Features" } %>
+    <% end %>
+
+    <%= render(Primer::Beta::BorderBox.new(padding: :default, mb: 3)) do |component| %>
+
+      <% if show_custom_instructions_options? %>
+        <%= component.with_row do %>
+          <%= render(Primer::Box.new(id: "copilot-chat-default-custom-instructions", display: :flex, justify_content: :space_between, flex: 1, direction: :row, align_items: :center, test_selector: :copilot_chat_default_custom_instructions)) do %>
+            <%= render(Primer::Box.new(display: :inline_flex, justify_content: :space_between, flex: 1, direction: :column)) do %>
+              <%= render(Primer::Box.new(display: :inline_flex, align_items: :center, justify_content: :space_between, direction: :row)) do %>
+                <%= render(Primer::Beta::Text.new(tag: :span, mb: 1, font_weight: :bold)) do %>
+                  <%= Copilot::COPILOT_DEFAULT_CUSTOM_INSTRUCTIONS %>
+                <% end %>
+                  <%= render(Primer::Alpha::SelectPanel.new(
+                    fetch_strategy: :local,
+                    title: "Select an organization",
+                    use_experimental_non_local_form: user_feature_enabled?(:primer_select_panel_use_experimental_non_local_form),
+                    form_arguments: { builder: f, name: "default_org_custom_instructions" },
+                    data: {
+                      action: "click:copilot-user-settings#updateDefaultOrgCustomInstructions",
+                      target: "copilot-user-settings.defaultOrgCustomInstructions"
+                    }
+                    )) do |panel| %>
+                    <% panel.with_show_button(
+                      "data-test-selector": "default-custom-instructions",
+                      "aria-label": "Default custom instructions #{default_custom_instructions_org.display_login}") do |button| %>
+                      <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+
+                      <div class="d-flex flex-justify-end flex-items-center">
+                        <%= render(GitHub::AvatarComponent.new(actor: default_custom_instructions_org, mr: 2)) %>
+                        <%= default_custom_instructions_org.display_login %>
+                      </div>
+                    <% end %>
+
+                    <% authorized_orgs_with_custom_instructions.each do |org| %>
+                      <% panel.with_avatar_item(
+                        username: org.display_login,
+                        src: helpers.avatar_url_for(org),
+                        avatar_arguments: { shape: :square },
+                        description_scheme: :inline,
+                        test_selector: "default-custom-instructions-option",
+                        active: default_custom_instructions_org&.id == org.id,
+                        content_arguments: { data: {
+                          value: org.id,
+                          login: org.display_login,
+                          avatar: helpers.avatar_url_for(org)
+                        }},
+                      ) do |item| %>
+                        <% item.with_description.with_content(org.display_login) %>
+                      <% end %>
+                    <% end %>
+                  <% end %>
+              <% end %>
+              <%= render(Primer::Beta::Text.new(tag: :p, mb: 2, mr: 6, color: :muted, id: "copilot_default_custom_instructions_label", col: 10)) do %>
+                You belong to multiple organizations with Copilot access. Set a default instruction for general chat.
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if !limited_access_user? && @copilot_user.feature_flag_enabled?(:copilot_next_edit_suggestions, default: false) %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            value: @copilot_user.editor_preview_features,
+            copilot_user: @copilot_user,
+            policy_name: "editor_preview_features",
+            display_name: Copilot::EDITOR_PREVIEW_FEATURES,
+            enablement_text: render_read_only_enablement_text("editor_preview_features", @copilot_user.editor_preview_features_enabled?, true),
+            setting_changed: false,
+            policy_blocked_by: (!has_single_seat? && @copilot_user.editor_preview_features_disabled? && !@copilot_user.has_cfi_access?) ? policy_blocked_by(:editor_preview_features) : "",
+            ) do |component| %>
+              <%= component.with_description do %>
+                You can use preview features in your editor. <%= inline_docs_link(Copilot::EDITOR_PREVIEW_FEATURES_DOCS, "Learn more.") %>
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if !limited_access_user? && !@copilot_user.has_cfi_access? && @copilot_user.feature_flag_enabled?(:copilot_agent_mode_show_policy, default: false) %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            value: @copilot_user.agent_mode,
+            copilot_user: @copilot_user,
+            policy_name: "agent_mode",
+            display_name: Copilot::AGENT_MODE,
+            enablement_text: render_read_only_enablement_text("agent_mode", @copilot_user.agent_mode_enabled?, true),
+            setting_changed: false,
+            policy_blocked_by: (!has_single_seat? && @copilot_user.agent_mode_disabled? && !@copilot_user.has_cfi_access?) ? policy_blocked_by(:agent_mode) : "",
+            ) do |component| %>
+              <%= component.with_description do %>
+                You can use agent mode in your editor.
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <%= component.with_row do %>
+        <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+          value: @copilot_user.dotcom_chat,
+          copilot_user: @copilot_user,
+          policy_name: "dotcom_chat",
+          display_name: Copilot::COPILOT_IN_DOTCOM,
+          enablement_text: render_read_only_enablement_text("dotcom_chat", @copilot_user.dotcom_chat_enabled?, true),
+          setting_changed: false,
+          policy_blocked_by: (!has_single_seat? && @copilot_user.dotcom_chat_disabled? && !@copilot_user.has_cfi_access?) ? policy_blocked_by(:dotcom_chat) : "",
+          preview: !(has_copilot_enterprise_access? || @copilot_user.feature_flag_enabled?(:copilot_chat_dotcom_ga, default: true)),
+          ) do |component| %>
+            <%= component.with_description do %>
+              <%= subtext %>
+            <% end %>
+        <% end %>
+      <% end %>
+
+      <% unless limited_access_user? %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            value: @copilot_user.cli,
+            copilot_user: @copilot_user,
+            policy_name: "cli",
+            display_name: Copilot::CLI_UI_NAME,
+            enablement_text: render_read_only_enablement_text("cli", @copilot_user.cli_enabled?, true),
+            setting_changed: false,
+            policy_blocked_by: (!has_single_seat? && @copilot_user.cli_disabled? && !@copilot_user.has_cfi_access?) ? policy_blocked_by(:cli) : "",
+            ) do |component| %>
+              <%= component.with_description do %>
+                You can use <%= inline_docs_link(Copilot::COPILOT_FOR_CLI_USAGE_DOCUMENTATION, "GitHub Copilot for assistance in terminal") %>.
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if !limited_access_user? && @copilot_user.feature_flag_enabled?(:copilot_extension_access, default: false) && copilot_access_through_org_or_business? %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            value: @copilot_user.copilot_extensions,
+            copilot_user: @copilot_user,
+            policy_name: "copilot_extensions",
+            display_name: Copilot::COPILOT_EXTENSION,
+            enablement_text: render_read_only_enablement_text("copilot_extensions", @copilot_user.copilot_extensions_enabled?, true),
+            setting_changed: changed?(:copilot_extensions),
+            policy_blocked_by: (!has_single_seat? && @copilot_user.copilot_extensions_disabled? && !@copilot_user.has_cfi_access?) ? policy_blocked_by(:copilot_extensions) : "",
+            ) do |component| %>
+              <%= component.with_description do %>
+                <% if @copilot_user.copilot_extensions_enabled? && !@copilot_user.user_object.is_enterprise_managed? %>
+                  You can use GitHub Copilot Extensions and install them to your personal account. To enable for organization repositories and data, you must request installation from an administrator in <%= link_to(copilot_provider&.display_login, h(copilot_provider_path), class: "Link--inTextBlock") %>.
+                <% elsif @copilot_user.copilot_extensions_enabled? && @copilot_user.user_object.is_enterprise_managed? %>
+                    You can use GitHub Copilot Extensions, but you cannot install them onto your individual account. An organization owner must install them at the organization level. You can contact an administrator in <%= link_to(copilot_provider&.display_login, h(copilot_provider_path), class: "Link--inTextBlock") %> to request access.
+                <% else %>
+                  GitHub Copilot Extensions are not available for use in your account. You can contact an administrator in <%= link_to(copilot_provider&.display_login, h(copilot_provider_path), class: "Link--inTextBlock") %> to request access.
+                <% end %>
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if @copilot_user.feature_flag_enabled?(:copilot_desktop_user_refactor, default: false) %>
+        <% if Copilot::Policies::Desktop.available_for?(@copilot_user) %>
+          <%= component.with_row do %>
+            <%= render ::Copilot::Policies::UserFormComponent.new(
+              policy_class: Copilot::Policies::Desktop,
+              copilot_user: @copilot_user,
+              enablement_text: render_read_only_enablement_text("desktop", Copilot::Policies::Desktop.effective_value(@copilot_user) == "enabled", true),
+              setting_changed: false,
+              policy_blocked_by: (!has_single_seat? && @copilot_user.desktop_disabled? && !@copilot_user.has_cfi_access?) ? policy_blocked_by(:desktop) : "",
+              ) do |component| %>
+                <%= component.with_description do %>
+                  You can use <%= inline_docs_link(Copilot::Policies::Desktop.documentation_url, "GitHub Copilot for assistance in GitHub Desktop") %>.
+                <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% else %>
+        <% if render_desktop_policy? %>
+          <%= component.with_row do %>
+            <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+              value: @copilot_user.desktop,
+              copilot_user: @copilot_user,
+              policy_name: "desktop",
+              display_name: Copilot::COPILOT_DESKTOP,
+              enablement_text: render_read_only_enablement_text("desktop", @copilot_user.desktop_enabled?, true),
+              setting_changed: false,
+              policy_blocked_by: (!has_single_seat? && @copilot_user.desktop_disabled? && !@copilot_user.has_cfi_access?) ? policy_blocked_by(:desktop) : "",
+              preview: !@copilot_user.feature_flag_enabled?(:copilot_desktop_no_preview_badge, default: false)
+              ) do |component| %>
+                <%= component.with_description do %>
+                  You can use <%= inline_docs_link(Copilot::COPILOT_IN_DESKTOP_DOCUMENTATION, "GitHub Copilot for assistance in GitHub Desktop") %>.
+                <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+
+      <% unless limited_access_user? %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            value: @copilot_user.chat_setting,
+            copilot_user: @copilot_user,
+            policy_name: "chat",
+            display_name: Copilot::COPILOT_CHAT_IN_IDE,
+            enablement_text: render_read_only_enablement_text("chat", @copilot_user.chat_enabled?, true),
+            setting_changed: false,
+            policy_blocked_by: (!has_single_seat? && @copilot_user.chat_disabled? && !@copilot_user.has_cfi_access?) ? policy_blocked_by(:chat_enabled) : "",
+            ) do |component| %>
+              <%= component.with_description do %>
+                You can use <%= inline_docs_link(Copilot::COPILOT_CHAT_IDE_DOCS, "GitHub Copilot Chat in the IDE") %> to explain a piece of code, propose bug fixes, or generate unit tests in a chat interface from your editor.
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% unless limited_access_user? %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            value: @copilot_user.mobile_chat,
+            copilot_user: @copilot_user,
+            policy_name: "mobile_chat",
+            display_name: Copilot::COPILOT_CHAT_IN_MOBILE,
+            enablement_text: render_read_only_enablement_text("mobile_chat", @copilot_user.mobile_chat_enabled?, true),
+            setting_changed: false,
+            policy_blocked_by: (!has_single_seat? && @copilot_user.mobile_chat_disabled? && !@copilot_user.has_cfi_access?) ? policy_blocked_by(:mobile_chat) : "",
+            ) do |component| %>
+              <%= component.with_description do %>
+                You can use <%= inline_docs_link(Copilot::COPILOT_CHAT_MOBILE_DOCS, "Copilot Chat in GitHub Mobile") %> personalized to a codebase.
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <%= component.with_row do %>
+        <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+          value: @copilot_user.bing_github_chat,
+          copilot_user: @copilot_user,
+          policy_name: "copilot_policy_bing",
+          display_name: Copilot::COPILOT_BING_ACCESS,
+          enablement_text: render_read_only_enablement_text("bing_github_chat", @copilot_user.bing_github_chat_enabled?),
+          setting_changed: changed?(:github_chat_bing_access_setting),
+          policy_blocked_by: (!has_single_seat? && @copilot_user.bing_github_chat_disabled? && !@copilot_user.has_cfi_access?) ? policy_blocked_by(:bing_github_chat) : "",
+          ) do |component| %>
+            <%= component.with_description do %>
+              Copilot can answer questions about new trends and give improved answers, via Bing. See
+              <%= inline_docs_link(Copilot::MICROSOFT_PRIVACY_STATEMENT_URL, "Microsoft Privacy Statement") %>
+            <% end %>
+        <% end %>
+      <% end %>
+
+      <% if has_individual_access? && !render_code_review_policy? %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            value: @copilot_user.automatic_code_review,
+            copilot_user: @copilot_user,
+            policy_name: "automatic_code_review",
+            display_name: Copilot::AUTOMATIC_CODE_REVIEW,
+            enablement_text: render_read_only_enablement_text("automatic_code_review", @copilot_user.automatic_code_review_enabled?),
+            setting_changed: changed?(:automatic_code_review_setting),
+            policy_blocked_by: (!has_single_seat? && @copilot_user.automatic_code_review_disabled? && !@copilot_user.has_cfi_access?) ? policy_blocked_by(:automatic_code_review) : "",
+            ) do |component| %>
+              <%= component.with_description do %>
+                Copilot will automatically review your pull requests. <%= inline_docs_link(Copilot::CODE_REVIEW_CONFIGURING_AUTO_DOCS_URL, "Learn more about configuring automatic code reviews.") %>
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <%= component.with_row do %>
+        <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+          value: @copilot_user.a_chat,
+          copilot_user: @copilot_user,
+          policy_name: "a_chat",
+          display_name: "#{Copilot::COPILOT_A_CHAT} in Copilot",
+          enablement_text: render_read_only_enablement_text("a_chat", @copilot_user.a_chat_enabled?),
+          setting_changed: changed?(:a_chat_setting),
+          policy_blocked_by: (!has_single_seat? && @copilot_user.a_chat_disabled? && !@copilot_user.has_cfi_access?) ? policy_blocked_by(:a_chat) : "",
+          preview: !@copilot_user.feature_flag_enabled?(:a_chat_ga, default: true)
+          ) do |component| %>
+            <%= component.with_description do %>
+              You can use the latest Claude 3.5 Sonnet model.
+              <%= inline_docs_link(Copilot::COPILOT_A_CHAT_DOCS, "Learn more about how GitHub Copilot serves Claude 3.5 Sonnet.") %>
+            <% end %>
+        <% end %>
+      <% end %>
+
+      <% if render_a_f_policy? %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            copilot_user: @copilot_user,
+            value: a_f_value,
+            policy_name: "a_f",
+            display_name: "#{Copilot::COPILOT_A_F} in Copilot",
+            enablement_text: is_readonly_mode? ? render_enablement_text("a_f", copilot_policy_a_f_text) : "",
+            setting_changed: changed?(:af_setting),
+            policy_blocked_by: (!has_single_seat? && @copilot_user.a_f_disabled? && !@copilot_user.has_cfi_access? && @copilot_user.has_cfb_access?) ? policy_blocked_by(:a_f) : "",
+            preview: !@copilot_user.feature_flag_enabled?(:af_ga, default: true),
+            ) do |component| %>
+              <%= component.with_description do %>
+                You can use the latest <%= Copilot::COPILOT_A_F %> model.
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if @copilot_user.feature_flag_enabled?(:copilot_afos, default: false) && (copilot_access_through_org_or_business? || Copilot::Users::ModelAccess.model_available?(@copilot_user, :afos)) %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            copilot_user: @copilot_user,
+            value: @copilot_user.afos,
+            policy_name: "afos",
+            display_name: "#{Copilot::COPILOT_AFOS} in Copilot",
+            enablement_text: render_read_only_enablement_text("afos", @copilot_user.afos_enabled?),
+            setting_changed: changed?(:afos_setting),
+            policy_blocked_by: (!has_single_seat? && @copilot_user.afos_disabled? && !@copilot_user.has_cfi_access? && @copilot_user.has_cfb_access?) ? policy_blocked_by(:afos) : "",
+            preview: false,
+            ) do |component| %>
+              <%= component.with_description do %>
+                You can use the latest <%= Copilot::COPILOT_AFOS %> model.
+                <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_AFOS_DOCS, classes: "Link--inTextBlock")) { "Learn more about how GitHub Copilot serves #{Copilot::COPILOT_AFOS}." } %>
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+
+      <% if @copilot_user.feature_flag_enabled?(:copilot_al, default: false) && (@copilot_user.has_cfe_access? || Copilot::Users::ModelAccess.model_available?(@copilot_user, :al)) %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            copilot_user: @copilot_user,
+            value: @copilot_user.al,
+            policy_name: "al",
+            display_name: "#{Copilot::COPILOT_AL} in Copilot",
+            enablement_text: render_read_only_enablement_text("al", @copilot_user.al_enabled?),
+            setting_changed: changed?(:al_setting),
+            policy_blocked_by: (!has_single_seat? && @copilot_user.al_disabled? && !@copilot_user.has_cfi_access? && @copilot_user.has_cfb_access?) ? policy_blocked_by(:al) : "",
+            preview: false,
+            ) do |component| %>
+              <%= component.with_description do %>
+                You can use the latest <%= Copilot::COPILOT_AL %> model.
+                <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_AL_DOCS, classes: "Link--inTextBlock")) { "Learn more about how GitHub Copilot serves #{Copilot::COPILOT_AL}." } %>
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if @copilot_user.feature_flag_enabled?(:copilot_aofo, default: false) && (@copilot_user.has_cfe_access? || Copilot::Users::ModelAccess.model_available?(@copilot_user, :aofo)) %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            copilot_user: @copilot_user,
+            value: @copilot_user.aofo,
+            policy_name: "aofo",
+            display_name: "#{Copilot::COPILOT_AOFO} in Copilot",
+            enablement_text: render_read_only_enablement_text("aofo", @copilot_user.aofo_enabled?),
+            setting_changed: changed?(:aofo_setting),
+            policy_blocked_by: (!has_single_seat? && @copilot_user.aofo_disabled? && !@copilot_user.has_cfi_access? && @copilot_user.has_cfb_access?) ? policy_blocked_by(:aofo) : "",
+            preview: !@copilot_user.feature_flag_enabled?(:aofo_ga, default: true),
+            ) do |component| %>
+              <%= component.with_description do %>
+                You can use the latest <%= Copilot::COPILOT_AOFO %> model.
+                <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_AOFO_DOCS, classes: "Link--inTextBlock")) { "Learn more about how GitHub Copilot serves #{Copilot::COPILOT_AOFO}." } %>
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <%= component.with_row do %>
+        <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+          value: @copilot_user.g_chat,
+          copilot_user: @copilot_user,
+          policy_name: "g_chat",
+          display_name: "#{Copilot::COPILOT_G_CHAT} in Copilot",
+          enablement_text: render_read_only_enablement_text("g_chat", @copilot_user.g_chat_enabled?),
+          setting_changed: changed?(:g_chat_setting),
+          policy_blocked_by: (!has_single_seat? && @copilot_user.g_chat_disabled? && !@copilot_user.has_cfi_access?) ? policy_blocked_by(:g_chat) : "",
+          preview: !@copilot_user.feature_flag_enabled?(:g_chat_ga, default: true),
+          ) do |component| %>
+            <%= component.with_description do %>
+              You can use Google’s Gemini 2.0 Flash model in Copilot.
+              <%= inline_docs_link(Copilot::COPILOT_G_CHAT_DOCS, "Learn more about the public preview of Gemini 2.0 Flash.") %>
+            <% end %>
+        <% end %>
+      <% end %>
+
+      <% if @copilot_user.feature_flag_enabled?(:copilot_g_tf, default: false) && (copilot_access_through_org_or_business? || Copilot::Users::ModelAccess.model_available?(@copilot_user, :g_tf)) %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            copilot_user: @copilot_user,
+            value: @copilot_user.g_tf,
+            policy_name: "g_tf",
+            display_name: "#{Copilot::COPILOT_G_TF} in Copilot",
+            enablement_text: render_read_only_enablement_text("g_tf", @copilot_user.g_tf_enabled?),
+            setting_changed: changed?(:gtf_setting),
+            policy_blocked_by: (!has_single_seat? && @copilot_user.g_tf_disabled? && !@copilot_user.has_cfi_access? && @copilot_user.has_cfb_access?) ? policy_blocked_by(:g_tf) : "",
+            preview: !@copilot_user.feature_flag_enabled?(:g_tf_ga, default: false),
+            ) do |component| %>
+              <%= component.with_description do %>
+                You can use the latest <%= Copilot::COPILOT_G_TF %> model.
+                <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_G_TF_DOCS, classes: "Link--inTextBlock")) { "Learn more about how GitHub Copilot serves #{Copilot::COPILOT_G_TF}." } %>
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if @copilot_user.feature_flag_enabled?(:copilot_gtff, default: false) && (copilot_access_through_org_or_business? || Copilot::Users::ModelAccess.model_available?(@copilot_user, :gtff)) %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            copilot_user: @copilot_user,
+            value: @copilot_user.gtff,
+            policy_name: "gtff",
+            display_name: "#{Copilot::COPILOT_GTFF} in Copilot",
+            enablement_text: render_read_only_enablement_text("gtff", @copilot_user.gtff_enabled?),
+            setting_changed: changed?(:gtff_setting),
+            policy_blocked_by: (!has_single_seat? && @copilot_user.gtff_disabled? && !@copilot_user.has_cfi_access? && @copilot_user.has_cfb_access?) ? policy_blocked_by(:gtff) : "",
+            preview: true,
+            ) do |component| %>
+              <%= component.with_description do %>
+                You can use the latest <%= Copilot::COPILOT_GTFF %> model.
+                <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_GTFF_DOCS, classes: "Link--inTextBlock")) { "Learn more about how GitHub Copilot serves #{Copilot::COPILOT_GTFF}." } %>
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% unless limited_access_user? %>
+        <% if render_o1_policy? %>
+          <%= component.with_row do %>
+            <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+              value: @copilot_user.o1,
+              copilot_user: @copilot_user,
+              policy_name: "o1",
+              display_name: "#{Copilot::COPILOT_O1} in Copilot",
+              enablement_text: render_read_only_enablement_text("o1", @copilot_user.o1_enabled?),
+              setting_changed: changed?(:o1_setting),
+              policy_blocked_by: (!has_single_seat? && @copilot_user.o1_disabled? && !@copilot_user.has_cfi_access?) ? policy_blocked_by(:o1) : "",
+              preview: true,
+              ) do |component| %>
+                <%= component.with_description do %>
+                  You can use the o1 family of models in Copilot Chat.
+                <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if @copilot_user.feature_flag_enabled?(:copilot_o_t, default: false) && (@copilot_user.has_cfe_access? || (Copilot::Users::ModelAccess.model_available?(@copilot_user, :o_t) && !@copilot_user.feature_flag_enabled?(:copilot_o_t_cfi_on, default: false))) %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            copilot_user: @copilot_user,
+            value: @copilot_user.o_t,
+            policy_name: "o_t",
+            display_name: "#{Copilot::COPILOT_O_T} in Copilot",
+            enablement_text: render_read_only_enablement_text("o_t", @copilot_user.o_t_enabled?),
+            setting_changed: changed?(:ot_setting),
+            policy_blocked_by: (!has_single_seat? && @copilot_user.o_t_disabled? && !@copilot_user.has_cfi_access? && @copilot_user.has_cfb_access?) ? policy_blocked_by(:o_t) : "",
+            preview: true,
+            ) do |component| %>
+              <%= component.with_description do %>
+                You can use the latest <%= Copilot::COPILOT_O_T %> model.
+                <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_O_T_DOCS, classes: "Link--inTextBlock")) { "Learn more about how GitHub Copilot serves #{Copilot::COPILOT_O_T}." } %>
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% unless limited_access_user? %>
+        <% if render_o3_policy? %>
+          <%= component.with_row do %>
+            <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+              value: @copilot_user.o3,
+              copilot_user: @copilot_user,
+              policy_name: "o3",
+              display_name: "#{Copilot::COPILOT_O3} in Copilot",
+              enablement_text: render_read_only_enablement_text("o3", @copilot_user.o3_enabled?),
+              setting_changed: changed?(:o3_setting),
+              policy_blocked_by: (!has_single_seat? && @copilot_user.o3_disabled? && !@copilot_user.has_cfi_access?) ? policy_blocked_by(:o3) : "",
+              preview: !@copilot_user.feature_flag_enabled?(:o3_mini_ga, default: true),
+              ) do |component| %>
+                <%= component.with_description do %>
+                  You can use the <%= Copilot::COPILOT_O3 %> model in Copilot.
+                <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if @copilot_user.feature_flag_enabled?(:copilot_o_fm, default: false) && (copilot_access_through_org_or_business? || (Copilot::Users::ModelAccess.model_available?(@copilot_user, :o_fm) && !@copilot_user.feature_flag_enabled?(:copilot_o_fm_cfi_on, default: false))) %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            copilot_user: @copilot_user,
+            value: @copilot_user.o_fm,
+            policy_name: "o_fm",
+            display_name: "#{Copilot::COPILOT_O_FM} in Copilot",
+            enablement_text: render_read_only_enablement_text("o_fm", @copilot_user.o_fm_enabled?),
+            setting_changed: changed?(:ofm_setting),
+            policy_blocked_by: (!has_single_seat? && @copilot_user.o_fm_disabled? && !@copilot_user.has_cfi_access? && @copilot_user.has_cfb_access?) ? policy_blocked_by(:o_fm) : "",
+            preview: true,
+            ) do |component| %>
+              <%= component.with_description do %>
+                You can use the latest <%= Copilot::COPILOT_O_FM %> model.
+                <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_O_FM_DOCS, classes: "Link--inTextBlock")) { "Learn more about how GitHub Copilot serves #{Copilot::COPILOT_O_FM}." } %>
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if @copilot_user.any_business_or_org_has_fsi_enabled? && (copilot_access_through_org_or_business? || (Copilot::Users::ModelAccess.model_available?(@copilot_user, :ofo) && !@copilot_user.feature_flag_enabled?(:copilot_ofo_cfi_on, default: false))) %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            copilot_user: @copilot_user,
+            value: @copilot_user.ofo,
+            policy_name: "ofo",
+            display_name: "#{Copilot::COPILOT_OFO} in Copilot",
+            enablement_text: render_read_only_enablement_text("ofo", @copilot_user.ofo_enabled?),
+            setting_changed: changed?(:ofo_setting),
+            policy_blocked_by: (!has_single_seat? && @copilot_user.ofo_disabled? && !@copilot_user.has_cfi_access? && @copilot_user.has_cfb_access?) ? policy_blocked_by(:ofo) : "",
+            preview: false,
+            ) do |component| %>
+              <%= component.with_description do %>
+                You can use the latest <%= Copilot::COPILOT_OFO %> model.
+                <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_OFO_DOCS, classes: "Link--inTextBlock")) { "Learn more about how GitHub Copilot serves #{Copilot::COPILOT_OFO}." } %>
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if render_o_ff_policy? %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            copilot_user: @copilot_user,
+            value: @copilot_user.o_ff,
+            policy_name: "o_ff",
+            display_name: "#{Copilot::COPILOT_O_FF} in Copilot",
+            enablement_text: render_read_only_enablement_text("o_ff", @copilot_user.o_ff_enabled?),
+            setting_changed: changed?(:off_setting),
+            policy_blocked_by: (!has_single_seat? && @copilot_user.o_ff_disabled? && !@copilot_user.has_cfi_access?) ? policy_blocked_by(:o_ff) : "",
+            preview: true,
+            ) do |component| %>
+                <%= component.with_description do %>
+                You can use the <%= Copilot::COPILOT_O_FF %> model in Copilot Chat.
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if render_o_f_policy? %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            copilot_user: @copilot_user,
+            value: @copilot_user.o_f,
+            policy_name: "o_f",
+            display_name: "#{Copilot::COPILOT_O_F} in Copilot",
+            enablement_text: render_read_only_enablement_text("o_f", @copilot_user.o_f_enabled?),
+            setting_changed: changed?(:of_setting),
+            policy_blocked_by: (!has_single_seat? && @copilot_user.o_f_disabled? && !@copilot_user.has_cfi_access?) ? policy_blocked_by(:o_f) : "",
+            preview: true,
+            ) do |component| %>
+                <%= component.with_description do %>
+                You can use the <%= Copilot::COPILOT_O_F %> model in Copilot Chat.
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if Copilot::Policies::Models::Ofct.available_for?(@copilot_user) %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            copilot_user: @copilot_user,
+            value: @copilot_user.ofct,
+            policy_name: "ofct",
+            display_name: "#{Copilot::COPILOT_OFCT} in Copilot",
+            enablement_text: render_read_only_enablement_text("ofct", @copilot_user.ofct_enabled?),
+            setting_changed: changed?(:ofct_setting),
+            policy_blocked_by: (!has_single_seat? && @copilot_user.ofct_disabled? && !@copilot_user.has_cfi_access? && @copilot_user.has_cfb_access?) ? policy_blocked_by(:ofct) : "",
+            preview: @copilot_user.feature_flag_enabled?(:ofct_ga, default: false) ? false: true,
+            ) do |component| %>
+              <%= component.with_description do %>
+                You can use the latest <%= Copilot::COPILOT_OFCT %> model.
+                <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_OFCT_DOCS, classes: "Link--inTextBlock")) { "Learn more about how GitHub Copilot serves #{Copilot::COPILOT_OFCT}." } %>
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if @copilot_user.feature_flag_enabled?(:copilot_obmb, default: false) && (copilot_access_through_org_or_business? || Copilot::Users::ModelAccess.model_available?(@copilot_user, :obmb)) %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            copilot_user: @copilot_user,
+            value: @copilot_user.obmb,
+            policy_name: "obmb",
+            display_name: "#{Copilot::COPILOT_OBMB} in Copilot",
+            enablement_text: render_read_only_enablement_text("obmb", @copilot_user.obmb_enabled?),
+            setting_changed: changed?(:obmb_setting),
+            policy_blocked_by: (!has_single_seat? && @copilot_user.obmb_disabled? && !@copilot_user.has_cfi_access? && @copilot_user.has_cfb_access?) ? policy_blocked_by(:obmb) : "",
+            preview: !@copilot_user.feature_flag_enabled?(:obmb_ga, default: true),
+            ) do |component| %>
+              <%= component.with_description do %>
+                <% if @copilot_user.feature_flag_enabled?(:obmb_roll_out_complete, default: false) %>
+                  You can use the latest <%= Copilot::COPILOT_OBMB %> model.
+                <% else %>
+                  Enable this setting to access <%= Copilot::COPILOT_OBMB %> when it becomes available.
+                <% end %>
+                <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_OBMB_DOCS, classes: "Link--inTextBlock")) { "Learn more about how GitHub Copilot serves #{Copilot::COPILOT_OBMB}." } %>
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if @copilot_user.feature_flag_enabled?(:copilot_obmw, default: false) && (copilot_access_through_org_or_business? || Copilot::Users::ModelAccess.model_available?(@copilot_user, :obmw)) %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            copilot_user: @copilot_user,
+            value: @copilot_user.obmw,
+            policy_name: "obmw",
+            display_name: "#{Copilot::COPILOT_OBMW} in Copilot",
+            enablement_text: render_read_only_enablement_text("obmw", @copilot_user.obmw_enabled?),
+            setting_changed: changed?(:obmw_setting),
+            policy_blocked_by: (!has_single_seat? && @copilot_user.obmw_disabled? && !@copilot_user.has_cfi_access? && @copilot_user.has_cfb_access?) ? policy_blocked_by(:obmw) : "",
+            preview: !@copilot_user.feature_flag_enabled?(:obmw_ga, default: true),
+            ) do |component| %>
+              <%= component.with_description do %>
+                <% if @copilot_user.feature_flag_enabled?(:obmw_roll_out_complete, default: false) %>
+                  You can use the latest <%= Copilot::COPILOT_OBMW %> model.
+                <% else %>
+                  Enable this setting to access <%= Copilot::COPILOT_OBMW %> when it becomes available.
+                <% end %>
+                <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_OBMW_DOCS, classes: "Link--inTextBlock")) { "Learn more about how GitHub Copilot serves #{Copilot::COPILOT_OBMW}." } %>
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if @copilot_user.feature_flag_enabled?(:copilot_grok_code, default: false) && (copilot_access_through_org_or_business? || Copilot::Users::ModelAccess.model_available?(@copilot_user, :grok_code)) %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            copilot_user: @copilot_user,
+            value: @copilot_user.grok_code,
+            policy_name: "grok_code",
+            display_name: "#{Copilot::COPILOT_GROK_CODE} in Copilot",
+            enablement_text: render_read_only_enablement_text("grok_code", @copilot_user.grok_code_enabled?),
+            setting_changed: changed?(:grok_code_setting),
+            policy_blocked_by: (!has_single_seat? && @copilot_user.grok_code_disabled? && !@copilot_user.has_cfi_access? && @copilot_user.has_cfb_access?) ? policy_blocked_by(:grok_code) : "",
+            preview: !@copilot_user.feature_flag_enabled?(:grok_code_ga, default: true),
+            ) do |component| %>
+              <%= component.with_description do %>
+                <% if @copilot_user.feature_flag_enabled?(:grok_code_roll_out_complete, default: false) %>
+                  If enabled, you can access and send data to <%= Copilot::COPILOT_GROK_CODE %>.
+                <% else %>
+                  If enabled, you can access and send data to <%= Copilot::COPILOT_GROK_CODE %> when the model becomes available.
+                <% end %>
+                <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_GROK_CODE_DOCS, classes: "Link--inTextBlock")) { "Learn more." } %>
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+
+      <%= component.with_row do %>
+        <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+          value: @copilot_user.dashboard_entry_point_enabled? ? 'enabled' : 'disabled',
+          copilot_user: @copilot_user,
+          policy_name: "dashboard_entry_point",
+          display_name: "Dashboard entry point",
+          enablement_text: !@copilot_user.dotcom_chat_enabled? ? render_enablement_text("dashboard_entry_point_disabled", "Disabled") : "",
+          setting_changed: changed?(:dashboard_entry_point_setting),
+          policy_blocked_by: "",
+          ) do |component| %>
+            <%= component.with_description do %>
+              Allows instant chatting when landing on GitHub.com
+            <% end %>
+        <% end %>
+      <% end %>
+
+      <% if render_code_review_policy? %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            copilot_user: @copilot_user,
+            value: @copilot_user.code_review_enabled? ? 'enabled' : 'disabled',
+            policy_name: "code_review",
+            display_name: Copilot::COPILOT_CODE_REVIEW,
+            enablement_text: render_read_only_enablement_text("code_review", @copilot_user.code_review_enabled?, true),
+            setting_changed: changed?(:code_review_setting),
+            menu_items: [],
+            policy_blocked_by: (@copilot_user.code_review_disabled? && @copilot_user.has_cfe_access?) ? policy_blocked_by(:code_review) : "",
+            preview: false,
+            ) do |component| %>
+              <%= component.with_description do %>
+                Use Copilot to <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_CODE_REVIEW_DOCUMENTATION, classes: "Link--inTextBlock")) { "review your code" } %> and generate <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_FOR_PRS_DOCUMENTATION, classes: "Link--inTextBlock")) { "pull request summaries" } %>.
+              <% end %>
+          <% end %>
+          <% if has_individual_access? %>
+            <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+              value: @copilot_user.automatic_code_review,
+              copilot_user: @copilot_user,
+              policy_name: "automatic_code_review",
+              display_name: "Automatically request #{Copilot::COPILOT_CODE_REVIEW}",
+              enablement_text: render_read_only_enablement_text("automatic_code_review", @copilot_user.automatic_code_review_enabled?),
+              setting_changed: changed?(:automatic_code_review_setting),
+              policy_blocked_by: (!has_single_seat? && @copilot_user.automatic_code_review_disabled? && !@copilot_user.has_cfi_access?) ? policy_blocked_by(:automatic_code_review) : "",
+              sub_setting: true,
+              ) do |component| %>
+                <%= component.with_description do %>
+                  Use Copilot to automatically review all the pull requests you've created.
+                <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if render_swe_agent_policies? %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            copilot_user: @copilot_user,
+            value: @copilot_user.swe_agent,
+            policy_name: "swe_agent",
+            display_name: Copilot::COPILOT_SWE_AGENT,
+            enablement_text: render_read_only_enablement_text("swe_agent", @copilot_user.swe_agent_enabled?, true),
+            setting_changed: changed?(:swe_agent_setting),
+            menu_items: [],
+            policy_blocked_by: (@copilot_user.swe_agent_disabled? && @copilot_user.has_cfe_access?) ? policy_blocked_by(:swe_agent) : "",
+            preview: true,
+            ) do |component| %>
+              <%= component.with_description do %>
+                Delegate tasks to <%= Copilot::COPILOT_SWE_AGENT %> in repositories where it is enabled
+                <%= render(Primer::Beta::Link.new(href: "https://gh.io/assigncopilot", classes: "Link--inTextBlock")) { "Learn more" } %>.
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if render_mcp_policy? %>
+        <%= component.with_row do %>
+          <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+            copilot_user: @copilot_user,
+            value: @copilot_user.mcp,
+            policy_name: "mcp",
+            display_name: Copilot::COPILOT_MCP_SERVERS,
+            enablement_text: render_read_only_enablement_text("mcp", @copilot_user.mcp_enabled?, true),
+            setting_changed: changed?(:mcp_setting),
+            menu_items: [],
+            policy_blocked_by: (@copilot_user.mcp_disabled? && @copilot_user.has_cfe_access?) ? policy_blocked_by(:mcp) : "",
+            preview: false,
+            ) do |component| %>
+              <%= component.with_description do %>
+                Connect MCP servers to Copilot in
+                <% if @copilot_user.feature_flag_enabled?(:mcp_clients_ga_release, default: false) %>
+                  <% if @copilot_user.has_copilot_standalone_business? %>
+                  all Copilot editors.
+                  <% else %>
+                  all Copilot editors and Coding Agent. Note that Coding Agent is in public preview.
+                  <% end %>
+                <% else %>
+                  Visual Studio Code and Coding Agent. MCP support is GA in VS Code, while Coding Agent is in public preview.
+                <% end %>
+                <% if @copilot_user.has_copilot_standalone_business? %>
+                  See MCP docs for <%= render(Primer::Beta::Link.new(href: "https://docs.github.com/en/copilot/customizing-copilot/extending-copilot-chat-with-mcp", classes: "Link--inTextBlock")) { "Copilot Chat" } %>.
+                <% else %>
+                  See MCP docs for <%= render(Primer::Beta::Link.new(href: "https://docs.github.com/en/copilot/customizing-copilot/extending-copilot-chat-with-mcp", classes: "Link--inTextBlock")) { "Copilot Chat" } %> and <%= render(Primer::Beta::Link.new(href: "https://docs.github.com/en/copilot/customizing-copilot/extending-copilot-coding-agent-with-mcp", classes: "Link--inTextBlock")) { "Coding Agent" } %>.
+                <% end %>
+              <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+    <%# ============== END OF FEATURES POLICIES SECTION ============== %>
+
+    <%# ============== START OF PRIVACY POLICIES SECTION ============== %>
+    <%= render(Primer::Box.new(display: :flex, justify_content: :space_between, direction: :row, align_items: :center, mb: 3)) do %>
+      <%= render(Primer::Beta::Text.new(tag: :h3, font_size: 4, font_weight: :bold)) { "Privacy" } %>
+    <% end %>
+
+    <%= render(Primer::Beta::BorderBox.new(padding: :default, mb: 3)) do |component| %>
+      <%= component.with_row do %>
+        <%= render ::Copilot::Policies::UserSettingsRowComponent.new(
+          copilot_user: @copilot_user,
+          value: public_code_suggestions_value,
+          policy_name: "public_code_suggestions",
+          display_name: Copilot::COPILOT_PUBLIC_CODE_SUGGESTIONS_UI,
+          enablement_text: render_read_only_enablement_text("public_code_suggestions", @copilot_user.block_public_code_suggestions?, enabled_text: "Blocked", disabled_text: "Allowed"),
+          setting_changed: changed?(:snippy_setting),
+          menu_items: Copilot::Policies::Menus::ALLOW_OR_BLOCK,
+          policy_blocked_by: (!has_single_seat? && @copilot_user.block_public_code_suggestions? && !@copilot_user.has_cfi_access?) ? policy_blocked_by(:public_code_suggestions) : "",
+          ) do |component| %>
+            <%= component.with_description do %>
+              <% if @copilot_user.is_enterprise_managed? || @copilot_user.has_cfb_access? || @copilot_user.has_copilot_standalone_business? %>
+                GitHub Copilot can provide you with details about matching code when you accept such suggestions. <%= inline_docs_link(Copilot::COPILOT_PUBLIC_CODE_SUGGESTIONS_DOCS, "Learn more") %>.
+              <% else %>
+                Copilot can allow or block suggestions matching public code. Learn more about
+                <%= render(Primer::Beta::Link.new(href: helpers.docs_url("copilot/configure-organization-matching-policies"), classes: "Link--inTextBlock")) { "code suggestions" } %>.
+              <% end %>
+            <% end %>
+        <% end %>
+      <% end %>
+
+      <% unless is_readonly_mode? %>
+        <% component.with_row do %>
+          <%= render(Primer::Box.new(display: :flex, justify_content: :space_between, flex: 1, direction: :row, align_items: :center)) do %>
+            <%= render(Primer::Box.new(display: :inline_flex, justify_content: :space_between, flex: 1, direction: :column)) do %>
+              <%= render(Primer::Box.new(display: :flex, direction: :row)) do %>
+                <%= render(Primer::Beta::Text.new(tag: :p, font_weight: :bold, mb: 1)) do %>
+                  <input
+                    type="checkbox"
+                    id="copilot_settings_telemetry"
+                    name="telemetry"
+                    value="Allow"
+                    class="mr-1" <%= @copilot_user&.telemetry_enabled? ? "checked" : "" %>
+                    data-action="click:copilot-user-settings#handleSubmit"
+                    data-target="copilot-user-settings.telemetry"
+                    aria-label="Allow GitHub to use my code snippets from the code editor for product improvements"
+                    disabled
+                  >
+                  <label for="telemetry">
+                    Allow GitHub to use my data for product improvements
+                  </label>
+                <% end %>
+                <% if changed?(:telemetry_configuration) %>
+                  <%= render Primer::Box.new(display: :flex, direction: :column, ml: 1, classes: 'hx_anim-fade-out') do %>
+                    <%= render Primer::Beta::Octicon.new(icon: "check", size: :small, mr: 2, color: :success) %>
+                  <% end %>
+                <% end %>
+              <% end %>
+              <%= render(Primer::Beta::Text.new(tag: :p, mb: 2, color: :muted)) do %>
+                Allow GitHub, its affiliates and third parties to use my data, including Prompts, Suggestions, and Code Snippets, for product improvements. More information in the
+                <%= render(Primer::Beta::Link.new(href: helpers.docs_url("copilot/about-github-copilot-individual-privacy"), classes: "Link--inTextBlock")) do %>
+                  Privacy Statement
+                <% end %>.
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% unless is_readonly_mode? %>
+        <% component.with_row do %>
+          <% if @copilot_user.has_cfi_access? %>
+            <%= render(Primer::Box.new(display: :flex, justify_content: :space_between, flex: 1, direction: :row, align_items: :center)) do %>
+              <%= render(Primer::Box.new(display: :inline_flex, justify_content: :space_between, flex: 1, direction: :column)) do %>
+                <%= render(Primer::Box.new(display: :flex, direction: :row, justify_content: :space_between)) do %>
+                  <%= render(Primer::Box.new(display: :flex, direction: :row)) do %>
+                    <%= render(Primer::Beta::Text.new(tag: :span, mb: 1, font_weight: :bold)) do %>
+                      Allow GitHub to use my data for AI model training
+                    <% end %>
+                  <% end %>
+                  <%= render(Primer::Box.new(display: :flex, direction: :row)) do %>
+                    Disabled
+                  <% end %>
+                <% end %>
+
+                <%= render(Primer::Beta::Text.new(tag: :p, mb: 2, color: :muted)) do %>
+                  Allow GitHub, its affiliates and third parties to use my data, including Prompts, Suggestions, and Code Snippets, for AI model training. More information in the
+                  <%= render(Primer::Beta::Link.new(href: helpers.docs_url("copilot/about-github-copilot-individual-privacy"), classes: "Link--inTextBlock")) do %>
+                    Privacy Statement
+                  <% end %>.
+                <% end %>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+    <%# ============== END OF PRIVACY POLICIES SECTION ============== %>
+
+    <%= render(Primer::Beta::Text.new(tag: :p, mt: 1, color: :muted, font_size: :small)) do %>
+      <% unless features_for_data_retention.empty? %>
+        <%= features_for_data_retention %> and updated <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_SPECIFIC_TERMS, classes: "Link--inTextBlock")) { "Product Terms" } %> apply.
+      <% end %>
+      For more information about the data your organization receives regarding your use of GitHub Copilot, please review <%= render(Primer::Beta::Link.new(href: Copilot::github_general_privacy_statement_url, classes: "Link--inTextBlock")) { "GitHub's Privacy Statement" } %>.
+    <% end %>
+
+    <% if onboarding? %>
+      <%= render(Primer::Beta::Button.new(
+        scheme: :primary,
+        size: :medium,
+        type: :submit,
+        disabled: true,
+        id: "copilot_settings_submit",
+        data: {
+          target: "copilot-user-settings.submit"
+        }
+      )) do %>
+        Save and complete setup
+      <% end %>
+    <% end %>
+  <% end %>
+</copilot-user-settings>

@@ -1,0 +1,615 @@
+<% page_info title: "Copilot" %>
+
+<%= render Primer::Beta::Subhead.new do |component| %>
+  <% component.with_heading(tag: :h2) do %>Copilot<% end %>
+<% end %>
+
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+  <% component.with_header do |h| %>
+    <% h.with_title(tag: :h2) do %>
+      Copilot Access
+    <% end %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Copilot Billable?",
+      copilot_business.copilot_billable?,
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Copilot Metered Services Billable? (Billing Check)",
+      copilot_business.billable_object.metered_services_billable?[:billable],
+      "Reason: <strong>#{copilot_business.billable_object.metered_services_billable?[:reason]}</strong>".html_safe, # rubocop:disable Rails/OutputSafety
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Enterprise Billing Type",
+      this_business.billing_type.present? ? this_business.billing_type : false,
+      "What billing type does this enterprise have?",
+      label_scheme: this_business.billing_type.present? ? :success : :danger,
+    ) %>
+  <% end %>
+  <% if this_business.enterprise_agreements.where(status: "active").any? %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "Does this enterprise have an Azure Subscription ID?",
+        this_business.customer.present? && this_business.customer.azure_subscription_id.present?,
+        "Since this enterprise has an Enterprise Agreement, they MUST have an Azure Subscription ID.",
+      ) %>
+    <% end %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Is this enterprise a trial enterprise?",
+      this_business.trial_status(this_business).present?,
+      this_business.trial_status(this_business),
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Has this enterprise enabled Copilot?",
+      !copilot_business.copilot_disabled?,
+      "Current setting: #{copilot_business.copilot_enabled_setting}",
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Eligible to migrate to EnterpriseTeams?",
+      copilot_business.eligible_to_migrate_to_enterprise_teams?,
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%
+      active_trials_count = active_trials.count
+      active_trial_copilot_plan = active_trials.first&.copilot_plan
+    %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Does this enterprise have an organization with an associated Copilot Business/Enterprise trial?",
+      copilot_business.has_trial_organization?,
+      active_trials_count > 0 ? "#{active_trials_count} Copilot #{active_trial_copilot_plan&.capitalize} trial(s) active" : "No active trials",
+    ) %>
+  <% end %>
+
+<% end %>
+
+<%= render(Stafftools::Copilot::PlanComponent.new(copilot_business)) %>
+
+<br>
+<% if current_user && current_user.feature_flag_enabled?(:copilot_stafftools_settings_refactor, default: false )%>
+  <%= render Stafftools::Copilot::SettingsComponent.new(copilot_business) do |component| %>
+    <% component.with_prepended_row do %>
+      <%= form_tag copilot_refresh_organizations_caches_stafftools_enterprise_path(current_business), :method => :put do %>
+        <%= render(Primer::Beta::ButtonGroup.new) do |component| %>
+          <% component.with_button(type: :submit, id: "copilot-refresh-button", test_selector: "copilot-refresh-button") do |button| %>
+            <% button.with_leading_visual_icon(icon: :sync) %>
+            Refresh all enterprise members settings cache
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+    <% if copilot_business.feature_flag_enabled?(:copilot_mcp_registry, default: false) %>
+      <% component.with_prepended_row do %>
+        <%= render Stafftools::Copilot::DetailComponent.new(
+          Copilot::COPILOT_MCP_REGISTRY,
+          nil,
+          "Whether the enterprise has a #{Copilot::COPILOT_MCP_REGISTRY} set and what the url is",
+        ) do |component| %>
+          <% component.with_body do %>
+          <p class="note">
+            <%= copilot_business.mcp_registry_url.present? ? copilot_business.mcp_registry_url : "No MCP registry URL set" %>
+          </p>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% else %>
+  <%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+    <% component.with_header do |h| %>
+      <% h.with_title(tag: :h2) do %>
+        Copilot Settings
+      <% end %>
+    <% end %>
+    <% component.with_row do %>
+      <%= form_tag copilot_refresh_organizations_caches_stafftools_enterprise_path(current_business), :method => :put do %>
+        <%= render(Primer::Beta::ButtonGroup.new) do |component| %>
+          <% component.with_button(type: :submit, id: "copilot-refresh-button", test_selector: "copilot-refresh-button") do |button| %>
+            <% button.with_leading_visual_icon(icon: :sync) %>
+            Refresh all enterprise members settings cache
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+    <% if copilot_business.feature_flag_enabled?(:copilot_business_user_assignment, default: false) %>
+      <% component.with_row do %>
+        <%= render Stafftools::Copilot::DetailComponent.new(
+          Copilot::COPILOT_EA_USER_FALLBACK_POLICY,
+          copilot_business.ea_user_fallback_policy_enabled? ? "Enabled" : "Disabled",
+          "The policy that will be applied to enterprise-assigned users when policies are configured 'No policy' (Default Disabled)",
+          label_scheme: copilot_business.ea_user_fallback_policy_enabled? ? :success : :danger
+        ) %>
+      <% end %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "#{Copilot::COPILOT_IN_DOTCOM} (#{Copilot::ENTERPRISE_PRODUCT_NAME})",
+        copilot_business.copilot_for_dotcom_setting.titleize,
+        "Whether this enterprise has enabled or disabled #{Copilot::COPILOT_IN_DOTCOM}",
+        label_scheme: copilot_business.copilot_for_dotcom_enabled? ? :success : copilot_business.copilot_for_dotcom_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_CHAT_IN_IDE,
+        copilot_business.chat_setting.titleize,
+        "Whether this enterprise has allowed or blocked chat",
+        label_scheme: copilot_business.chat_enabled? ? :success : copilot_business.no_chat_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::DOTCOM_PREVIEW_FEATURES,
+        copilot_business.beta_features_github_chat_no_policy? ? "No Policy" : copilot_business.beta_features_github_chat_enabled? ? "Enabled" : "Disabled",
+        "Whether this enterprise has enabled or disabled the use of preview Copilot features in github.com (part of #{Copilot::ENTERPRISE_PRODUCT_NAME})",
+        label_scheme: copilot_business.beta_features_github_chat_enabled? ? :success : copilot_business.beta_features_github_chat_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::EDITOR_PREVIEW_FEATURES,
+        copilot_business.editor_preview_features.titleize,
+        "Whether this enterprise has enabled or disabled editor preview features",
+        label_scheme: copilot_business.editor_preview_features_enabled? ? :success : copilot_business.editor_preview_features_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::AGENT_MODE,
+        copilot_business.agent_mode.titleize,
+        "Whether this enterprise has enabled or disabled agent mode",
+        label_scheme: copilot_business.agent_mode_enabled? ? :success : copilot_business.agent_mode_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_CHAT_IN_MOBILE,
+        copilot_business.mobile_chat.titleize,
+        "Whether this enterprise has enabled or disabled Copilot Chat in GitHub Mobile",
+        label_scheme: copilot_business.mobile_chat_enabled? ? :success : copilot_business.no_mobile_chat_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::CLI_UI_NAME,
+        copilot_business.cli.titleize,
+        "Whether this enterprise has enabled or disabled Copilot in the CLI",
+        label_scheme: copilot_business.cli_enabled? ? :success : copilot_business.cli_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_DESKTOP,
+        copilot_business.desktop.titleize,
+        "Whether this enterprise has enabled or disabled Copilot in GitHub Desktop",
+        label_scheme: copilot_business.desktop_enabled? ? :success : copilot_business.desktop_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_EXTENSION,
+        copilot_business.copilot_extensions.titleize,
+        "Whether this enterprise has enabled or disabled Copilot Extensions",
+        label_scheme: copilot_business.copilot_extensions_enabled? ? :success : copilot_business.copilot_extensions_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "#{Copilot::COPILOT_IN_DOTCOM} Chat",
+        copilot_business.dotcom_chat.titleize,
+        "Whether this enterprise has enabled or disabled Copilot Chat in GitHub.com (part of #{Copilot::ENTERPRISE_PRODUCT_NAME})",
+        label_scheme: copilot_business.dotcom_chat_enabled? ? :success : copilot_business.dotcom_chat_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_BING_ACCESS,
+        copilot_business.bing_github_chat_no_policy? ? "No Policy" : copilot_business.bing_github_chat_enabled? ? "Enabled" : "Disabled",
+        "Whether this enterprise has enabled or disabled the use of Bing Search in Copilot Chat in GitHub.com (part of #{Copilot::ENTERPRISE_PRODUCT_NAME})",
+        label_scheme: copilot_business.bing_github_chat_enabled? ? :success : copilot_business.bing_github_chat_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_PR_SUMMARIZATIONS,
+        copilot_business.pr_summarizations.titleize,
+        "Whether this enterprise has enabled or disabled Copilot PR Summarizations (part of #{Copilot::ENTERPRISE_PRODUCT_NAME})",
+        label_scheme: copilot_business.pr_summarizations_enabled? ? :success : copilot_business.pr_summarizations_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_PUBLIC_CODE_SUGGESTIONS,
+        copilot_business.no_public_code_suggestions_policy? ? "No Policy" : !copilot_business.public_code_suggestions_configured? ? "Unconfigured" : copilot_business.allow_public_code_suggestions? ? "Allow" : "Block",
+        "Whether this enterprise has allowed or blocked public code suggestions",
+        label_scheme: copilot_business.allow_public_code_suggestions? ? :success : copilot_business.no_public_code_suggestions_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_FINETUNING,
+        copilot_business.custom_models.titleize,
+        "Whether this enterprise has enabled or disabled Copilot fine-tuning",
+        label_scheme: copilot_business.custom_models_enabled? ? :success : copilot_business.custom_models_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "Private Docs",
+        copilot_business.private_docs.titleize,
+        "Whether this enterprise has enabled or disabled Copilot for Private Docs",
+        label_scheme: copilot_business.private_docs_enabled? ? :success : copilot_business.private_docs_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent .new(
+        Copilot::COPILOT_METRICS_API_NAME,
+        copilot_business.usage_telemetry_api.titleize,
+        "Whether this enterprise has enabled, disabled, or allowed organizations to control access to #{Copilot::COPILOT_METRICS_API_NAME} endpoints",
+        label_scheme: copilot_business.telemetry_aggregation_enabled? ? :success : copilot_business.telemetry_aggregation_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_O1,
+        copilot_business.o1.titleize,
+        "Whether this enterprise has enabled or disabled Open AI o1 models",
+        label_scheme: copilot_business.o1_enabled? ? :success : copilot_business.o1_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_O3,
+        copilot_business.o3.titleize,
+        "Whether this enterprise has enabled or disabled Open AI o3 models",
+        label_scheme: copilot_business.o3_enabled? ? :success : copilot_business.o3_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_O_FF,
+        copilot_business.o_ff.titleize,
+        "Whether this enterprise has enabled or disabled OpenAI GPT-4.5 model",
+        label_scheme: copilot_business.o_ff_enabled? ? :success : copilot_business.o_ff_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% if current_user.feature_flag_enabled?(:copilot_o_f, default: false) %>
+      <% component.with_row do %>
+        <%= render Stafftools::Copilot::DetailComponent.new(
+          Copilot::COPILOT_O_F,
+          copilot_business.o_f.titleize,
+          "Whether this enterprise has enabled or disabled TEMP O_F",
+          label_scheme: copilot_business.o_f_enabled? ? :success : copilot_business.o_f_no_policy? ? :secondary : :danger
+        ) %>
+      <% end %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_O_FM,
+        copilot_business.o_fm.titleize,
+        "Whether this enterprise has enabled or disabled #{Copilot::COPILOT_O_FM} model",
+        label_scheme: copilot_business.o_fm_enabled? ? :success : copilot_business.o_fm_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_O_T,
+        copilot_business.o_t.titleize,
+        "Whether this enterprise has enabled or disabled #{Copilot::COPILOT_O_T} model",
+        label_scheme: copilot_business.o_t_enabled? ? :success : copilot_business.o_t_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_OFO,
+        copilot_business.ofo.titleize,
+        "Whether this enterprise has enabled or disabled #{Copilot::COPILOT_OFO} model",
+        label_scheme: copilot_business.ofo_enabled? ? :success : copilot_business.ofo_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_A_CHAT,
+        copilot_business.a_chat.titleize,
+        "Whether this enterprise has enabled or disabled Anthropic Claude 3.5 model",
+        label_scheme: copilot_business.a_chat_enabled? ? :success : copilot_business.a_chat_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_A_F,
+        copilot_business.a_f.titleize,
+        "Whether this enterprise has enabled or disabled Anthropic Claude 3.7 model",
+        label_scheme: copilot_business.a_f_enabled? ? :success : copilot_business.a_f_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_AFOS,
+        copilot_business.afos.titleize,
+        "Whether this enterprise has enabled or disabled #{Copilot::COPILOT_AFOS} model",
+        label_scheme: copilot_business.afos_enabled? ? :success : copilot_business.afos_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_AL,
+        copilot_business.al.titleize,
+        "Whether this enterprise has enabled or disabled #{Copilot::COPILOT_AL} model",
+        label_scheme: copilot_business.al_enabled? ? :success : copilot_business.al_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_G_CHAT,
+        copilot_business.g_chat.titleize,
+        "Whether this enterprise has enabled or disabled Google Gemini model",
+        label_scheme: copilot_business.g_chat_enabled? ? :success : copilot_business.g_chat_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_G_TF,
+        copilot_business.g_tf.titleize,
+        "Whether this enterprise has enabled or disabled #{Copilot::COPILOT_G_TF} model",
+        label_scheme: copilot_business.g_tf_enabled? ? :success : copilot_business.g_tf_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_GTFF,
+        copilot_business.gtff.titleize,
+        "Whether this enterprise has enabled or disabled #{Copilot::COPILOT_GTFF} model",
+        label_scheme: copilot_business.gtff_enabled? ? :success : copilot_business.gtff_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_OBMB,
+        copilot_business.obmb.titleize,
+        "Whether this enterprise has enabled or disabled #{Copilot::COPILOT_OBMB} model",
+        label_scheme: copilot_business.obmb_enabled? ? :success : copilot_business.obmb_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_OBMW,
+        copilot_business.obmw.titleize,
+        "Whether this enterprise has enabled or disabled #{Copilot::COPILOT_OBMW} model",
+        label_scheme: copilot_business.obmw_enabled? ? :success : copilot_business.obmw_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_OFCT,
+        copilot_business.ofct.titleize,
+        "Whether this enterprise has enabled or disabled #{Copilot::COPILOT_OFCT} model",
+        label_scheme: copilot_business.ofct_enabled? ? :success : copilot_business.ofct_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_AOFO,
+        copilot_business.aofo.titleize,
+        "Whether this enterprise has enabled or disabled #{Copilot::COPILOT_AOFO} model",
+        label_scheme: copilot_business.aofo_enabled? ? :success : copilot_business.aofo_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_GROK_CODE,
+        copilot_business.grok_code.titleize,
+        "Whether this enterprise has enabled or disabled #{Copilot::COPILOT_GROK_CODE} model",
+        label_scheme: copilot_business.grok_code_enabled? ? :success : copilot_business.grok_code_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% if copilot_business.enterprise_managed? %>
+      <% component.with_row do %>
+        <%= render Stafftools::Copilot::DetailComponent.new(
+          Copilot::COPILOT_WORKSPACE_FOR_EMU,
+          copilot_business.copilot_workspace_for_emu_setting.to_s.split("_").last.titleize,
+          "Whether this enterprise has enabled Copilot Workspace for their EMUs",
+          label_scheme: copilot_business.workspace_for_emu_enabled? ? :success : :danger
+        ) %>
+      <% end %>
+    <% end %>
+    <% if current_user.feature_flag_enabled?(:copilot_overages, default: false) %>
+      <% component.with_row do %>
+        <%= render Stafftools::Copilot::DetailComponent.new(
+          "Additional Copilot premium requests",
+          copilot_business.overages.titleize,
+          "Whether this enterprise has enabled or disabled overages",
+          label_scheme: copilot_business.overages_enabled? ? :success : copilot_business.overages_no_policy? ? :secondary : :danger
+        ) %>
+      <% end %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_SWE_AGENT,
+        copilot_business.swe_agent.titleize,
+        "Whether this enterprise has enabled or disabled #{Copilot::COPILOT_SWE_AGENT}",
+        label_scheme: copilot_business.swe_agent_enabled? ? :success : copilot_business.swe_agent_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_MCP_SERVERS,
+        copilot_business.mcp.titleize,
+        "Whether this enterprise has enabled or disabled #{Copilot::COPILOT_MCP_SERVERS}",
+        label_scheme: copilot_business.mcp_enabled? ? :success : copilot_business.mcp_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% if copilot_business.feature_flag_enabled?(:copilot_mcp_registry, default: false) %>
+      <% component.with_row do %>
+        <%= render Stafftools::Copilot::DetailComponent.new(
+          Copilot::COPILOT_MCP_REGISTRY,
+          nil,
+          "Whether the enterprise has a #{Copilot::COPILOT_MCP_REGISTRY} set and what the url is",
+        ) do |component| %>
+          <% component.with_body do %>
+          <p class="note">
+            <%= copilot_business.mcp_registry_url.present? ? copilot_business.mcp_registry_url : "No MCP registry URL set" %>
+          </p>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_INSIGHTS,
+        copilot_business.insights.titleize,
+        "Whether this enterprise has enabled or disabled #{Copilot::COPILOT_INSIGHTS}",
+        label_scheme: copilot_business.insights_enabled? ? :success : copilot_business.insights_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::SPARK_NAME,
+        copilot_business.spark.titleize,
+        "Whether this enterprise has enabled or disabled #{Copilot::SPARK_NAME}",
+        label_scheme: copilot_business.spark_enabled? ? :success : copilot_business.spark_no_policy? ? :secondary : :danger
+      ) %>
+    <% end %>
+    <% if current_user.feature_flag_enabled?(:copilot_code_review_policy, default: false) %>
+      <% component.with_row do %>
+        <%= render Stafftools::Copilot::DetailComponent.new(
+          Copilot::COPILOT_CODE_REVIEW,
+          copilot_business.code_review.titleize,
+          "Whether this enterprise has enabled or disabled #{Copilot::COPILOT_CODE_REVIEW}",
+          label_scheme: copilot_business.code_review_enabled? ? :success : copilot_business.code_review_no_policy? ? :secondary : :danger
+        ) %>
+      <% end %>
+      <% component.with_row do %>
+        <%= render Stafftools::Copilot::DetailComponent.new(
+          Copilot::COPILOT_CODE_REVIEW_PREVIEW_FEATURES,
+          copilot_business.code_review_beta_features.titleize,
+          "Whether this enterprise has enabled or disabled #{Copilot::COPILOT_CODE_REVIEW_PREVIEW_FEATURES}",
+          label_scheme: copilot_business.code_review_beta_features_enabled? ? :success : copilot_business.code_review_beta_features_no_policy? ? :secondary : :danger
+        ) %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>
+<br>
+
+<%= render Stafftools::Copilot::EmailOptInOutComponent.new(
+  entity: this_business,
+  submit_path: business_toggle_copilot_email_notifications_stafftools_enterprise_path(this_business, notifications: params[:notifications]),
+  notifications: params[:notifications]
+) %>
+
+<%= render(Stafftools::Copilot::WaitlistsComponent.new(this_business)) %>
+
+<% if seat_assignments.any? %>
+  <br>
+  <%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+    <% component.with_header do |h| %>
+      <% h.with_title(tag: :h2) do %>
+        Copilot Organizations
+      <% end %>
+    <% end %>
+    <% component.with_row do %>
+      <table class="width-full px-1 mt-n1 boxed-group-table">
+        <tr>
+          <th>Organization</th>
+          <th>Seat Count</th>
+          <th>Pending Cancellation</th>
+          <th>License</th>
+        </tr>
+        <% seat_assignments.each do |id, seat_assignment| %>
+          <tr>
+            <td>
+              <%= render(Primer::Beta::Link.new(target: "_blank", href: stafftools_user_copilot_settings_path(seat_assignment[:organization]))) do %>
+                <%= seat_assignment[:organization].display_login %><% if seat_assignment[:trial].present? %><span class="label"><%= seat_assignment[:trial].short_display_name %> - <%= seat_assignment[:trial].state.to_s.humanize %></span><% end %>
+              <% end %>
+            </td>
+            <td>
+              <%= seat_assignment[:seat_count] %> <% if seat_assignment[:seat_count] > 0 %>(<%= render(Primer::Beta::Link.new(target: "_blank", href: stafftools_user_copilot_seats_path(seat_assignment[:organization]))) do %>View<% end %>)<% end %>
+            </td>
+            <td>
+              <%= seat_assignment[:seats_pending_cancellation_count] %>
+            </td>
+            <td>
+              <%= render(Primer::Beta::Label.new(scheme: :default)) { Copilot::Organization.new(seat_assignment[:organization]).copilot_plan.capitalize } %>
+            </td>
+          </tr>
+        <% end %>
+      </table>
+    <% end %>
+    <% component.with_row(text_align: :right, display: :flex, justify_content: :flex_end) do %>
+      <%= render Primer::Alpha::ActionMenu.new(menu_id: "copilot-export-menu") do |menu| %>
+        <% menu.with_show_button do |button| %>
+          <% button.with_leading_visual_icon(icon: :file) %>
+          Get Usage report
+          <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+        <% end %>
+        <% menu.with_item(
+          href: business_generate_copilot_activity_csv_stafftools_enterprise_path(this_business),
+          form_arguments: { method: :post, data: { turbo: false } }
+        ) do |item| %>
+          Activity report (new)
+          <% item.with_description.with_content(Copilot::COPILOT_ACTIVITY_REPORT_DESCRIPTION) %>
+        <% end %>
+        <% menu.with_divider %>
+        <% menu.with_item(
+          href: business_generate_copilot_csv_stafftools_enterprise_path(this_business),
+          form_arguments: { method: :post, data: { turbo: false } }
+        ) do |item| %>
+          Usage report (legacy)
+          <% item.with_description.with_content(Copilot::COPILOT_USAGE_DEPRECATION) %>
+        <% end %>
+      <% end %>
+      <% if copilot_business.eligible_to_migrate_to_enterprise_teams? %>
+        <%= form_with(url: migrate_to_enterprise_teams_copilot_stafftools_enterprise_path(this_business), method: :post, local: true) do |f| %>
+          <%= render(Primer::Beta::Button.new(type: :submit)) do |button| %>
+            Migrate to EnterpriseTeams
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+  <br>
+  <%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+    <% component.with_header do |h| %>
+      <% h.with_title(tag: :h2) do %>
+        Danger Zone
+      <% end %>
+    <% end %>
+    <% component.with_row do %>
+      <%= render(Primer::Alpha::Dialog.new(
+        title: "Reinstate Access for All Copilot Seat Assignments",
+        subtitle: "",
+        id: "reinstate-copilot-seat-assignments-#{this_business&.id}",
+        size: :xlarge,
+      )) do |d| %>
+        <% d.with_show_button(type: :button, scheme: :danger, aria: { label: "Show options", hidden: false }) { "Reinstate Access for All Seat Assignments" } %>
+
+        <% d.with_body do %>
+          <%= render(Primer::Alpha::Banner.new(scheme: :warning)) do %>
+            This will reinstate access for all Copilot seat assignments across all organizations within this enterprise. Proceed with caution.
+          <% end %>
+        <% end %>
+
+        <% d.with_footer do %>
+          <%= form_with(url: business_reinstate_copilot_seat_assignments_stafftools_enterprise_url(this_business), method: :put) do |form| %>
+            <%= hidden_field_tag :business_id, this_business.id %>
+            <%= render(Primer::Beta::Button.new(type: :submit, scheme: :danger)) { "Confirm" } %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>
+
+<%= render Stafftools::Copilot::SeatEmissionsComponent.new(copilot_seat_emissions) if copilot_seat_emissions.present? %>

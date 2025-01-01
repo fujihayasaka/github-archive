@@ -1,0 +1,195 @@
+<%= render Primer::Alpha::Stack.new(direction: :vertical, gap: :spacious) do %>
+  <%= render Primer::Alpha::Stack.new(direction: :vertical, gap: :normal) do %>
+    <%= render Primer::Beta::Heading.new(tag: :h2, font_size: 4) do %>
+      Account
+    <% end %>
+
+    <%= render Primer::Box.new(p: 3, border: true, border_radius: 2, bg: :default) do %>
+      <%= render Primer::Alpha::Stack.new(direction: :horizontal, justify: :space_between) do %>
+        <div class="d-flex flex-items-center">
+          <%= render GitHub::AvatarComponent.new(actor: user, size: 32, mr: 3) %>
+
+          <div>
+            <%= render Primer::Beta::Text.new(tag: :p, font_size: 5, font_weight: :bold, mb: 0) do %>
+              <%= user.safe_profile_name %> · <%= user.email %>
+            <% end %>
+
+            <%= render Primer::Beta::Text.new(tag: :p, font_size: 5, color: :muted, mb: 0) do %>
+              Personal account
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <%= render Primer::Alpha::Stack.new(direction: :vertical, gap: :normal) do %>
+    <%= render Primer::Beta::Heading.new(tag: :h2, font_size: 4) do %>
+      Billing frequency
+    <% end %>
+
+    <%= render Primer::Alpha::Stack.new(direction: :vertical, gap: :normal) do %>
+      <%= render "copilot/signup/billing_frequency_fields",
+        payment_duration: payment_duration,
+        monthly_price: Copilot::COPILOT_PRO_PLUS_MONTHLY_BASE_PRICE,
+        yearly_price: Copilot::COPILOT_PRO_PLUS_YEARLY_BASE_PRICE
+      %>
+    <% end %>
+  <% end %>
+
+  <% if premium_requests_feature_enabled? %>
+    <%= render Primer::Alpha::Stack.new(direction: :vertical, gap: :normal, test_selector: "premium-requests-container") do %>
+      <%= render Primer::Beta::Heading.new(tag: :h2, font_size: 4) do %>
+        Premium request settings
+      <% end %>
+
+      <%= render Primer::Box.new(p: 3, border: true, border_radius: 2, bg: :default) do %>
+        <% if premium_requests? %>
+          <%= render Primer::Alpha::Stack.new(direction: :horizontal, justify: :space_between, data: { target: "billing-checkout.premiumRequestsSummary" }) do %>
+            <div class="d-flex">
+              <% premium_requests_icon = premium_requests_enabled? ? :"check-circle" : :"x-circle"%>
+              <%= render Primer::Beta::Octicon.new(premium_requests_icon, size: :small, color: :muted, mr: 2, style: "margin-top: 2px;") %>
+
+              <div>
+                <%= render Primer::Beta::Text.new(tag: :p, font_size: 5, font_weight: :bold, mb: 0) do %>
+                  Additional usage for Copilot premium requests
+                <% end %>
+
+                <%= render Primer::Beta::Text.new(tag: :p, color: :muted, font_size: 5, font_weight: :normal, mb: 0) do %>
+                  <% if premium_requests_enabled? %>
+                    Enabled · <%= Billing::Money.new(004).format(no_cents_if_whole: false) %> / premium request
+                  <% else %>
+                    Disabled
+                  <% end %>
+                <% end %>
+              </div>
+            </div>
+
+            <%= render Primer::Beta::Button.new(font_size: 6, data: { action: "click:billing-checkout#editPremiumRequests", targets: "billing-checkout.editButtons" }) do %>
+              Edit<span class="sr-only"> premium requests</span>
+            <% end %>
+          <% end %>
+        <% end %>
+
+        <div data-target="billing-checkout.premiumRequestsForm" <%= "hidden" if premium_requests? %>>
+          <%= form_with url: update_path, method: :put do |f| %>
+            <%= f.hidden_field "payment_duration", value: payment_duration if payment_duration? %>
+
+            <% tracking_params&.each do |key, value| %>
+              <%= f.hidden_field key, value: value %>
+            <% end %>
+
+            <%= render Primer::Alpha::CheckBox.new(
+              name: "premium_requests",
+              label: "Yes, I want to enable additional usage for Copilot premium requests",
+              value: "enabled",
+              unchecked_value: "disabled",
+              checked: premium_requests_enabled?
+            ) %>
+
+            <%= render Primer::Beta::Text.new(tag: :p, color: :muted, font_size: 5, font_weight: :normal, mb: 4, mt: 3) do %>
+              Enables usage of additional premium requests beyond the 1000 included in your plan. You will be billed at <%= Billing::Money.new(004).format(no_cents_if_whole: false) %> per premium request. You can always update this information in your account settings. <%= render Primer::Beta::Link.new(href: "https://gh.io/copilot-pro-plus", classes: "Link--inTextBlock", style: "white-space: nowrap;") do %>Learn more<% end %>
+            <% end %>
+
+            <%= render Primer::Alpha::Stack.new(direction: :horizontal, gap: :condensed, flex_wrap: [:wrap, :nowrap]) do %>
+              <%= render Primer::Beta::Button.new(scheme: :primary, block: true, type: :submit, style: premium_requests? ? nil : "max-width: 50%") do %>
+                <% if premium_requests? %>
+                  Save premium request settings
+                <% else %>
+                  Save & continue
+                <% end %>
+              <% end %>
+
+              <% if premium_requests? %>
+                <%= render Primer::Beta::Button.new(block: true, data: { action: "click:billing-checkout#cancelEditPremiumRequests" }) do %>
+                  Cancel
+                <% end %>
+              <% end %>
+            <% end %>
+          <% end %>
+        </div>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if show_billing_information_container? %>
+    <%= render Primer::Alpha::Stack.new(direction: :vertical, gap: :normal, data: { target: has_billing_information? ? nil : "billing-checkout.billingInformationWrapper" }) do %>
+      <%= render Primer::Beta::Heading.new(tag: :h2, font_size: 4) do %>
+        Billing information
+      <% end %>
+
+      <% if billing_info_exists_without_errors? %>
+        <%= render Primer::Box.new(p: 3, border: true, border_radius: 2, bg: :default, classes: "js-edit-user-personal-profile-wrapper", test_selector: "billing-information-summary") do %>
+          <%= render Primer::Alpha::Stack.new(direction: :horizontal, justify: :space_between) do %>
+            <div class="d-flex">
+              <%= render Primer::Beta::Octicon.new(:location, size: :small, color: :muted, mr: 2, style: "margin-top: 2px;") %>
+
+              <ul class="list-style-none">
+                <li><%= billing_information.fullname %></li>
+                <li><%= billing_information.address1 %></li>
+                <li><%= billing_information.address2 %></li>
+                <li><%= billing_information.city %>, <%= billing_information.country_is_united_states? ? billing_information.us_state : billing_information.region %> <%= billing_information.postal_code %></li>
+                <li><%= billing_information.country.name %></li>
+
+                <% if billing_information.vat_code.present? %>
+                  <li class="mt-2">VAT/GST: <%= billing_information.vat_code %></li>
+                <% end %>
+              </ul>
+            </div>
+
+            <% if user.is_allowed_to_edit_billing_information? %>
+              <%= render Primer::Beta::Button.new(font_size: 6, classes: "js-edit-user-personal-profile",
+                data: { action: "click:billing-checkout#editBillingInformation", targets: "billing-checkout.editButtons" }
+              ) do %>
+                Edit<span class="sr-only"> billing information</span>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <div class="js-name-address-collection-wrapper" <%= "hidden" if hide_billing_information_form? %> <%= test_selector("billing-information-form") %>>
+        <%= render Primer::Box.new(p: 3, border: true, border_radius: 2, bg: :default) do %>
+          <fieldset>
+            <legend class="sr-only">Billing information</legend>
+
+            <%= render Billing::Settings::NameAddressFormComponent.new(
+              target: user,
+              payment_flow_loaded_from: "COPILOT",
+              return_to: return_to_path,
+            ) %>
+          </fieldset>
+        <% end %>
+      </div>
+    <% end %>
+  <% end %>
+
+  <% if show_payment_method_container? %>
+    <%= render Primer::Alpha::Stack.new(direction: :vertical, gap: :normal, classes: "js-payment-methods-wrapper", test_selector: "payment-method-container") do %>
+      <%= render Primer::Beta::Heading.new(tag: :h2, font_size: 4) do %>
+        Payment method
+      <% end %>
+
+      <%= render Primer::Box.new(p: 3, border: true, border_radius: 2, bg: :default) do %>
+        <%= render Billing::Settings::PaymentMethodFormComponent.new(
+          target: user,
+          new_name_address_design: true,
+          signature_view_context: Billing::Zuora::HostedPaymentsPage::COPILOT_SIGNATURE_VIEW_CONTEXT,
+          return_to: return_to_path
+        ) %>
+
+        <div class="form-group m-0">
+          <input type="reset" value="Cancel" class="btn js-sponsors-cancel-edit-payment-method-btn" data-action="click:billing-checkout#cancelEditPaymentMethod" hidden>
+        </div>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if has_commercial_restrictions? %>
+    <%= render(TradeCompliance::TradeScreeningRestrictionNoticeComponent.new(
+      target: user,
+      title: "You can't proceed with your payment",
+      feature_type: :copilot,
+    )) %>
+  <% end %>
+<% end %>

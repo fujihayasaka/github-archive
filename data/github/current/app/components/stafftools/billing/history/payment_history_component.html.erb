@@ -1,0 +1,69 @@
+<%= render Primer::Beta::Subhead.new do |component| %>
+  <%= component.with_heading(tag: :h2) { "Payment History" } %>
+
+  <% component.with_actions do %>
+    <%= link_to(hide_zero_amount ? "Show $0 payments" : "Hide $0 payments", url_for(params.permit!.to_h.merge(hide_zero: !hide_zero_amount, only_path: true))) %>
+  <% end %>
+<% end %>
+
+
+<% if show_last_failed_auth_retry? %>
+  <%= render(Primer::Beta::BorderBox.new(padding: :condensed, mb: 2, test_selector: "retry-auth")) do |component| %>
+    <% component.with_header do |h| %>
+      <% h.with_title(tag: :h2) do %>
+        Retry Authorization
+      <% end %>
+    <% end %>
+
+    <% component.with_row do %>
+      <%= form_tag stafftools_billing_authorizations_path, method: :post do %>
+        <%= hidden_field_tag billable_entity.is_a?(Business) ? :business_id : :user_id, billable_entity.id %>
+        <%= render(Primer::Alpha::Banner.new(scheme: :warning)) do |banner| %>
+          <% banner.with_action_button(type: :submit, scheme: :danger, size: :small) { "Re-trigger Authorization" } %>
+          <%= "Failed authorization for #{latest_authorization.amount.format} created on #{latest_authorization.created_at.strftime("%b %-d, %Y")}" %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+  <% end %>
+<% end %>
+
+<% if payments.any? %>
+  <payment-history
+    data-action="
+      no-invoice-found:payment-history#showNoInvoiceFoundBanner
+      invoice-download-error:payment-history#showGeneralErrorBanner
+      invoice-download-timeout:payment-history#showTimeoutBanner
+  ">
+    <div style="display: none" data-target="payment-history.noInvoiceFoundBanner">
+      <%= render(Primer::Alpha::Banner.new(full: false, scheme: :warning, icon: :alert)) do %>
+        No invoice associated to transaction <span data-target="payment-history.transactionIdNotFound"></span>
+      <% end %>
+    </div>
+    <div style="display: none" data-target="payment-history.generalErrorBanner">
+      <%= render(Primer::Alpha::Banner.new(full: false, scheme: :warning, icon: :alert)) do %>
+        Something went wrong. Please try again later.
+      <% end %>
+    </div>
+    <div style="display: none" data-target="payment-history.timeoutBanner">
+      <%= render(Primer::Alpha::Banner.new(full: false, scheme: :warning, icon: :alert)) do %>
+        Invoice(s) download failed for transaction <span data-target="payment-history.transactionIdTimeout"></span>.
+        <% if current_user.present? %>
+          It'll be sent by email to <%= current_user.billing_email %> once it's ready.
+        <% end %>
+        If needed, view the invoices directly on Zuora.
+      <% end %>
+    </div>
+    <%= render Primer::Beta::BorderBox.new(test_selector: "payment-history") do |component| %>
+      <% payments.each do |payment| %>
+        <% component.with_row(p: 0) do %>
+          <%= render Stafftools::Billing::History::BillingTransactionComponent.new(payment: payment) %>
+        <% end %>
+      <% end %>
+    <% end %>
+  </payment-history>
+<% else %>
+  <%= render Primer::Beta::Blankslate.new(test_selector: "payment-history") do |component| %>
+    <% component.with_heading(tag: :h2).with_content("#{billable_entity} has not made any self-serve payments.") %>
+  <% end %>
+<% end %>

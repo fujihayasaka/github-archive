@@ -1,0 +1,73 @@
+<% page_info title: "Advanced Security" %>
+<% if this_user.advanced_security_billable_entity? %>
+  <%= render(Stafftools::Billing::AdvancedSecurityLicensingStateComponent.new(entity: this_user)) %>
+  <% skus.each do |sku| %>
+    <div class="ml-4 mb-4">
+      <%= render(Primer::Beta::BorderBox.new(mb: 4)) do |component| %>
+        <% component.with_header do %>
+          <h2 class="Box-title" <%= test_selector("ghas-sku-enablement") %>> <%= sku.title %> Enablement</h2>
+        <% end %>
+        <% component.with_row do %>
+          <div class="d-flex flex-justify-between">
+            <span>Number of repositories with active <%= sku.title %> committers:</span>
+            <span class="no-wrap">
+              <strong <%= test_selector("ghas-enabled-repositories")%>><%= enabled_ghas_repositories_count(entity: this_user, sku:) %></strong>
+              <%= link_to download_ghas_repositories_stafftools_user_advanced_security_path(this_user.login),
+                class: "btn-octicon ml-2 no-wrap" do %>
+                <%= render(Primer::Beta::Octicon.new(icon: "download")) %> Download CSV
+              <% end %>
+            </span>
+          </div>
+        <% end %>
+      <% end %>
+
+      <%= render Stafftools::AdvancedSecurity::OrganizationCommittersFormComponent.new(
+        this_user: this_user,
+        entities: request.params.fetch(:entities, {})[sku.to_param],
+        sku:,
+      ) %>
+    </div>
+  <% end %>
+
+  <div class="ml-4 mb-4">
+    <%= render Stafftools::GhasTrialsSectionComponent.new(billable_entity: this_user) %>
+  </div>
+
+  <div class="ml-4">
+    <%= render Primer::Beta::Subhead.new(hide_border: true) do |component| %>
+      <% component.with_heading(tag: :h2, danger: true) do %>Danger zone<% end %>
+    <% end %>
+    <% if this_user.plan.business? %>
+      <%= render(Primer::Beta::BorderBox.new(mb: 4)) do |component| %>
+        <% component.with_row do %>
+          <div class="d-flex flex-justify-between" <%= test_selector("toggle-unbundled-ghas")%>>
+            <span>
+              <h3 class="Box-title h4">Toggle Unbundled Advanced Security</h3>
+            </span>
+            <span class="no-wrap">
+              <%= form_tag toggle_ghas_stafftools_user_advanced_security_path(this_user), method: :post do %>
+                <% if this_user.advanced_security_purchased? %>
+                  <%= render Primer::Beta::Button.new(type: :submit) do %>Disable<% end %>
+                <% else %>
+                  <input type="hidden" name="enable_ghas" value="1">
+                  <%= render Primer::Beta::Button.new(type: :submit) do %>Enable<% end %>
+                <% end %>
+              <% end %>
+            </span>
+          </div>
+        <% end %>
+      <% end %>
+    <% else %>
+      <p class="text-italic">
+        This organization's plan does not give them the option of switching between bundled and unbundled Advanced Security.
+        If it did, you'd see that option here.
+      </p>
+    <% end %>
+  </div>
+<% else %>
+  <div class="Box Box--danger mb-3">
+    <div class="Box-body text-bold" <%= test_selector("ghas-business-link") %>>
+      To manage this organization's advanced security billing, see their parent enterprise <%= link_to this_user.business.name, stafftools_enterprise_path(this_user.business), class: "Link--inTextBlock" %>.
+    </div>
+  </div>
+<% end %>

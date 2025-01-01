@@ -1,0 +1,62 @@
+#!/usr/bin/env ruby
+
+require "json"
+require "shellwords"
+require "ruby-progressbar"
+require "optparse"
+
+options = {
+  lines: false,
+  directive: "disable"
+}
+
+OptionParser.new do |opts|
+  opts.banner = "Usage: rubocop-ignore-errors [options]"
+
+  opts.on("--lines", "Add comments inline for each offense") do
+    options[:lines] = true
+  end
+
+  opts.on("--directive [DIRECTIVE]", %w(disable todo), "Set the rubocop directive (disable or todo)") do |directive|
+    options[:directive] = directive
+  end
+end.parse!
+
+def add_line_comment(file, directive)
+  data = File.readlines(file["path"])
+  file["offenses"].each do |offence|
+    line = Integer(offence["location"]["line"]) - 1
+    data[line] = "#{data[line][0...-1]} # rubocop:#{directive} #{offence["cop_name"]}\n"
+  end
+  File.open(file["path"], "w") { |f| f.write(data.join) }
+end
+
+def add_file_comment(file, directive)
+  cops = file["offenses"].map { |o| o["cop_name"] }.uniq
+  if file["path"].end_with?(".erb")
+    comments = cops.map { |cop| "<%# rubocop:#{directive} #{cop} %>\n" }.join
+  else
+    comments = cops.map { |cop| "# rubocop:#{directive} #{cop}\n" }.join
+  end
+  data = File.read(file["path"])
+  File.open(file["path"], "w") { |f| f.write(comments + data) }
+end
+
+print "==> Gather files to scan..."
+report = JSON.parse(`#{Shellwords.join(["rubocop", "--format", "json"] + ARGV)}`)
+
+puts "#{report["files"].count} files found"
+
+progressbar = ProgressBar.create(title: "Scanning...", total: report["files"].count)
+
+report["files"].each do |file|
+  if file["offenses"].any?
+    if options[:lines]
+      add_line_comment(file, options[:directive])
+    else
+      add_file_comment(file, options[:directive])
+    end
+  end
+
+  progressbar.increment
+end

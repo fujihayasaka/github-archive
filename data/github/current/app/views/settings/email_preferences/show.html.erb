@@ -1,0 +1,54 @@
+<% page_info title: "Email settings", class: "page-account" %>
+<% view = Settings::EmailsView.new(:user => current_user) %>
+
+<%= render partial: "settings/email_preferences/flashes", locals: { notifications_email: view.global_notifications_email } %>
+
+<%= render layout: "settings/settings" do %>
+  <%= render Primer::Beta::Subhead.new do |component| %>
+    <% component.with_heading(tag: :h2) do %>Emails<% end %>
+  <% end %>
+
+  <% if !GitHub.single_or_multi_tenant_enterprise? && current_user.feature_flag_enabled_or_raise?(:actionable_two_factor_security_checkup) # rubocop:disable GitHub/FeatureManagement/NoVexiActorFeatureFlagEnabledOrRaiseUsage %>
+    <% email_related_global_notice = %(verified_emails one_verified_email).include?(current_user.global_notice.name) %>
+    <div class="mb-3">
+      <%= render partial: "settings/securities/inline_security_checkup_notice", locals: { section: "emails", hide_initial_notice: email_related_global_notice } %>
+    </div>
+  <% else %>
+    <% if view.verification_enabled? && current_user.emails.verified.size == 0 %>
+      <p>
+        <% if current_user.must_verify_email? %>
+          <strong>Please verify an email address</strong> to collaborate on GitHub,
+          receive notifications, and help us protect your account.
+        <% else %>
+          You have not verified any email addresses.
+          We recommend you verify at least one email for password reset.
+        <% end %>
+      </p>
+    <% end %>
+  <% end %>
+
+  <%= render partial: "settings/email_preferences/emails_list", locals: {
+    user_emails: current_user.is_emu_and_not_first_owner? ? [view.stealth_email_display] : current_user.emails.user_entered_emails.ordered_by_id,
+    verification_enabled: view.verification_enabled?,
+    deletion_disabled_func: view.method(:deletion_disabled?),
+    deletion_tooltip_func: view.method(:deletion_tooltip),
+    deletion_message_func: view.method(:deletion_message),
+    social_disconnect_disabled_func: view.method(:social_disconnect_disabled?),
+  } %>
+
+  <%= render partial: "settings/email_preferences/add_email" %>
+
+  <%= render partial: "settings/email_preferences/set_primary_email", locals: {
+    primary_email_select_options: view.primary_email_select_options,
+    primary_email_default_selection: view.primary_email_default_selection,
+  } %>
+
+  <div class="mt-3" <%= "hidden" if view.hide_backup_email_options %>>
+    <%= render partial: "settings/email_preferences/backup_email_options", locals: {
+      backup_email_select_options: view.backup_email_select_options,
+      backup_email_default_selection: view.backup_email_default_selection,
+      stealth_email_display: view.stealth_email_display,
+    } %>
+  </div>
+
+<% end %>

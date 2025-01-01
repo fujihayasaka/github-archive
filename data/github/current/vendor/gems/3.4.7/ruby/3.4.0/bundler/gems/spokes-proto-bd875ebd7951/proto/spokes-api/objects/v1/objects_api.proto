@@ -1,0 +1,266 @@
+syntax = "proto3";
+
+package github.spokes.objects.v1;
+
+option go_package = "github.com/github/spokes-proto/gen/go/v1/objects";
+option ruby_package = "GitHub::Spokes::Proto::Objects::V1";
+
+import "spokes-api/types/selectors/v1/object_selector.proto";
+import "spokes-api/types/v1/object.proto";
+import "spokes-api/types/v1/object_id.proto";
+import "spokes-api/types/v1/repository.proto";
+import "spokes-api/types/v1/request_context.proto";
+import "spokes-api/types/v1/revision.proto";
+import "spokes-api/types/v1/trailer.proto";
+import "spokes-api/types/v1/tree_entry.proto";
+import "spokes-api/types/v2/attribution.proto";
+
+// ObjectsAPI contains APIs for object-related Git operations.
+service ObjectsAPI {
+    // ResolveObject returns a single resolved object by revision.
+    //
+    // If the input 'object_name' is ambiguous and could refer to multiple
+    // objects, an InvalidArgument error (e.g. "object_name is an ambiguous
+    // short object ID") will be returned.
+    rpc ResolveObject(ResolveObjectRequest) returns (ResolveObjectResponse);
+
+    // ResolveObjects returns multiple resolved objects.
+    // The entries in the response are in the same order as the items in the request.
+    rpc ResolveObjects(ResolveObjectsRequest) returns (ResolveObjectsResponse);
+
+    // ExpandOids returns the full oid for a list of abbreviated oids.
+    rpc ExpandOids(ExpandOidsRequest) returns (ExpandOidsResponse);
+
+    // ReadObjects returns the list of objects that have been requested.
+    // The entries in the response are in the same order as the items in the
+    // request. The response contains a polymorphic list of objects, which can
+    // be one of the following:
+    // - CommitObject
+    // - BlobObject
+    // - TreeObject
+    // - TagObject
+    // - ErrorObject
+    rpc ReadObjects(ReadObjectsRequest) returns (ReadObjectsResponse);
+}
+
+message ExpandOidsRequest {
+    // repository is the repository to scope the object lookup to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    // selectors is the list of abbreviated oids and their corresponding types to expand.
+    // The users of this API can specify the long version of the OID, but it would
+    // not make sense to perform this RPC if you already have the long version of the OID.
+    // At most 1000 elements are allowed.
+    repeated github.spokes.types.selectors.v1.ObjectSelector selectors = 2;
+
+    github.spokes.types.v1.RequestContext request_context = 3;
+}
+
+message ExpandOidsResponse {
+    message ErrorResult {
+        enum ErrorReason {
+            ERROR_REASON_INVALID = 0;
+            ERROR_REASON_MISSING = 1;
+            ERROR_REASON_AMBIGUOUS = 2;
+            ERROR_REASON_TYPE_MISMATCH = 3;
+        }
+
+        // error_reason is a machine-readable error code.
+        ErrorReason error_reason = 1;
+
+        // error contains a description of the error
+        string error = 2;
+    }
+
+    message ExpandedOid {
+        // short_oid is the object ID the user provided
+        github.spokes.types.v1.Revision short_oid = 1;
+
+        oneof item {
+            // error contains a description of the error if the object is not
+            ErrorResult error = 2;
+
+            // long_oid is the longer version of the object ID
+            github.spokes.types.v1.ObjectID long_oid = 3;
+        }
+    }
+
+    // oids is the list of expanded OIDs.
+    repeated ExpandedOid oids = 1;
+}
+
+message ResolveObjectRequest {
+    // repository is the repository to scope the object lookup to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    // object_name is the revision which will be used to look up the object.
+    github.spokes.types.v1.Revision object_name = 2;
+
+    github.spokes.types.v1.RequestContext request_context = 3;
+}
+
+message ResolveObjectResponse {
+    // oid is the resolve object ID.
+    github.spokes.types.v1.ObjectID oid = 1;
+}
+
+message ResolveObjectsRequest {
+    // repository is the repository to scope the object lookup to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.RequestContext request_context = 3;
+
+    // selectors defines the objects to select.
+    //
+    // Reference names passed here must be valid ref, branch, or tag names and
+    // follow the rules in
+    // https://git-scm.com/docs/git-check-ref-format#_description. For example,
+    // "main", "refs/heads/main", "v1.0", "refs/tags/v1.0" are all valid ref
+    // names. In particular, ref names may not include NUL (\0), NL (\n), or
+    // colon (:). If a selector includes an invalid reference name, the
+    // corresponding response item will be the error "unprocessable".
+    //
+    // Path names passed here may not include a NUL (\0) or NL (\n) character.
+    // If a path includes a forbidden character, even if it is valid, the
+    // corresponding response item will be the error "unprocessable".
+    repeated github.spokes.types.selectors.v1.ObjectSelector selectors = 2;
+}
+
+message ResolveObjectsResponse {
+    // items is the list of resolved objects, in the same order that they
+    // appear in the request.
+    repeated ResolvedItem items = 1;
+
+    message ResolvedItem {
+        oneof item {
+            // error is set to one of the following values if the object is not
+            // available.
+            // - "unprocessable" - there is an error in the input and the
+            //   server did not attempt to look up this object.
+            // - "missing" - the object could not be found.
+            // - "ambiguous" - the input is abbreviated (e.g. the first 7
+            //   characters of an object ID) and could refer to more than one
+            //   thing when expanded.
+            string error = 1;
+
+            // The object's information.
+            github.spokes.types.v1.Object object = 2;
+        }
+    }
+}
+
+message ReadObjectsRequest {
+    // repository is the repository to scope the object lookup to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.RequestContext request_context = 2;
+
+    // selectors represents the objects we want to read.
+    // At most 1000 objects can be read at once.
+    repeated github.spokes.types.selectors.v1.ObjectSelector selectors = 3;
+
+    reserved 4;
+}
+
+message ReadObjectsResponse {
+    // objects represent the list of objects that have been read.
+    repeated Object objects = 1;
+}
+
+// CommitObject represents a commit object.
+message CommitObject {
+    // tree_oid is the tree oid associated with the commit.
+    github.spokes.types.v1.ObjectID tree_oid = 1;
+
+    // parents is the list of commits that parent the current one.
+    repeated github.spokes.types.v1.ObjectID parents = 2;
+
+    // author is the author of the object.
+    github.spokes.types.v2.Attribution author = 3;
+
+    // committer is the commiter of the object.
+    github.spokes.types.v2.Attribution committer = 4;
+
+    // message is the commit's message.
+    bytes message = 5;
+
+    // trailers is the list of trailers defined as a part of the commit message.
+    repeated github.spokes.types.v1.Trailer trailers = 6;
+
+    // message_oids is the list of expanded oids in the message.
+    repeated ExpandOidsResponse.ExpandedOid message_oids = 7;
+
+    // encoding is the encoding of the object read.
+    string encoding = 8;
+
+    // signature contains the commit's signature (if it has one).
+    bytes signature = 9;
+}
+
+// BlobObject represents a blob object.
+message BlobObject {
+    // data represents the blob's content.
+    bytes data = 1;
+
+    // encoding is the encoding of the blob's data.
+    string encoding = 2;
+}
+
+// TreeObject represents a tree object.
+message TreeObject {
+    // entries is the list of tree entries.
+    repeated github.spokes.types.v1.TreeEntry entries = 1;
+}
+
+// TagObject represents a tag object.
+message TagObject {
+    // name represents the name of the tag.
+    bytes name = 1;
+
+    // message represents the tag's message.
+    bytes message = 2;
+
+    // message_oids is the list of expanded oids in the message.
+    repeated ExpandOidsResponse.ExpandedOid message_oids = 3;
+
+    // signature contains the tag's signature (if it has one).
+    bytes signature = 4;
+
+    // tagger is the tagger of the object.
+    github.spokes.types.v2.Attribution tagger = 5;
+
+    // target is the object that the tag points to.
+    github.spokes.types.v1.Object target = 6;
+}
+
+// Error represents a potential error that occurred while reading an object.
+message ErrorObject {
+    enum ErrorReason {
+        ERROR_REASON_INVALID = 0;
+        ERROR_REASON_MISSING = 1;
+        ERROR_REASON_AMBIGUOUS = 2;
+        ERROR_REASON_TYPE_MISMATCH = 3;
+        ERROR_REASON_TOO_LARGE = 4;
+    }
+    // error_reason is a machine-readable error code.
+    ErrorReason error_reason = 1;
+
+    // error contains a description of the error
+    string error = 2;
+}
+
+// Object is used to represent a polymorphic list of objects in the ReadObjects response.
+message Object {
+    oneof entity {
+        CommitObject commit_object = 1;
+        BlobObject blob_object = 2;
+        TreeObject tree_object = 3;
+        TagObject tag_object = 4;
+        ErrorObject error_object = 5;
+    };
+    // object represents the oid and type of the object.
+    github.spokes.types.v1.Object object = 6;
+
+    // truncated is true if some of the data for the object was truncated.
+    bool truncated = 7;
+}

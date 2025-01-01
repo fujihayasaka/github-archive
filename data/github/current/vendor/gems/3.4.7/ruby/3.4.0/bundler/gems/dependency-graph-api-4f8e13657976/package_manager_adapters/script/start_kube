@@ -1,0 +1,77 @@
+#!/bin/bash
+#
+# Main script to start a package-manager process.
+# Called by config/kubernetes/workers/.../extract_*_packages.yaml jobs.
+#
+# Usage: start_kube package_manager
+# where package_manager is a subdirectory.
+#
+# May be run from any working directory.
+# Finds helper programs relative to location of this script.
+#
+# Assumes FJORD_URL is defined in environment. (Production value comes from Vault.)
+
+set -xeu
+
+scriptdir="$(dirname "$0")"
+
+package_manager="$1"; shift
+
+# Start the sink proxy for package managers that need it.
+#
+# TODO(adonovan): modify these three package managers to avoid the
+# sink proxy and send messages to Fjord directly, like (e.g.) gopma.
+# Then delete the sink proxy.
+case "$package_manager" in
+  npm|pypi|rubygems)
+    echo "Starting sink proxy..." >&2
+    (cd "$scriptdir/../.." && RAILS_LOG_TO_STDOUT=true script/etl/sink_proxy start)
+    sink_proxy_url="http://localhost:7777"
+    while [[ "$(curl -s -o /dev/null -w '%{http_code}' $sink_proxy_url/status)" != "200" ]]; do
+      sleep 1
+    done
+    echo "Sink proxy up." >&2
+esac
+
+
+# Disable errexit mode for the final step, as it complicates inspection of $?.
+set +e
+
+# Usage: run_wrapper_with_lock [flags...]
+function run_wrapper_with_lock {
+  # We use a MySQL-based global lock to ensure that only a single
+  # instance runs at once across all clusters.  (The k8s CronJob's
+  # spec.concurrencyPolicy parameter has this effect only within each cluster.
+  # https://kubernetes.io/docs/tasks/job/automated-tasks-with-cron-jobs/#concurrency-policy.)
+  "$scriptdir/../../mysql-lock" \
+    -lock="pma-$package_manager" \
+    -dir="$scriptdir/../$package_manager" \
+    -user-env="DEPENDENCYGRAPH_DB_USERNAME" \
+    -password-env="DEPENDENCYGRAPH_DB_PASSWORD" \
+    -host="$DEPENDENCYGRAPH_DB_HOST" \
+    -port="$DEPENDENCYGRAPH_DB_PORT" \
+    "$@" \
+    dependency_graph dg_locks \
+    ./wrapper run
+}
+
+# Run one instance of the package-manager adapter in its subdirectory.
+case "$package_manager" in
+  npm|go)
+    # Deployment: long-lived; wait for lock.
+    run_wrapper_with_lock
+    status=$?
+    ;;
+  *)
+    # CronJob: short-lived, periodic; don't wait for lock.
+    run_wrapper_with_lock -wait=false
+    status=$?
+    [ $status = 11 ] && {
+      # Lock unavailable.
+      # Exit successfully: all but one of the CronJob replicas are
+      # expected to fail to acquire the lock and silently do nothing.
+      echo "Failed to acquire leadership lock for job '$package_manager'. Nothing to do."
+      exit 0
+    } >&2
+esac
+exit $status

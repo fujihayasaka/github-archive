@@ -1,0 +1,98 @@
+#!/bin/bash
+set -e
+
+# This script sets up the github/copilot-api repository for a github/github codespace.
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+ORANGE='\033[0;33m'
+NC='\033[0m' # No Color
+
+# Function to print help message
+help() {
+   echo "Sets up the github/copilot-api repository for a github/github codespace."
+   echo
+   echo "Usage: setup-codespaces-copilot-api [-b branch] [-d|h] "
+   echo "Options:"
+   echo "-d     Before starting, delete the existing copilot-api directory in the codespace."
+   echo "-w     Add the copilot-api repo as a workspace in VS Code."
+   echo "-p     Install the 1Password CLI."
+   echo "-h     Print this help message."
+   echo "-b     Specify a branch to clone (default: main)."
+   echo "-c     Enable code review mode."
+   echo "-v     Enable vision (will also install the 1Password CLI)."
+   echo
+}
+
+BRANCH=main
+
+# Get the options
+while getopts ":hdwpb:cv" opt; do
+   case $opt in
+      h) # display help message
+         help
+         exit;;
+      d) # Delete the repository if it exists
+         DELETE_REPO=true;;
+      w) # Add the repository as a workspace in VS Code
+         ADD_TO_WORKSPACE=true;;
+      p) # Install the 1Password CLI
+         INSTALL_1PASSWORD=true;;
+      b) # If a branch was provided, re-set the variable
+         BRANCH=$OPTARG;;
+      c) # Enable code review mode
+         if [ ! -z "$COPILOT_CODE_REVIEW" ]; then
+           export COPILOT_CODE_REVIEW_MODE=true
+         fi
+         echo -e "${GREEN}Code review mode enabled";;
+      v) # Enable vision
+         INSTALL_VISION=true
+         ;;
+     :)
+      echo -e "${RED}Error: Option -$OPTARG requires an argument."
+      exit 1;;
+     \?) # Invalid option
+         echo -e "${RED}Error: Invalid option -$OPTARG"
+         exit 1;;
+   esac
+done
+
+# If the copilot-api repo already exists and the delete argument hasn't been specified, echo a warning and exit.
+if [[ -d "/workspaces/copilot-api" && -z "$DELETE_REPO" ]]; then
+  echo -e "${RED}The copilot-api directory already exists in this codespace.${NC} \nYou can rerun the setup script with the -d argument to force the deletion of the existing repository."
+  exit 1
+fi
+
+if [ "$DELETE_REPO" = true ]; then
+  echo -e "\n${GREEN}➡️ Deleting the existing copilot-api repo...\n${NC}"
+  rm -rf /workspaces/copilot-api
+fi
+
+# Do a shallow clone of copilot-api to the same dir as the github/github repo.
+# If a branch was supplied, use that branch for the clone.
+echo -e "\n${GREEN}➡️ Cloning copilot-api repo...\n${NC}"
+git clone https://github.com/github/copilot-api /workspaces/copilot-api --branch $BRANCH
+
+# Bootstrap copilot-api
+echo -e "\n${GREEN}➡️ Bootstrapping copilot-api...\n${NC}"
+if [ "$INSTALL_VISION" = true ]; then
+   ( cd /workspaces/copilot-api ; script/bootstrap-dotcom-codespaces -v; )
+elif [ "$INSTALL_1PASSWORD" = true ]; then
+   ( cd /workspaces/copilot-api ; script/bootstrap-dotcom-codespaces -p; )
+else
+   ( cd /workspaces/copilot-api ; script/bootstrap-dotcom-codespaces; )
+fi
+
+# Add the copilot-api repo as a workspace in VS Code
+if [ "$ADD_TO_WORKSPACE" = true ]; then
+   echo -e "\n${GREEN}➡️ Adding copilot-api to VS Code workspace...\n${NC}"
+   code --add /workspaces/copilot-api
+fi
+
+echo -e ""
+echo -e "${GREEN}🎉🎉 FINISHED! The copilot-api repo has been set up! 🎉🎉${NC}"
+echo -e ""
+echo -e "If you're not using Codespace secrets or the 1Password CLI, make sure the generated /workspaces/copilot-api/.env file has all the proper values."
+echo -e ""
+echo -e "${GREEN}The copilot-api server will be started when you run script/server in /workspaces/github.${NC}"
+echo -e ""

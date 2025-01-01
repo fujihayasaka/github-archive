@@ -1,0 +1,100 @@
+<%= page_info title: "Security configurations • #{owner.display_login}" %>
+<%= render Primer::Beta::Heading.new(tag: :h2, mb: 4).with_content("Security configurations") %>
+
+<%= render Primer::Beta::BorderBox.new(padding: :condensed, mb: 2) do |component| %>
+  <% component.with_header(font_weight: :bold) { "GitHub Advanced Security" } %>
+  <% component.with_row(test_selector: "advanced_security_bundled") do %>
+    <%= content_tag :b, "Bundled:" %>
+    <%= billable_entity.advanced_security_products_bundled? ? "Yes" : "No" %>
+  <% end %>
+  <% component.with_row(test_selector: "advanced_security_bundle_purchased") do %>
+    <%= content_tag :b, "Bundled GHAS purchased:" %>
+    <%= billable_entity.advanced_security_purchased? && billable_entity.advanced_security_products_bundled? ? "Yes" : "No" %>
+  <% end %>
+  <% component.with_row(test_selector: "advanced_security_metered") do %>
+    <%= content_tag :b, "Metered:" %>
+    <%= billable_entity.advanced_security_products_metered? ? "Yes" : "No" %>
+  <% end %>
+  <% component.with_row(test_selector: "code_security_purchased") do %>
+    <%= content_tag :b, "Code Security purchased:" %>
+    <%= billable_entity.code_security_purchased? ? "Yes" : "No" %>
+  <% end %>
+  <% component.with_row(test_selector: "secret_protection_purchased") do %>
+    <%= content_tag :b, "Secret Protection purchased:" %>
+    <%= billable_entity.secret_protection_purchased? ? "Yes" : "No" %>
+  <% end %>
+<% end %>
+
+<% unless owner.is_a?(Business) # TODO: Skip this for now until PR for job tracking for Enterprise is merged %>
+  <%= render Primer::Beta::BorderBox.new(padding: :condensed, mb: 2) do |component| %>
+    <% component.with_header(font_weight: :bold) { "Configurations applying or blocked" } %>
+    <% component.with_row(test_selector: "jobs_in_progress") do %>
+      <%= content_tag :b, "Jobs in progress?" %>
+      <%= owner.jobs_in_progress? ? "Yes" : "No" %>
+    <% end %>
+    <% component.with_row(test_selector: "blocked_settings") do %>
+      <%= content_tag :b, "Blocked settings?" %>
+      <%= owner.security_configurations_blocked? ? "Yes" : "No" %>
+    <% end %>
+  <% end %>
+<% end %>
+
+<%= render Primer::Beta::BorderBox.new(padding: :condensed, mb: 2) do |component| %>
+  <% component.with_header(font_weight: :bold) { "Default configurations" } %>
+  <% component.with_row(test_selector: "default_public_config") do %>
+    <%= content_tag :b, "New public repositories:" %>
+    <% if owner.organization? && owner.business.present? %>
+      <%= link_to_default_configuration(enterprise_or_org_security_configurations, configuration_defaults, :public, owner.is_a?(Business)) %>
+    <% else %>
+      <%= link_to_default_configuration(security_configurations, configuration_defaults, :public, owner.is_a?(Business)) %>
+    <% end %>
+  <% end %>
+  <% component.with_row(test_selector: "default_private_config") do %>
+    <%= content_tag :b, "New private/internal repositories:" %>
+    <% if owner.organization? && owner.business.present? %>
+      <%= link_to_default_configuration(enterprise_or_org_security_configurations, configuration_defaults, :private, owner.is_a?(Business)) %>
+    <% else %>
+      <%= link_to_default_configuration(security_configurations, configuration_defaults, :private, owner.is_a?(Business)) %>
+    <% end %>
+  <% end %>
+<% end %>
+
+<%= render Primer::Beta::BorderBox.new(padding: :condensed, mb: 2) do |component| %>
+  <% component.with_header(font_weight: :bold) { owner.is_a?(Business) ? "Enterprise security configurations" : "Organization security configurations" } %>
+  <% if security_configurations.present? %>
+    <% security_configurations.each do |security_config| %>
+      <% component.with_row(test_selector: "security_configuration_row") do %>
+        <% if owner.is_a?(Business) %>
+          <%= link_to security_config.name, security_configuration_stafftools_enterprise_path(security_configuration_id: security_config.id) %>
+        <% else %>
+          <%= link_to security_config.name, security_configuration_stafftools_user_path(security_configuration_id: security_config.id) %>
+        <% end %>
+        <% if security_config.enforced?(owner) %>
+          <%= render(Primer::Beta::Label.new(scheme: :accent, inline: true, test_selector: "enforced")) { "Enforced" } %>
+        <% end %>
+        – <%= content_tag :span, security_config.description %>
+      <% end %>
+    <% end %>
+  <% else %>
+    <% component.with_row.with_content("None, yet.")  %>
+  <% end %>
+<% end %>
+
+<% if owner.is_a?(Organization) && owner.business.present? %>
+  <%= render Primer::Beta::BorderBox.new(padding: :condensed, mb: 2) do |component| %>
+    <% component.with_header(font_weight: :bold) { "Enterprise security configurations" } %>
+    <% if enterprise_security_configurations.present? %>
+      <% enterprise_security_configurations.each do |security_config| %>
+        <% component.with_row(test_selector: "enterprise_security_configuration_row") do %>
+          <%= link_to security_config.name, security_configuration_stafftools_enterprise_path(security_configuration_id: security_config.id, slug: owner.business.slug) %>
+          <% if security_config.enforced?(owner) %>
+            <%= render(Primer::Beta::Label.new(scheme: :accent, inline: true, test_selector: "enforced")) { "Enforced" } %>
+          <% end %>
+          – <%= content_tag :span, security_config.description %>
+        <% end %>
+      <% end %>
+    <% else %>
+      <% component.with_row.with_content("None, yet.")  %>
+    <% end %>
+  <% end %>
+<% end %>

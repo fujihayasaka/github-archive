@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["uuid"],{58639:(u,i,h)=>{h.d(i,{v4:()=>t});function t(){return crypto.randomUUID()}}},u=>{u(u.s=58639)}]);
+//# sourceMappingURL=uuid-b5dbd1a4d25f.js.map

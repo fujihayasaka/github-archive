@@ -1,0 +1,63 @@
+# typed: strict
+# frozen_string_literal: true
+
+module Orgs::Settings::ThirdPartyAccess::PersonalAccessTokens
+  class CredentialExpirationsController < Orgs::Controller
+    before_action :organization_admin_required
+    before_action :ensure_trade_restrictions_allows_org_settings_access
+    before_action :require_feature_flags
+    before_action :ensure_current_grant
+    before_action :ensure_current_access
+
+    javascript_bundle :settings
+
+    depends_on_clusters ApplicationRecord::Mysql1,
+      ApplicationRecord::Configurations,
+      ApplicationRecord::IamAbilities,
+      ApplicationRecord::Collab,
+      ApplicationRecord::Mysql2,
+      ApplicationRecord::NotificationsEntries,
+      ApplicationRecord::Mysql5,
+      ApplicationRecord::Repositories,
+      ApplicationRecord::Billing,
+      ApplicationRecord::Permissions
+
+    depends_on_clusters ApplicationRecord::Copilot,
+      only: [:show], optional: true
+
+    sig { void }
+    def show
+      expiration_result = ProgrammaticAccess::TokenManager.expiration_for(T.must(current_access))
+      return head :service_unavailable if expiration_result.failed?
+
+      render PersonalAccessTokens::ExpirationInfoComponent.new(expiration_time: expiration_result.value), layout: false
+    end
+
+    private
+
+    sig { returns(T.nilable(ProgrammaticAccessGrant::ORGANIZATION_TYPE)) }
+    def current_grant
+      ProgrammaticAccessGrant.with_target(current_organization).preload(:user_programmatic_access).find_by(id: params[:id])
+    end
+
+    sig { returns(T.nilable(ProgrammaticAccess::USER_TYPE)) }
+    def current_access
+      current_grant&.user_programmatic_access
+    end
+
+    sig { void }
+    def ensure_current_grant
+      render_404 unless current_grant
+    end
+
+    sig { void }
+    def ensure_current_access
+      render_404 unless current_access
+    end
+
+    sig { void }
+    def require_feature_flags
+      render_404 unless current_organization.patsv2_enabled?
+    end
+  end
+end

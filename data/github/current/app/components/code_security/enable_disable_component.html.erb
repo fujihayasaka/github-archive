@@ -1,0 +1,79 @@
+<%= form_tag update_path, method: :put do %>
+  <%= render Primer::Alpha::TextField.new(hidden: true, name: "code_security_enabled", value: input_value, label: "")%>
+  <%= render Primer::Alpha::Dialog.new(title: "#{button_text} Code Security", id: "toggle-code-security", size: :medium_portrait) do |dialog| %>
+    <% dialog.with_show_button(disabled: enablement_blocked?, scheme: enabled ? :danger : :default, px: 3, test_selector: "enable-dialog-show-button") do %>
+      <%= button_text %>
+    <% end %>
+    <% dialog.with_header(show_divider: true) %>
+    <% dialog.with_body(test_selector: "#{button_text.downcase}-code-security-dialog-button") do %>
+      <% if show_trial_banner? %>
+        <%= render Primer::Alpha::Banner.new do %>
+          Your <%= entity_type %> is on a trial until <%= T.must(code_security_trial).expires_at %>. No charges will be incurred during that trial.
+        <% end %>
+      <% end %>
+
+      <ul class="px-4 my-2">
+        <% if enabled %>
+          <li>Disable all Code Security features</li>
+          <li>Disallow custom Dependabot auto-triage rules</li>
+          <li>Disable Dependency Review Action (if dependency graph is enabled)</li>
+          <% if code_quality_enabled %><li <%= test_selector("code-quality-disable-warning") %>>Disable Code quality</li><% end %>
+        <% else %>
+          <li>Allow Code Security features to be enabled</li>
+          <li>Allow custom Dependabot auto-triage rules</li>
+          <li>Enable Dependency Review Action (if dependency graph is enabled)</li>
+          <% if cost_breakdown[:count] > 0 && show_license_increase? %>
+            <li>Consume <strong><%= cost_breakdown[:count] %> additional Code Security licenses</strong></li>
+          <% end %>
+        <% end %>
+      </ul>
+      <% if !enabled %>
+        <% if cost_breakdown[:count] == 0 %>
+          <p class="mt-1">No additional licenses will be consumed.</p>
+        <% elsif show_cost_breakdown? %>
+          <div class="fgColor-muted text-small">
+            <div class="my-2 py-2 px-3 bgColor-inset rounded-2">
+              <div class="my-2 fgColor-default">
+                <span class="f3"><%= cost_breakdown[:total] %></span>
+                <span class="f5"> / month</span>
+              </div>
+
+              <div class="mb-2">
+                New additional cost for your organization/enterprise
+              </div>
+
+              <div class="border-top py-2">
+                <div class="d-flex flex-justify-between fgColor-default text-normal">
+                  <span>
+                    <%= cost_breakdown[:count] %> additional Code Security <%= "license".pluralize(cost_breakdown[:count]) %>
+                  </span>
+                </div>
+                <%= cost_breakdown[:per_license_cost] %> per active committer within the last 90 days
+              </div>
+            </div>
+
+            <div>
+              You will be charged for additional committers in your next billing cycle.
+              <%= render(Primer::Beta::Link.new(href: helpers.docs_url("billing/about-billing-for-github-advanced-security"), classes: "Link--inTextBlock")) { "Review billing information" } %>
+              for more details.
+            </div>
+          </div>
+        <% end %>
+      <% end %>
+    <% end %>
+    <% dialog.with_footer(show_divider: true) do  %>
+      <% if show_cost_breakdown? || show_license_increase? %>
+        <%= render(Primer::Beta::Button.new(tag: :a, href: settings_org_security_products_path(repository.owner))) { "Configure in settings" } %>
+      <% else %>
+        <%= render(Primer::Beta::Button.new( type: :button, data: { "close-dialog-id": "toggle-code-security" } )) { "Cancel" } %>
+      <% end %>
+      <%= render(Primer::Beta::Button.new(
+        type: :submit,
+        scheme: enabled ? :danger : :primary,
+        "aria-label": "#{button_text} code security",
+        px: 3,
+        data: {target: "toggle-code-security"},
+      )) { "#{button_text} Code Security" } %>
+    <% end %>
+  <% end %>
+<% end %>

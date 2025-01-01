@@ -1,0 +1,133 @@
+<% if copilot_seat_assignments.total_entries > 0 %>
+  <table class="site-admin-table" style="white-space:nowrap; overflow:visible;">
+    <tr>
+      <th>Type</th>
+      <th>Assignable</th>
+      <th>Assignable ID</th>
+      <th>Sync Status</th>
+      <th>Created</th>
+      <th>Cancellation Date</th>
+      <th>Access Revoked</th>
+      <th>Actions</th>
+    </tr>
+    <% copilot_seat_assignments.each do |assignment| %>
+      <% can_reinstate = assignment.reinstate_validation("stafftools.copilot.seat_assignments") == :valid %>
+      <tr>
+        <td>
+          <% if assignment.symbolized_assignable_type == :ORGANIZATION_INVITATION %>
+            Invitation
+          <% else %>
+            <%= assignment.assignable_type %>
+          <% end %>
+        </td>
+        <td>
+          <% assignable = assignment.assignable %>
+          <% if assignment.assignable.nil? %>
+            <%= render(Primer::Beta::Octicon.new(:alert, color: :danger)) %>&nbsp;<%= "nil (id was: #{assignment.assignable_id})" %>
+          <% else %>
+            <% if assignment.symbolized_assignable_type == :ORGANIZATION_INVITATION %>
+              <%= assignable.email_or_invitee_name %>
+            <% elsif assignment.symbolized_assignable_type == :TEAM %>
+              <%= assignable.name %>
+            <% else # User or Organization %>
+              <%= assignable&.login %>
+
+              <% if assignable&.suspended? %>
+                &nbsp;
+                <%= render Primer::Beta::Label.new(scheme: :attention, title: "User is suspended") do %>
+                  S
+                <% end %>
+              <% end %>
+
+              <% if assignment.symbolized_assignable_type == :USER && !assignable&.organization_ids.include?(assignment.organization&.id) %>
+                &nbsp;<%= render(Primer::Beta::Octicon.new(:"no-entry", color: :muted)) %>
+              <% end %>
+            <% end %>
+          <% end %>
+        </td>
+        <td>
+          <%= assignment.assignable_id %>
+        </td>
+        <td align="center">
+          <% if assignment.symbolized_assignable_type == :ORGANIZATION_INVITATION %>
+            <span class="color-fg-muted">
+              <%= render(Primer::Beta::Octicon.new(icon: "check-circle-fill")) %>
+            </span>
+          <% else %>
+            <% if assignment.requires_conversion? %>
+              <%= render Primer::Beta::Label.new(scheme: :severe, title: "Out Of Sync", "aria-label": "Out Of Sync") do %>
+                <%= assignment.assignable_member_seat_count %> of <%= assignment.assignable_members_eligible_for_seats_count %>
+              <% end %>
+            <% else %>
+              <%= render Primer::Beta::Label.new(scheme: :success, title: "In Sync", "aria-label": "In Sync") do %>
+                <% if assignment.assignable.nil? && assignment.assignable_type == "User" %>
+                  1 of 1
+                <% else %>
+                  <%= assignment.assignable_member_seat_count %> of <%= assignment.assignable_members_eligible_for_seats_count %>
+                <% end %>
+              <% end %>
+            <% end %>
+          <% end %>
+        </td>
+        <td>
+          <span id="created_at_<%= assignment.id %>"> <%= assignment.created_at %></span>
+          <%= render(Primer::Alpha::Tooltip.new(for_id: "created_at_#{assignment.id}", type: :description, text: "Created by #{assignment.assigning_user&.display_login}", direction: :ne)) %>
+        </td>
+        <td>
+          <%= assignment.pending_cancellation_date %>
+        </td>
+        <td>
+          <% if assignment.access_revoked? %>
+            <%= assignment.access_revoked_at&.utc %>
+            <% if can_reinstate %>
+              &nbsp;
+              <%= render Stafftools::Copilot::ReinstateSeatAssignmentComponent.new(assignment) %>
+            <% end %>
+          <% end %>
+        </td>
+        <td>
+          <% if assignment.symbolized_assignable_type == :USER && assignment.assignable&.display_login %>
+            <%= render(Primer::Beta::Link.new(href: stafftools_user_copilot_settings_path(assignment.assignable.display_login), target: "_blank", title: "View User", muted: true, id: "user-link-#{assignment.assignable_id}")) do |component| %>
+              <% component.with_tooltip(text: "Copilot page for #{assignment.assignable.display_login}") %>
+              <%= render(Primer::Beta::Octicon.new(:"link-external")) %>
+            <% end %>
+          <% elsif assignment.symbolized_assignable_type == :TEAM %>
+            <%= render(Primer::Beta::Link.new(href: gh_stafftools_team_path(assignment.assignable), target: "_blank", title: "View Team", muted: true, id: "team-link-#{assignment.assignable_id}")) do |component| %>
+              <% component.with_tooltip(text: "Team page for #{assignment.assignable.name}") %>
+              <%= render(Primer::Beta::Octicon.new(:"link-external")) %>
+            <% end %>
+          <% elsif assignment.symbolized_assignable_type == :ORGANIZATION_INVITATION %>
+            <%
+              invitation = assignment.assignable
+              link = if invitation.email?
+                stafftools_search_path(query: invitation.email)
+              else
+                stafftools_user_copilot_settings_path(invitation.invitee)
+              end
+            %>
+            <%= render(Primer::Beta::Link.new(href: link, target: "_blank", title: "View User", muted: true, id: "user-link-#{assignment.assignable_id}")) do |component| %>
+              <% component.with_tooltip(text: "Page for #{assignment.assignable.email_or_invitee_name}") %>
+              <%= render(Primer::Beta::Octicon.new(:"link-external")) %>
+            <% end %>
+          <% else %>
+            <%= render(Primer::Beta::Octicon.new(:"link-external")) %>
+          <% end %>
+          &nbsp;
+          <%= render Stafftools::Copilot::ResyncSeatAssignmentComponent.new(assignment) %>
+          &nbsp;
+          <%= render Stafftools::Copilot::CancelSeatAssignmentComponent.new(assignment) %>
+        </td>
+      </tr>
+    <% end %>
+  </table>
+  <div class="paginate-container">
+    <%= helpers.will_paginate copilot_seat_assignments %>
+  </div>
+  <br>
+  <%= render Primer::Beta::Label.new(scheme: :attention, title: "Suspended") do %>
+    S
+  <% end %> = User Suspended&nbsp;
+  <%= render(Primer::Beta::Octicon.new(:"no-entry", color: :muted)) %> = User is not a member of this organization
+<% else %>
+    This organization has no assigned seats.
+<% end %>

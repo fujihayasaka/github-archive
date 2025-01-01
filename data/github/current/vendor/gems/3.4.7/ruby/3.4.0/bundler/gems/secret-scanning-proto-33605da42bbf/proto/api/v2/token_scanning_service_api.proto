@@ -1,0 +1,873 @@
+syntax = "proto3";
+
+package github.secretscanning.v2;
+
+option go_package = "github.com/github/secret-scanning-proto/gen/go/v2/api";
+option ruby_package = "GitHub::Proto::SecretScanning::Api::V2";
+
+import "api/v1/shared.proto";
+import "api/v2/custom_pattern_api.proto";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/wrappers.proto";
+
+service TokenAPI {
+  rpc GetTokens(GetTokensRequest) returns (GetTokensResponse);
+  rpc GetToken(GetTokenRequest) returns (GetTokenResponse);
+  rpc GetTokenLocations(GetTokenLocationsRequest) returns (GetTokenLocationsResponse);
+  rpc GetTokensMeanTimeToRemediation(GetTokensMeanTimeToRemediationRequest) returns (GetTokensMeanTimeToRemediationResponse);
+  rpc ResolveToken(ResolveTokenRequest) returns (ResolveTokenResponse);
+  rpc ResolveTokens(ResolveTokensRequest) returns (ResolveTokensResponse);
+  rpc GetTokenCounts(GetTokenCountsRequest) returns (GetTokenCountsResponse);
+  rpc GetTokenGroupByCounts(GetTokenGroupByCountsRequest) returns (GetTokenGroupByCountsResponse);
+  rpc GetTokenTypesInfo(GetTokenTypesInfoRequest) returns (GetTokenTypesInfoResponse) { option deprecated = true; };
+  rpc ValidateEnabledRepos(ValidateEnabledReposRequest) returns (ValidateEnabledReposResponse);
+  rpc AddTokenRemediation(AddTokenRemediationRequest) returns (google.protobuf.Empty);
+  rpc GetTokenLatestRemediation(GetTokenLatestRemediationRequest) returns (GetTokenLatestRemediationResponse);
+  rpc GetTimeline(GetTimelineRequest) returns (GetTimelineResponse);
+  rpc GetMoreTimelineEvents(GetMoreTimelineEventsRequest) returns (GetMoreTimelineEventsResponse);
+  rpc GetTokenValidationStatus(GetTokenValidationStatusRequest) returns (GetTokenValidationStatusResponse);
+  rpc ReportToken(ReportTokenRequest) returns (ReportTokenResponse);
+  rpc GetAdversarialAudit(GetAdversarialAuditRequest) returns (GetAdversarialAuditResponse);
+  rpc GetWorkflowAudit(GetWorkflowAuditRequest) returns (GetWorkflowAuditResponse);
+  rpc GetPermissionAudit(GetPermissionAuditRequest) returns (GetPermissionAuditResponse);
+  rpc GetAutofixSuggestion(GetAutofixSuggestionRequest) returns (GetAutofixSuggestionResponse);
+  rpc UpdateTokenWithClosureExemptionRequestId(UpdateTokenWithClosureExemptionRequestIdRequest) returns (google.protobuf.Empty);
+  rpc SetAlertAssignee(SetAlertAssigneeRequest) returns (google.protobuf.Empty);
+  rpc SetCampaignAssignments(CampaignAssignmentsRequest) returns (CampaignAssignmentsResponse);
+}
+
+message GetTimelineRequest {
+  reserved 3;
+  // repo-scoped alert number (as opposed to internal token scan result id)
+  uint64 token_alert_number = 1;
+  // repository to which this token scan result belongs
+  uint64 repository_id = 2;
+}
+
+message GetTimelineResponse {
+  reserved 1 to 3;
+  // total number of events in the entire history of this alert; can be used by dotcom to know how many more events can be loaded if there were too many to be returned in this response
+  uint32 total_number_of_events = 4;
+  // timeline containing the most recent events in ascending order if the alert has more events than an internal threshold; if alert has less events than this threshold, this contains all events in ascending order
+  TimelineSegment latest_ascending = 5;
+  // timeline containing the oldest events in ascending order if the alert has more events than an internal threshold; if alert has less events than this threshold, this is not set
+  TimelineSegment earliest_ascending = 6;
+}
+
+message TimelineSegment {
+  // timeline events in forward or reverse chronological order; the order depends on the cursor that was given in the request
+  repeated TimelineEvent events = 1;
+  // cursor is an opaque set of bytes used to load the next set of events either forward or backward in time depending on the cursor in the request
+  bytes cursor = 2;
+}
+
+message GetMoreTimelineEventsRequest {
+  // repo-scoped alert number (as opposed to internal token scan result id)
+  uint64 token_alert_number = 1;
+  // repository to which this token scan result belongs
+  uint64 repository_id = 2;
+  // cursor is an opaque set of bytes used to load the next set of events, which can be either forward or backward in time depending on which cursor is passed in from GetTimelineResponse
+  bytes cursor = 3;
+  // number of events to load in the next set of events
+  uint32 number_of_events_to_load = 4;
+}
+
+message GetMoreTimelineEventsResponse {
+  // timeline containing both events and a cursor that can be used to get the next set of events
+  TimelineSegment timeline = 1;
+}
+
+message TimelineEvent {
+  enum TimelineEventType {
+    UNSPECIFIED = 0;
+    ALERT_CREATION = 1;
+    RESOLUTION = 2;
+    BYPASS = 3;
+    REVOCATION = 4;
+    DELEGATED_BYPASS_REQUEST_OPENED = 5; 
+    DELEGATED_BYPASS_REQUEST_APPROVED = 6;
+    VALIDITY_CHANGE = 7;
+    REPORT = 8;
+    DELEGATED_ALERT_CLOSURE_REQUEST_OPENED = 9;
+    DELEGATED_ALERT_CLOSURE_REQUEST_APPROVED = 10;
+    DELEGATED_ALERT_CLOSURE_REQUEST_REJECTED = 11;
+    DELEGATED_ALERT_CLOSURE_REQUEST_CANCELLED = 12;
+    ASSIGNMENT_CHANGED = 13;
+  }
+  // type of event; tells dotcom which type of component to render
+  TimelineEventType type = 1;
+  // time at which the event occurred
+  google.protobuf.Timestamp time = 2;
+  // user that triggered the event, this will be 0 for validity events
+  uint64 actor = 3;
+  // event-specific metadata; not all types of events have this
+  oneof event_specific_data {
+    ResolutionEvent resolution = 4;
+    ValidityEvent validity = 5;
+    ExemptionRequestEvent exemption_request = 6; 
+    ExemptionResponseEvent exemption_response = 7;
+    AssignmentChangeEvent assignment_change = 8;
+  }
+}
+
+message ValidityEvent {
+  TokenValidity validity = 1;
+}
+
+message ResolutionEvent {
+  // type of resolution
+  Token.Resolution type = 1;
+  // indicates whether the alert is resolved, i.e. the alert is closed if this is true, open if false
+  bool resolved = 2;
+  // indicates if resolved state has just changed from open to close or vice versa compared to most recent resolution event; can be used to draw a thick line between such events in the timeline UX
+  bool resolved_state_change = 3;
+  // optional resolution comment
+  string comment = 4;
+}
+
+message AssignmentChangeEvent {
+  uint64 assigned_user_id = 1;
+  uint64 unassigned_user_id = 2;
+}
+
+message ExemptionRequestEvent {
+  string requester_comment = 1;
+  github.secretscanning.v1.ExemptionReason reason = 2; 
+
+  enum ExemptionRequestEventStatus {
+    UNKNOWN = 0;
+    PENDING = 1;
+    APPROVED = 2;
+    REJECTED = 3;
+    CANCELLED = 4;
+  }
+
+  ExemptionRequestEventStatus status = 3;
+}
+
+message ExemptionResponseEvent {
+  string reviewer_comment = 1; 
+}
+
+message TokenRemediation {
+enum EventType {
+    UNKNOWN = 0;
+    ACTIVE = 1;
+    REVOKED = 2;
+    REQUEST_REVOKED = 3;
+  }
+  uint64 number = 1;
+  EventType event_type = 2;
+  google.protobuf.Timestamp event_at = 3;
+  uint64 event_by = 4;
+}
+
+message AddTokenRemediationRequest {
+  uint64 repository_id = 1;
+  TokenRemediation token_remediation = 2;
+}
+
+message GetTokenLatestRemediationRequest {
+  uint64 repository_id = 1;
+  repeated uint64 numbers = 2;
+}
+
+message GetTokenLatestRemediationResponse {
+  repeated TokenRemediation token_remediations = 1;
+}
+
+message GetTokenValidationStatusRequest {
+  uint64 repository_id = 1;
+  uint64 token_number  = 2;
+  uint64 requested_by_user_id = 3;
+}
+
+message GetTokenValidationStatusResponse {
+  // validity will be set for token regardless of whether they are multipart tokens
+  // or standalone tokens.
+  TokenValidity validity = 1;
+  // A non-standalone token's validation_details will contain the most recent last check time from all its groups
+  TokenValidationDetails validation_details = 2;
+  repeated TokenGroup token_groups = 3;
+}
+
+message GetPermissionAuditRequest {
+  oneof permissions {
+    PATV1Permissions pat_v1_permissions = 1;
+    PATV2Permissions pat_v2_permissions = 2;
+  }
+  repeated string audit_log_actions = 3;
+}
+
+message GetPermissionAuditResponse {
+  string summary = 1;
+  oneof removed_permissions {
+    PATV2Permissions removed_pat_v2_permissions = 2;
+    PATV1Permissions removed_pat_v1_permissions = 3;
+  }
+}
+
+message GetAutofixSuggestionRequest {
+  uint64 repository_id = 1;
+  uint64 token_number = 2;
+}
+
+message GetAutofixSuggestionResponse {
+  string diff = 1 [deprecated = true];
+  string explanation = 2;
+  bytes encrypted_diff = 3;
+}
+
+message UpdateTokenWithClosureExemptionRequestIdRequest {
+  uint64 repository_id = 1; 
+  uint64 token_number = 2; 
+  uint64 closure_exemption_request_id = 3; 
+}
+
+message PanicRequest {
+  string request = 1;
+}
+
+message PanicResponse {
+  string response = 1;
+}
+
+// Selector used to query at enterprise level.
+// As there's currently no enterprise-level permissions, this message must include
+// a list of organization IDs, calculated in dotcom, that the user has access to.
+message BusinessSelector {
+  repeated uint64 organization_ids = 1;
+
+  // if this list is empty or unset, we will select all repos in all the org ids.
+  repeated uint64 repository_ids = 2;
+  repeated RepositoryVisibility repository_visibilities = 3;
+  bool repos_are_excluded = 4;
+
+  // Business ID
+  uint64 id = 5;
+
+  // If the user_filter_type is ONLY or EXCEPT, then user_ids will be a slice of ids to filter by
+  repeated uint64 user_ids = 6;
+  enum user_filter_type {
+    // Load all alerts from EMU repositories
+    ALL = 0;
+
+    // Load no alerts from EMU repositories (used when user has specified orgs to filter on)
+    NONE = 1;
+
+    // Load alerts only from specified EMU accounts
+    ONLY = 2;
+
+    // Exclude alerts from specified EMU accounts
+    EXCEPT = 3;
+  }
+  user_filter_type user_filter = 7;
+
+  enum OwnerType {
+    // Unspecified owner type. Used as a zero value and should not be used in practice.
+    OWNER_TYPE_UNSPECIFIED = 0;
+
+    // Return alerts from organization repositories
+    OWNER_TYPE_ORGANIZATION = 1;
+
+    // Return alerts from EMU repositories
+    OWNER_TYPE_USER = 2;
+  }
+
+  // Filter by owner type
+  repeated OwnerType owner_types = 8;
+  repeated OwnerType excluded_owner_types = 9;
+}
+
+message OrgSelector {
+  uint64 owner_id = 1;
+  // if this list is empty or unset, we will select all repos in the org.
+  repeated uint64 repository_ids = 2;
+  repeated RepositoryVisibility repository_visibilities = 3;
+  bool repos_are_excluded = 4;
+}
+
+message RepoSelector {
+  uint64 repository_id = 1;
+}
+
+message GetTokensRequest {
+  // token_types was superceded by token_slugs
+  reserved 1, 17;
+  reserved "token_types", "repository_ids_selector";
+  SortOrder sort_order = 2;
+  TokenState token_state = 3;
+  uint32 limit = 4;
+  uint32 page = 5;
+  repeated string feature_flags = 6;
+  oneof selector {
+    OrgSelector org_selector = 7;
+    RepoSelector repo_selector = 8;
+    BusinessSelector business_selector = 13;
+  }
+  repeated string token_providers = 9;
+  repeated Token.Resolution resolution = 11;
+  repeated string token_slugs = 12;
+
+  // cursor replaced by previous_cursor/next_cursor
+  reserved 14;
+  reserved "cursor";
+
+  // Represents an opaque object to be used to request the previous page of results.
+  bytes previous_cursor = 15;
+  // Represents an opaque object to be used to request the next page of results.
+  bytes next_cursor = 16;
+
+  // repository_visibilities was moved into applicable selectors
+  reserved 18;
+
+  repeated string exclude_token_providers = 19;
+  repeated Token.Resolution exclude_resolutions = 20;
+  repeated string exclude_token_slugs = 21;
+
+  bool low_confidence = 22;
+  repeated TokenValidity validity = 23;
+  bool bypassed = 24;
+
+  bool publicly_leaked = 25;
+  bool multi_repo = 26;
+  // checks whether each token has more than one location (but does not return those locations)
+  bool include_has_more_locations = 27;
+
+  CampaignFilter campaign_filter = 28;
+
+  AssigneeFilter assignee_filter = 29;
+}
+
+message CampaignFilter {
+  oneof filter {
+    CampaignInclude include = 1;
+    CampaignExclude exclude = 2;
+  }
+}
+
+message CampaignInclude {
+  repeated uint64 campaign_ids = 1; // only return tokens that are assigned to these campaigns
+}
+
+message CampaignExclude {
+  bool exclude_all = 1; // exclude tokens that are assigned to any campaigns
+  repeated uint64 campaign_ids = 2; // don't return tokens that are assigned to these campaigns
+}
+
+message AssigneeFilter {
+  uint64 assigned_user_id = 1;
+  uint64 excluded_assigned_user_id = 2;
+  AssignedUserPresence assigned_user_presence = 3;
+}
+
+enum AssignedUserPresence {
+  ASSIGNED_USER_PRESENCE_UNSPECIFIED = 0;
+  ASSIGNED_USER_PRESENCE_HAS_USER = 1;
+  ASSIGNED_USER_PRESENCE_NO_USER = 2;
+}
+
+message TokenType {
+  string type_value = 1;
+  string label_value = 2;
+  string slug_value = 3;
+}
+
+message GetTokensResponse {
+  repeated Token tokens = 1;
+  uint64 resolved_count = 2;
+  uint64 unresolved_count = 3;
+  bool has_pending_backfill = 4;
+  bool has_backfill_scanning_terminal_error = 5;
+  bool has_backfill_scan_max_candidates = 6;
+  repeated TokenType token_types = 7;
+  // next_cursor is an opaque paging token; request for next page should get records immediately following (exclusive)
+  bytes next_cursor = 8;
+  // previous_cursor is an opaque paging token; request for previous page should get records immediately preceding (exclusive)
+  bytes previous_cursor = 9;
+}
+
+message GetTokenRequest {
+  uint64 repository_id = 1;
+  uint64 token_id = 2;  // Note: this is the repo-scoped alert number, not token scan result ID
+  bool include_commit_oids = 3;
+  uint32 limit = 4;
+  uint32 page = 5;
+  bool include_included_locations = 6;
+  reserved 7;
+  repeated string feature_flags = 8;
+  bool include_location_count = 9;
+  bool include_config_filters = 10;
+  bool include_related_alerts = 11; // include related_alerts and related_public_leaks in the response
+}
+
+message TokenLocationIdsSelector {
+  repeated uint64 location_ids = 1;
+}
+
+message GetTokenLocationsRequest {
+  uint64 repository_id = 1;
+  uint64 token_number = 2;
+  bytes cursor = 3;
+  oneof selector {
+    TokenLocationIdsSelector locations_ids_selector = 4;
+  }
+}
+
+message GetTokenLocationsResponse {
+  repeated TokenLocation locations = 1;
+  bytes next_cursor = 2;
+  Token token = 3;
+}
+
+message GetTokensMeanTimeToRemediationRequest {
+  oneof selector {
+    OrgSelector org_selector = 1;
+  }
+}
+
+message GetTokensMeanTimeToRemediationResponse {
+  // Mean time to remediation in days. The average time it takes to remediate an alert.
+  int64 mttr_days = 1;
+}
+
+message GetTokenResponse {
+  Token token = 1;
+  bool has_ignored_locations = 2;
+  repeated string commit_oids = 3;
+  uint64 included_locations_count = 4;
+  repeated TokenLocation included_locations = 5;
+  message CustomPatternData {
+    uint64 custom_pattern_id = 1;
+    uint64 owner_id = 2;
+    github.secretscanning.v1.OwnerScope owner_scope = 3;
+    github.secretscanning.v2.CustomPatternState state = 4;
+  }
+  // custom_pattern_data represents info about the custom pattern when the token type is custom_pattern
+  CustomPatternData custom_pattern_data = 6;
+  repeated RelatedToken related_alerts = 7;
+  repeated TokenLocationWithRepoID related_public_leaks = 8;
+  uint64 closure_exemption_request_id = 9;
+}
+
+message ResolveTokenRequest {
+  uint64 repository_id = 1;
+  uint64 token_id = 2; // Note: this is the repo-scoped alert number, not token scan result ID
+  Token.Resolution resolution = 3;
+  uint64 resolver_id = 4;
+  string default_branch_name = 5;
+  repeated string feature_flags = 6;
+  string resolution_comment = 7;
+}
+
+message ResolveTokenResponse {
+}
+
+message ResolveTokensRequest {
+  uint64 repository_id = 1;
+  repeated uint64 token_numbers = 2;
+  Token.Resolution resolution = 3;
+  uint64 resolver_id = 4;
+  string default_branch_name = 5;
+  repeated string feature_flags = 6;
+  string resolution_comment = 7;
+}
+
+message ResolveTokensResponse {
+}
+
+message GetTokenCountsRequest {
+  uint64 repository_id = 1 [deprecated = true];
+  repeated string feature_flags = 2;
+  oneof selector {
+    OrgSelector org_selector = 3;
+    RepoSelector repo_selector = 4;
+    BusinessSelector business_selector = 6;
+  }
+  bool low_confidence = 5;
+  bool include_resolved = 7;
+  CampaignFilter campaign_filter = 8;
+}
+
+message GetTokenCountsResponse {
+  uint64 unresolved_count = 1;
+  bool has_pending_backfill = 2;
+  uint64 resolved_count = 3;
+}
+
+message GetTokenGroupByCountsRequest {
+  reserved 7;
+  reserved "repository_ids_selector";
+
+  repeated string feature_flags = 1;
+  oneof selector {
+    OrgSelector org_selector = 2;
+    RepoSelector repo_selector = 3;
+    BusinessSelector business_selector = 5;
+  }
+  repeated GetTokenGroupByAggregation aggregations = 4;
+  // this allows the client to request, if desired, that only resolved / unresolved are counted.  default is both.
+  TokenState token_state = 6;
+  repeated string token_providers = 8;
+  repeated string token_slugs = 9;
+
+  repeated string exclude_token_providers = 10;
+  repeated Token.Resolution exclude_resolutions = 11;
+  repeated string exclude_token_slugs = 12;
+  bool low_confidence = 13;
+  CampaignFilter campaign_filter = 14;
+}
+
+message GetTokenGroupByCountsResponse {
+  repeated AggregationCount counts = 1;
+
+  message AggregationCount {
+    oneof aggregation {
+      RepoTokenCountAggregation repo_aggregation = 1;
+      ProviderTokenCountAggregation provider_aggregation = 2;
+      SecretTypeTokenCountAggregation type_aggregation = 3;
+    }
+
+    message SecretTypeTokenCountAggregation {
+      repeated TypeCount counts = 1;
+
+      message TypeCount {
+        TokenType type = 1;
+        uint64 unresolved_count = 2;
+        uint64 resolved_count = 3;
+      }
+    }
+
+    message ProviderTokenCountAggregation {
+      repeated ProviderCount counts = 1;
+
+      message ProviderCount {
+        string provider_name = 1;
+        uint64 unresolved_count = 2;
+        uint64 resolved_count = 3;
+      }
+    }
+
+    message RepoTokenCountAggregation {
+      repeated RepoCount counts = 1;
+
+      message RepoCount {
+        uint64 repository_id = 1;
+        uint64 unresolved_count = 2;
+        uint64 resolved_count = 3;
+      }
+    }
+  }
+}
+
+message GetTokenTypesInfoRequest {
+  option deprecated = true;
+  uint64 repository_id = 1 [deprecated = true];
+  oneof selector {
+    OrgSelector org_selector = 2;
+    RepoSelector repo_selector = 3;
+  }
+}
+
+message GetTokenTypesInfoResponse {
+  option deprecated = true;
+  repeated TokenType token_types = 1;
+}
+
+message ValidateEnabledReposRequest {
+  // Maximum number of repository IDs that can be validated at once is 1000. If more than 1000 need to be validated, make multiple calls to this RPC
+  repeated uint64 repository_ids = 1;
+}
+
+message ValidateEnabledReposResponse {
+  repeated uint64 repository_ids = 1;
+}
+
+message ReportTokenRequest {
+    uint64 repository_id = 1;
+    uint64 number = 2;
+    uint64 reporting_user_id = 3;
+}
+
+message ReportTokenResponse {
+  enum ReportResult {
+    UNKNOWN = 0;
+    REVOKED = 1;
+    ALREADY_REVOKED = 2;
+    TOKEN_NOT_FOUND = 3;
+  }
+  TokenValidity validity = 1;
+  TokenValidationDetails validation_details = 2;
+  ReportResult result = 3;
+}
+
+message SetAlertAssigneeRequest {
+  uint64 repository_id = 1;
+  uint64 alert_number = 2;
+  uint64 assignee_id = 3;
+  uint64 updated_by_id = 4;
+}
+
+message Token {
+  string token_type = 1;
+  string token_signature = 2;
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp updated_at = 4;
+  uint64 repository_id = 5;
+  Resolution resolution = 6;
+  uint64 resolver_id = 7;
+  google.protobuf.Timestamp resolved_at = 8;
+  uint64 id = 9;
+  TokenLocation first_location = 10;
+  uint64 number = 11;
+  TokenScanScope scan_scope = 12;
+  string label = 13;
+  string slug = 14;
+  enum of_type {
+    UNKNOWN = 0;
+
+    // well known token type (such as AWS, GCP)
+    BUILT_IN = 1;
+
+    // user defined token type
+    CUSTOM = 2;
+  }
+  of_type token_of_type = 15;
+  bool push_protection_bypassed = 16;
+  uint64 push_protection_bypassed_by_user_id = 17;
+  google.protobuf.Timestamp push_protection_bypassed_at = 18;
+
+  // the provider for the type of the token
+  string token_type_provider = 19;
+
+  // url to where the token was found
+  string token_url = 20;
+
+  uint64 revoked_by = 21;
+  google.protobuf.Timestamp revoked_at = 22;
+  string resolution_comment = 23;
+  bytes encrypted_token = 24;
+  string external_remediation_doc_url = 25;
+
+  // validity represents the validity of the token (is it active, revoked, inactive, not known, etc.)
+  TokenValidity validity = 26;
+  TokenValidationDetails validation_details = 27;
+  TokenValidationSupport validation_support = 28;
+  repeated TokenGroup token_groups = 29;
+
+  bool low_confidence = 30;
+
+  // whether an AI/LLM detected this token
+  bool llm_detected = 31;
+
+  enum Resolution {
+    NO_RESOLUTION = 0;
+    REVOKED = 1;
+    FALSE_POSITIVE = 2;
+    reserved 3;
+    WONT_FIX = 4;
+    REOPENED = 5;
+    USED_IN_TESTS = 6;
+    PATTERN_DELETED = 7;
+    PATTERN_EDITED = 8;
+    HIDDEN_BY_CONFIG = 9;
+  }
+
+  // is_multipart is true if this is a multipart token that TSS can validate
+  bool is_multipart = 32;
+
+  // publicly_leaked is true if this token has been marked as publicly leaked anywhere on GitHub.com
+  bool publicly_leaked = 33;
+
+  // multi_repo is true if this token has been found in more than one repo belonging to the same organization or enterprise
+  bool multi_repo = 34;
+
+  // is_reported is true if a user has reported this token to the provider
+  bool is_reported = 35;
+
+  uint64 bypass_exemption_request_id = 36;
+
+  bool is_base64_encoded = 37;
+
+  // if there are more than one locations where token is detected
+  google.protobuf.BoolValue has_more_locations = 38;
+
+  // assigned_user_id is the user ID of the user to whom this alert is assigned
+  uint64 assigned_user_id = 39;
+
+  // updated_by_id is the user ID of the user who last updated this alert
+  // this currently tracks who last assigned the alert to a user
+  uint64 updated_by_id = 40;
+
+  // security campaign id that this token is assigned to
+  // if unset, there is no campaign associated with the token
+  uint64 security_campaign_id = 41;
+}
+
+message RelatedToken {
+    uint64 repository_id = 1;
+    uint64 number = 2;
+    string token_type = 3;
+}
+
+message TokenValidationDetails {
+    // validity_last_checked was the last time validity was checked for this token
+    google.protobuf.Timestamp validity_last_checked = 27;
+    // async_check_requested_at is the timestamp of when the last on-demand check was run for this token type.
+    // Curretnly only some (NuGet and Azure token types) have an async process for on-demand checks.
+    google.protobuf.Timestamp async_check_requested_at = 28;
+}
+
+message TokenGroup {
+  TokenValidationDetails validation_details = 1;
+  TokenValidity validity = 2;
+  message TokenMember {
+    string label = 1;
+    uint64 number = 2;
+  }
+  repeated TokenMember members = 3;
+}
+
+message TokenValidationSupport {
+  bool on_demand_checks_supported = 1;
+  bool validity_checks_supported = 2;
+}
+
+message TokenLocation {
+  google.protobuf.Timestamp created_at = 1;
+  google.protobuf.Timestamp updated_at = 2;
+  string commit_oid = 3;
+  string blob_oid = 4;
+
+  // Deprecated as type "string" does not handle encoding
+  string deprecated_path = 5 [deprecated = true];
+  bytes path = 11;
+
+  uint64 start_line = 6;
+  uint64 end_line = 7;
+  uint64 start_column = 8;
+  uint64 end_column = 9;
+
+  // BlobPathsProcessed only existed on the v1 TokenScanResultLocation table
+  bool blob_paths_processed = 10 [deprecated = true];
+
+  ContentType content_type = 12;
+
+  // For issues, prs, and discussions
+  uint64 content_id = 13;
+  uint32 content_number = 14;
+}
+
+message TokenLocationWithRepoID {
+    uint64 repository_id = 1;
+    TokenLocation location = 2;
+}
+
+message PATV1Permissions {
+  repeated string scopes = 1;
+}
+
+message PATV2Permissions {
+  message Permission {
+    string scope = 1;
+    string permission = 2;
+  }
+  repeated Permission permissions = 1; 
+}
+
+message GetAdversarialAuditRequest {
+  oneof permissions {
+    PATV1Permissions pat_v1_permissions = 1;
+    PATV2Permissions pat_v2_permissions = 2;
+  }
+}
+
+message GetAdversarialAuditResponse {
+  string audit_response = 1;
+}
+
+message GetWorkflowAuditRequest {
+  repeated string audit_log_actions = 1;
+  string token_type = 2;
+}
+
+message GetWorkflowAuditResponse {
+  string audit_response = 1;
+}
+
+enum ContentType {
+  CONTENT_TYPE_UNKNOWN = 0;
+  REPOSITORY_BLOB = 1;
+  COMMIT_METADATA = 2;
+  COMMIT_COMMENT = 3;
+  PULL_REQUEST_TITLE = 4;
+  PULL_REQUEST_BODY = 5;
+  PULL_REQUEST_COMMENT = 6;
+  PULL_REQUEST_REVIEW_COMMENT = 7;
+  PULL_REQUEST_TIMELINE_COMMENT = 8;
+  ISSUE_TITLE = 9;
+  ISSUE_BODY = 10;
+  ISSUE_COMMENT = 11;
+  DISCUSSION_TITLE = 12;
+  DISCUSSION_BODY = 13;
+  DISCUSSION_COMMENT = 14;
+  WIKI_BLOB = 15;
+}
+
+enum SortOrder {
+  NO_SORT_ORDER = 0;
+  CREATED_ASCENDING = 1;
+  CREATED_DESCENDING = 2;
+  UPDATED_ASCENDING = 3;
+  UPDATED_DESCENDING = 4;
+}
+
+enum TokenState {
+  NO_STATE = 0;
+  OPEN = 1;
+  RESOLVED = 2;
+}
+
+enum TokenScanScope {
+  UNKNOWN = 0;
+  REPO = 1;
+  COMMIT = 2;
+}
+
+enum GetTokenGroupByAggregation {
+  UNKNOWN_AGGREGATION = 0;
+  SECRET_TYPE = 1;
+  SECRET_PROVIDER = 2;
+  REPOSITORY = 3;
+}
+
+enum RepositoryVisibility {
+  REPOSITORY_VISIBILITY_UNKNOWN = 0;
+  REPOSITORY_VISIBILITY_PUBLIC = 1;
+  REPOSITORY_VISIBILITY_PRIVATE = 2;
+  REPOSITORY_VISIBILITY_INTERNAL = 3;
+}
+
+enum TokenValidity {
+  TOKEN_VALIDITY_UNKNOWN = 0;
+  TOKEN_VALIDITY_ACTIVE = 1;
+  TOKEN_VALIDITY_INACTIVE = 2;
+  TOKEN_VALIDITY_REVOKED = 3;
+  TOKEN_VALIDITY_UNVERIFIABLE = 4;
+}
+
+message TokenNumber {
+  uint64 repository_id = 1;
+  uint64 number = 2;
+}
+
+message CampaignAssignmentsRequest {
+  uint64 campaign_id = 1;
+  repeated TokenNumber assignments = 2;
+  uint64 updated_by_id = 3;
+}
+
+message CampaignAssignmentsResponse {
+}

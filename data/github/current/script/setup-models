@@ -1,0 +1,65 @@
+#!/usr/bin/env safe-ruby
+# frozen_string_literal: true
+
+require_relative "#{Rails.root}/config/environment"
+require_relative "#{Rails.root}/script/seeds/objects"
+require_relative "#{Rails.root}/script/seeds/runner"
+require_relative "#{Rails.root}/script/seeds/runners/github_models"
+
+unless Rails.env.development?
+  raise "This is a dev-only script"
+end
+
+WITH_BYOK = !!(ARGV.delete("--with-byok"))
+
+class SetupModels
+  def call
+    puts("Starting Models setup")
+
+    # Temporary workaround for a local development issue when sorting models. For more context, see:
+    # https://github.com/github/models/blob/ed4fedc06a391fadf3f50953da461a73ceff5bf6/docs/local-development.md#working-in-stafftools
+    system("bin/dbconsole development -e \"SET GLOBAL sort_buffer_size = 2560000000000000000;\"") || raise("Failed to increase sort buffer size")
+
+    setup_integration
+    enable_feature_flags
+    create_models
+
+    setup_byok if WITH_BYOK
+
+    puts "Models setup completed."
+  end
+
+  private
+
+  def enable_feature_flags
+    flags = GitHubModels::RenderDependency::MODELS_CLIENT_SIDE_FEATURE_FLAGS
+    puts "Enabling feature flags"
+
+    flags.each do |flag|
+      puts "Enabling #{flag} feature..."
+      FeatureFlag.vexi_management.enable_feature_flag(flag)
+    end
+  end
+
+  def create_models
+    puts "Running seeds..."
+    Seeds::Runner::GitHubModels.execute
+  end
+
+  def setup_integration
+    if Apps::Privileged.integration(:neutron).present?
+      puts "=> The GitHub Models app already exists."
+    else
+      puts "=> Creating the GitHub Models app..."
+      Apps::Privileged::Neutron.seed_database!
+    end
+  end
+
+  def setup_byok
+    puts "Setting up BYOK (Bring Your Own Key)..."
+    command = "script/setup-models-byok"
+    system(command) || raise("Failed to setup BYOK")
+  end
+end
+
+SetupModels.new.call

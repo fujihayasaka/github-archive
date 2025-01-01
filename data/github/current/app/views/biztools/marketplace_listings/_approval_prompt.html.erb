@@ -1,0 +1,113 @@
+<%
+  missing_required_fields = required_fields(listing).select { |field| params[field].blank? }
+  plans_description = if listing.listing_plans.with_published_state.count.zero?
+    "This listing has no published pricing plans."
+  else
+    "This listing has the following published pricing plan(s): #{listing.listing_plans.with_published_state.map do |plan|
+      description = "A #{plan.price_model.humanize.downcase} plan that costs #{casual_currency(plan.monthly_price_in_dollars)}/month"
+      description += "/#{plan.unit_name}" if plan.per_unit
+      description += " or #{casual_currency(plan.yearly_price_in_dollars)}/year"
+      description += "/#{plan.unit_name}" if plan.per_unit
+      description
+    end.join('. ')}."
+  end
+  webhook_service ||= Marketplace::Listings::WebhookService.new(listing: listing)
+  webhook_test_needed = webhook_service.no_deliveries_for_hook?
+  webhook_text = webhook_service.hook_text
+  prompt_text = <<~TEXT
+    I need to review a GitHub Marketplace listing submission. Based on the MANDATORY requirements and listing information below, please:
+    1. Evaluate if it meets all MANDATORY requirements
+    2. Recommend: APPROVE, SEND BACK TO DRAFT, or REJECT
+    3. Provide a concise, clear, professional message I can send to the publisher explaining the decision
+
+    LISTING TYPE
+    #{listing.copilot_app ? "Copilot Extension" : listing.listable_is_oauth_application? ? "OAuth App" : "GitHub App"}
+    #{listing.published_paid_plans? ? "Paid App" : "Free App"}
+
+    LISTING INFORMATION
+    - Name: #{listing.name}
+    - Publisher: #{listing.owner.login}
+    - Very Short Description: #{listing.short_description}
+    - Introductory Description: #{listing.full_description}
+    - Detailed Description: #{listing.extended_description}
+    - Categories: #{listing.categories.pluck(:name).join(', ')}
+    - Organization has Verified Creator status: #{listing.verified_owner?}
+    - Has functional webhook: #{webhook_text}
+    - Number of #{listing.listable_is_oauth_application? ? "users" : "installations"}: #{number_with_delimiter(listing.cached_installation_count)}
+    - Pricing Plan: #{plans_description}
+
+    MANDATORY REQUIREMENTS FOR ALL LISTINGS
+    - Must provide value to GitHub users (use the API integration and data for added functionality)
+    - Must not actively persuade users away from GitHub
+    - Must include valid contact information, either a support email or a support URL
+    - They do NOT need a support email if they have a support URL
+    - Must have a relevant description of the application
+    - Must specify a pricing plan
+    - Must integrate with GitHub beyond just authentication
+    - Must be publicly available (not in private preview or invite-only), except Copilot Extensions
+    - Must have well-written descriptions free of grammatical errors
+    - [Paid apps only] Recommend that they have working webhook events for plan changes/cancellations
+    - Support URL (can be replaced with a support email) and privacy policy URL are required and must be valid.
+    - All other links are optional, but if provided, they must be valid.
+
+    ADDITIONAL MANDATORY REQUIREMENTS FOR COPILOT EXTENSIONS
+    - Must not have paid plans
+
+    ADDITIONAL MANDATORY REQUIREMENTS FOR PAID APPS
+    - GitHub Apps must have at least 100 installations
+    - OAuth Apps must have at least 200 users
+    - Must support both monthly and annual billing
+    - Must handle GitHub Marketplace purchase events
+
+    ADDITIONAL MANDATORY REQUIREMENTS FOR PAID APPS AND COPILOT EXTENSIONS. NOT REQUIRED FOR FREE GITHUB APPS AND OAUTH APPS.
+    - Must be owned by an organization with Verified Creator status
+
+    REVIEWER NOTES ABOUT SCREENSHOTS & LINKS
+    - Screenshots: #{screenshots.present? ? "I've verified that the screenshots are appropriate and relevant." : "No screenshots were submitted."}
+    - Support Email: #{listing.support_email.present? ? "I've verified that the support email is #{params["support_email"] == "yes" ? "valid.": "not valid."}" : "No support email was submitted."}
+    #{prompt_urls(listing).map { |key, value| "- #{key.to_s.humanize}: #{value.present? ? "I have verified that the URL #{params[key] == "yes" ? "works.": "does not work."}" : "No #{key.to_s.humanize} was submitted."}" }.join("\n")}
+
+    Based on this information, what is your recommendation and what specific message should I send to the publisher? Be concise and direct.
+  TEXT
+%>
+
+<% if missing_required_fields.present? || webhook_test_needed %>
+  <%= render(Primer::Alpha::Banner.new(scheme: :warning, full: false, icon: "alert", mb: 5)) do %>
+    <% if webhook_test_needed %>
+      The listing has a webhook, but it has not been tested. Please
+      <a class="Link--inTextBlock" href="<%= biztools_marketplace_listing_hook_path(listing) %>" rel="noopener noreferrer">test the webhook</a>.
+      Then, come back and complete the form to generate a review prompt.
+    <% else %>
+      Complete the form to generate a review prompt.
+    <% end %>
+    <% if missing_required_fields.present? %>
+      Fields missing: <%= missing_required_fields.map(&:humanize).join(", ") %>
+    <% end %>
+  <% end %>
+<% else %>
+  <div class="rounded border color-border-default p-3 mb-5">
+    <div class="d-flex gap-3">
+      <%= render(Primer::Beta::Octicon.new(:copilot, size: :medium, color: :default, classes: "flex-self-center")) %>
+      <div>
+        <p class="text-bold color-fg-default">Review with Copilot</p>
+        <p class="mb-0">
+          Copy and paste this prompt into Copilot Chat for a quick review.
+          You may need to go to
+          <a class="Link--inTextBlock" href="https://github.com/copilot" target="_blank" rel="noopener noreferrer">
+            github.com/copilot
+          </a>
+          and turn off staff mode for chat to work.
+        </p>
+      </div>
+      <%= render Primer::Beta::ClipboardCopy.new(
+        value: prompt_text,
+        "aria-label": "Copy prompt to clipboard",
+        classes: "btn btn-sm",
+        "data-copy-feedback": "Copied!"
+      ) do %>
+        Copy review prompt
+        <%= render(Primer::Beta::Octicon.new(:copy, size: :small, classes: 'ml-1')) %>
+      <% end %>
+    </div>
+  </div>
+<% end %>

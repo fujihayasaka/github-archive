@@ -1,0 +1,80 @@
+#!/usr/bin/env safe-ruby
+# frozen_string_literal: true
+
+puts "=> Loading the environment..."
+
+require_relative "#{Rails.root}/config/environment"
+require_relative "#{Rails.root}/script/seeds/objects"
+require_relative "#{Rails.root}/script/seeds/runner"
+require_relative "#{Rails.root}/script/seeds/runners/copilot_byok"
+
+unless Rails.env.development?
+  raise "This is a dev-only script"
+end
+
+IS_PRISTINE = !!(ARGV.delete("--pristine"))
+
+class SetupCopilotByok
+  def call
+    puts "============================================================"
+    puts "Starting Copilot BYOK (Bring Your Own Key) setup"
+    puts "============================================================\n\n"
+
+    setup_custom_app
+    setup_kredz
+    run_seeds
+
+    puts "\n\nCopilot BYOK setup completed. 🎉 Go forth and build cool things!"
+  end
+
+  private
+
+  def setup_custom_app
+    puts "Setting up custom integration app..."
+    run_cmd "bin/create-copilot-byok-app"
+  end
+
+  def run_seeds
+    puts "Running seeds..."
+    Seeds::Runner::CopilotByok.execute
+  end
+
+  def setup_kredz
+    puts "\nEnsuring kredz is up and running..."
+
+    run_cmd "script/setup-kredz-server"
+    run_cmd "overmind restart kredz"
+  end
+
+  def run_cmd(cmd, quiet: false)
+    stdout_str = String.new
+    puts "Running cmd: #{cmd}"
+
+    rd, wr = IO.pipe
+    pid = spawn("bash", "-c", cmd, out: wr, err: wr)
+    wr.close
+
+    while (line = rd.gets)
+      unless quiet
+        puts "[cmd]: #{line}"
+      end
+      stdout_str << line
+    end
+
+    Process.wait(pid)
+    status = $?.exitstatus
+
+    unless status == 0
+      unless quiet
+        puts "+++++++++"
+        puts cmd
+        puts "+++++++++"
+      end
+      raise "Command failed with status #{status}"
+    end
+
+    stdout_str.strip
+  end
+end
+
+SetupCopilotByok.new.call

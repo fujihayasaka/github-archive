@@ -1,0 +1,96 @@
+<%
+  billing_contact = target.billing_contact
+  valid_billing_contact = target.has_saved_billing_information?
+
+  SecureHeaders.append_content_security_policy_directives(
+    request,
+    img_src: [GitHub.paypal_checkout_url],
+    connect_src: [GitHub.braintreegateway_url, GitHub.braintree_analytics_url]
+  )
+%>
+
+<div class="py-3">
+  <div class="clearfix mb-3">
+    <h2 class="float-left">Billing information</h2>
+    <% if !has_billing_info_validation_error && target.is_allowed_to_edit_billing_information? %>
+      <div class="float-right js-edit-user-personal-profile-wrapper">
+        <label id="edit-billing-button" class="sr-only">Edit billing information</label>
+        <%= render(Primer::Beta::Button.new(size: :medium, font_size: 6, aria: { labelledby: "edit-billing-button" }, classes: class_names("js-edit-user-personal-profile", "hidden" => !valid_billing_contact))) do %>
+          Edit
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+
+  <% if !valid_billing_contact && view.needs_valid_payment_method? %>
+    <div class="clearfix pb-3 note">
+      Please confirm your billing details to continue. You only need to do this once.
+    </div>
+  <% end %>
+
+  <div class="clearfix d-sm-flex">
+    <div class="col-sm-6">
+      <div class="d-flex flex-items-center">
+        <%= render GitHub::AvatarComponent.new(actor: view.account, size: 48, mr: 2) %>
+        <div>
+          <ul class="list-style-none lh-condensed mb-2" style="min-height: 48px;">
+            <li class="text-bold pb-1">
+              <%= view.account %>
+            </li>
+            <li class="color-fg-muted text-small">
+              <% if view.account.user? %>
+                Personal account
+              <% else %>
+                Organization
+              <% end %>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="col-sm-6 text-sm-right lh-condensed">
+      <% if billing_info_exists_without_errors %>
+        <%= render Billing::Settings::NameAddressSummaryComponent.new(contact: billing_contact, target: view.account) %>
+      <% end %>
+    </div>
+  </div>
+</div>
+
+<% if view.needs_valid_payment_method? || billing_contact.persisted? %>
+  <div class="js-name-address-collection-wrapper" <%= "hidden" if billing_info_exists_without_errors %>>
+    <%= render Billing::Settings::NameAddressFormInputsComponent.new(
+      contact: billing_contact,
+      target: view.account,
+      payment_flow_loaded_from: payment_flow_loaded_from
+    ) %>
+    <% if params[:return_to].present? %>
+      <%= hidden_field_tag "return_to", params[:return_to], id: nil %>
+    <% end %>
+    <div class="form-group pt-1">
+      <%= submit_tag "Save and continue", class: "btn btn-primary width-full mt-2", name: 'billing_info_submit_btn', id: "submit_personal_profile", data: { disable_with: false } %>
+    </div>
+  </div>
+<% end %>
+
+<% if view.show_sdn_blocking_notice? %>
+  <div class="border-top py-3">
+    <%= render(TradeCompliance::TradeScreeningRestrictionNoticeComponent.new(
+      target:,
+      title: "You can't proceed with your payment",
+    )) %>
+  </div>
+<% elsif !has_billing_info_validation_error && view.show_payment_form?(current_user) %>
+  <% if view.allowed_to_submit_payment_information_or_upgrade? %>
+    <div class="border-top py-3 js-payment-methods-wrapper">
+      <div class="clearfix mb-3">
+        <h2 class="float-left">Payment information</h2>
+      </div>
+      <%= render Billing::Settings::PaymentMethodFormComponent.new(
+        target: target,
+        new_name_address_design: true,
+        signature_view_context: Billing::Zuora::HostedPaymentsPage::PLAN_UPGRADE_SIGNATURE_VIEW_CONTEXT,
+        return_to: return_to,
+      ) %>
+    <div>
+  <% end %>
+<% end %>

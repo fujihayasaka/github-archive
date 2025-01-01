@@ -1,0 +1,201 @@
+#!/usr/bin/env safe-ruby
+
+# typed: false
+# frozen_string_literal: true
+
+# This script is used stitch process and pull down query violation information from the latest, complete CI run.
+# It stitches together query violation files generated across all our CI builds into one file
+# that is checked into gh/gh. It can also include the location of the violations in the queries but this should
+# never be committed.
+#
+# Run this from the root of your gh/gh Codespace with a specific branch checked out. It will update the relevant YAML
+# files in packages with the violations found in the last CI builds. See the options below for more details.
+
+require "optparse"
+require "yaml"
+require "sorbet-runtime"
+require "pp"
+require "pry"
+
+require_relative "../lib/github/serviceowners/packageowners"
+
+options = {}
+OptionParser.new do |opts|
+  opts.banner = "Usage: domain-isolation-violations [options]"
+
+  opts.on("-b", "--branch [String]", "Optional branch name") do |v|
+    options[:branch] = v
+  end
+  opts.on("-s", "--sha [String]", "Optional SHA") do |v|
+    options[:sha] = v
+  end
+  opts.on("--[no-]locations", "Include violation locations") do |v|
+    options[:include_locations] = v
+  end
+  opts.on("--[no-]audit", "Include violations for queries involving tables with visibility 'audit'") do |v|
+    options[:include_audit] = v
+  end
+  opts.on("--reason [String]", "Only process this reason, possible values: cross_domain, domain_access") do |v|
+    options[:reason] = v
+  end
+  opts.on("-t", "--tables", "Only print tables involved in violations") do |v|
+    options[:tables] = v
+  end
+  opts.on("--specific-table [String]", "Limit the output query violations to only specific table") do |v|
+    options[:specific_table] = v
+  end
+  opts.on("--specific-package [String]", "Filter violations by a specific package") do |v|
+    options[:specific_package] = v
+  end
+  opts.on("--format [String]", "Output format. Default: domain_query_violations. Possible options: `domain_query_violations` - updates domain_query_violations.yml in packages root folders, `domain_query_todo` - updates domain_query_todo.yml in packages root folders.") do |v|
+    options[:format] = v
+  end
+end.parse!
+
+input_branch = options[:branch] || `git rev-parse --abbrev-ref HEAD`.strip
+input_include_locations = options[:include_locations] || false
+input_include_audit = options[:include_audit] || false
+input_reason = options[:reason]
+input_tables = options[:tables] || false
+input_specific_table = options[:specific_table] || nil
+input_specific_package = options[:specific_package] || nil
+format = options[:format] || "domain_query_violations"
+
+sha = options[:sha] || `git rev-parse #{input_branch}`.strip
+
+puts "Looking up latest worklow run for #{input_branch} (#{sha})..."
+workflow_run_id = `gh run list --commit #{sha} --status 'completed' --workflow 'GitHub CI - Actions' --json databaseId | jq '.[] | .databaseId' | tail -n1`.strip
+
+if workflow_run_id.empty?
+  puts "=> No completed workflow runs found for #{input_branch} (#{sha})"
+  exit
+end
+
+if input_tables
+  puts "Pulling workflow run data from GitHub..."
+  run_view = `gh run view #{workflow_run_id}`
+
+  annotations = run_view.split("ANNOTATIONS").last
+  tables = annotations.split(/^  Tables:\n/).each_with_object(Set.new) do |section, tables|
+    table_names = section.scan(/\s{2}-\s'([^']+)'/).flatten
+    tables.merge(table_names)
+  end.sort
+
+  puts tables.join("\n")
+  exit
+end
+
+folder = "tmp/cache/artifacts/#{sha}-#{workflow_run_id}"
+
+puts "Checking if artifacts for #{input_branch} (#{sha}) exist in #{folder}..."
+if !File.exist?(folder)
+  puts "Downloading artifacts for #{input_branch} (#{sha}) to #{folder}"
+  puts "This may take between 5 to 15 minutes..."
+
+  # artifacts can be large, so let's keep one copy around
+  FileUtils.rm_rf("tmp/cache/artifacts")
+  FileUtils.mkdir_p(folder)
+
+  `gh run download #{workflow_run_id} --pattern 'github-all-features*' --dir #{folder}`
+  puts "=> Artifacts downloaded."
+else
+  puts "=> Artifacts already downloaded for #{sha}."
+end
+
+puts "Processing artifacts in #{folder}..."
+violations_count = 0
+packageowners = GitHub::Serviceowners::Packageowners.new
+
+summary = Hash.new { |h, key| h[key] = [] }
+
+Dir["#{folder}/**/*domain_query_violations.yml"].each do |file_name|
+  package = file_name.match(/github-all-features.*artifacts\/(\S+)\//)&.captures&.first
+  next if package.nil?
+
+  # Skip if the package does not match the specific package filter
+  next if input_specific_package && package != input_specific_package
+
+  data = YAML.safe_load_file(file_name)
+
+  data.each do |_, value|
+    next if input_specific_table && !value["tables"].include?(input_specific_table)
+
+    relevant_violations = value["violations"].dup
+    relevant_violations.select! { |v| v["reason"] == input_reason } if input_reason
+
+    next if relevant_violations.empty?
+
+    if !input_include_audit
+      all_tables_audit = value["tables"].all? do |table|
+        package, level = packageowners.package_and_ownership_level_for(table)
+        level == GitHub::Serviceowners::Packageowners::TableVisibilityLevel::Audit
+      end
+
+      next if all_tables_audit
+
+      all_tables_public = value["tables"].all? do |table|
+        package, level = packageowners.package_and_ownership_level_for(table)
+        level == GitHub::Serviceowners::Packageowners::TableVisibilityLevel::Public
+      end
+
+      if all_tables_public
+        only_domain_access = relevant_violations.all? do |v|
+          reason = GitHub::Serviceowners::Packageowners::QueryViolationReason.deserialize(v["reason"])
+          v["reason"] == "domain_access"
+        end
+
+        next if only_domain_access
+      end
+    end
+
+    relevant_violations.each do |violation|
+      tables = value["tables"]
+      query = value["query"]
+      query_type = query.split.first
+      violation_category = query_type + " " + tables.sort.join(", ")
+
+      summary[violation_category] << query
+
+      reason = GitHub::Serviceowners::Packageowners::QueryViolationReason.deserialize(violation["reason"])
+
+      packageowners.record_violation_for_package(
+        package: package,
+        query: query,
+        tables: tables,
+        frame: violation["location"],
+        reason: reason
+      )
+      violations_count += 1
+    end
+  end
+end
+
+puts "=> Processed #{violations_count} violations across all packages."
+
+summary.each { |_, v| v.uniq! }
+Pry::ColorPrinter.pp(summary); nil
+
+
+if format == "domain_query_violations"
+  puts "Writing violations to YAML files in all packages..."
+  packageowners.flush_package_violations(
+    merge_with_stored: false,
+    write_to_stored: true,
+    include_locations: input_include_locations
+  )
+elsif format == "domain_query_todo"
+  require "github/packwerk/domain_isolation/domain_isolation_violations_todos"
+
+  violations = packageowners.flush_package_violations(
+    merge_with_stored: false,
+    write_to_stored: false,
+    include_locations: input_include_locations
+  )
+
+  GitHub::Packwerk::DomainIsolation::DomainIsolationViolationsTodos.persist_inline_comments!(violations)
+  GitHub::Packwerk::DomainIsolation::DomainIsolationViolationsTodos.persist!
+
+  puts "=> Domain isolation violations todos persisted."
+else
+  puts "Invalid format specified. Please use 'domain_query_violations' or 'domain_query_todo'."
+end

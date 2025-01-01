@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+
+# Before landing breaking changes, please update the README documentation!
+
+set -euo pipefail
+
+echo ">>> Setting up version for generated code..."
+if [ $# -eq 1 ]; then
+  # use passed in version if provided
+  VERSION=$1
+elif [ -f "./ruby/lib/oss_license_compliance/version.rb" ]; then
+  # extract version from the existing gem entry point file
+  VERSION=$(sed -n 's/.*VERSION *= *["'\'']\([^"\'']*\)["'\''].*/\1/p' ./ruby/lib/oss_license_compliance/version.rb)
+  if [ -z "$VERSION" ]; then
+    echo "VERSION is required, but not found in ./ruby/lib/osslicensecompliance-client.rb"
+    exit 1
+  fi
+  REUSING_VERSION=True
+else
+  # stop if no version and the entry point file does not exist
+  echo "VERSION is required, but not provided"
+  echo "Call with \`./script/protobuf-gen 1.0.0\`"
+  exit 1
+fi
+
+MAJOR_VERSION="$(echo "$VERSION" | cut -d '.' -f 1)"
+
+echo ">>>    Full version:  $VERSION"
+echo ">>>    Major version: $MAJOR_VERSION"
+echo ">>> DONE Setting up version for generated code"
+echo
+
+
+# The local osslicensecompliance checkout root
+REPO_ROOT=$(realpath .)
+
+# Input: protobuf spec file trees
+PROTO_BASE="${REPO_ROOT}/proto"
+mkdir -p "${PROTO_BASE}"
+
+# Output: OLC generated protobuf code will live
+echo ">>> Re-setting output directories"
+RUBY_GEN_BASE="${REPO_ROOT}/ruby/lib"
+rm -rf "${RUBY_GEN_BASE}"
+mkdir -p "${RUBY_GEN_BASE}"
+
+GO_GEN_BASE="${REPO_ROOT}/pkg"
+rm -rf "${GO_GEN_BASE}"
+mkdir -p "${GO_GEN_BASE}"
+
+DOC_GEN_FILE="${REPO_ROOT}/proto/README.md"
+rm -f "${DOC_GEN_FILE}"
+echo ">>> DONE -- Resetting output directories"
+echo
+
+# Build the code gen tools image
+echo ">>> Building Dockerfile-gen into image olc_protogen"
+docker build -f Dockerfile-gen -t olc_protogen .
+echo ">>> DONE -- Building Dockerfile-gen into image olc_protogen"
+echo
+
+# Run a container of the generated image, mounting the local in/out dirs
+echo ">>> Running olc_protogen to generate code"
+docker run --rm \
+    -e VERSION="$VERSION" \
+    -e MAJOR_VERSION="$MAJOR_VERSION" \
+    -v "${PROTO_BASE}":/proto \
+    -v "${RUBY_GEN_BASE}":/ruby/lib \
+    -v "${GO_GEN_BASE}":/pkg \
+    olc_protogen
+echo ">>> DONE -- Running olc_protogen to generate code"
+echo
+
+if [ "${REUSING_VERSION:-}" = "True" ]; then
+  echo "WARNING: Using version from existing entry point file: $VERSION"
+  echo "   If this is not intended, pass the version as an argument."
+  echo "   e.g. \`./script/protobuf-gen 1.0.0\`"
+  echo
+fi

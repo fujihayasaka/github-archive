@@ -1,0 +1,181 @@
+<%# view is an instance of Notification::V2::IndexView %>
+
+<%# responsive nav dropdown %>
+<div class="d-block d-md-none py-2 px-2 py-md-0 px-sm-0 p-md-0">
+  <div class="manage-notifications-responsive d-flex my-2">
+    <%= render(Primer::Alpha::ActionMenu.new(anchor_side: :outside_top, classes: "manage-notifications-menu", test_selector: "action-menu-manage-notifications-mobile")) do |component|
+      component.with_show_button(scheme: :default, font_weight: :normal, display: :flex) { |button|
+        button.with_trailing_action_icon(icon: :"triangle-down")
+        "Manage notifications"
+      }
+      component.with_item(label: "Notification settings", href: settings_notification_preferences_path)
+      component.with_item(label: "Watched repositories", href: watching_path)
+      component.with_item(label: "Subscriptions", href: notification_subscriptions_path)
+      component.with_item(label: "Teams notifications", href: teams_notifications_path) if FeatureFlag.vexi.enabled?(:ignorable_team_notifications, current_user, default: false)
+    end %>
+  </div>
+  <div class="d-flex gap-1">
+    <%= render(Primer::Alpha::Dialog.new(id: "notifications-tabs-nav", title: 'Switch inbox')) do |d| %>
+      <% d.with_header(show_divider: true) %>
+      <% d.with_show_button(block: true)  do |button| %>
+        <% button.with_trailing_action_icon(icon: "triangle-down") %>
+        <%= view.selected_tab_title  %>
+      <% end %>
+      <% d.with_body do %>
+        <%= render(Primer::Beta::NavList.new(selected_item_id: view.selected_item, aria: {label: "Switch inbox"}, my: 2)) do |list| %>
+          <% list.with_item(href: view.notifications_tab_path(tab: :inbox), test_selector: "responsive-inbox-link", selected_by_ids: 'inbox') do |item| %>
+            <% item.with_leading_visual_icon(icon: :inbox) %>
+            <div class="d-flex flex-justify-between">
+              Inbox
+              <span class="count text-normal"><%= number_with_delimiter(view.inbox_unread_count) if view.inbox_unread_count > 0%> </span>
+            </div>
+          <% end %>
+          <% list.with_item(label: "Saved", href: view.notifications_tab_path(tab: :saved), selected_by_ids: 'saved') do |item| %>
+            <% item.with_leading_visual_icon(icon: :bookmark) %>
+          <% end %>
+          <% list.with_item(label: "Done", href: view.notifications_tab_path(tab: :done),  selected_by_ids: 'done') do |item| %>
+            <% item.with_leading_visual_icon(icon: :check) %>
+
+          <% end %>
+          <% unless view.filters.empty? %>
+            <% list.with_divider %>
+            <% list.with_group(classes: 'js-notification-mobile-filters') do |group| %>
+              <% group.with_heading(title: "Filters") %>
+              <% view.filters.each do |filter| %>
+                <% group.with_item(href: notifications_path(query: filter.query_string)) do |item| %>
+                  <div class="d-flex flex-justify-between">
+                    <%= filter.name %>
+                    <span class="count text-normal"><%= number_with_delimiter(filter.unread_count) if filter.unread_count > 0 %></span>
+                  </div>
+                <% end %>
+              <% end %>
+            <% end %>
+          <% end %>
+          <% unless view.repo_notification_counts.empty?  %>
+            <% list.with_divider %>
+            <% list.with_group do |group| %>
+              <% group.with_heading(title: "Repositories") %>
+              <% view.repo_notification_counts.take(25).each do |count| %>
+                <% group.with_item(href: view.notifications_repository_tab_path(count.repository.name_with_display_owner), test_selector: "responsive-sidebar-repo-link") do |item| %>
+                  <div class="d-flex flex-justify-between">
+                    <%= count.repository.name_with_display_owner %>
+                    <span class="count text-normal"><%= number_with_delimiter(count.unread_count) if count.unread_count > 0%> </span>
+                  </div>
+                <% end %>
+              <% end %>
+          <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <%= render(Primer::Alpha::ActionMenu.new(select_variant: :single, anchor_align: :end)) do |menu_component| %>
+      <% menu_component.with_show_button do |button| %>
+        <% button.with_trailing_action_icon(icon: :"triangle-down")   %>
+        <%= "All" unless view.unread_only? %><%= "Unread" if view.unread_only? %>
+      <% end %>
+      <% menu_component.with_item(
+        label: 'All',
+        active: view.unread_only? == false,
+        href: view.notifications_path(unread: true, read: true),
+      ) %>
+      <% menu_component.with_item(
+        label: 'Unread',
+        active: view.unread_only?,
+        href: view.notifications_path(unread: true, read: false),
+      )  %>
+    <% end %>
+
+    <span class="notification-configure-filters" <%= test_selector("configure-filters-responsive") %>>
+      <%= render partial: "notifications/v2/custom_inboxes_dialog_mobile" %>
+    </span>
+  </div>
+</div>
+
+<%# full width sidebar nav %>
+<div class="d-none d-md-flex col-12 col-sm-12 col-md-3 col-lg-2 col-xl-2 flex-shrink-0 flex-grow-0" data-pjax>
+  <h2 class='sr-only'>Folders</h2>
+  <nav class="color-bg-default col-12 height-full notification-navigation pt-3 pb-6" aria-label="Notifications">
+    <%= render(Primer::Beta::NavList.new(
+      aria: { label: "Inbox" },
+      selected_item_id: view.selected_tab_id,
+      classes: 'js-notification-inboxes',
+      test_selector: "notifications-navlist-tabs-component",
+    )) do |component| %>
+      <% component.with_item(label: "Inbox", href: view.notifications_tab_path(tab: :inbox), selected_by_ids: :inbox) do |item| %>
+        <% item.with_leading_visual_icon(icon: :inbox) %>
+        <% item.with_trailing_visual_counter(
+          count: view.inbox_unread_count > 0 ? number_with_delimiter(view.inbox_unread_count) : nil,
+        ) %>
+      <% end %>
+      <% component.with_item(label: "Saved", href: view.notifications_tab_path(tab: :saved), selected_by_ids: :saved) do |item| %>
+        <% item.with_leading_visual_icon(icon: :bookmark) %>
+      <% end %>
+      <% component.with_item(label: "Done", href: view.notifications_tab_path(tab: :done), selected_by_ids: :done) do |item| %>
+        <% item.with_leading_visual_icon(icon: :check) %>
+      <% end %>
+    <% end %>
+    <hr>
+    <%= render(Primer::Beta::NavList.new(
+      aria: { label: "Filters" },
+      selected_item_id: view.selected_filter_name,
+      classes: 'js-notification-new-filters',
+      test_selector: "notifications-navlist-filters-component",
+    )) do |component| %>
+      <% component.with_group do |group| %>
+        <% group.with_heading(title: "Filters", heading_level: 2) %>
+
+        <% view.filters.each do |filter| %>
+          <% group.with_item(label: filter.name, href: notifications_path(query: filter.query_string), selected_by_ids: filter.name) do |item| %>
+            <% item.with_trailing_visual_counter(
+              count: filter.unread_count > 0 ? filter.unread_count : nil,
+            ) %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+    <span class="notification-configure-filters" <%= test_selector("configure-filters-desktop") %>>
+      <%= render partial: "notifications/v2/custom_inboxes_dialog", locals: { button_location: :sidebar } %>
+    </span>
+
+    <div class="js-notification-sidebar-repositories">
+      <% if view.repo_notification_counts.length > 0 %>
+        <hr>
+        <%= render(Primer::Beta::NavList.new(
+          aria: { label: "Repositories" },
+          selected_item_id: view.selected_repo_name,
+          test_selector: "notifications-navlist-repositories-component",
+        )) do |component| %>
+          <% component.with_group do |group| %>
+            <% group.with_heading(title: "Repositories", heading_level: 2) %>
+            <% view.repo_notification_counts.take(25).each do |count| %>
+              <%= count.repository.name_with_display_owner %>
+              <% group.with_item(
+                label: count.repository.name_with_display_owner,
+                href: view.notifications_repository_tab_path(count.repository.name_with_display_owner),
+                selected_by_ids: count.repository.name,
+              ) do |item| %>
+                <% item.with_trailing_visual_counter(
+                  count: count.unread_count > 0 ? count.unread_count : nil,
+                ) %>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    </div>
+    <hr>
+    <div class="pt-2 pl-2">
+      <%= render(Primer::Alpha::ActionMenu.new(anchor_side: :outside_top, test_selector: "action-menu-manage-notifications",)) do |component|
+        component.with_show_button(scheme: :link, classes: "Link--muted", font_weight: :normal, display: :flex) { |button|
+          button.with_trailing_action_icon(icon: :"triangle-down")
+          "Manage notifications"
+        }
+        component.with_item(label: "Notification settings", href: settings_notification_preferences_path)
+        component.with_item(label: "Watched repositories", href: watching_path)
+        component.with_item(label: "Subscriptions", href: notification_subscriptions_path)
+        component.with_item(label: "Teams notifications", href: teams_notifications_path) if FeatureFlag.vexi.enabled?(:ignorable_team_notifications, current_user, default: false)
+      end %>
+    </div>
+  </nav>
+</div>

@@ -1,0 +1,76 @@
+<%
+# Example of selective rendering based on the current request path
+#
+# First define the paths you want to render the banner on. This has to be an Array or Nil.
+#  `copilot_for_workspace_preview_paths = ["/features/copilot", "/features/copilot/plans", "/features/preview"] if FeatureFlag.vexi.enabled?(:global_banner_copilot_for_workspace, current_user, default: false)`
+#
+# The `allowed_on_pages?` helper is used to specify which paths the banner should be rendered on. It takes an `allowed_paths` option and an `excluded_paths` option which can be Array or Nil. Remeber render is true by default.
+# Within the banner data hash, you can use the `render` key to specify which paths the banner should be rendered on.
+#  `render: allowed_on_pages?(allowed_paths: copilot_for_workspace_preview_paths)`
+
+# And for the other banner, you can use the `render` key to specify which paths the banner should NOT be rendered on.
+#  `render: allowed_on_pages?(excluded_paths: copilot_for_workspace_preview_paths)`
+#
+# @see app/helpers/site_helper.rb:120
+
+# Note that the Global Banner will appear on all marketing pages, plus on the /topics pages for logged-out users.
+#
+# @see show_global_banner? in app/helpers/site_helper.rb
+
+# Example banner
+# {
+#   uid: "my_unique_id",
+#   title: "My Banner Title",
+#   link: "https://my-url.com/?utm_source=github&utm_medium=banner&utm_campaign=my_campaign",
+#   link_label: "Click now",
+#   icon: :megaphone, # Either an Octicon
+#   icon: image_path("modules/site/global-banner/my_unique_id.svg"), # Or image asset
+#   classes: "fgColor-onEmphasis",
+#   render: allowed_on_pages?(excluded_paths: ["/team"]),
+#   enabled: FeatureFlag.vexi.enabled?(:site_my_unique_id_global_banner, current_user, default: false),
+# },
+
+  global_banners = [
+    {
+      uid: "universe_25_1",
+      title: "Save $400 on Universe passes until 9/17.",
+      link: "https://githubuniverse.com/?utm_source=github&utm_medium=banner&utm_campaign=2025globalbanner1",
+      link_label: "Register now",
+      classes: "global-banner--universe_25_1",
+      render: allowed_on_pages?(excluded_paths: ["/team"]),
+      enabled: FeatureFlag.vexi.enabled?(:site_universe_25_1_global_banner, current_user, default: false),
+      custom_design: "universe_25_1",
+    },
+    {
+      uid: "galaxy_25",
+      title: "Discover AI-driven development insights at GitHub Galaxy ‘25.",
+      link: "https://galaxy.github.com/?utm_source=github&utm_medium=site-banner&utm_campaign=2025q4-evt-ww-virtual-galaxy&ref_page=#{request_path_parametrize(lodash_style: true, pagename_only: true)}",
+      link_label: "Learn more",
+      classes: "fgColor-onEmphasis",
+      render: allowed_on_pages?(allowed_paths: ["/", "/home", "/enterprise", "/security/advanced-security", "/features/copilot/copilot-business"]),
+      enabled: FeatureFlag.vexi.enabled?(:site_galaxy_25_global_banner, current_user, default: false),
+    },
+    {
+      uid: "advanced_security",
+      title: "Enterprise-grade security now available for GitHub Team organizations.",
+      link: "https://www.github.com/security/advanced-security?utm_source=github&utm_medium=banner&utm_campaign=ghas-unbundle#{request_path_parametrize(prefix: "-")}",
+      link_label: "Explore now",
+      classes: "fgColor-onEmphasis",
+      render: allowed_on_pages?(allowed_paths: ["/team"]),
+      enabled: FeatureFlag.vexi.enabled?(:site_security_unbundling_team_page, current_user, default: false),
+    },
+  ]
+
+  active_global_banners = global_banners.select { |banner| banner[:enabled] }
+  active_global_banners_uids = active_global_banners.map { |banner| banner[:uid] }.join(",")
+%>
+
+<% for banner in active_global_banners %>
+  <%= render Site::GlobalBannerComponent.new(**banner) if !user_disabled_global_banner?(banner[:uid]) %>
+<% end %>
+
+<% if !logged_in? %>
+  <%= javascript_bundle("global-banner-disable.js") %>
+<% end %>
+
+<active-global-banners data-banners="<%= active_global_banners_uids %>"></active-global-banners>

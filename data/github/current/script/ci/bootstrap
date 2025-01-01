@@ -1,0 +1,454 @@
+#!/bin/bash
+# Usage: script/ci/bootstrap --help
+#
+set -e
+
+# Ensure script/bootstrap does not generate the serviceowners cache so we can
+# run it in the background
+export PARALLEL_SERVICEOWNERS=true
+
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common_functions.sh"
+
+function print_usage() {
+  cat <<-HELP
+Usage:
+  ${0} [--skip-database] [--skip-serviceowners] [--skip-background-sections]
+
+Setup a CI agent for github/github. This includes Ruby gems, Node packages,
+assets, and the database. By default, it sets up everything but you can turn off
+the things you don't want.
+HELP
+}
+
+while [ "$1" != "" ]; do
+  OPTION=$(echo $1)
+
+  case $OPTION in
+  -h | --help)
+    print_usage
+    exit
+    ;;
+  --skip-database)
+    SKIP_DATABASE=1
+    ;;
+  --skip-serviceowners)
+    SKIP_SERVICEOWNERS=1
+    ;;
+  --skip-background-sections)
+    SKIP_BACKGROUND_SECTIONS=1
+    ;;
+  *)
+    echo "ERROR: unknown option \"$OPTION\""
+    print_usage
+    exit 1
+    ;;
+  esac
+
+  shift
+done
+
+initial_cleanup() {
+  rm -rf .bundle
+}
+
+export WORKSPACE="${WORKSPACE:-/workspace/github}"
+DB_BACKUP_PATH="$WORKSPACE/tmp/mysql-backup.tar.gz"
+RESTORED_IDENTICAL_DB_CACHE="$WORKSPACE/tmp/restored_identical_db"
+MYSQL_DATA_DIR="$WORKSPACE/tmp/mysql-data"
+MYSQL_VERSION="$(cat config/mysql-version)"
+MYSQL_SOCKET="$WORKSPACE/tmp/mysqld/mysqld.sock"
+
+export RAILS_VERSION=$(grep -oP 'rails_version\s*=\s*"\K[^"]+' Gemfile)
+export RUBY_VERSION=$(config/ruby-version)
+export TEST_MASTER_SIMULATION=false
+if [ "$TEST_MASTER_SIMULATION" = "true" ]; then
+  # When we are testing master we will want to avoid saving the cache to something the potentially will end up
+  # in other branches in CI.
+  export GITHUB_BUILD_CACHE_KEY_PREFIX="cache_buster"
+fi
+
+# Utilize pigz if available for faster compression in tar
+TAR_COMPRESSION_FLAG="--gzip"
+if command -v pigz &> /dev/null; then
+  echo "Using parallel gzip (pigz) for tar compression"
+  TAR_COMPRESSION_FLAG="-I pigz"
+fi
+
+
+database_setup() {
+  DB_SETUP_START=$(metric_timestamp)
+
+  # Stop the MySQL service, we want to use a docker container instead
+  sudo service mysql stop
+
+  # read for identical database cache
+  DB_CACHE_READ_START=$(metric_timestamp)
+
+  # Make sure we have cache_go
+  "${RAILS_ROOT}/script/build-cache_go"
+
+  script/ci/vtcombo-setup
+
+  echo Checking for cached DB
+
+  set +e
+  "${RAILS_ROOT}"/vendor/ci-bin/cache_go \
+    --action=read \
+    --cache-path="$DB_BACKUP_PATH" \
+    --name=test-databases \
+    --verbose \
+    --key-glob="db/**/*" \
+    --key-glob="db/topology" \
+    --key-glob="config/defaults/database.yml" \
+    --key-string "$MYSQL_VERSION" \
+    --key-string "concurrency-${TEST_QUEUE_WORKERS}" \
+    --key-string "rails-env-${RAILS_ENV}" \
+    --key-string "vitess${DISABLE_VITESS:+-disabled}" \
+    --key-string "incremental_test_ci_reset"
+  CACHE_RESULT=$?
+
+  echo "Cache read artifact: $DB_BACKUP_PATH"
+
+  set -e
+
+  mkdir -p "$MYSQL_DATA_DIR"
+
+  if [ $CACHE_RESULT -eq 0 ]; then
+    echo Restoring DB
+
+    # Extract the mysql backup
+    time tar $TAR_COMPRESSION_FLAG --extract --file "$DB_BACKUP_PATH" --directory "$MYSQL_DATA_DIR"
+
+    start_mysql_container
+
+    echo "Primary DB cache hit"
+    touch "$RESTORED_IDENTICAL_DB_CACHE"
+
+    log_database_cache_metric "primary_cache_hit"
+    log_duration_metric "primary_cache_hit" "$DB_SETUP_START"
+    log_duration_metric "db_cache_read" "$DB_CACHE_READ_START"
+  else
+    # read for last master database cache
+    DB_CACHE_READ_MASTER_START=$(metric_timestamp)
+    echo Checking for cached master DB
+
+    set +e
+    "${RAILS_ROOT}"/vendor/ci-bin/cache_go \
+      --action=read \
+      --cache-path="$DB_BACKUP_PATH" \
+      --name=test-databases \
+      --verbose \
+      --key-glob="db/topology" \
+      --key-glob="config/defaults/database.yml" \
+      --key-string "master" \
+      --key-string "$MYSQL_VERSION" \
+      --key-string "concurrency-${TEST_QUEUE_WORKERS}" \
+      --key-string "rails-env-${RAILS_ENV}" \
+      --key-string "vitess${DISABLE_VITESS:+-disabled}" \
+      --key-string "incremental_test_ci_reset"
+    CACHE_RESULT=$?
+
+    set -e
+
+    if [ $CACHE_RESULT -eq 0 ]; then
+      echo Restoring master DB
+
+      # Extract the mysql backup
+      time tar $TAR_COMPRESSION_FLAG --extract --file "$DB_BACKUP_PATH" --directory "$MYSQL_DATA_DIR"
+
+      start_mysql_container
+    else
+      # No cache found, start a fresh MySQL container
+      mkdir -p "${MYSQL_DATA_DIR}/mysql"
+
+      start_mysql_container
+      setup_mysql_root_user
+
+      echo Failed to find/read DB and master DB caches
+    fi
+
+    ls -lh "$DB_BACKUP_PATH" || true
+
+    log_duration_metric "db_cache_read_master" "$DB_CACHE_READ_MASTER_START"
+  fi
+
+  if [ -n "$TRACK_EXPENSIVE_QUERIES" ]; then
+    DB_STATS_START=$(metric_timestamp)
+    # Download stats from https://github.com/github/mysql-index-stats-import
+    octofactory_latest_download --app_name mysql-index-stats-import \
+      --blob update_local_test_index_and_table_stats.sql \
+      update_local_test_index_and_table_stats.sql
+
+    echo "Inserting single db index stats"
+    time mysql -uroot -S "$MYSQL_SOCKET" <update_local_test_index_and_table_stats.sql
+
+    for ((i = 1; i <= TEST_QUEUE_WORKERS; i++)); do
+      sed -Ee "s/database_name='([a-z_]+)'/database_name='\1$i'/g" update_local_test_index_and_table_stats.sql >parallel_test_index_stats_$i.sql
+      echo "Inserting db $i index stats"
+      time mysql -uroot -S "$MYSQL_SOCKET" <parallel_test_index_stats_$i.sql
+    done
+
+    mysql -uroot -S "$MYSQL_SOCKET" -e 'set GLOBAL innodb_stats_auto_recalc = 0;'
+    mysql -uroot -S "$MYSQL_SOCKET" -e 'flush tables;'
+
+    log_duration_metric "db_stats" "$DB_STATS_START"
+  fi
+}
+
+database_setup_part_two() {
+  echo "Starting database base part two"
+  DB_SETUP_START=$(metric_timestamp)
+  script/ci/vtcombo-up
+  wait_for_vtcombo
+
+  ls -l "$DB_BACKUP_PATH" || true
+  ls -l "$RESTORED_IDENTICAL_DB_CACHE" || true
+
+  if [ ! -f "$RESTORED_IDENTICAL_DB_CACHE" ]; then
+    echo "Doing part two of database setup"
+    DB_CACHE_RESTORE_START=$(metric_timestamp)
+    if [ -f "$DB_BACKUP_PATH" ]; then
+      log_database_cache_metric "secondary_cache_hit"
+      # Perform partial database rebuild
+      bin/rails --trace db:test:ci:reset
+      log_duration_metric "secondary_cache_hit" "$DB_SETUP_START"
+    else
+      log_database_cache_metric "cache_miss"
+      # Perform full database rebuild
+      bin/rails --trace db:drop:all db:create:all db:test:load_schema db:test:ci:reset
+      log_duration_metric "cache_miss" "$DB_SETUP_START"
+    fi
+    log_duration_metric "db_cache_restore" "$DB_CACHE_RESTORE_START"
+
+    DB_CACHE_WRITE_START=$(metric_timestamp)
+
+    if [ "$SHARD_NUMBER" -eq 1 ]; then
+      echo Caching DB
+      script/ci/vtcombo-down
+      stop_mysql_container
+
+      tar $TAR_COMPRESSION_FLAG --create --file "$DB_BACKUP_PATH" --directory "$MYSQL_DATA_DIR" mysql
+
+      start_mysql_container
+
+      script/ci/vtcombo-up
+      wait_for_vtcombo
+
+      "${RAILS_ROOT}"/vendor/ci-bin/cache_go \
+        --action=write \
+        --cache-path="$DB_BACKUP_PATH" \
+        --verbose \
+        --name=test-databases \
+        --key-glob="db/**/*" \
+        --key-glob="db/topology" \
+        --key-glob="config/defaults/database.yml" \
+        --key-string "$MYSQL_VERSION" \
+        --key-string "concurrency-${TEST_QUEUE_WORKERS}" \
+        --key-string "rails-env-${RAILS_ENV}" \
+        --key-string "vitess${DISABLE_VITESS:+-disabled}" \
+        --key-string "incremental_test_ci_reset"
+      log_duration_metric "db_cache_write" "$DB_CACHE_WRITE_START"
+
+      # If we're on the master branch, also write the master branch cache
+      if [ "$BUILD_BRANCH" = "master" ] || [ "$BUILD_BRANCH" = "main" ] || [ "$TEST_MASTER_SIMULATION" = "true" ]; then
+        DB_CACHE_WRITE_MASTER_START=$(metric_timestamp)
+        echo Caching master DB
+
+        "${RAILS_ROOT}"/vendor/ci-bin/cache_go \
+          --action=write \
+          --cache-path="$DB_BACKUP_PATH" \
+          --verbose \
+          --name=test-databases \
+          --key-glob="db/topology" \
+          --key-glob="config/defaults/database.yml" \
+          --key-string "master" \
+          --key-string "$MYSQL_VERSION" \
+          --key-string "concurrency-${TEST_QUEUE_WORKERS}" \
+          --key-string "rails-env-${RAILS_ENV}" \
+          --key-string "vitess${DISABLE_VITESS:+-disabled}" \
+          --key-string "incremental_test_ci_reset"
+        log_duration_metric "db_cache_write_master" "$DB_CACHE_WRITE_MASTER_START"
+      fi
+    else
+      echo "Not caching DB since we are number worker #$SHARD_NUMBER."
+    fi
+  else
+    echo "Database setup part two not necessary"
+  fi
+}
+
+start_mysql_container() {
+  mkdir -p "${WORKSPACE}/tmp/mysqld"
+  mkdir -p "${MYSQL_DATA_DIR}/mysql-files"
+
+  container_id=$(docker run -d \
+    --name mysql \
+    --user $UID \
+    --ulimit nofile=1048576:1048576 \
+    --network host \
+    -e MYSQL_ALLOW_EMPTY_PASSWORD=1 \
+    -v "${MYSQL_DATA_DIR}/mysql:/var/lib/mysql" \
+    -v "${MYSQL_DATA_DIR}/mysql-files:/var/lib/mysql-files" \
+    -v "${WORKSPACE}/tmp/mysqld:/var/run/mysqld" \
+    -v "${WORKSPACE}/config/ci/mysql.cnf:/etc/mysql/conf.d/mysql.cnf" \
+    -v "/etc/localtime:/etc/localtime" \
+    mysql:$MYSQL_VERSION)
+
+  if ! wait_for_mysql; then
+    docker logs "${container_id}"
+    exit 1
+  fi
+
+  echo "MySQL started"
+  docker logs "${container_id}"
+}
+
+wait_for_mysql() {
+  echo "Waiting for MySQL socket connection..."
+  for i in {1..60}; do
+    if mysql -u root -S "$MYSQL_SOCKET" --execute "SELECT 1" > /dev/null 2>&1; then
+      echo "MySQL is accepting socket connections"
+      break
+    fi
+    if [ $i -eq 60 ]; then
+      echo "MySQL did not start accepting connections in time"
+      return 1
+    fi
+    sleep 1
+    echo "Waiting for MySQL socket connection... ($i/60)"
+  done
+
+  # Wait for TCP connection
+  echo "Waiting for MySQL TCP connection..."
+  for i in {1..30}; do
+    if mysql -u root -h 127.0.0.1 --execute "SELECT 1" > /dev/null 2>&1; then
+      echo "MySQL initialization is complete"
+      return 0
+    fi
+    sleep 1
+    echo "Waiting for MySQL TCP connection... ($i/30)"
+  done
+
+  echo "MySQL initialization did not complete in time"
+  return 1
+}
+
+setup_mysql_root_user() {
+  # Create the root user
+  mysql -u root -S "$MYSQL_SOCKET" --execute "SELECT * FROM mysql.user"
+  mysql -u root -S "$MYSQL_SOCKET" --execute "CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED WITH mysql_native_password BY ''"
+  mysql -u root -S "$MYSQL_SOCKET" --execute "GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION;"
+  echo "Root user created"
+
+  # Verify TCP connections work
+  mysql -u root -h "127.0.0.1" --execute "SELECT 1"
+  mysql -u root -h "127.0.0.1" --execute "SHOW VARIABLES LIKE '%ssl%'"
+  mysql -u root -h "127.0.0.1" --execute "SHOW GLOBAL VARIABLES"
+  mysql -u root -h "127.0.0.1" --execute "SELECT 1"
+}
+
+stop_mysql_container() {
+  echo "Shutting down MySQL..."
+  if docker exec mysql mysqladmin -u root shutdown; then
+    echo "Waiting for MySQL to stop..."
+
+    for i in {1..30}; do
+      if ! mysql -u root -S "$MYSQL_SOCKET" --execute "SELECT 1" > /dev/null 2>&1; then
+        echo "MySQL has stopped"
+        break
+      fi
+      sleep 1
+      echo "Waiting for MySQL to stop... ($i/30)"
+    done
+  else
+    echo "MySQL shutdown command failed"
+    docker logs mysql || true
+  fi
+
+  echo "Stopping MySQL container..."
+  docker stop mysql || true
+  docker rm mysql || true
+}
+
+set_runtime_type() {
+  rm -rf tmp/runtime
+  if [ -n "$ENTERPRISE" -o -n "$FI" ]; then
+    mkdir -p tmp/runtime
+    echo "enterprise" >tmp/runtime/current
+  fi
+}
+
+generate_serviceowners() {
+  mkdir -p vendor/serviceowners
+  bin/generate-service-files.rb --cache-only --skip-validation
+}
+
+bootsnap_precompile() {
+  # precompile Ruby iseqs in parallel so that we boot faster
+  bin/bundle exec bootsnap precompile app lib packages test --gemfile
+}
+
+run_script_bootstrap() {
+  SKIP_ROBOTS=1 SKIP_OPENSEARCH=1 script/bootstrap --local --deployment
+}
+
+# Generate a timestamp in milliseconds that we can use to report CI bootstrapping time
+TIME="$(date +%s%N)"
+
+cd "${RAILS_ROOT}"
+mkdir -p tmp
+echo "Bootstrapping from $(pwd)"
+
+# To only upload caches from the first shard in a job
+# Some gymnastics to get the -X number removed in DB_CACHE_SHARD_NUMBER variable
+SHARD_NUMBER_IF_PRESENT="${GH_CI_RUNTIME//[!0-9]/}"
+export SHARD_NUMBER=${SHARD_NUMBER_IF_PRESENT:-1} # At least set a number to 1 if not present
+echo "Shard number: ${SHARD_NUMBER}"
+echo "GH CI Runtime: ${GH_CI_RUNTIME}"
+export DB_CACHE_JOB_NAME="${GH_CI_RUNTIME//-$SHARD_NUMBER}"
+echo "DB Cache job key: ${DB_CACHE_JOB_NAME}"
+
+# Initialize bt.sh for breaking down where we spend time during the build
+bt_init
+trap "bt_cleanup" EXIT
+
+section initial_cleanup
+if [[ -z "${SKIP_BACKGROUND_SECTIONS}" ]]; then
+  [[ -z "${SKIP_DATABASE}" ]] && background_section "Database setup part one" database_setup
+fi
+
+section script/build-ruby
+section run_script_bootstrap
+section set_runtime_type
+background_finish # report on database_setup step from above
+
+if [[ -z "${SKIP_BACKGROUND_SECTIONS}" ]]; then
+  background_section "Generate robots.txt" bin/robots
+  background_section "Generate opensearch.xml" bin/opensearch
+  background_section "Bootsnap precompile" bootsnap_precompile
+  [[ -z "${SKIP_SERVICEOWNERS}" ]] && background_section "Generate SERVICEOWNERS" generate_serviceowners
+  [[ -z "${SKIP_DATABASE}" ]] && background_section "Database setup part two" database_setup_part_two
+  background_finish
+fi
+
+start_actions_log_grouping "Bootstrap - stats"
+
+# Enable YJIT for CI
+sed -i 's/--yjit-disable//' bin/safe-ruby
+
+# Calculate the bootstrap duration and report it in milliseconds
+TIME="$(($(date +%s%N) - TIME))"
+MS="$((TIME / 1000000))"
+script/ci/dogstats distribution bootstrap.duration "$MS" "branch:${BUILD_BRANCH}" "workflow_name: $GITHUB_WORKFLOW"
+
+# Celebrate our success
+cat <<MESSAGE
+CI boostrap completed 🎉
+
+pwd: $(pwd)
+hostname: $(hostname)
+ruby path: $(which ruby)
+ruby version: $(ruby -v)
+git version: $(git --version)
+MESSAGE

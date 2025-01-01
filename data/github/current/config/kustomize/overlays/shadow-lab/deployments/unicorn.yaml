@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unicorn
+  annotations:
+    moda.github.net/allow-missing-ready-pods: null
+    moda.github.net/canary-label: null
+    moda.github.net/canary-maxunavailable: null
+    moda.github.net/canary-replicas: null
+    moda.github.net/canary-v2: null
+    moda.github.net/cluster-preferences: |
+      {
+        "dotcom-1-ash1-iad":  {
+          "spec": {
+            "template": {
+              "spec": {
+                "affinity": {
+                  "nodeAffinity": {
+                    "preferredDuringSchedulingIgnoredDuringExecution": [
+                      { "weight": 1,
+                        "preference": {
+                          "matchExpressions": [
+                            { "key": "kubernetes.github.com/pool",
+                              "operator": "In",
+                              "values": ["performance-testing"]
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+spec:
+  replicas: 4
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 1
+            preference:
+              matchExpressions:
+              - key: gpanel.githubapp.com/machine_type
+                operator: In
+                values:
+                - general5.m.large
+      containers:
+        - name: unicorn
+          env:
+            - name: SMTP_HOST
+              value: smtp.service.github.net
+            - name: GH_HOSTNAME
+              value: github.com
+            - name: GITHUB_CONFIG_ROLE
+              value: api
+            - name: GH_UNICORN_WORKER_COUNT
+              value: 10
+            - name: USERS_CACHE_CONNECT
+              value: '0'
+          resources:
+            limits:
+              memory: 20Gi
+            requests:
+              cpu: 7
+              memory: 16Gi

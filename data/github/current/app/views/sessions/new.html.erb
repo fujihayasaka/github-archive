@@ -1,0 +1,147 @@
+<%# erblint:counter FlashMigrationCounter 1 %>
+<%# rubocop:disable Lint/InstanceVariable %>
+<%
+# This form is also loaded in on 404.html.
+
+ldap ||= GitHub.auth_mode.to_sym == :ldap
+emu_first_admin_login ||= false
+subtitle = signin_subtitle(ldap, emu_first_admin_login)
+login_field_label = signin_login_field_label(ldap)
+sign_in_message =  @preview_message || customized(:sign_in_message)
+show_account_creation = GitHub.signup_enabled? && params[:allow_signup] != "false" && !enterprise_access_improvements? && !Apps::Privileged.capable?(:hide_login_signup_button, app: @application) && !emu_first_admin_login
+utm_params = utm_memo
+proxima_admin_login ||= false
+
+description =
+  if at_auth_limit_login?
+    "There have been several failed attempts to sign in from this account or IP address. Please wait a while and try again later."
+  elsif @tried_signing_into_org
+    safe_join([
+    content_tag(:span, "@#{h(params[:login])} is an "),
+    content_tag(:b, "organization"),
+    content_tag(:span, ", so you can't sign in to it directly. Try signing into your personal account and then using the context switcher on your dashboard:"),
+    tag(:br),
+    image_tag("modules/account/org-select.png", alt: ""),
+    tag(:br),
+    content_tag(:span, "Don't have a personal account? Talk to someone in your organization about getting access.")
+  ])
+  elsif sign_in_message.present?
+    github_simplified_markdown(sign_in_message)
+  else
+    nil
+  end
+%>
+
+<% page_info title: subtitle, canonical_url: login_url %>
+
+<%= render Sessions::AuthenticationWrapperComponent.new(
+      html_attributes: { "data-test-selector" => "login-standard-view", "data-hpc" => true },
+      id: "login-standard-view",
+      body_classes: "authentication-body--with-form new-session",
+    ) do |component| %>
+
+  <% user_style = @application || emu_first_admin_login %>
+  <% avatar_subject = @application || business_by_login_shortcode || @user %>
+
+  <% component.with_header do %>
+    <% if emu_first_admin_login %>
+      <div class="auth-form-header p-0 mb-0" <%= test_selector "emu-first-admin-business-info" %>>
+        <%= render(Primer::Beta::Avatar.new(mb: 2, shape: :square, size: 64, src: business_by_login_shortcode.primary_avatar_url, alt: business_by_login_shortcode.name )) %>
+        <h2><%= business_by_login_shortcode.name %></h2>
+        <%= render(Primer::Beta::Text.new(tag: :p, font_size: :small, color: :muted)) { "Enterprise account" } %>
+        <h1><%= subtitle %></h1>
+      </div>
+    <% elsif @application %>
+      <div class="color-border-muted h4 text-normal text-center">
+        <% unless GitHub.private_mode_enabled? %>
+          <div style="background-color: #<%= @application.preferred_bgcolor %>" class="CircleBadge CircleBadge--medium mx-auto mb-3">
+            <%= oauth_application_logo(@application, 60, class: "CircleBadge-icon", alt: "#{@application.name} logo", width: 50, height: 50) %>
+          </div>
+        <% end %>
+        <p>
+          Sign in to <strong><%= GitHub.flavor %></strong>
+          <br>
+          to continue to <strong><%= @application.name %></strong>
+        </p>
+      </div>
+    <% else %>
+      <%= render_react_partial name: "sessions-auth-header", props: {
+        variant: user_style ? "user" : "github",
+        avatarUrl: user_style ? image_path(avatar_subject.primary_avatar_url(100)) : nil,
+        userName: avatar_subject&.name,
+        title: subtitle,
+        description: description,
+      } %>
+    <% end %>
+  <% end %>
+
+  <% component.with_body do %>
+    <%= render "shared/flash" %>
+
+    <div class="flash js-transform-notice" hidden>
+      <button class="flash-close js-flash-close" type="button" aria-label="Dismiss this message">
+        <%= render Primer::Beta::Octicon.new(icon: "x", aria: { label: "Dismiss" }) %>
+      </button>
+    </div>
+
+      <%= render partial: "sessions/password_sign_in", locals: {
+        login_field_label: login_field_label,
+        login_scenario: :new_session,
+        proxima_admin_login: proxima_admin_login,
+        emu_first_admin_login: emu_first_admin_login,
+      } %>
+
+    <% if show_account_creation %>
+      <% if logged_in? %>
+        <% component.with_footer do %>
+          <div class="d-flex">
+            <p class="mr-2 mb-0">Want to create an account?</p>
+            <%= form_tag kill_session_path, method: 'post', class: "width-auto" do %>
+              <input type="submit" value="Sign out" class="Link color-bg-default border-0 p-0">
+            <% end %>
+          </div>
+          <%= render partial: "sessions/webauthn/login_hint" %>
+      <% end %>
+      <% else %>
+        <% component.with_footer do %>
+          <div class="authentication-login-footer-links">
+          <p class="mt-1 mb-0 p-0">
+            New to <%= GitHub.flavor %>?
+            <% source_label = params[:return_to].to_s.start_with?(oauth_authorize_path) ? "oauth" : "login" %>
+            <% opts = { "data-ga-click": "Sign in, switch to sign up",
+              data: sign_up_link_data_attributes(location_in_page: "sign in switch to sign up") } %>
+            <% if source_label == "oauth" %>
+              <% get_started_with = "copilot-vscode" if @application&.key == Apps::Privileged::Codespaces::VSCODE_AUTH_SERVER_KEY %>
+              <%= link_to(
+                "Create an account",
+                signup_path(return_to: params[:return_to], source: source_label, get_started_with: get_started_with),
+                **opts
+              ) %>
+            <% else %>
+              <%= link_to(
+                "Create an account",
+                nux_signup_index_path(return_to: params[:return_to], source: source_label, **utm_params),
+                **opts
+              ) %>
+            <% end %>
+          </p>
+          </div>
+          <%= render partial: "sessions/webauthn/login_hint" %>
+        <% end %>
+      <% end %>
+    <% elsif (show_passkey_login? && !emu_first_admin_login) || Rails.env.development? %>
+      <% component.with_footer do %>
+        <div class="authentication-login-footer-links" hidden>
+            <%= render partial: "sessions/webauthn/login_hint" %>
+        </div>
+      <% end %>
+    <% end %>
+  <% end %>
+  <% if GitHub.default_password %>
+    <p class="note text-center">
+    <strong>Tip:</strong>
+      The default password for all users in development is
+      <strong><%= GitHub.default_password %></strong>
+    </p>
+  <% end %>
+<% end %>

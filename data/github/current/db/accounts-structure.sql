@@ -1,0 +1,48 @@
+DROP TABLE IF EXISTS `business_orchestrations`;
+CREATE TABLE `business_orchestrations` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `parent_id` bigint unsigned DEFAULT NULL,
+  `business_id` bigint unsigned DEFAULT NULL,
+  `actor_id` bigint unsigned DEFAULT NULL,
+  `type` varchar(255) COLLATE utf8mb4_unicode_520_ci NOT NULL,
+  `state` int NOT NULL DEFAULT '0',
+  `step_name` varchar(255) COLLATE utf8mb4_unicode_520_ci DEFAULT NULL,
+  `data_organization_ids` blob,
+  `data_team_ids` blob,
+  `data_user_ids` blob,
+  `data` mediumtext COLLATE utf8mb4_unicode_520_ci,
+  `attempts` int NOT NULL DEFAULT '0',
+  `error_message` varchar(255) COLLATE utf8mb4_unicode_520_ci DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `index_type` (`type`,`state`),
+  KEY `index_state_updated_at` (`state`,`updated_at`),
+  KEY `index_parent_id_state` (`parent_id`,`state`),
+  KEY `index_business_id` (`business_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;
+DROP TABLE IF EXISTS `team_orchestrations`;
+CREATE TABLE `team_orchestrations` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `parent_id` bigint unsigned DEFAULT NULL,
+  `business_id` bigint unsigned DEFAULT NULL,
+  `team_id` bigint unsigned NOT NULL,
+  `actor_id` bigint unsigned DEFAULT NULL,
+  `type` varchar(255) COLLATE utf8mb4_unicode_520_ci NOT NULL,
+  `state` int NOT NULL DEFAULT '0',
+  `step_name` varchar(255) COLLATE utf8mb4_unicode_520_ci DEFAULT NULL,
+  `data_organization_ids` blob,
+  `data_team_ids` blob,
+  `data_user_ids` blob,
+  `data` text COLLATE utf8mb4_unicode_520_ci,
+  `attempts` int NOT NULL DEFAULT '0',
+  `error_message` varchar(255) COLLATE utf8mb4_unicode_520_ci DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `index_type` (`type`,`state`),
+  KEY `index_state_updated_at` (`state`,`updated_at`),
+  KEY `index_parent_id_state` (`parent_id`,`state`),
+  KEY `index_business_id` (`business_id`),
+  KEY `index_team_id` (`team_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;

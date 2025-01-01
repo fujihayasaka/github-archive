@@ -1,0 +1,49 @@
+<%# Social buttons partial - shared between login and signup flows %>
+<%
+  # Use local variables if passed, otherwise use default login flow logic
+  show_social_buttons ||= GitHub.social_sisu_enabled?(user: previously_verified_anon_user) && params[:mobile_ios] == "false"
+  show_divider ||= false
+  button_margin_top ||= 2
+  from ||= :login
+
+  # Check if Apple sign-in should be shown as an option:
+  # Login page - based on the social_sisu_apple FF
+  # Signup page - based on the social_sisu_apple_signup FF or if the provider param is "apple"
+  apple_signin_enabled = GitHub.social_sisu_enabled?(user: previously_verified_anon_user) && (
+    GitHub.social_sisu_apple_enabled?(user: previously_verified_anon_user) ||
+    (from == :signup && (params[:provider] == "apple" || FeatureFlag.vexi.enabled?(:social_sisu_apple_signup, default: false)))
+  )
+%>
+<% if show_social_buttons %>
+  <%= form_tag social_initiate_path(provider: "google"), method: :get do %>
+    <input type="hidden" name="return_to" value="<%= h(params[:return_to]) %>" <%= test_selector "google-social-return-to" %>>
+    <%= render(Primer::Beta::Button.new(mt: button_margin_top, block: true, type: :submit, scheme: :default,
+      data: { disable_with: "Continuing with Google..." },
+    ))  do |b| %>
+      <% b.with_leading_visual_svg do %>
+        <%= render Providers::GoogleIconComponent.new %>
+      <% end %>
+      Continue with Google
+    <% end %>
+  <% end %>
+
+  <% if apple_signin_enabled %>
+    <%= form_tag social_initiate_path(provider: "apple"), method: :get do %>
+      <input type="hidden" name="return_to" value="<%= h(params[:return_to]) %>" <%= test_selector "apple-social-return-to" %>>
+      <%= render(Primer::Beta::Button.new(mt: 2, block: true, type: :submit, scheme: :default,
+        data: { disable_with: "Continuing with Apple..." },
+      ))  do |b| %>
+        <% b.with_leading_visual_svg do %>
+          <%= render Providers::AppleIconComponent.new %>
+        <% end %>
+        Continue with Apple
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if show_divider %>
+    <div class="authentication-divider">
+      <span>or</span>
+    </div>
+  <% end %>
+<% end %>

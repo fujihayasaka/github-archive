@@ -1,0 +1,105 @@
+syntax = "proto3";
+
+package github.spokes.batch.v1;
+
+option go_package = "github.com/github/spokes-proto/gen/go/v1/streaming";
+option ruby_package = "GitHub::Spokes::Proto::Streaming::V1";
+
+import "spokes-api/types/v1/diff_algorithm.proto";
+import "spokes-api/types/v1/object_id.proto";
+import "spokes-api/types/v1/repository.proto";
+import "spokes-api/types/v1/request_context.proto";
+import "spokes-api/streaming/v1/blob_filter.proto";
+import "spokes-api/types/selectors/v1/parent_selector.proto";
+import "spokes-api/types/selectors/v1/repo_object_id_selector.proto";
+import "spokes-api/types/selectors/v1/root_selector.proto";
+
+// The Streaming API contains twirp-like HTTP endpoints. These endpoints have
+// special needs that twirp can't satisfy. For example, the batch blob
+// endpoint streams blobs back as they're found.
+
+// BatchBlobsRequest is the request body for batch blob requests.
+//
+// ```text
+// POST /streaming/v1/blobs
+// Content-Type: [ application/json | application/protobuf ]
+// Accept: application/tar
+//
+// (BatchBlobsRequest)
+// ```
+message BatchBlobsRequest {
+    // repository is the repository to scope the blob to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.RequestContext request_context = 4;
+
+    // oids are the OIDs of the blobs to return.
+    repeated github.spokes.types.v1.ObjectID oids = 2;
+
+    // (Optional) Filter blobs before they are returned.
+    BlobFilter filters = 3;
+}
+
+// ReadRawDiffRequest is the request body for reading raw diff requests.
+//
+// ```text
+// POST /streaming/v1/diffs/raw
+// Content-Type: [ application/json | application/protobuf ]
+// Accept: application/octet-stream
+//
+// (ReadRawDiffRequest)
+// ```
+message ReadRawDiffRequest {
+
+    // DiffMode specifies the format of the raw diff output.
+    enum DiffMode {
+        // DIFF_MODE_INVALID is the default invalid value.
+        DIFF_MODE_INVALID = 0;
+
+        // DIFF_MODE_PATCH generates output in patch format (similar to git format-patch).
+        DIFF_MODE_PATCH = 1;
+
+        // DIFF_MODE_DIFF generates output in diff format (similar to git diff).
+        DIFF_MODE_DIFF = 2;
+
+    }
+    // repository is the repository to operate on.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.RequestContext request_context = 2;
+
+    // oid1 is the first head to operate on.
+    oneof oid1 {
+        // object_id1 selects an object by its OID.
+        github.spokes.types.v1.ObjectID object_id1 = 3;
+
+        // repo_object_id1 selects an object by its OID that may exist in an alternate repository.
+        github.spokes.types.selectors.v1.RepoObjectIDSelector repo_object_id1 = 4;
+
+        // root_selector1 selects the empty tree (from the root of the repository).
+        github.spokes.types.selectors.v1.RootSelector root_selector1 = 5;
+
+        // parent_selector1 selects the parent of oid2.
+        github.spokes.types.selectors.v1.ParentSelector parent_selector1 = 11;
+    }
+
+    // oid2 is the second head to operate on.
+    oneof oid2 {
+        // object_id2 selects an object by its OID.
+        github.spokes.types.v1.ObjectID object_id2 = 6;
+
+        // repo_object_id2 selects an object by its OID that may exist in an alternate repository.
+        github.spokes.types.selectors.v1.RepoObjectIDSelector repo_object_id2 = 7;
+    }
+
+    // full index indicates whether to include the full index in the diff.
+    bool full_index = 8;
+
+    // mode is the diff mode to use for the diff output.
+    DiffMode mode = 9;
+
+    // diff_algorithm is the diff algorithm to be used.
+    // If not specified, the default diff algorithm will be used.
+    github.spokes.types.v1.DiffAlgorithm diff_algorithm = 10;
+
+}

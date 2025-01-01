@@ -1,0 +1,79 @@
+<% stats_timer do %>
+  <%= render Feed::ItemNextComponent.new(
+    actor:,
+    action:,
+    timestamp: item.created_at,
+    item:,
+    repository:,
+    heading_icon:,
+  ) do |c| %>
+    <% if item.related_item? %>
+      <% c.with_border do %>
+        <hr class="mb-3 mt-2">
+      <% end %>
+    <% end %>
+
+    <% if item.rollup? %>
+      <% c.with_heading_subject do %>
+        <%= item.rollup_item_count %> <%= "contribution".downcase.pluralize(item.rollup_item_count) %>
+      <% end %>
+    <% else %>
+      <% c.with_heading_subject do %>
+        <span class="branch-name"><%= branch_name %></span>
+        in
+        <%= helpers.link_to_feed_repo(
+          repository,
+          item,
+          include_owner: true,
+          test_selector: :push_heading_repo_link,
+        ) %>
+      <% end %>
+    <% end %>
+
+    <% if item.rollup? || item.related_item? %>
+      <% c.with_body(
+        mt: 2,
+        bg: :subtle,
+        mb: 0,
+        p: 3,
+        border_radius: 1,
+        aria: { label: "Delete branch #{item.unique_html_id}" },
+      ) do |body| %>
+        <div class="d-flex flex-items-baseline">
+          <span class="mr-2">
+            <%= helpers.feed_user_avatar(repository.owner, item) %>
+          </span>
+          <span>
+            <% if item.rollup? || item.related_item? %>
+              deleted branch
+            <% end %>
+            <span class="branch-name"><%= branch_name %></span>
+            in <%= helpers.link_to_feed_repo(
+              repository,
+              item,
+              include_owner: true,
+              test_selector: :push_body_repo_link,
+            ) %>
+          </span>
+        </div>
+      <% end %>
+    <% end %>
+
+    <% if item.rollup? %>
+      <% preview_item = item.related_items.find { |r| r.subject&.push_type == "branch_deletion" } || item.related_items.first %>
+      <% c.with_related_items_preview do %>
+        <% if preview_item %>
+          <% component = related_card_component(related_item: preview_item) %>
+          <%= render component.new(item: preview_item) %>
+        <% end %>
+      <% end %>
+      <% c.with_related_items do %>
+        <% remaining_items = item.related_items.reject { |r| r.equal?(preview_item) } %>
+        <% remaining_items.each do |related_item| %>
+          <% component = related_card_component(related_item:) %>
+          <%= render component.new(item: related_item) %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

@@ -1,0 +1,83 @@
+#!/bin/bash
+# This script is used to initialize the GLB repository in a codespace. It clones the repository and optionally sets up the gateway.
+
+set -e
+
+help() {
+  echo "Clones GLB repository and optionally sets up the gateway."
+  echo
+  echo "Usage: setup-codespaces-glb [-d|g|h]"
+  echo "Options:"
+  echo "-d     Deletes existing GLB repository before re-cloning it."
+  echo "-g     Sets up the gateway."
+  echo "-h     Prints this help message."
+  echo
+}
+
+# Whether to delete existing repository.
+delete_existing_repo=false
+
+# Parse the options.
+while getopts "dgh" opt; do
+  case $opt in
+  d)
+    delete_existing_repo=true
+    ;;
+  g)
+    setup_gateway=true
+    ;;
+  h)
+    help
+    exit
+    ;;
+  :)
+    echo "Error: Option -$OPTARG requires an argument."
+    exit 1
+    ;;
+  \?)
+    echo "Error: Invalid option -$OPTARG"
+    exit 1
+    ;;
+  esac
+done
+
+echo "Started setup of GLB repository..."
+
+workspaces_dir="/workspaces"
+
+# Delete existing gateway repository if requested.
+if [[ $delete_existing_repo == true ]]; then
+  echo -e "Deleting existing GLB repository..."
+  rm -rf $workspaces_dir/glb
+  echo -e "Deleted existing GLB repository."
+fi
+
+initialize_repo() {
+  local repo_name=$1
+
+  # Change to the gateway workspace directory.
+  cd "$workspaces_dir"
+
+  # Clone the repo if it doesn't exist.
+  if [ ! -d "$repo_name" ]; then
+    echo "Cloning $repo_name repo..."
+    git clone "https://github.com/github/$repo_name"
+    echo "Cloned $repo_name repo."
+  else
+    echo "Repo $repo_name already exists. Skipping clone..."
+  fi
+
+  # Change to the repo directory.
+  cd "$repo_name"
+}
+
+initialize_repo glb
+
+echo "Completed setup of GLB repository."
+
+if [[ $setup_gateway == true ]]; then
+  echo "Started setup of gateway..."
+  cd "$workspaces_dir/glb"
+  script/setup-codespaces-gateway
+  echo "Completed setup of gateway."
+fi
