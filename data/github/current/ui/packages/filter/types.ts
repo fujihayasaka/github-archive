@@ -1,3 +1,4 @@
+import type {SafeHTMLString} from '@github-ui/safe-html'
 import type {Icon} from '@primer/octicons-react'
 import type {RefObject} from 'react'
 
@@ -308,6 +309,8 @@ export interface BaseFilterValue {
 
 export interface FilterValueData extends BaseFilterValue {
   displayName?: string
+  /** Sanitized or safe HTML to render as display name. If provided, will be used instead of the plaintext `displayName`. */
+  displayNameHtml?: SafeHTMLString
   description?: string
   id?: string
   inlineDescription?: boolean

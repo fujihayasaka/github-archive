@@ -58,7 +58,7 @@ module GitHub
     DEVELOPER_BASE_URL             = "https://developer.github.com".freeze
     STAGING_DOMAIN                 = "github-staging-lab.com".freeze
 
-    ELASTOMER_INDEX_LOCK_BACKOFF_ATTEMPTS     = 20
+    ENTERPRISE_ELASTOMER_INDEX_LOCK_BACKOFF_ATTEMPTS = 20
     ES_QUERY_TIMEOUT                          = "250ms"
     ES_DATACENTER                             = "default"
     ES_AUDIT_LOG_CLUSTER                      = "default"
@@ -3916,8 +3916,8 @@ module GitHub
     end
 
     def elastomer_index_lock_backoff_attempts
-      env_setting = ENV["ELASTOMER_INDEX_LOCK_BACKOFF_ATTEMPTS"]&.to_i
-      @elastomer_index_lock_backoff_attempts = env_setting || ELASTOMER_INDEX_LOCK_BACKOFF_ATTEMPTS
+      env_setting = ENV["ENTERPRISE_ELASTOMER_INDEX_LOCK_BACKOFF_ATTEMPTS"]&.to_i
+      @elastomer_index_lock_backoff_attempts = env_setting || ENTERPRISE_ELASTOMER_INDEX_LOCK_BACKOFF_ATTEMPTS
     end
     attr_writer :elastomer_index_lock_backoff_attempts
 
@@ -8956,6 +8956,25 @@ module GitHub
       return @web_sockets_rate_limit if defined?(@web_sockets_rate_limit)
       @web_sockets_rate_limit = [0, GitHub.environment.fetch("ENTERPRISE_WEB_SOCKETS_RATE_LIMIT", "99").to_i].max
     end
+
+    # Allow the rebase_merge_allowed setting to be the canonical repository
+    # setting determining whether rebase commits are generated on merge commit
+    # calculation.
+    #
+    # This is in response to Salesforce needing to continually disable rebase
+    # commit generation between GHES releases, and is a potential precursor to
+    # changing the way we allow customers to skip rebase commit generation in
+    # both enterprise and non-enterprise environments.
+    #
+    # More context on the Salesforce issue:
+    # https://github.com/github/ghes/issues/11427
+    #
+    # Additional context in a pull requests issue:
+    # https://github.com/github/pull-requests/issues/19821
+    def skip_rebase_commit_generation_from_rebase_merge_settings
+      @skip_rebase_commit_generation_from_rebase_merge_settings ||= false
+    end
+    attr_writer :skip_rebase_commit_generation_from_rebase_merge_settings
   end
 end
 

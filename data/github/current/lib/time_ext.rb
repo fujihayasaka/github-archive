@@ -12,3 +12,16 @@ else
     end
   end
 end
+
+if Time.now.respond_to?(:to_proto)
+  raise LoadError, "Time#to_proto should not exist"
+else
+  class Time
+    sig do
+      returns(Google::Protobuf::Timestamp)
+    end
+    def to_proto
+      Google::Protobuf::Timestamp.new(seconds: to_i, nanos: nsec)
+    end
+  end
+end

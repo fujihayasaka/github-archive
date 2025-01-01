@@ -1,4 +1,5 @@
 import {fuzzyScore} from '@github-ui/fuzzy-score/fuzzy-score'
+import type {SafeHTMLString} from '@github-ui/safe-html'
 
 import {FILTER_KEYS, INDETERMINANT} from '../constants/filter-constants'
 import type {FilterQuery} from '../filter-query'
@@ -25,7 +26,7 @@ const LABEL_VALIDATION_ENDPOINT = '/_filter/labels/validate'
 
 export type Label = {
   name: string
-  nameHtml?: string
+  nameHtml?: SafeHTMLString
   description?: string
   color?: string
 }
@@ -64,7 +65,8 @@ export class LabelFilterProvider extends AsyncFilterProvider<Label> implements F
     }
     return {
       type: FilterValueType.Value,
-      displayName: label.nameHtml ?? label.name,
+      displayName: label.name,
+      displayNameHtml: label.nameHtml,
       ariaLabel: `${label.name}, ${this.displayName}`,
       value: label.name ?? '',
       priority,

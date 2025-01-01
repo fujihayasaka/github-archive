@@ -24,6 +24,7 @@ import {
   type UserFilterParams,
 } from '@github-ui/filter/providers'
 import {TypeFilterProvider} from '@github-ui/filter/providers/type'
+import type {SafeHTMLString} from '@github-ui/safe-html'
 import type {ColorName, ColorSet} from '@github-ui/use-named-color'
 import {
   CalendarIcon,
@@ -405,7 +406,7 @@ export class MemexParentIssueFilterProvider extends ParentIssueFilterProvider {
     }
 
     const json = await response.json()
-    const suggestions = json.suggestions as Array<ParentIssue>
+    const suggestions = json.suggestions as Array<ParentIssue & {titleHtml: SafeHTMLString}>
 
     // Prefer more recently created issues at the top of the list.
     const sorted = suggestions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) satisfies Array<Issue>

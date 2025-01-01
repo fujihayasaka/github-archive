@@ -3,8 +3,8 @@ declare const styles: {
   readonly "Box_0": string;
   readonly "Box_1": string;
   readonly "GitHubAvatar_0": string;
-  readonly "SafeHTMLText_0": string;
   readonly "boldText": string;
+  readonly "displayName": string;
   readonly "item": string;
   readonly "normalText": string;
 };

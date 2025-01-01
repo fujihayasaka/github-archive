@@ -84,19 +84,26 @@ module Exemptions
         data: []
       }
       rule_suite = request.resource_owner
+
+      # Return empty hash if rule_suite is nil or not the expected type
+      return hash unless rule_suite && rule_suite.is_a?(RuleEngine::RuleSuite)
+
       # We only care about the latest rule run
       rule_run = rule_suite.rule_runs.last
 
+      # Return empty hash if there's no rule run
+      return hash unless rule_run
+
       # CLI pushes and web pushes have slightly different structures
       # CLI push
-      if rule_run&.insights_ui_metadata&.keys&.include?("secrets")
+      if rule_run.insights_ui_metadata&.keys&.include?("secrets")
         matching_secrets = rule_run.insights_ui_metadata["secrets"].filter { |secret| secret["bypass_placeholder_ksuid"] == request.resource_identifier }
         matching_secrets.each do |secret|
           hash[:data] << {
             secret_type: secret["token_metadata"]["label"],
             locations: secret["locations"].map do |location|
               {
-                branch: request.resource_owner.ref_name,
+                branch: rule_suite.ref_name,
                 commit: location["commit_oid"],
                 path: "#{location["path"]}:#{location["start_line"]}:#{location["start_line_byte_position"]}",
               }
@@ -104,7 +111,7 @@ module Exemptions
           }
         end
       # Web push
-      elsif rule_run&.insights_ui_metadata&.keys&.length && rule_run&.insights_ui_metadata&.keys&.length > 0
+      elsif rule_run.insights_ui_metadata&.keys&.length && rule_run.insights_ui_metadata&.keys&.length > 0
         path = rule_run.insights_ui_metadata.keys.first
         matching_secrets = rule_run.insights_ui_metadata[path]["secrets"].filter { |secret| secret["bypass_placeholder_ksuid"] == request.resource_identifier }
         matching_secrets.each do |secret|
@@ -112,7 +119,7 @@ module Exemptions
             secret_type: secret["token_metadata"]["label"],
             locations: secret["locations"].map do |location|
               {
-                branch: request.resource_owner.ref_name,
+                branch: rule_suite.ref_name,
                 commit: "Pending (from file editor)",
                 path: "#{path}:#{location["start_line"]}:#{location["start_line_byte_position"]}",
               }

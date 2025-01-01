@@ -17,7 +17,17 @@ type SuggestionItemProps = {
 } & ARIAFilterSuggestion
 
 export const SuggestionItem = (suggestion: SuggestionItemProps) => {
-  const {suggestionId, active, icon: Icon, iconColor, value, avatar, displayName, ariaLabel} = suggestion
+  const {
+    suggestionId,
+    active,
+    icon: Icon,
+    iconColor,
+    value,
+    avatar,
+    displayName,
+    displayNameHtml,
+    ariaLabel,
+  } = suggestion
   const {suggestionSelected, activeSuggestionRef} = useSuggestions()
   const {inputRef} = useInput()
 
@@ -38,6 +48,8 @@ export const SuggestionItem = (suggestion: SuggestionItemProps) => {
     },
     [active, activeSuggestionRef],
   )
+
+  const displayNameClass = clsx(styles.displayName, suggestion.description ? styles.boldText : styles.normalText)
 
   return (
     <ActionList.Item
@@ -71,11 +83,11 @@ export const SuggestionItem = (suggestion: SuggestionItemProps) => {
           </div>
         </ActionList.LeadingVisual>
       )}
-      {/* We set the inner HTML dangerously here because we can receive HTML back from the server for Labels */}
-      <SafeHTMLText
-        unverifiedHTML={displayName ?? getFilterValue(value) ?? ''}
-        className={clsx(styles.SafeHTMLText_0, suggestion.description ? styles.boldText : styles.normalText)}
-      />
+      {displayNameHtml !== undefined ? (
+        <SafeHTMLText html={displayNameHtml} className={displayNameClass} />
+      ) : (
+        <span className={displayNameClass}>{displayName ?? getFilterValue(value) ?? ''}</span>
+      )}
       {suggestion.description && suggestion.inlineDescription !== undefined && (
         <ActionList.Description
           variant={suggestion.inlineDescription ? 'inline' : 'block'}

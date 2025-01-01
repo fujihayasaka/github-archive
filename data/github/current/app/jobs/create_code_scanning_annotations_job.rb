@@ -268,7 +268,7 @@ class CreateCodeScanningAnnotationsJob < ApplicationJob
 
       fixed_alerts: data.fixed_alerts,
       fixed_count: data.fixed_count,
-      new_alerts: data.new_alerts,
+      new_alerts: data.new_alerts.to_a,
       new_count: data.new_count,
       new_categories: data.new_categories,
       missing_categories: data.missing_categories,

@@ -1,4 +1,5 @@
 import {fuzzyScore} from '@github-ui/fuzzy-score/fuzzy-score'
+import type {SafeHTMLString} from '@github-ui/safe-html'
 import {IssueClosedIcon, IssueOpenedIcon, SkipIcon} from '@primer/octicons-react'
 
 import {FILTER_KEYS, INDETERMINANT} from '../constants/filter-constants'
@@ -38,7 +39,7 @@ export const IssueStateReason = {
 
 export type Issue = {
   title: string
-  titleHtml: string
+  titleHtml: SafeHTMLString
   nwoReference: string
   state: (typeof IssueState)[keyof typeof IssueState]
   stateReason?: (typeof IssueStateReason)[keyof typeof IssueStateReason]
@@ -81,7 +82,8 @@ export class BaseIssueFilterProvider extends AsyncFilterProvider<Issue> implemen
 
     return {
       type: FilterValueType.Value,
-      displayName: titleHtml ?? title,
+      displayName: title,
+      displayNameHtml: titleHtml,
       ariaLabel: `${title}, ${this.displayName}`,
       description: nwoReference,
       inlineDescription: false,
