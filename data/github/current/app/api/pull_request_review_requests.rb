@@ -41,7 +41,7 @@ class Api::PullRequestReviewRequests < Api::App
 
     teams_to_add = []
     if data["team_reviewers"]
-      teams_to_add = repo.teams(immediate_only: false, include_all_repo_roles: repo.owner&.feature_enabled?(:reviewer_teams_all_repo_role)).where(slug: data["team_reviewers"])
+      teams_to_add = repo.teams(immediate_only: false, include_all_repo_roles: true).where(slug: data["team_reviewers"])
 
       # tried to add a team that doesn't exist for this repository.
       if data["team_reviewers"].length != teams_to_add.length

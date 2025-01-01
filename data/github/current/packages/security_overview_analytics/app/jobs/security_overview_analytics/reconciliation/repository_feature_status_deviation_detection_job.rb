@@ -271,9 +271,10 @@ module SecurityOverviewAnalytics
 
             deviations = synced_data.find_deviations
             unless deviations.any?
-              # If we didn't find any deviations, recalculate our rollup anyway
+              # On GitHub.com, recalculate rollup even if we didn't find any deviations
+              # On GHES, skip the rollup if no deviations were found
               # If we _did_ find deviations, this will get queued after the remediation job
-              UpdateFeatureStatusSummaryJob.enqueue(repository_id:)
+              UpdateFeatureStatusSummaryJob.enqueue(repository_id:) unless GitHub.enterprise?
               next
             end
 

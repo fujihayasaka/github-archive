@@ -44,7 +44,9 @@ module Search
 
       # Internal: Returns a Hash that will be passed as URL params for the query.
       def query_params
-        { type: "workflow_run" }
+        params = { type: "workflow_run" }
+        params[:routing] = @repo_id unless @repo_id.nil?
+        params
       end
 
       # Internal: Returns the Array of field names that will be queried.

@@ -1,6 +1,8 @@
 # typed: true
 # frozen_string_literal: true
 
+require "browser"
+
 module ApplicationController::SecurityHeadersDependency
   extend T::Helpers
   requires_ancestor { ApplicationController }
@@ -101,7 +103,8 @@ module ApplicationController::SecurityHeadersDependency
   #
   # Returns nothing.
   def clear_browser_cache
-    if parsed_useragent.name != "Chrome"
+    browser = Browser.new(request.user_agent)
+    unless browser.chromium_based?
       SecureHeaders.use_secure_headers_override(request, :clear_browser_cache)
     end
   end

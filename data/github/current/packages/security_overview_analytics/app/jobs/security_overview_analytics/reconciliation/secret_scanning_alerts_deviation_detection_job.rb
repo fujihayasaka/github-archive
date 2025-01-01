@@ -97,6 +97,7 @@ module SecurityOverviewAnalytics
       sig { override.params(arguments: T.untyped).void }
       def initialize(**arguments)
         @next_cursor = T.let(nil, T.nilable(String))
+        @deviations_found = T.let(false, T::Boolean)
         # Workaround for https://sorbet.org/docs/error-reference#7019
         super(**T.unsafe(arguments))
       end
@@ -162,6 +163,7 @@ module SecurityOverviewAnalytics
 
           # On first batch, report deviation as missing_repository if Analytics has no alert data.
           if last_alert_number == 0 && alerts.any? && !SecretScanningAlertRevision.where(repository_id:).exists?
+            @deviations_found = true
             report_deviation([:missing_repository], alert_numbers: nil)
           end
 
@@ -278,8 +280,11 @@ module SecurityOverviewAnalytics
           PostReconciliationRepoDeviationCountsJob.perform_with_delay(repository_id:, owner_id:, feature: "secret-scanning")
         end
 
-        # Even if we didn't correct any data, recalculate our rollup anyway
-        UpdateFeatureStatusSummaryJob.enqueue(repository_id:)
+        # On GitHub.com, recalculate rollup even if we didn't correct any data
+        # On GHES, only recalculate if deviations were found
+        if !GitHub.enterprise? || @deviations_found
+          UpdateFeatureStatusSummaryJob.enqueue(repository_id:)
+        end
       end
 
       protected
@@ -393,6 +398,7 @@ module SecurityOverviewAnalytics
 
           orphaned_alert_numbers = T.let(rel.pluck(:alert_number), T::Array[Integer])
           orphaned_alert_numbers.each_slice(BATCH_SIZE) do |numbers_in_batch|
+            @deviations_found = true
             report_deviation([:orphaned_alerts], alert_numbers: numbers_in_batch)
             SecretScanningAlertsDeletionJob.perform_later(repository_id:, alert_numbers: numbers_in_batch)
           end
@@ -448,6 +454,7 @@ module SecurityOverviewAnalytics
 
         deviations = existing_revision.fields_with_deviation(alert)
         if deviations.any?
+          @deviations_found = true
           report_alert_revision_deviation(deviations, source: alert, target: existing_revision)
           SecretScanningAlertRevisionIngestionJob.perform_later(
             alert:,
@@ -474,6 +481,7 @@ module SecurityOverviewAnalytics
             .where(alert_number: low_confidence_alerts.map(&:number).uniq)
             .pluck(:alert_number).uniq, T::Array[Integer])
           low_confidence_alert_numbers.each_slice(BATCH_SIZE) do |numbers_in_batch|
+            @deviations_found = true
             report_deviation([:low_confidence_alerts], alert_numbers: numbers_in_batch)
             SecretScanningAlertsDeletionJob.perform_later(repository_id:, alert_numbers: numbers_in_batch)
           end
