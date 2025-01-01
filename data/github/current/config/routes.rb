@@ -5016,7 +5016,6 @@ GitHub::Application.routes.draw do
 
     # Secret Scanning Delegated Bypass Reviewer Suggestions (points to repositories controller method)
     get      "settings/security_analysis/bypass_suggestions", to: "repos/secret_scanning/push_protection/delegated_bypass_reviewers#bypass_suggestions", as: :secret_scanning_bypass_reviewer_suggestions
-    get      "settings/security_analysis/bypass_reviewers", to: "repos/secret_scanning/push_protection/delegated_bypass_reviewers#index", as: :repository_secret_scanning_get_bypass_reviewers
     post     "settings/security_analysis/bypass_reviewers", to: "repos/secret_scanning/push_protection/delegated_bypass_reviewers#create", as: :repository_secret_scanning_add_bypass_reviewer
     delete   "settings/security_analysis/bypass_reviewers", to: "repos/secret_scanning/push_protection/delegated_bypass_reviewers#destroy", as: :repository_secret_scanning_remove_bypass_reviewer
 

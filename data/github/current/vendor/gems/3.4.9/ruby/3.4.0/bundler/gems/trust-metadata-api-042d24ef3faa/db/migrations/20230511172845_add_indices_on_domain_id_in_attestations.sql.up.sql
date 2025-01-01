@@ -1,0 +1,2 @@
+CREATE INDEX domain_id_purl_predicate_type_attestations_idx ON attestations (domain_id, purl, predicate_type);
+CREATE INDEX domain_id_owner_id_repository_id_predicate_type_attestations_idx ON attestations (domain_id, owner_id, repository_id, predicate_type);

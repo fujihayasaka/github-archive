@@ -1,0 +1,32 @@
+#!/bin/bash
+#/ Usage: script/gofmt
+#/ Reformats your code to conform to Go's opinions.
+#/ Runs `gofmt`, `go fix`, and `go vet`.
+
+set -e
+
+# 'go fix' and 'go vet' need to be run from a real path, otherwise they
+# might infer that ".." means something different than it really does.
+cd $(git rev-parse --show-toplevel)
+
+function fmt {
+  gofmt -w -s "${1}"
+  bin=$(go env GOBIN)
+  if [ -z "${bin}" ]; then
+    bin="${HOME}/go/bin"
+  fi
+  "${bin}/goimports" -l -local github.com/github/launch -w "${1}"
+}
+
+# Find all files to format, but skip:
+# - the ./tmp dir
+# - hydro schemas
+# - generated pb.go files
+files=$(go list github.com/github/launch/... 2>/dev/null | grep -v github.com/github/launch/tmp | grep -v hydro | sed -Ee "s|github.com/github/launch/?|./|" | xargs -I {} find {} -type f -name '*.go' ! -name '*.pb.go' ! -name '*.twirp.go' ! -name 'mock_*.go')
+
+echo Run go fmt...
+for f in $files; do
+  fmt "${f}" &
+done
+
+wait

@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: aqueduct-suggested-fix-high-priority-worker
+    annotations:
+        heaven.githubapp.com/image-placeholder: "turboscan"
+spec:
+    # We deploy to multiple clusters, so each cluster will have n_replicas workers
+    replicas: 1
+    selector:
+        matchLabels:
+            app: turboscan
+            role: aqueduct-suggested-fix-high-priority-worker
+    template:
+        metadata:
+            labels:
+                app: turboscan
+                role: aqueduct-suggested-fix-high-priority-worker
+            annotations:
+                observability.github.com/logger: fluent-bit
+                fluentbit.io/parser: logfmt
+                observability.github.com/splunk_index: turboscan
+        spec:
+            dnsPolicy: ClusterFirst
+            containers:
+                - name: turboscan
+                  image: turboscan
+                  command:
+                    - /app/bin/turboscan
+                    - service
+                    - start
+                    - aqueductsvc
+                    - --worker-type=autofix-high-priority
+                  env:
+                    - name: STATS_ADDR
+                      value: "$(KUBE_NODE_HOSTNAME):28125"
+                    - name: KAFKA_GROUP
+                      value: "turboscan-consumer-prod"
+                    - name: GOMAXPROCS
+                      valueFrom:
+                          resourceFieldRef:
+                              containerName: turboscan
+                              resource: limits.cpu
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - configMapRef:
+                        name: background-environment
+                    - secretRef:
+                        name: vault-secrets
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                  readinessProbe:
+                    exec:
+                        command: ["true"]
+                    initialDelaySeconds: 10
+                  resources:
+                    requests:
+                        memory: 1Gi
+                        cpu: 2000m
+                    limits:
+                        memory: 4Gi
+                        cpu: 4000m

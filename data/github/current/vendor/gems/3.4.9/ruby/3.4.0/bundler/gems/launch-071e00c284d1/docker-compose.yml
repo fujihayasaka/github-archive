@@ -1,0 +1,63 @@
+services:
+  db:
+    image: mysql:8.0.36
+    volumes:
+      - data:/var/lib/mysql
+      - ./tmp/my.cnf.dev:/etc/mysql/conf.d/github.cnf
+    ports:
+      - '127.0.0.1:${MYSQL_PORT:-5101}:3306'
+    environment:
+      MYSQL_ROOT_PASSWORD: '${MYSQL_ROOT_PASSWORD:-unknown}'
+      MYSQL_DATABASE: launch_development
+      MYSQL_USER: launch
+      MYSQL_PASSWORD: sekrit
+  redis:
+    image: redis:5.0.9
+    command: redis-server --port ${REDIS_PORT:-6380}
+    ports:
+      - '127.0.0.1:${REDIS_PORT:-6380}:6380'
+  skeema:
+    image: launch-skeema
+    depends_on:
+      - db
+    volumes:
+      - ./schemas:/workdir/schemas
+    working_dir: /workdir
+  exporter:
+    image: prom/statsd-exporter
+    ports:
+      - '9102:9102'
+      - '9125:9125'
+      - '9125:9125/udp'
+    volumes:
+      - ./config/dev/statsd_mapping.yml:/tmp/statsd_mapping.yml
+    command: --statsd.mapping-config=/tmp/statsd_mapping.yml
+  prom:
+    links:
+      - "exporter"
+    image: prom/prometheus
+    ports:
+      - '9091:9090'
+    volumes:
+      - ./config/dev/prometheus.yml:/etc/prometheus/prometheus.yml
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    ports:
+      - '${AZURITE_BLOB_PORT:-10100}:10000'
+    volumes:
+      - ./tmp/azurite:/data
+    healthcheck:
+      test: nc 127.0.0.1 10000 -z
+      interval: 1s
+      retries: 30
+  azurite_init:
+    image: mcr.microsoft.com/azure-cli:latest
+    depends_on:
+      azurite:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["az", "storage", "container", "create", "--name", "${AZURE_STORAGE_CONTAINER_NAME:-payloads}"]
+    environment:
+      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+volumes:
+  data:

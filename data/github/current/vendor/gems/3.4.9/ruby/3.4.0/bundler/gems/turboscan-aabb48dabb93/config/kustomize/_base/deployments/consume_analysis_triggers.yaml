@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: consume-analysis-triggers
+    annotations:
+        heaven.githubapp.com/image-placeholder: "turboscan"
+spec:
+    replicas: 2
+    selector:
+        matchLabels:
+            app: turboscan
+            role: consume-analysis-triggers
+    template:
+        metadata:
+            labels:
+                app: turboscan
+                role: consume-analysis-triggers
+            annotations:
+                observability.github.com/logger: fluent-bit
+                fluentbit.io/parser: logfmt
+                observability.github.com/splunk_index: turboscan
+        spec:
+            dnsPolicy: ClusterFirst
+            containers:
+                - name: turboscan
+                  image: turboscan
+                  command:
+                    - /app/bin/turboscan
+                    - service
+                    - start
+                    - analysistriggersvc
+                  env:
+                    - name: STATS_ADDR
+                      value: "$(KUBE_NODE_HOSTNAME):28125"
+                    - name: KAFKA_GROUP
+                      value: "turboscan_consume_analysis_triggers"
+                    - name: GOMAXPROCS
+                      valueFrom:
+                          resourceFieldRef:
+                              containerName: turboscan
+                              resource: limits.cpu
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - configMapRef:
+                        name: background-environment
+                    - secretRef:
+                        name: vault-secrets
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                  readinessProbe:
+                    exec:
+                        command: ["true"]
+                    initialDelaySeconds: 10
+                  resources:
+                    requests:
+                        memory: 1Gi
+                        cpu: 500m
+                    limits:
+                        memory: 4Gi
+                        cpu: 1000m

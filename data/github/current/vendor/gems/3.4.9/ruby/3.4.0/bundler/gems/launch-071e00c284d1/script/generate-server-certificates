@@ -1,0 +1,100 @@
+#!/bin/bash
+#/ Usage: script/generate-server-certificates [--if-missing]
+#/
+#/ This script generates certificates and corresponding keys for each
+#/ launch service. It specifies the common name (CN) in the certificate.
+
+set -e
+set -o nounset
+
+cert_dir=tmp/dev-certs-ca-style
+root_ca_dir=config/dev
+config=${cert_dir}/config
+ca_cert=${root_ca_dir}/root.pem
+ca_key=${root_ca_dir}/root.key
+ca_serial=${cert_dir}/root.srl
+
+fast=false
+for arg; do
+  case "$arg" in
+    --if-missing)
+      fast=true ;;
+  esac
+done
+
+main() {
+  mkdir -p $cert_dir
+  make_ca
+  make_cert chatops
+  make_cert deployer
+  extract_keys chatops
+}
+
+write_config() {
+  cat <<CONFIG >$config
+[localhostsan]
+subjectAltName = @localaltnames
+[localaltnames]
+IP.1 = 127.0.0.1
+DNS.1 = $1
+DNS.2 = host.docker.internal
+CONFIG
+}
+
+make_ca() {
+  if [ -f "$ca_key" ] && [ -f "$ca_cert" ] && openssl x509 -in "$ca_cert" -checkend 3600 -noout; then
+    return
+  fi
+
+  # Make sure everything gets regenerated.
+  rm -rf ${cert_dir}
+  mkdir -p ${cert_dir}
+
+  echo "Generate $ca_cert"
+  quiesce openssl req -new -newkey rsa:4096 -days 3650 -nodes -x509 \
+    -subj "/C=US/ST=CA/L=San Francisco/O=launch/CN=GitHub Launch Dev Root CA" \
+    -keyout "$ca_key" -out "$ca_cert"
+}
+
+make_cert() {
+  local service=$1
+  local key=${cert_dir}/${service}.key
+  local csr=${cert_dir}/${service}.csr
+  local cert=${cert_dir}/${service}.pem
+  local dns_name=launch-${service}.localhost
+
+  if $fast && [ -f $cert ] && [ -f $key ] && openssl x509 -in "$cert" -checkend 3600 -noout; then
+    return
+  fi
+
+  write_config $dns_name
+
+  echo "Generate $cert"
+  quiesce openssl req -new -newkey rsa:4096 -days 7 -nodes \
+    -reqexts localhostsan -config <(cat /etc/ssl/openssl.cnf $config) \
+    -subj "/C=US/ST=CA/L=San Francisco/O=launch/CN=${dns_name}" \
+    -keyout "$key" -out "$csr"
+  quiesce openssl x509 -req -CA "$ca_cert" -CAkey "$ca_key" -CAcreateserial -CAserial "$ca_serial" \
+    -extensions localhostsan -extfile $config \
+    -in "$csr" -out "$cert"
+}
+
+extract_keys() {
+  local service=$1
+  local key=${cert_dir}/${service}.key
+  local pub_key=${cert_dir}/${service}.public.key
+  local pri_key=${cert_dir}/${service}.private.key
+
+  echo Extract public and private key for "$service"
+  quiesce openssl rsa -in "$key" -outform PEM -out "$pri_key"
+  quiesce openssl rsa -in "$key" -outform PEM -out "$pub_key" -pubout
+}
+
+quiesce() {
+  if ! "$@" >& ${cert_dir}/.log; then
+    cat ${cert_dir}/.log
+    exit 1
+  fi
+}
+
+main

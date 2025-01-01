@@ -298,6 +298,8 @@ module Memexes
 
     def copy
       return render_404 unless this_memex.viewer_can_read?(current_user)
+      return head(:forbidden) unless memex_can_copy?
+
       source_memex_project = this_memex
 
       target_memex_project_title = copy_memex_params[:title]
@@ -317,6 +319,10 @@ module Memexes
 
       if target_memex_project_is_template
         return head(:forbidden) unless target_memex_project_owner.organization?
+        # Copying as a template always requires write permission, even for public projects.
+        # This is intentionally separate from the private-project gate above, which only
+        # restricts plain copies of private projects.
+        return head(:forbidden) unless this_memex.viewer_can_write?(current_user)
       end
 
       # Create a new target project with the default system fields
@@ -1668,6 +1674,7 @@ module Memexes
       {
         role: role,
         canChangeProjectVisibility: this_memex&.viewer_can_change_visibility?(current_user) || false,
+        canCopy: memex_can_copy?,
         canCopyAsTemplate: memex_can_copy_as_template?,
       }
     end
@@ -1698,13 +1705,28 @@ module Memexes
       }
     end
 
-    # only organizations can make templates.
-    #
-    # A user may copy the project as a template if they are a member or billing manager of any organization
-    private def memex_can_copy_as_template?
-      return false unless this_memex.owner.is_a?(Organization) && current_user.present?
+    # A user may copy a project if:
+    # - the project is public (anyone with read access can copy), OR
+    # - the user has write/admin permission on the project (required for private projects)
+    private def memex_can_copy?
+      return false unless current_user.present?
 
-      current_user&.member_or_billing_manager_for_any_organization?
+      this_memex.public? || this_memex.viewer_can_write?(current_user)
+    end
+
+    # Only organizations can make templates.
+    #
+    # A user may copy the project as a template if:
+    # - the project owner is an organization,
+    # - the user is a member or billing manager of any organization, AND
+    # - the user has write/admin access on the source project.
+    private def memex_can_copy_as_template?
+      user = current_user
+      return false unless this_memex.owner.is_a?(Organization) && user.present?
+      return false unless user.member_or_billing_manager_for_any_organization?
+      return false unless this_memex.viewer_can_write?(current_user)
+
+      true
     end
 
     private def set_memex_nav_breadcrumb

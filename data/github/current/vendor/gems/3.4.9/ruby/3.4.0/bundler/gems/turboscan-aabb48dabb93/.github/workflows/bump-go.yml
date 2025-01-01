@@ -1,0 +1,45 @@
+name: "Bump Go version"
+
+on:
+  workflow_dispatch:
+    inputs:
+      goVersion:
+        description: "Version of Go to use"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  GH_TOKEN: ${{ secrets.DSP_CODE_SCANNING_TOKEN }}
+
+jobs:
+  lint:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+      - name: Setup Git Specs
+        run: |
+          git config --global user.name github-actions[bot]
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+      - name: Update the Go version
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod edit -go=${{ inputs.goVersion }}
+          cd ./.github/workflows/batch && go mod edit -go=${{ inputs.goVersion }} && go mod tidy && cd ../../..
+          make update-go-version
+          go mod tidy && go mod vendor
+      - name: Get file changes
+        run: |
+          git branch
+          git diff --diff-filter=dr --name-only origin/master > git_diff.txt
+          echo "Files changed-- `cat git_diff.txt`"
+      - name: Commit changes
+        run: |
+          git commit -am "Bump Go Version ${{ inputs.goVersion }}" || true
+          git push origin HEAD:go-bump-version-${{ inputs.goVersion }} || true
+          gh pr create --title "Bump Go Version ${{ inputs.goVersion }}" --body "Bump Go Version ${{ inputs.goVersion }}" --base main

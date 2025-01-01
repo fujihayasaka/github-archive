@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: authnd
+    annotations:
+        moda.github.net/canary-v2: "true"
+        moda.github.net/canary-label: "canary"
+spec:
+    replicas: 8
+    selector:
+        matchLabels:
+            app: authnd
+            canary: "production"
+    strategy:
+        rollingUpdate:
+            maxUnavailable: 0
+            maxSurge: 25%
+    template:
+        metadata:
+            labels:
+                app: authnd
+                canary: "production"
+            annotations:
+                observability.github.com/logger: fluent-bit
+                fluentbit.io/parser: logfmt_sloppy
+        spec:
+            affinity:
+                podAntiAffinity:
+                    preferredDuringSchedulingIgnoredDuringExecution:
+                        - weight: 100
+                          podAffinityTerm:
+                            labelSelector:
+                                matchExpressions:
+                                    - key: "app"
+                                      operator: In
+                                      values:
+                                        - authnd
+                            topologyKey: "kubernetes.io/hostname"
+                            # The following line is to fix transient dns issues in deployed environments
+                            # https://moda.githubapp.com/docs/reference/frequently-asked-questions/#i-m-seeing-a-lot-of-dns-exceptions-what-gives
+            dnsPolicy: Default
+            volumes:
+                - name: authnd-configmap
+                  configMap:
+                    name: authnd
+            containers:
+                - name: authnd
+                  image: authnd
+                  command: ["./bin/authnd"]
+                  resources:
+                    requests:
+                        cpu: "25m"
+                        memory: "250Mi"
+                    limits:
+                        cpu: "1.0"
+                  ports:
+                    - name: http
+                      containerPort: 8000
+                      protocol: TCP
+                  envFrom:
+                    - secretRef:
+                        name: vault-secrets
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - configMapRef:
+                        name: common-config
+                  env:
+                    - name: STATS_ADDR
+                      value: "$(KUBE_NODE_HOSTNAME):28125"
+                    - name: CHATOPS_BASE_URL
+                      # should match value in: #https://github.com/github/hubot-classic/blob/master/config/chatops-rpc/production.yaml
+                      value: "https://authnd-$(HEAVEN_DEPLOYED_ENV).service.iad.github.net/_chatops"
+                    - name: FIDO_URL
+                      value: "https://fido-challenger.githubapp.com"
+                    - name: MYSQL_PRIMARY_READS_ENABLED
+                      value: "true"
+                    - name: IDENTITY_PRIVATE_KEY
+                      valueFrom:
+                        secretKeyRef:
+                            key: IDENTITY_PRIVATE_KEY
+                            name: vault-secrets
+                    - name: IDENTITY_PUBLIC_KEY
+                      valueFrom:
+                        secretKeyRef:
+                            key: IDENTITY_PUBLIC_KEY
+                            name: vault-secrets
+                    - name: IDENTITY_CERTIFICATE
+                      valueFrom:
+                        secretKeyRef:
+                            key: IDENTITY_CERTIFICATE
+                            name: vault-secrets
+                    - name: CHATOPS_BOT_PUBLIC_KEY
+                      valueFrom:
+                        secretKeyRef:
+                            key: CHATOPS_AUTH_PUBLIC_KEY
+                            name: vault-secrets
+                    - name: CHATOPS_MANUAL_PUBLIC_KEY
+                      value: |
+                        -----BEGIN RSA PUBLIC KEY-----
+                        MIIBCgKCAQEA4tN6q+o20onBruCnXVhtJ/1i5hSOPKhcscDo9o1U8jY2hDITnQC9
+                        g6Eq4/dy5Zs0FHFfFp06l32SN1XGuJte5WqBv+PmaPNB+tyurg4eSYz0A+jC62uz
+                        0o8CLShVCyWwPY6PunkYXmJTjGKyFSZeIvMQswhJ/hqz6h8quqD5x//hH5wk8WWJ
+                        CcwmdJXvaVP4K4Mkxr9Nt4+KiUBnbpMrRKU5Jtx7Ue1TkEJhQFPsYG8bNN2ZetdO
+                        UR5Jxmr+6H9UM3Gddy4hoiYUxu0J/HRHxf64/8zRawN56Ojg79T5VoUVCBJmoBxX
+                        vYW5QyHRHno9I/O+RE5jou1X53nyl8+c1wIDAQAB
+                        -----END RSA PUBLIC KEY-----
+                    - name: SECURITY_CONFIG_FILE
+                      value: /config/security-config.yaml
+                  # Prevent container from shutting down before kube-proxy has converged
+                  # See https://pages.ghe.io/moda/docs/features/pod-lifecycle/
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command: ["sleep", "5"]
+                  livenessProbe:
+                    initialDelaySeconds: 3
+                    timeoutSeconds: 1
+                    httpGet:
+                        path: /_ping
+                        port: 8000
+                  readinessProbe:
+                    initialDelaySeconds: 3
+                    timeoutSeconds: 1
+                    httpGet:
+                        path: /_ping
+                        port: 8000
+                  volumeMounts:
+                    - name: authnd-configmap
+                      mountPath: /config

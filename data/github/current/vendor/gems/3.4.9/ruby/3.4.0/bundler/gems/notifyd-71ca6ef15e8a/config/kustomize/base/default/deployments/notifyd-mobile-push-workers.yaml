@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: notifyd-mobile-push-workers
+    annotations:
+        heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: "mobile-push-worker"
+spec:
+    selector:
+        matchLabels:
+            app: notifyd-mobile-push-workers
+    template:
+        metadata:
+            labels:
+                app: notifyd-mobile-push-workers
+            annotations:
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: notifyd
+                fluentbit.io/parser_stdout: logfmt
+                fluentbit.io/parser_stderr: json
+        spec:
+            dnsPolicy: ClusterFirst
+            containers:
+                - name: mobile-push-worker
+                  resources:
+                    requests:
+                        cpu: 25m
+                        memory: 100Mi
+                    limits:
+                        cpu: 500m
+                        memory: 500Mi
+                  image: notifyd
+                  command: ["/go/bin/mobile"]
+                  readinessProbe:
+                    exec:
+                        command: ["pgrep", "-f", "mobile"]
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command: ["sleep", "5"]
+                  envFrom:
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: AQUEDUCT_QUEUE
+                      value: notifyd_deliver_mobile_push
+                    - name: EXCEPTION_HTTP_EXPORTER
+                      value: "true"
+                    - name: GOMAXPROCS
+                      valueFrom:
+                        resourceFieldRef:
+                          containerName: mobile-push-worker
+                          resource: limits.cpu
+                    - name: NOTIFYD_CHECKER_TIMEOUT
+                      value: 8s
+                    - name: RETRIES_MAX_ATTEMPTS
+                      value: "5"
+                    - name: STATSD_ADDR
+                      value: "$(KUBE_NODE_HOSTNAME):28125"
+                    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                      value: http://otelcol-mesh.otelcol-production.svc.cluster.local:14318/v1/traces
+                  ports:
+                    - name: pprof
+                      containerPort: 8081
+                      protocol: TCP

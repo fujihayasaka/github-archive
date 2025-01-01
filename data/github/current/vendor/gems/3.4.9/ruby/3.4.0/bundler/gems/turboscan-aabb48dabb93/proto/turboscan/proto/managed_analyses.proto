@@ -1,0 +1,180 @@
+syntax = "proto3";
+
+package github.turboscan;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "./;proto";
+option ruby_package = "Turboscan::Proto";
+
+// ManagedAnalyses coordinates the execution of CodeQL analyses for selected repos.
+// https://github.com/github/code-scanning/blob/main/docs/adrs/0027-managed-analyses.md
+service ManagedAnalyses {
+  // Enable enabled the repo to managed analyses.
+  rpc Enable(EnableRequest) returns (EnableResponse);
+  // Disabled disables the repo from managed analyses.
+  rpc Disable(DisableRequest) returns (DisableResponse);
+  // GetManagedAnalysisInfo returns the configuration of automatic CodeQL for a repository.
+  rpc GetManagedAnalysisInfo(GetManagedAnalysisInfoRequest) returns (GetManagedAnalysisInfoResponse);
+  // Update *attempts to* change the current codeql configuration for a repository.
+  rpc Update(UpdateRequest) returns (UpdateResponse);
+  // UpdateLanguages *attempts to* change the languages in the current codeql configuration for a repository.
+  rpc UpdateLanguages(UpdateLanguagesRequest) returns (UpdateLanguagesResponse);
+  // Adjust updates a config following a validation run to only include the successful languages.
+  rpc Adjust(AdjustRequest) returns (AdjustResponse);
+}
+
+message EnableRequest {
+  reserved 11, 12;
+  reserved "actions_installation_id";
+
+  uint64 repository_id = 1;
+  repeated string supported_languages = 2;
+  repeated string selected_languages = 3;
+  QuerySuite query_suite = 4;
+  ThreatModel threat_model = 5;
+  string enabled_by_actor_login = 6;
+  // Data that we need for Launch Dynamic Workflows
+  // We might find a better way to share this in the future.
+  string global_repository_id = 7;
+  // data needed for triggering the validation run
+  string enabled_by_actor_grid = 8;
+  bytes default_ref = 9;
+  uint64 owner_id = 10;
+  bool has_kotlin = 13;
+  string codeql_packs = 14;
+  string runner_label = 15;
+}
+
+message EnableResponse {
+  uint64 workflow_run_id = 1; // maybe remove this later
+  bool noop = 2;
+}
+
+message DisableRequest {
+  uint64 repository_id = 1;
+}
+
+message DisableResponse {
+  bool noop = 1;
+}
+
+message GetManagedAnalysisInfoRequest {
+  uint64 repository_id = 1;
+}
+
+message CodeQLConfig {
+  reserved 1;
+  repeated string languages = 2;
+  google.protobuf.Timestamp updated_at = 3;
+  QuerySuite query_suite = 4;
+  repeated string initial_languages = 5;
+  NewConfigTrigger trigger = 7;
+  ThreatModel threat_model = 8;
+  string runner_label = 9;
+}
+
+enum QuerySuite {
+  // QUERY_SUITE_UNSPECIFIED should be used when the query suite is not specified (e.g., in a REST PATCH request)
+  QUERY_SUITE_UNSPECIFIED = 0;
+  QUERY_SUITE_DEFAULT = 1;
+  QUERY_SUITE_SECURITY_EXTENDED = 2;
+}
+
+enum ThreatModel {
+  // THREAT_MODEL_UNSPECIFIED should be used when the threat model is not specified (e.g., in a REST PATCH request)
+  THREAT_MODEL_UNSPECIFIED = 0;
+  THREAT_MODEL_REMOTE = 1;
+  THREAT_MODEL_REMOTE_LOCAL = 2;
+}
+
+message GetManagedAnalysisInfoResponse {
+  reserved 1, 2, 3, 4, 7, 8, 9;
+  reserved "status";
+  string error = 5; // Populates in case of validation run failure
+  string workflow = 6; // This is mainly used in cassettes to test generation of the dynamic workflow
+  uint64 debuggable_workflow_run_id = 10; // This allows us to point users to the correct Actions logs in case of failure validating a codeql configuration
+  CodeQLConfig current_config = 11;
+  google.protobuf.Timestamp next_scheduled_run_at = 12;
+  bool active_repo = 13;
+  CodeQLConfig debuggable_config = 14;
+  bool has_failed_update = 15;
+  QuerySuite query_suite = 16;
+  ThreatModel threat_model = 17;
+  OnboardingStatusV2 status_v2 = 18;
+  string runner_label = 19;
+}
+
+enum OnboardingStatusV2 {
+  DISABLED = 0;
+  WAITING = 1;
+  ONBOARDING = 2;
+  STABLE = 3;
+  UPDATING = 4;
+}
+
+message LanguageList {
+  repeated string languages = 1;
+}
+
+message UpdateRequest {
+  enum RunnerType {
+    RUNNER_TYPE_UNCHANGED = 0;
+    RUNNER_TYPE_LABELED = 1;
+    RUNNER_TYPE_STANDARD = 2;
+  }
+
+  reserved 5;
+  reserved "actions_installation_id";
+
+  uint64 repository_id = 1;
+  repeated string languages = 2;
+  string global_actor_id = 3;
+  string actor_login = 4;
+  bytes default_ref = 6;
+  QuerySuite query_suite = 7;
+  uint64 owner_id = 8;
+  ThreatModel threat_model = 9;
+  LanguageList selected_languages= 10;
+  repeated string supported_languages = 11;
+  string codeql_packs = 12;
+  string runner_label = 13;
+  RunnerType runner_type = 14;
+}
+
+message UpdateResponse {
+  uint64 workflow_run_id = 1;
+  bool noop = 2;
+}
+
+message UpdateLanguagesRequest {
+  reserved 2;
+  reserved "actions_installation_id";
+
+  uint64 repository_id = 1;
+  bytes default_ref = 3;
+  repeated string languages_added = 4;
+  repeated string languages_removed = 5;
+  uint64 owner_id = 6;
+  repeated string supported_languages = 7;
+  string codeql_packs = 8;
+}
+
+message UpdateLanguagesResponse {
+  uint64 workflow_run_id = 1;
+}
+
+message AdjustRequest {
+  uint64 repository_id = 1;
+  repeated string languages = 2;
+  uint64 workflow_run_id = 3; // If this is non-zero, adjustments will only be applied if the latest validation run matches this id.
+  uint64 owner_id = 4;
+}
+
+message AdjustResponse {}
+
+enum NewConfigTrigger {
+  MANUAL = 0;
+  LANGUAGES_CHANGE = 1;
+  TEMPLATE_UPGRADE = 2;
+}

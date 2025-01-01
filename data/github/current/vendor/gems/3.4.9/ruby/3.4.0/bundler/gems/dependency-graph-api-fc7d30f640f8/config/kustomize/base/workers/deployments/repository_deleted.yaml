@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: repository-deleted
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "repository-deleted"
+        heaven.githubapp.com/image-placeholder: "dependency-graph-api"
+        heaven.githubapp.com/deploy-requirement: "true"
+spec:
+    replicas: 1
+    strategy:
+        type: RollingUpdate
+    selector:
+        matchLabels:
+            app: dependency-graph-api
+            role: repository-deleted
+    template:
+        metadata:
+            labels:
+                app: dependency-graph-api
+                role: repository-deleted
+        spec:
+            dnsPolicy: ClusterFirst
+            volumes:
+                - name: github-metadata
+                  hostPath:
+                    path: /etc/github/metadata.json
+            containers:
+                - name: repository-deleted
+                  image: dependency-graph-api
+                  resources:
+                    requests:
+                        cpu: 1000m
+                        memory: "1Gi"
+                    limits:
+                        cpu: 2000m
+                        memory: "4Gi"
+                  command: ["./script/etl/repositories_deleted"]
+                  readinessProbe:
+                    timeoutSeconds: 1
+                    tcpSocket:
+                        port: 8888
+                  env:
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - secretRef:
+                        name: vault-secrets
+                  volumeMounts:
+                    - mountPath: /etc/github/metadata.json
+                      name: github-metadata
+                      readOnly: true

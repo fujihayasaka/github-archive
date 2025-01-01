@@ -1,0 +1,2 @@
+DROP INDEX domain_id_purl_predicate_type_attestations_idx on attestations;
+DROP INDEX domain_id_owner_id_repository_id_predicate_type_attestations_idx on attestations;

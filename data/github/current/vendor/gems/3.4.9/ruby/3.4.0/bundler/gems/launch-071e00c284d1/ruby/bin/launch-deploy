@@ -1,0 +1,66 @@
+#!/usr/bin/env ruby
+#/ Usage: launch-deploy OPTIONS
+
+require "github-launch"
+
+def usage
+  system "cat #$0 | grep ^#/ | cut -c4-", :out => :err
+  exit 1
+end
+
+client_opts = {
+  server: "127.0.0.1:7999",
+  proto: :grpc,
+}
+deploy_opts = {
+  deploy_rev: "HEAD",
+  task: "hello-example",
+  environment: "staging",
+  auto_merge: false,
+}
+while ARGV.any?
+  case arg = ARGV.shift
+  when "-server"
+    client_opts[:server] = ARGV.shift
+  when "-grpc"
+    client_opts[:proto] = :grpc
+  when "-http"
+    client_opts[:proto] = :http
+  when "-https"
+    client_opts[:proto] = :https
+  when "-certs"
+    client_opts[:ca_file] = ARGV.shift
+  when "-insecure"
+    client_opts[:ca_file] ||= :insecure
+  when "-token"
+    deploy_opts[:deployer_token] = ARGV.shift
+  when "-repo-db-id"
+    deploy_opts[:repository_db_id] = ARGV.shift.to_i
+  when "-repo-global-id"
+    deploy_opts[:repository_global_id] = ARGV.shift
+  when "-rev"
+    deploy_opts[:deploy_rev] = ARGV.shift
+  when "-task"
+    deploy_opts[:task] = ARGV.shift
+  when "-environment"
+    deploy_opts[:environment] = ARGV.shift
+  when "-automerge"
+    deploy_opts[:auto_merge] = true
+  when /^-+h/
+    usage
+  else
+    $stderr.puts "Unknown arg: #{arg}"
+    usage
+  end
+end
+
+client = GitHub::Launch::Deployer.new(client_opts)
+begin
+  $stderr.puts "Requesting a deployment..."
+  id = client.deploy(deploy_opts)
+  puts "deployment_id=#{id}"
+rescue GRPC::Unknown => e
+  $stderr.puts "Error: #{e.class}: #{e}"
+rescue Net::HTTPExceptions => e
+  $stderr.puts "Error: #{e.response.code} #{e.response.message}\n#{e.response.body}"
+end

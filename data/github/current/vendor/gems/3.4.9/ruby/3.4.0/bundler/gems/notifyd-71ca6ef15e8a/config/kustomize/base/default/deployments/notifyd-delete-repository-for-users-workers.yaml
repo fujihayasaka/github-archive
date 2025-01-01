@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notifyd-delete-repository-for-users-workers
+  annotations:
+    heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: "delete-repository-for-users-worker"
+spec:
+  selector:
+    matchLabels:
+      app: notifyd-delete-repository-for-users-workers
+  template:
+    metadata:
+      labels:
+        app: notifyd-delete-repository-for-users-workers
+      annotations:
+        observability.github.com/logger: fluent-bit
+        observability.github.com/splunk_index: notifyd
+        fluentbit.io/parser_stdout: logfmt
+        fluentbit.io/parser_stderr: json
+    spec:
+      dnsPolicy: ClusterFirst
+      containers:
+        - name: delete-repository-for-users-worker
+          image: notifyd
+          resources:
+            requests:
+                cpu: 25m
+                memory: 100Mi
+            limits:
+                cpu: 500m
+                memory: 500Mi
+          command: ["/go/bin/delete-repository-for-users"]
+          readinessProbe:
+            exec:
+              command: ["pgrep", "-f", "delete-repository-for-users"]
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          envFrom:
+            - configMapRef:
+                name: kube-cluster-metadata
+            - secretRef:
+                name: vault-secrets
+          env:
+            - name: AQUEDUCT_QUEUE
+              value: notifyd_delete_repository_for_users
+            - name: EXCEPTION_HTTP_EXPORTER
+              value: "true"
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  containerName: delete-repository-for-users-worker
+                  resource: limits.cpu
+            - name: RETRIES_MAX_ATTEMPTS
+              value: "100"
+            - name: RETRIES_EXPONENTIAL_FACTOR
+              value: "0"
+            - name: RETRIES_BASE_BACKOFF
+              value: "30m"
+            - name: STATSD_ADDR
+              value: "$(KUBE_NODE_HOSTNAME):28125"
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: http://otelcol-mesh.otelcol-production.svc.cluster.local:14318/v1/traces
+          ports:
+            - name: pprof
+              containerPort: 8081
+              protocol: TCP

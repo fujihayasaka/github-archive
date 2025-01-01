@@ -1,0 +1,1 @@
+ALTER TABLE `ts_analyses` DROP KEY `idx_analyses_configuration_most_recent`, ADD UNIQUE KEY `idx_analyses_on_repo_id_configuration_most_recent` (`repository_id`,`configuration_hash_bytes`,`unique_most_recent`);

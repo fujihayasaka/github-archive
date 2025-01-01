@@ -1,6 +1,11 @@
 import type {FileType} from '@github-ui/markdown-editor'
+import {isEnterprise} from '@github-ui/runtime-environment'
 import {verifiedFetch} from '@github-ui/verified-fetch'
 import {useCallback} from 'react'
+
+function getUploadCredentials(): RequestCredentials {
+  return isEnterprise() ? 'include' : 'same-origin'
+}
 
 // 204 No Content
 type S3ResponseData = Record<string, unknown>
@@ -125,6 +130,7 @@ async function uploadFileToStorage(policy: UploadPolicyData, file: File) {
     headers: {...header},
     method: 'post',
     body: uploadFormData,
+    credentials: getUploadCredentials(),
   })
   return uploadResponse
 }
@@ -144,7 +150,7 @@ async function markUploadComplete(policy: UploadPolicyData, uploadResponse: Resp
     const putResponse = await fetch(assetUploadUrl, {
       method: 'PUT',
       body: putForm,
-      credentials: 'same-origin',
+      credentials: getUploadCredentials(),
       headers: {
         Accept: 'application/json',
         'X-Requested-With': 'XMLHttpRequest',

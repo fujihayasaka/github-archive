@@ -1,0 +1,706 @@
+// Protocol definition for Dependency Graph Twirp-based RPC services.
+//
+// After each update, run:
+// $ script/protoc
+
+syntax = "proto3";
+
+package DependencyGraphAPI.v1;
+import "google/protobuf/timestamp.proto";
+option go_package = "/v1";
+
+service HealthAPI {
+  rpc Ping(PingRequest) returns (PingResponse);
+  // Used to test out an error being issues from dg-api. Diagnostic use only.
+  rpc Boom(BoomRequest) returns (BoomResponse);
+}
+
+// The Repository service provides a Twirp interface for exposing dependency
+// relationships and entities related to a given repository. Both requests and
+// responses reference repositories by GitHub (Rails model) Repository IDs, not DG IDs.
+//
+// The full graph of dependencies rooted at a given Repository is called a "solar system"
+// by the Semantic Code team, this API's primary consumer. A "solar system" is the complete
+// name-resolution graph for a single repository, extended to include all the repository's
+// dependencies. See also:
+// - Scope graphs: https://pl.ewi.tudelft.nl/research/projects/scope-graphs/
+// - Stack graphs: https://docs.rs/stack-graphs/0.1.0/stack_graphs/
+// - Aleph PR where the term was introduced: https://github.com/github/aleph/pull/888
+service Repository {
+  // Given a GitHub repository (model) ID, returns an unordered list of
+  // all the input repository's direct dependencies, also as GitHub repo IDs.
+  // As of now, this RPC method only returns Pip-managed Python dependencies.
+  // See also: https://github.com/github/dependency-graph-api/pull/1285
+  rpc GetDirectDependencies(GetDirectDependenciesRequest) returns (GetDirectDependenciesResponse);
+}
+
+service SnapshotAPI {
+  rpc GetSnapshotsDiff(GetSnapshotsDiffRequest) returns (GetSnapshotsDiffResponse);
+}
+
+service DependencySnapshotAPI {
+  rpc CreateDependencySnapshot(CreateDependencySnapshotRequest) returns (CreateDependencySnapshotResponse);
+  rpc GetDependencySnapshot(GetDependencySnapshotRequest) returns (GetDependencySnapshotResponse);
+  rpc GetDependencySnapshotsDiff(GetDependencySnapshotsDiffRequest) returns (GetDependencySnapshotsDiffResponse);
+  rpc ExcludeDependencySnapshots(ExcludeDependencySnapshotsRequest) returns (ExcludeDependencySnapshotsResponse);
+  rpc GetIncludedDependencySnapshots(GetIncludedDependencySnapshotsRequest) returns (GetIncludedDependencySnapshotsResponse);
+}
+
+// The RepositoryDependenciesAPI is used to get dependencies given a containing repository.
+service RepositoryDependenciesAPI {
+  // Gets dependencies for a repository using any/all of build-time and source-code analysis.
+  rpc GetDependenciesForRepository(GetDependenciesForRepositoryRequest) returns (GetDependenciesForRepositoryResponse);
+  // Returns true or false depending on if the given Repository has associated Manifests
+  rpc HasManifests(HasManifestsRequest) returns (HasManifestsResponse);
+  // Gets a list of repository IDs that contain at least one dependency matching the criteria in the request.
+  rpc RepositoriesContainingDependency(RepositoriesContainingDependencyRequest) returns (RepositoriesContainingDependencyResponse);
+
+  rpc SearchDependenciesForRepository(SearchDependenciesForRepositoryRequest) returns (SearchDependenciesForRepositoryResponse);
+}
+
+service ExperimentalAPI {
+  rpc GetReleasesForPackage(GetReleasesForPackageRequest) returns (GetReleasesForPackageResponse);
+}
+
+service RepositorySBOM {
+  rpc GetRepositorySBOM(GetRepositorySBOMRequest) returns (GetRepositorySBOMResponse);
+}
+
+service PackagesAPI {
+  rpc GetPackageVersions(GetPackageVersionsRequest) returns (GetPackageVersionsResponse);
+  rpc ListPackageVersions(ListPackageVersionsRequest) returns (ListPackageVersionsResponse);
+}
+
+service DgpAPI {
+  rpc GetLicensesForPackages(GetLicensesForPackagesRequest) returns (GetLicensesForPackagesResponse);
+  rpc GetDependenciesForSBOM(GetDependenciesForSBOMRequest) returns (GetDependenciesForSBOMResponse);
+}
+
+message PingRequest { }
+
+message PingResponse {
+  string response = 1;
+}
+
+message BoomRequest {
+  // Default is 500, but can also 400
+  bool issue400 = 1;
+
+  // seconds to sleep for, if unspecified will not sleep
+  uint32 sleep_seconds = 2;
+}
+
+message BoomResponse {
+  string response = 1;
+}
+
+message GetDirectDependenciesRequest {
+  uint64 repository_id = 1; // GitHub (Rails model) ID, not DG ID
+  repeated PackageManager package_managers = 2; // 0..N PMs to expose language ecosystem filtering
+}
+
+message GetDirectDependenciesResponse {
+  repeated uint64 repository_ids = 1; // Unordered list of GitHub (Rails model) IDs, not DG repo IDs
+}
+
+// TODO scripts to generate this enum from types.rb
+// Prefixes look ugly, but they are needed for enums. See https://github.com/protobuf-net/protobuf-net/issues/60
+enum PackageManager {
+  PACKAGE_MANAGER_UNKNOWN = 0;
+  PACKAGE_MANAGER_RUBYGEMS = 1;
+  PACKAGE_MANAGER_NPM = 2;
+  PACKAGE_MANAGER_PIP = 3;
+  PACKAGE_MANAGER_MAVEN = 4;
+  PACKAGE_MANAGER_NUGET = 5;
+  PACKAGE_MANAGER_COMPOSER = 6;
+  PACKAGE_MANAGER_GOMOD = 7;
+  PACKAGE_MANAGER_RUST = 8;
+  PACKAGE_MANAGER_ACTIONS = 9;
+  PACKAGE_MANAGER_PUB = 10;
+  PACKAGE_MANAGER_SWIFT = 11;
+  // Keep in sync with app/models/types.rb!
+}
+
+enum Scope {
+  SCOPE_UNKNOWN = 0; // added to keep id parity with app/models/types.rb
+  SCOPE_RUNTIME = 1;
+  SCOPE_DEVELOPMENT = 2;
+}
+
+enum Severity {
+  SEVERITY_LOW = 0;
+  SEVERITY_MODERATE = 1;
+  SEVERITY_HIGH = 2;
+  SEVERITY_CRITICAL = 3;
+}
+
+enum Relationship {
+  RELATIONSHIP_UNKNOWN = 0;
+  RELATIONSHIP_DIRECT = 1;
+  RELATIONSHIP_INDIRECT = 2;
+  RELATIONSHIP_INCONCLUSIVE = 3;
+}
+
+message ChangedFile {
+  string path = 1;
+  string blob_id = 2;
+}
+
+message LimitToFiles {
+  repeated ChangedFile base = 1;
+  repeated ChangedFile target = 2;
+}
+
+message RequestPageMetadata {
+  uint32 page = 1;
+  uint32 per_page = 2;
+}
+
+message GetSnapshotsDiffRequest {
+  uint64 repository_id = 1;
+  string base_sha = 2;
+  string target_sha = 3;
+  reserved "target_repository_id"; reserved 4;
+  reserved "repository_metadata"; reserved 5;
+  reserved "target_repository_metadata"; reserved 6;
+  LimitToFiles limit_to_files = 7;
+  bool decompose_updates = 8;
+  RequestPageMetadata page_metadata = 9;
+  bool include_dependency_snapshots = 10;
+}
+
+message ExcludeDependencySnapshotsRequest {
+  uint64 repository_id = 1;
+  repeated uint64 snapshot_ids = 2;
+}
+
+message ExcludeDependencySnapshotsResponse {
+  repeated uint64 excluded_snapshot_ids = 1;
+}
+
+message GetIncludedDependencySnapshotsRequest {
+  uint64 repository_id = 1;
+}
+
+message GetIncludedDependencySnapshotsResponse {
+  message IncludedSnapshot {
+    uint64 snapshot_id = 1;
+    string correlator = 2;
+    string detector = 3;
+  }
+
+  repeated IncludedSnapshot included_snapshots = 1;
+}
+
+// Using these for now because protoc generation doesn't work for 'optional' in ruby,
+//  which would be the best way to express what this is expressing.
+// https://github.com/twitchtv/twirp-ruby/issues/71
+message NullableBool {
+  bool value = 1;
+}
+
+message Manifest {
+  message Dependency {
+    message VulnerableVersionRange {
+      bool is_contained = 1;
+      uint64 github_id = 2;
+    }
+
+    string name = 1;
+    string exact_version = 2;
+    bool has_loaded_vulnerable_version_ranges = 3;
+    repeated VulnerableVersionRange vulnerable_version_ranges = 4;
+    // string corresponding to the requirements parameters for a given dependency.
+    //  "= 1.2.3", "> 0.1.2, < 0.1.8", "= 1.2.3 || = 4.5.6", etc.
+    string requirements = 5;
+    PackageManager package_manager = 6;
+    string scope = 7;
+    Relationship relationship = 8;
+  }
+
+  PackageManager package_manager = 1;
+
+  // For source code detection, this will *always* be a path relative to the root
+  // of the repository, and will be a file that exists in a remote commit.
+  // For build-time detection, this will be a best effort to give a path relative
+  // to the root of the repository, and may not exist in a remote commit (e.g. generated
+  // file during a build that is detected but not in the git tree).
+  string file_path = 2;
+
+  repeated Dependency dependencies = 3;
+
+  // Only present when an operation is manifest blob aware.
+  NullableBool is_vendored = 4;
+
+  // What kind of manifest file is this? e.g. Gemfile, Gemfile.lock.
+  string type = 5;
+
+  // This will be one of two values: the same value that is file_path,
+  // or a value that is an "unmodified" file path. For build time detection
+  // specifically, this is likely to be the absolute path on disk for the manifest.
+  string original_file_path = 6;
+
+  // Where the manifest came from. "Dependency Graph" or "Snapshots"
+  string source = 7;
+
+  // The name of the manifest, for manifests that come from Snapshots.
+  string name = 8;
+
+  // The ID of the Snapshot that this manifest came from. Only present when source is "Snapshots".
+  uint64 snapshot_id = 9;
+}
+
+message ResponsePageMetadata {
+  uint32 page = 1;
+  uint32 per_page = 2;
+  uint32 first = 3;
+  uint32 last = 4;
+}
+
+message GetSnapshotsDiffResponse {
+  // We reserve 5 because an unused property, "removed_manifests", was there.
+  reserved 5;
+
+  message ManifestDiff {
+    message DependencyDiff {
+      // TODO scripts to generate this enum from types.rb
+      enum DependencyChangeType {
+        DEPENDENCY_CHANGE_TYPE_UNKNOWN = 0;
+        DEPENDENCY_CHANGE_TYPE_ADDED = 1;
+        DEPENDENCY_CHANGE_TYPE_REMOVED = 2;
+        DEPENDENCY_CHANGE_TYPE_UPDATED = 3;
+      }
+
+      string name = 1;
+      string target_version = 2;
+      DependencyChangeType change_type = 3;
+      string base_version = 4;
+      repeated uint64 github_vulnerability_range_ids = 5;
+      string license = 6;
+      string repo_nwo = 7;
+      uint64 github_repository_id = 8;
+      google.protobuf.Timestamp published_at = 9;
+      uint64 dependent_count = 10;
+      google.protobuf.Timestamp unpublished_at = 11;
+      string base_purl = 12;
+      string target_purl = 13;
+      Scope scope = 14;
+    }
+
+    PackageManager type = 1;
+    string file_path = 2;
+    repeated DependencyDiff dependencies = 3;
+  }
+
+  uint64 repository_id = 1;
+  string base_sha = 2;
+  string target_sha = 3;
+  repeated ManifestDiff changed_manifests = 4;
+  google.protobuf.Timestamp base_sha_created_at = 6;
+  google.protobuf.Timestamp target_sha_created_at = 7;
+  ResponsePageMetadata page_metadata = 14;
+  repeated string snapshot_warnings = 15;
+}
+
+message DependencySnapshotDependency {
+  uint64 scope = 1; // Scope is an Enum Flag: 1= DEVELOPMENT, 2= RUNTIME, 4= COMPILE, 8= TEST_RUNTIME, 16= TEST_COMPILE
+  bool explicit = 2;
+  repeated string dependencies = 3; // purls of transitive dependencies
+}
+
+message DependencySnapshotManifest {
+  map<string, DependencySnapshotDependency> graph = 1; // key is dependency PURL
+}
+
+message DependencySnapshotRepositoryMetadata {
+  string nwo = 1;
+  bool public = 2;
+  uint64 owner_id = 3;
+}
+
+message CreateDependencySnapshotRequest {
+  reserved 2, 4 to 6;
+
+  // the gh/gh repository_id, NOT the dg-api repository_id
+  uint64 repository_id = 1;
+
+  // metadata from the monolith Repository model at the time
+  // the snapshot was submitted; included here to avoid having
+  // to deserialize "payload" at the DG-API (proxy) step to
+  // introspect/log the repo data
+  DependencySnapshotRepositoryMetadata repository_metadata = 3;
+
+  // byte-serialized JSON of the dependency snapshot submission request.
+  // To be proxied over to DS-API, in request scope, for processing.
+  // initial schema validation (shape not contents!) happens in the monolith:
+  // https://github.com/github/github/blob/master/app/api/schemas/v3/schemas/repository-snapshot.json
+  bytes payload = 7;
+
+  // Only used for feature enablement checks
+  uint64 owner_id = 8;
+}
+
+message CreateDependencySnapshotResponse {
+  // unique lookup ID from DS-API backend
+  uint64 snapshot_id = 1;
+
+  // time the snapshot was successfully stored by DS-API backend
+  google.protobuf.Timestamp created_at = 2;
+
+  // the creation result from the DS-API backend
+  Result result = 3;
+
+  // an English-language explanation of the result
+  string message = 4;
+
+  // There are three possible result outcomes which correspond to the following HTTP status codes and scenarios.
+  // INVALID  - 400 - error deserializing snapshot.
+  // INVALID  - 400 - invalid purl.
+  // ACCEPTED - 201 - snapshot is submitted for the non-default branch.
+  // ACCEPTED - 201 - snapshot is submitted for the default branch and there's already a snapshot with a newer commit SHA.
+  // SUCCESS  - 201 - snapshot is submitted for the default branch and it's the snapshot with the latest commit SHA.
+  // REMOVED  - 201 - snapshot was submitted, but then removed. Storage for the backend doesn't support non-canonical snapshots.
+  // Dependency results for the repo will be successfully updated only in SUCCESS scenario.
+  enum Result {
+    // the names here *must match* the corresponding names in ds-api: https://github.com/github/dependency-snapshots-api/blob/main/proto/snapshots.proto
+    INVALID = 0;
+    ACCEPTED = 1;
+    SUCCESS = 2;
+    REMOVED = 3;
+  }
+}
+
+message DependencySnapshotDependencyMetadata {
+  string license = 1;
+  repeated uint64 github_vulnerability_range_ids = 2;
+  string repo_nwo = 3;
+  uint64 github_repository_id = 4;
+  google.protobuf.Timestamp published_at = 5;
+}
+
+message GetDependencySnapshotRequest {
+  reserved 3, 4;
+
+  // the gh/gh repository_id, NOT the dg-api repository_id.
+  uint64 repository_id = 1;
+  // unique lookup ID returned in successful CreateDependencySnapshotResponse
+  uint64 snapshot_id = 2;
+}
+
+message GetDependencySnapshotResponse {
+  reserved 3 to 8;
+
+  // storage PK of requested snapshot
+  uint64 snapshot_id = 1;
+  // GitHub repository ID of the requested snapshot
+  uint64 repository_id = 2;
+  // "raw" JSON snapshot as byte blob; TODO: add fixed shape
+  // and protobuf components for resp + deprecate payload
+  bytes payload = 9;
+ }
+
+// TODO: totally broken legacy snapshot diff API.
+// to be revisited after e2e store/fetch-by-id is in place
+message GetDependencySnapshotsDiffRequest {
+  // the gh/gh repository_id, NOT the dg-api repository_id
+  uint64 base_repository_id = 1;
+  // the gh/gh repository_id, NOT the dg-api repository_id
+  uint64 target_repository_id = 2;
+  uint64 base_snapshot_id = 3;
+  uint64 target_snapshot_id = 4;
+  string base_ref = 5;
+  string target_ref = 6;
+  string base_sha = 7;
+  string target_sha = 8;
+  string base_build_type = 9;
+  string target_build_type = 10;
+  string base_build_id = 11;
+  string target_build_id = 12;
+}
+
+message GetDependencySnapshotsDiffResponse {
+  message DependencySnapshotManifestDiff {
+    message DependencySnapshotDependency {
+      string purl = 1;
+      uint64 scope = 2;
+    }
+
+    message DependencySnapshotDependencyDiff {
+      string package = 1;
+      DependencySnapshotDependency base = 2;
+      DependencySnapshotDependency target = 3;
+    }
+
+    PackageManager type = 1;
+    string file_path = 2;
+    repeated DependencySnapshotDependencyDiff dependencies = 3;
+  }
+
+  message DependencySnapshotVulnerableDependency {
+    repeated uint64 github_vulnerability_range_ids = 1;
+  }
+
+  message DependencySnapshotDependencyDiffMetadata {
+    string license = 1;
+    string repo_nwo = 2;
+    uint64 github_repository_id = 3;
+    google.protobuf.Timestamp published_at = 4;
+  }
+
+  message DependencySnapshotMetadata {
+    // the gh/gh repository_id, NOT the dg-api repository_id
+    uint64 repository_id = 1;
+    string sha = 2;
+    uint64 snapshot_id = 3;
+    map<string, string> metadata = 4;
+  }
+
+  DependencySnapshotMetadata base_snapshot = 1;
+  DependencySnapshotMetadata target_snapshot = 2;
+  repeated DependencySnapshotManifestDiff changed_manifests = 3;
+  map<string, DependencySnapshotVulnerableDependency> vulnerable_dependencies = 4; // key is dependency purl
+  map<string, DependencySnapshotDependencyDiffMetadata> dependency_metadata = 5;   // key is dependency purl
+}
+
+message GetDependenciesForRepositoryRequest {
+  uint64 repository_id = 1; // GitHub (Rails model) ID, not DG ID
+  bool include_vulnerabilities = 2;
+  bool enable_preview_ecosystems = 3;
+  string sha = 4;
+  // This value only applies to static manifest parsing, that is, it doesn't apply to build time driven dependency returns.
+  // This is intentional: We have to do significant processing on demand for static manifest parsing that doesn't apply to build-time submission.
+  // We expect values of up to 600 from dotcom. The default value is 20. We don't enforce a maximum.
+  uint32 max_static_manifests = 5;
+  // GitHub (Rails model) owner ID, not DG ID. Only used for feature enablement checks
+  uint64 owner_id = 6;
+  bool include_internal_snapshots = 7;
+  repeated PackageManager exclude_ecosystems = 8;
+}
+
+message GetDependenciesForRepositoryResponse {
+  repeated Manifest manifests = 1;
+}
+
+message HasManifestsRequest {
+  uint64 repository_id = 1; // GitHub (Rails model) ID, not DG ID
+  bool only_static_manifests = 2; // if true, only check for static manifests
+}
+
+message HasManifestsResponse {
+  bool has_manifests = 1;
+}
+
+message RepositoriesContainingDependencyRequest {
+  string base_purl = 1;
+  string version_range = 2;
+}
+
+message RepositoriesContainingDependencyResponse {
+  repeated uint64 repository_ids = 1; // unordered list of GitHub (Rails model) IDs
+}
+
+message GetRepositorySBOMRequest {
+  uint64 repository_id = 1; // GitHub Repository ID
+  string sha = 2; // Commit SHA to get SBOM for (currently unused)
+  string repository_name = 3; // GitHub Repository Name with Owner
+  string namespace_base = 4; // The namespace base for the SBOM: eg. "https://github.com/" or "https://staff-wus2-01.ghe.io/"
+  string repository_license = 5; // GitHub Repository declared license
+}
+
+message GetRepositorySBOMResponse {
+  string payload = 1;
+}
+
+message SearchDependenciesForRepositoryRequest {
+  uint64 repository_id = 1;
+  uint32 page = 3;
+  uint32 per_page = 4;
+  string query = 5;
+
+  message DependabotAlert {
+    string vulnerable_manifest_path = 1;
+    string vulnerable_version_range_affects = 2;
+    string vulnerable_requirements = 3;
+    Severity vulnerability_severity = 4;
+    uint64 vulnerable_version_range_id = 5;
+    string vulnerable_version_range_requirements = 6;
+  }
+
+  repeated DependabotAlert dependabot_alerts = 6;
+  bool preview_enabled = 7;
+  string manifest_path = 8;
+  reserved "package_manager"; reserved 9;
+  optional Relationship relationship_filter = 10;
+  repeated PackageManager ecosystem_filter = 11;
+}
+
+message SearchDependenciesForRepositoryResponse {
+  enum Scanner {
+    // dg-api static detection
+    DG = 0;
+    // ds-api submission
+    DS = 1;
+    // ds-api static detection
+    DS_INTERNAL = 2;
+    // dgp
+    DGP = 3;
+  }
+
+  enum AncestorRelationship {
+    // The ancestor relationship is unknown
+    UNKNOWN = 0;
+    // The ancestor is a direct parent of the transitive dependency (i.e. 1 level deep)
+    PARENT = 1;
+    // The ancestor is an ancestor of the transitive dependency (i.e. 2+ levels deep)
+    ANCESTOR = 2;
+  }
+
+  // The distinct, root direct dependencies for a transitive dependency. This will be empty for direct dependencies.
+  message RootAncestor {
+    // The name of the root ancestor package
+    string package_name = 1;
+
+    // The version requirements of the package
+    string requirements = 2;
+
+    // The relationship of the root ancestor to the transitive dependency
+    AncestorRelationship relationship = 3;
+  }
+
+  message Result {
+    PackageManager package_manager = 1;
+    string package_name = 2;
+    string requirements = 3;
+    string manifest_path = 4;
+    Scope scope = 5;
+    uint64 repository_id = 6;
+    string license = 7;
+    google.protobuf.Timestamp scanned_at = 8;
+    Scanner scanned_by = 9;
+    string snapshot_detector_name = 10;
+    Relationship relationship = 11;
+    repeated uint64 vulnerable_version_range_ids = 12;
+    repeated RootAncestor root_ancestors = 13;
+    // available filter values with counts
+    // - manifest file, count
+    // - ecosystem, count (sum over manifest files)
+  }
+
+  uint32 total_results = 2;
+  repeated Result results = 3;
+
+  // true if there are any submitted snapshots for the repository
+  // used to display the snapshot call to action
+  bool repository_has_snapshots = 4;
+
+  // list of package managers in the repository
+  repeated PackageManager package_managers = 5;
+}
+
+message GetReleasesForPackageRequest {
+  PackageManager package_manager = 1;
+  string package_name = 2;
+}
+
+message GetReleasesForPackageResponse {
+  message PackageRelease {
+    string version = 1;
+  }
+  repeated PackageRelease package_releases = 1;
+}
+
+message GetPackageVersionsRequest {
+  message PackageVersionSpec {
+    PackageManager package_manager = 1;
+    string package_name = 2;
+
+    // An exact package version in the form appropriate for the ecosystem
+    // (ie. this must match what DG has in the database for the version)
+    string package_version = 3;
+  }
+
+  repeated PackageVersionSpec package_versions = 1;
+
+  // Default false
+  bool include_copyright_attributions = 2;
+}
+
+message GetPackageVersionsResponse {
+  message PackageVersion {
+    PackageManager package_manager = 1;
+    string package_name = 2;
+    string name = 3;
+    string license = 4;
+    repeated string attributions = 5;
+    string source_url = 6;
+    google.protobuf.Timestamp published_at = 7;
+    google.protobuf.Timestamp unpublished_at = 8;
+  }
+  repeated PackageVersion package_versions = 1;
+}
+
+
+message ListPackageVersionsRequest {
+  PackageManager package_manager = 1;
+  string package_name = 2;
+
+  bool include_licenses = 3;
+}
+
+message ListPackageVersionsResponse {
+  message PackageVersion {
+    string package_version = 1;
+    string package_license = 2;
+  }
+
+  repeated PackageVersion package_versions = 1;
+}
+
+message GetLicensesForPackagesRequest {
+  message Package {
+    PackageManager package_manager = 1;
+    string package_name = 2;
+    // all package versions are fetched if not set
+    repeated string package_versions = 3;
+  }
+
+  repeated Package packages = 1;
+  // default false
+  bool include_copyright_attributions = 2;
+}
+
+message GetLicensesForPackagesResponse {
+  message PackageLicenseInfo {
+    string package_version = 1;
+    string package_license = 2;
+    repeated string attributions = 3;
+  }
+
+  message PackageLicenses {
+    PackageManager package_manager = 1;
+    string package_name = 2;
+    repeated PackageLicenseInfo package_licenses = 3;
+  }
+
+  repeated PackageLicenses licenses = 1;
+}
+
+message GetDependenciesForSBOMRequest {
+  uint64 repository_id = 1;
+  repeated PackageManager excluding_package_managers = 2;
+}
+
+message GetDependenciesForSBOMResponse {
+  message Dependency {
+    PackageManager package_manager = 1;
+    string package_name = 2;
+    oneof package_version_info {
+      // A version, e.g. `1.0.0`
+      string version = 3;
+      // A version constraint, e.g. `>= 1.0.0`
+      string version_range = 4;
+    }
+  }
+
+  repeated Dependency dependencies = 1;
+}

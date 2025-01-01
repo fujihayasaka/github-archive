@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20230425081114_delete_physical_alerts_without_logical_alerts.go on GHES

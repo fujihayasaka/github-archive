@@ -1,0 +1,42 @@
+#!/bin/bash
+# Usage: script/server
+# Launches the api server, ingestion workers and any extra required processes locally.
+# This script forwards any arguments to script/dc so you can pass in any docker-compose arguments.
+# (e.g. script/server -d to run in detached mode)
+set -e
+
+cd "$(dirname "$0")/.."
+
+# Using the `--cosmos` flag uses a Cosmos DB resource in Azure. By default, the server starts
+# with a Cosmos DB emulator.
+#
+
+# Parse options
+while [[ "$#" -gt 0 ]]; do case $1 in
+  -c|--cosmos) cosmos="1"; shift;;
+  -d|--debug) debug="1"; shift;;
+  *)
+    echo "Usage: $0 [-c|--cosmos] [-d|--debug]"
+    exit 1
+    ;;
+esac; done
+
+# Check for -c flag to enable cosmos in azure
+if [ -n "$cosmos" ]; then
+  echo "Usings Cosmos DB in Azure"
+  script/set-remote
+else
+  script/cosmos-emulator
+fi
+
+source dev.env
+
+# Check for -d flag to build in debug mode
+if [ -n "$debug" ]; then
+  script/build --debug
+else
+  script/build
+fi
+
+docker build -f Dockerfile.dev -t base-dev-runtime .
+script/dc up $@

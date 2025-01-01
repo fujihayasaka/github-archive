@@ -1,0 +1,38 @@
+#!/usr/bin/env ruby
+
+require_relative "../config/environment"
+
+
+query = <<-QUERY
+  SELECT
+    table_name AS `Table`,
+    round(table_rows, 2),
+    round((data_length / 1024 / 1024), 2),
+    round((index_length / 1024 / 1024), 2),
+    round(((data_length + index_length) / 1024 / 1024), 2)
+  FROM information_schema.TABLES
+  WHERE table_schema = "#{ActiveRecord::Base.connection_config[:database]}"
+  ORDER BY 2 DESC
+QUERY
+
+string_width = 60
+number_width = 20
+
+puts [
+  "Table".ljust(string_width),
+  "Rows".rjust(number_width),
+  "Data size (MB)".rjust(number_width),
+  "Index size (MB)".rjust(number_width),
+  "Total (MB)".rjust(number_width)
+].join
+
+ActiveRecord::Base.connection.execute(query).each do |row|
+  name, rows, data, index, total = row
+  puts [
+    name.ljust(string_width),
+    rows.to_s(:delimited).rjust(number_width),
+    data.to_s.rjust(number_width),
+    index.to_s.rjust(number_width),
+    total.to_s.rjust(number_width),
+  ].join
+end

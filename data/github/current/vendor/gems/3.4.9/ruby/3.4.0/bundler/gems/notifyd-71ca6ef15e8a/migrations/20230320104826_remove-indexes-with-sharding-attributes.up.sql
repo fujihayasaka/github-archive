@@ -1,0 +1,8 @@
+ALTER TABLE `routing_setting_match_rules`  ADD INDEX `index_routing_setting_match_rules` (`shard_attribute`,`routing_setting_id`);
+ALTER TABLE `routing_setting_channels` ADD CONSTRAINT `uniq_channel_routing_setting_id_channel` UNIQUE (`shard_attribute`,`routing_setting_id`,`channel`);
+ALTER TABLE `routing_setting_match_rules` ADD CONSTRAINT `unique_routing_setting_match_rules` UNIQUE (`shard_attribute`,`attribute`,`value`,`routing_setting_id`);
+ALTER TABLE `routing_settings` ADD CONSTRAINT `unique_routing_settings` UNIQUE (`shard_attribute`,`topic_type`,`topic_value`,`subject_type`,`trigger`,`reason`,`meta_id`,`user_id`);
+DROP INDEX `index_routing_setting_match_rules` ON `routing_setting_match_rules`;
+DROP INDEX `uniq_channel_routing_setting_id_channel` ON `routing_setting_channels`;
+DROP INDEX `unique_routing_setting_match_rules` ON `routing_setting_match_rules`;
+DROP INDEX `unique_routing_settings` ON `routing_settings`;

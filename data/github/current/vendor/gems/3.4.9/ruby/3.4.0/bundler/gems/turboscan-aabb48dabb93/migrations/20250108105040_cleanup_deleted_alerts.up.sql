@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20250108105040_cleanup_deleted_alerts.go on GHES

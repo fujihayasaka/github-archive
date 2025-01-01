@@ -1,0 +1,2 @@
+ALTER TABLE `subscription_custom_fields` DROP INDEX `unique_subscription_custom_fields_name_value_meta_id`;
+ALTER TABLE `routing_setting_custom_fields` DROP INDEX `unique_routing_setting_custom_fields_name_value_meta_id`;

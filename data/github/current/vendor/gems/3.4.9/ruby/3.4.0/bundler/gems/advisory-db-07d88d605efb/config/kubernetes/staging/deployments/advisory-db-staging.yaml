@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: advisory-db-staging
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "advisory-db-staging"
+spec:
+    replicas: 2
+    selector:
+        matchLabels:
+            app: advisory-db
+            role: advisory-db-staging
+    template:
+        metadata:
+            labels:
+                app: advisory-db
+                role: advisory-db-staging
+            annotations:
+                observability.github.com/logger: fluent-bit
+                fluentbit.io/parser: logfmt_sloppy
+        spec:
+            volumes:
+                - name: github-metadata
+                  hostPath:
+                    path: /etc/github/metadata.json
+            containers:
+                - name: advisory-db-staging
+                  volumeMounts:
+                    - mountPath: /etc/github/metadata.json
+                      name: github-metadata
+                      readOnly: true
+                  image: advisory-db
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command: ["sleep", "5"]
+                  ports:
+                    - name: http
+                      containerPort: 3000
+                      protocol: TCP
+                  envFrom:
+                    - configMapRef:
+                        name: rails
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: ADVISORY_DB_ROLE
+                      value: "web-staging"
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                    # Override DataDog reported environment. We usually keep Rails.env == production in staging,
+                    # which makes sense because we are connecting to production data etc. But, for purposes of ops,
+                    # we don't want staging to be included in our alerting (or to falsely report healthy alerts).
+                    - name: DD_ENV
+                      value: "staging"
+                    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                      value: "https://opentelemetry-collector-production.service.iad.github.net/v1/traces"
+                    - name: GITHUB_API_BASE_URL
+                      value: "https://api.github.com"
+                  readinessProbe:
+                    failureThreshold: 3
+                    httpGet:
+                        path: /ping
+                        port: http
+                    initialDelaySeconds: 10
+                    periodSeconds: 10

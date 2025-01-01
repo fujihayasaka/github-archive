@@ -1,0 +1,175 @@
+syntax = "proto3";
+
+package github.spokes.legacygitrpc.v1;
+
+option go_package = "github.com/github/spokes-proto/gen/go/v1/legacygitrpc";
+option ruby_package = "GitHub::Spokes::Proto::LegacyGitrpc::V1";
+
+import "spokes-api/types/v1/repository.proto";
+import "spokes-api/types/v1/request_context.proto";
+
+service LegacyGitrpcAPI {
+    // LegacyGitrpcReader sends an rpc_reader request to the ernicorn.
+    rpc LegacyGitrpcReader(LegacyGitrpcReaderRequest) returns (LegacyGitrpcReaderResponse);
+
+    // LegacyGitrpcWriter sends an rpc_writer request to the ernicorn.
+    rpc LegacyGitrpcWriter(LegacyGitrpcWriterRequest) returns (LegacyGitrpcWriterResponse);
+
+    // Bertrpc sends a bertrpc request to the ernicorn.
+    // This should only be used by things like build_maint_rpc, where the application really
+    // needs to know about replicas and on-disk paths.
+    rpc Bertrpc(BertrpcRequest) returns (BertrpcResponse);
+
+    // GetCacheKey returns the cache key for a repository.
+    rpc GetCacheKey(GetCacheKeyRequest) returns (GetCacheKeyResponse);
+
+    // GetCacheKeys returns the cache keys for a list of repositories.
+    rpc GetCacheKeys(GetCacheKeysRequest) returns (GetCacheKeysResponse);
+}
+
+message DataServer {
+    string name = 1;
+    bool voting = 2;
+    bool healthy = 3;
+}
+
+message TopologyContext {
+    repeated DataServer data_servers = 1;
+}
+
+enum StatusCode {
+    STATUS_CODE_INVALID = 0;
+    STATUS_CODE_OK = 1;
+    STATUS_CODE_DEADLINE_EXCEEDED = 2;
+    STATUS_CODE_REQUEST_CANCELLED = 3;
+    STATUS_CODE_INVALID_REQUEST   = 4;
+    STATUS_CODE_INVALID_GIT_PATH  = 5;
+    STATUS_CODE_ERROR_ENCODING_REQUEST = 6;
+    STATUS_CODE_ERROR_CONNECTING_TO_ERNICORN = 7;
+    STATUS_CODE_ERROR_TALKING_TO_ERNICORN = 8;
+    STATUS_CODE_ERROR_PROCESSING_ERNICORN_RESPONSE = 9;
+}
+
+message Status {
+    StatusCode code = 1;
+    string message = 2;
+}
+
+message ErnicornResponse {
+    // response from the ernicorn, to be decoded by the Ruby client.
+    bytes response = 1;
+    // represent if there has been any problem while trying to talk to the actual Unicorn server.
+    Status status = 2;
+}
+
+// This message is used to send back to the monolith the server name and the response from the ernicorn
+message WriteServerResponse {
+    DataServer data_server = 1;
+    ErnicornResponse ernicorn_response = 2;
+}
+
+message ErnicornRequest {
+    // options from the Ruby client, encoded by Mochilo. Typically includes :timeout, :info (sockstat vars), and :trace2.
+    bytes options = 1;
+
+    // function is the name of the backend function.
+    string function = 2;
+
+    // args from the Ruby client, encoded by Mochilo.
+    bytes args = 3;
+
+    // keyword args from the Ruby client, encoded by Mochilo.
+    bytes kwargs = 4;
+}
+
+message LegacyGitrpcReaderRequest {
+    // repository is the repository to scope the request to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.RequestContext request_context = 2;
+
+    // ernicorn_request is the request to be sent to the ernicorn.
+    ErnicornRequest ernicorn_request = 3;
+
+    // This field is used to indicate the state of the topology context. The topology is a list of data servers that
+    // the proxy should try to send the request to. If the topology context is empty, the proxy will its internal
+    // topology mechanism to get the list of data servers.
+
+    // This information will be provided as the response to any write operation, so any subsequent read operation can read
+    // its own writes, providing our users a causal consistency guarantee.
+    TopologyContext topology_context = 4;
+}
+
+message LegacyGitrpcReaderResponse {
+    // response from the ernicorn, to be decoded by the Ruby client.
+    bytes response = 1;
+}
+
+message LegacyGitrpcWriterRequest {
+    // repository is the repository to scope the request to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.RequestContext request_context = 2;
+
+    // ernicorn_request is the request to be sent to the ernicorn.
+    ErnicornRequest ernicorn_request = 3;
+
+    // This information will be provided as the response to any write operation, so any subsequent read operation can read
+    // its own writes, providing our users a causal consistency guarantee.
+    TopologyContext topology_context = 4;
+}
+
+message LegacyGitrpcWriterResponse {
+    repeated WriteServerResponse responses = 1;
+}
+
+message BertrpcRequest {
+    // host is the host to send the request to.
+    string host = 1;
+
+    // path is the on-disk path to scope the request to.
+    string path = 2;
+
+    github.spokes.types.v1.RequestContext request_context = 3;
+
+    // ernicorn_request is the request to be sent to the ernicorn.
+    ErnicornRequest ernicorn_request = 4;
+}
+
+message BertrpcResponse {
+    ErnicornResponse ernicorn_response = 1;
+}
+
+message GetCacheKeyRequest {
+    // repository is the repository used to retrieve the cache key.
+    github.spokes.types.v1.Repository repository = 1;
+
+    // use_primary indicates whether we should be using the primary database or can use a replica.
+    bool use_primary = 2;
+}
+
+message GetCacheKeyResponse {
+    // cache_key is the cache key for the repository.
+    string cache_key = 1;
+}
+
+message GetCacheKeysRequest {
+    // repositories are the repositories for which to retrieve the cache keys.
+    repeated github.spokes.types.v1.Repository repositories = 1;
+
+    // use_primary indicates whether we should be using the primary database or can use a replica.
+    bool use_primary = 2;
+}
+
+message RepositoryWithCacheKey {
+    // repository is the repository which the cache_key corresponds to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    // cache_key is the cache key for the repository.
+    string cache_key = 2;
+}
+
+message GetCacheKeysResponse {
+    // repositories_with_cache_keys are the cache keys and their corresponding repositories.
+    repeated RepositoryWithCacheKey repositories_with_cache_keys = 1;
+}

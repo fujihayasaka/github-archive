@@ -1,0 +1,1 @@
+ALTER TABLE `ts_analyses` DROP KEY `idx_analyses_on_repo_id_soft_deleted_at_most_recent_ref_tool_id`, DROP KEY `idx_analyses_on_repo_id_most_recent_ref_tool_id`, ADD KEY `idx_analyses_on_repo_id_deleted_recent_ref_tool_id_created` (`repository_id`,`soft_deleted_at`,`most_recent`,`ref`,`tool_id`,`created_at`);

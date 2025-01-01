@@ -1,0 +1,149 @@
+name: "CodeQL"
+run-name: ${{ github.event.inputs.code_scanning_run_name }}
+on: dynamic
+
+[TS /*
+  We put in a defaults section specifying the bash shell to avoid Powershell if customers run us on self-hosted Windows workers.
+  The way we write to $GITHUB_OUTPUT does not work in Powershell.
+*/ - TS]
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+      security-events: write
+    continue-on-error: [TS .AnalyzeJobContinueOnError TS]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+[TS - range .GetLanguageMatrix TS]
+          - language: [TS .LanguageName TS]
+            category: [TS .Category TS]
+            build-mode: [TS .BuildMode TS]
+            runner: '[TS .Runner TS]'
+[TS - end TS]
+    env:
+      CODE_SCANNING_REF: ${{ github.event.inputs.code_scanning_ref }}
+      CODE_SCANNING_IS_ANALYZING_DEFAULT_BRANCH: ${{ github.event.inputs.code_scanning_is_analyzing_default_branch }}
+[TS - if and (not .IncludeValidation) (not .AutoAdjustValidation) TS]
+      CODE_SCANNING_IS_STEADY_STATE_DEFAULT_SETUP: true
+[TS - end TS]
+      CODE_SCANNING_WORKFLOW_FILE: ${{ github.event.inputs.code_scanning_workflow_file }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@[TS .CodeQLActionVersion TS]
+      with:
+        languages: ${{ matrix.language }}
+        build-mode: ${{ matrix.build-mode }}
+        queries: [TS .Queries TS]
+        config: |
+          default-setup:
+            org:
+              model-packs: [ ${{ github.event.inputs.code_scanning_codeql_packs }} ]
+          threat-models: [ [TS .ThreatModel TS] ]
+[TS - if .SetupGo TS]
+
+    - name: Configure
+      uses: github/codeql-action/resolve-environment@[TS .CodeQLActionVersion TS]
+      id: resolve-environment
+      with:
+        language: ${{ matrix.language }}
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      if: matrix.language == 'go' && fromJSON(steps.resolve-environment.outputs.environment).configuration.go.version
+      with:
+        go-version: ${{ fromJSON(steps.resolve-environment.outputs.environment).configuration.go.version }}
+[TS - end TS]
+[TS if .IncludeAutobuild TS]
+    - name: Autobuild
+      uses: github/codeql-action/autobuild@[TS .CodeQLActionVersion TS]
+[TS - end TS]
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@[TS .CodeQLActionVersion TS]
+      with:
+        category: ${{ matrix.category }}
+[TS if and .IncludeValidation (not .AutoAdjustValidation) - TS]
+## VALIDATION RUN ONLY
+        upload: false
+        output: 'results'
+
+    - name: Upload Sarif Artifact
+      uses: actions/upload-artifact@[TS .ArtifactActionVersion TS]
+      with:
+        name: sarif-artifact-${{ matrix.language }}
+        path: 'results'
+
+  upload:
+    name: Upload Results
+    runs-on: [TS .GetRunnerLabels TS]
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    needs: analyze
+    steps:
+      - name: Download Sarifs
+        uses: actions/download-artifact@[TS .ArtifactActionVersion TS]
+        with:
+          path: ../results
+          pattern: sarif-artifact-*
+          merge-multiple: true
+
+      - name: Upload Results
+        uses: github/codeql-action/upload-sarif@[TS .CodeQLActionVersion TS]
+[TS else if .AutoAdjustValidation - TS]
+## AUTO-ADJUST VALIDATION RUN ONLY
+    - name: Record Successful outcome
+      id: outcomes
+      run: echo "${{ matrix.language }}=OK" | sed s/-/_/ >> "$GITHUB_OUTPUT"
+
+    outputs:
+[TS range .GetLanguages TS]      [TS . | toUnderscore TS]: ${{ steps.outcomes.outputs.[TS . | toUnderscore TS] }}
+[TS end TS]
+
+  adjust:
+    name: Adjust Configuration
+    runs-on: [TS .GetRunnerLabels TS]
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    needs: analyze
+    if: ${{ [TS range $i, $e := .GetLanguages TS][TS if gt $i 0 TS] || [TS end TS]needs.analyze.outputs.[TS $e | toUnderscore TS] != 'OK'[TS end TS] }}
+    steps:
+      - name: Rebuild configuration
+        env:
+[TS range .GetLanguages TS]          CODE_SCANNING_OUTCOME_[TS . | toUnderscore TS]: ${{ needs.analyze.outputs.[TS . | toUnderscore TS] }}
+[TS end TS]
+        uses: actions/github-script@v7
+        with:
+          script: |
+            newLangs = []
+[TS range .GetLanguages TS]            if (process.env.CODE_SCANNING_OUTCOME_[TS . | toUnderscore TS] === 'OK') {
+              newLangs.push("[TS . TS]")
+            }
+[TS end TS]
+            if (newLangs.length === 0) {
+                console.log("No languages were successfully analyzed. Exiting.")
+                process.exit(1)
+            }
+
+            resp = await github.request("PATCH /repos/{owner}/{repo}/code-scanning/default-setup/adjust", {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              languages: newLangs,
+            });
+            console.log(resp.status);
+[TS end - TS]

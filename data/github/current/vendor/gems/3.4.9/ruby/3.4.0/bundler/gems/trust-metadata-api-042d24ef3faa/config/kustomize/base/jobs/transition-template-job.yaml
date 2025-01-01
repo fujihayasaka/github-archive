@@ -1,0 +1,43 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: transition-template-job
+spec:
+  template:
+    metadata:
+      labels:
+        app: trust-metadata-api-transition
+        role: internal-service
+      annotations:
+        observability.github.com/logger: fluent-bit
+        fluentbit.io/parser: logfmt
+        observability.github.com/splunk_index: trust-metadata
+    spec:
+      containers:
+        - name: transition
+          image: trust-metadata-api
+          resources:
+            requests:
+              cpu: "1"
+              memory: "512Mi"
+            limits:
+              cpu: "3.0"
+              memory: "1.5G"
+          envFrom:
+            - configMapRef:
+                name: kube-cluster-metadata
+            - secretRef:
+                name: vault-secrets
+          command:
+            - /bin/transition
+          env:
+            - name: TMA_DOGSTATSD_HOST
+              value: "$(KUBE_NODE_HOSTNAME):28125"
+            - name: GOMAXPROCS
+              value: "2"
+      restartPolicy: Never
+  backoffLimit: 0
+  # Moda recommends setting activeDeadlineSeconds to any job resource.
+  # This configuration is only relevant though for the deployment of the job
+  # but not for the execution of transitions via the transition automation.
+  activeDeadlineSeconds: 100

@@ -1,0 +1,86 @@
+environments:
+- name: production
+  require_pipeline:
+    true
+  timeout: 300
+  cluster_selector:
+    profile: general
+    region: iad
+  service_mesh:
+    enabled: true
+  extra_start_message: |
+    🚨 Please keep an eye on:
+      - [Datadog APM](https://app.datadoghq.com/apm/entity/service%3Anotifyd)
+      - [Datadog dashboard](https://app.datadoghq.com/dashboard/n77-d3g-dqh)
+      - [Sentry for the code on gh/gh](https://sentry.io/organizations/github/issues/?project=5962311)
+      - [Sentry](https://sentry.io/organizations/github/issues/?environment=production&project=5962313&statsPeriod=1h)
+      - [Splunk](https://splunk.githubapp.com/en-US/app/gh_reference_app/search?earliest=-15m&latest=now&q=search%20index%3Dnotifyd%20kube_namespace%3Dnotifyd-production)
+      - [Notifyd Aqueduct](https://app.datadoghq.com/dashboard/vmq-gt6-2h7/aqueductdeveloper?tpl_var_application=notifyd-production&from_ts=1653205348480&to_ts=1653291748480&live=true)
+  notify_still_locked: true
+- name: staff-wus2-01
+  require_pipeline:
+    true
+  timeout: 600
+  service_mesh:
+    enabled: true
+  cluster_selector:
+    stamp: staff-wus2-01
+    profile: proxima
+  # required_review_tasks: [] # OPTIONAL: disables reviews to deploy, to quickly iterate.
+  extra_start_message: |
+        Please add links to proxima's dashboards
+  notify_still_locked: true
+- name: prod-jobs
+  resource_path: config/kubernetes/util-jobs
+  cluster_selector:
+    name: general-1-ash1-iad # we need only one job on single cluster
+required_builds:
+  - notifyd-tests # from GitHub actions
+  - notifyd-docker-image / notifyd-docker-image
+  - notifyd-moda-config-bundle / notifyd-moda-config-bundle
+notifications:
+  slack_channels:
+    - "#notifications-ops"
+auto_start_pipeline: production_rollout
+auto_retry_count: 1
+partition_failure_tolerance: 3
+
+proxima:
+  environment_pattern:
+    service_mesh:
+      enabled: true
+    timeout: 600
+    extra_start_message: |
+      Please add links to proxima's dashboards
+    notify_still_locked: true
+  rollout_pattern:
+  - kind: deployment
+    start_message: We are now going to deploy {{app}}/{{ref}} to proxima {{stamp}}! Please pause or cancel the pipeline after the deploy if you want more time before your pull request(s) auto merges.
+    config:
+      timeout: 600
+
+pipelines:
+  production_rollout:
+    append_proxima_stamps: true
+    timeout: 2700 # 45m
+    notify_support_on_invalid_queue_state: false
+    auto_start_wait: true
+    stages:
+      - name: proxima-staffship
+        kind: deployment
+        start_message: We are now going to deploy {{app}}/{{ref}} to proxima staff ship! Please pause or cancel the pipeline after the deploy if you want more time before your pull request(s) auto merges.
+        config:
+          environment: staff-wus2-01
+          timeout: 600
+        gates:
+          - kind: timer
+            duration: 180
+      - name: dotcom
+        kind: deployment
+        start_message: We are now going to deploy {{app}}/{{ref}} to dotcom! Please pause or cancel the pipeline after the deploy if you want more time before your pull request(s) auto merges.
+        config:
+          environment: production
+          timeout: 600
+        gates:
+          - kind: timer
+            duration: 300

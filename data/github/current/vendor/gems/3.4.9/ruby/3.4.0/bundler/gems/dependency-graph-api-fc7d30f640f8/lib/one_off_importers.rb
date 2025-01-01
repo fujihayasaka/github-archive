@@ -1,0 +1,8 @@
+require_relative "./one_off_importers/base"
+require_relative "./one_off_importers/go"
+require_relative "./one_off_importers/pypi"
+require_relative "./one_off_importers/npm"
+require_relative "./one_off_importers/rubygems"
+require_relative "./one_off_importers/nuget"
+require_relative "./one_off_importers/composer"
+require_relative "./one_off_importers/actions"

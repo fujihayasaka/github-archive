@@ -23,8 +23,9 @@ module Platform
       def self.async_api_can_modify?(permission, owner:, **inputs)
         # An actor can copy if they have read permissions on the source project and
         # project_v2_create permissions on the destination owner.
-        # Read permissions for the source project are checked when loading Objects::ProjectV2
-        # Write permissions are checked below
+        # Read permissions for the source project are checked when loading Objects::ProjectV2.
+        # Additional write-access checks on the source project (for private projects)
+        # are enforced in #resolve.
         current_org = owner if owner.organization?
         permission.access_allowed?(
           :project_v2_create,
@@ -38,10 +39,18 @@ module Platform
       end
 
       def resolve(project:, owner:, title:, include_draft_issues:, **inputs)
+        viewer = context[:viewer]
+
+        # Copying a private project requires write/admin access on the source
+        # project. Public projects can still be copied by anyone with read access.
+        unless project.public? || project.viewer_can_write?(viewer)
+          raise Errors::Forbidden.new("You do not have permission to copy this project.")
+        end
+
         # Create a new target project with the default system fields
         new_project = MemexProject.create_with_associations(
           owner: owner,
-          creator: context[:viewer],
+          creator: viewer,
           title: title,
           with_default_workflows: false,
           with_mwl_enabled: false,
@@ -52,7 +61,7 @@ module Platform
           base_project: project,
           target_project: new_project,
           include_draft_issues: include_draft_issues,
-          actor: context[:viewer],
+          actor: viewer,
         ).execute
 
         copy = copier_result.target_project
@@ -63,7 +72,7 @@ module Platform
 
         GlobalInstrumenter.instrument("memex_event",
           {
-            actor: context[:viewer],
+            actor: viewer,
             memex_project: project,
             name: "copy",
             ui: "graphql",

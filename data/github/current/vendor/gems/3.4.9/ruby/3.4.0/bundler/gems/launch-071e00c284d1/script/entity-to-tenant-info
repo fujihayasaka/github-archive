@@ -1,0 +1,41 @@
+#!/bin/bash
+
+# Gets the AZP tenant (aka host) ID and name for a given repository (NWO), user, or org.
+
+set -e
+
+. script/_serverenv
+
+if [[ -z "$1" ]]; then
+    echo 'Missing entity identifier.'
+    echo 'Usage:'
+    echo '  entity-to-tenant-info github/helloworld'
+    exit 1
+fi
+
+# First get the global ID of the nwo
+global_id=$(cd "${GITHUB_PATH}" && bin/rails runner "puts (Business.find_by_name('${1}') || GitHub::Resources.find_by_uri('${1}'))&.global_relay_id")
+if [[ -z "${global_id}" ]]; then
+    echo "Could not find entity '$1' in dotcom"
+    exit 1
+fi
+
+echo "Global Relay ID of '${1}': ${global_id}"
+
+# Query the AZP table
+tenant_info=$(echo "SELECT
+        tenant_name,
+        tenant_id
+FROM azp_resources
+WHERE entity_id = '${global_id}'
+LIMIT 1;" | script/dbconsole deployer 2> /dev/null | tail --lines=1)
+if [[ -z "${tenant_info}" ]]; then
+    echo "Could not find an entry for '${1}' in launch's AZP table"
+    exit 1
+fi
+
+tenant_name=$(echo "${tenant_info}" | cut -f1)
+tenant_id=$(echo "${tenant_info}" | cut -f2)
+
+echo "Tenant Name: ${tenant_name}"
+echo "Tenant ID:   ${tenant_id}"

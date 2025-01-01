@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+#
+# Hits the passed in twirp endpoint.
+# Assumes curl and jq are installed.
+# Assumes any JSON input will be piped in, as in "echo '{"some":"json"}' | script/twirpcurl WorkflowCancel"
+#
+# Usage: echo <json-representation-of-request> | script/twirpcurl deploy GetRepositoryTier
+
+set -eo pipefail
+
+. ./script/_serverenv
+
+HMAC=$DEPLOYER_HMAC_SECRET
+HOST=$DEPLOYER_TWIRP_ADDR
+
+case "$1" in
+artifactcache)
+    URL_PATH=/twirp/git_hub.launch.services.artifactcache.ArtifactCache
+    ;;
+artifactsexchange)
+    URL_PATH=/twirp/git_hub.launch.services.artifactsexchange.ActionsArtifactExchange
+    ;;
+deploy)
+    URL_PATH=/twirp/git_hub.launch.services.deploy.LaunchDeploymentService
+    ;;
+environment)
+    URL_PATH=/twirp/git_hub.launch.services.environment.Environment
+    ;;
+largerrunners)
+    URL_PATH=/twirp/git_hub.launch.services.largerrunners.LargerRunners
+    ;;
+runnergroups)
+    URL_PATH=/twirp/git_hub.launch.services.runnergroups.RunnerGroups
+    ;;
+runnerscalesets)
+    URL_PATH=/twirp/git_hub.launch.services.runnerscalesets.RunnerScaleSets
+    ;;
+selfhostedrunners)
+    URL_PATH=/twirp/git_hub.launch.services.selfhostedrunners.SelfHostedRunners
+    ;;
+status)
+    URL_PATH=/twirp/git_hub.launch.services.status.LaunchStatusService
+    ;;
+token)
+    URL_PATH=/twirp/git_hub.launch.services.token.LaunchTokenService
+    ;;
+trusttier)
+    # implemented in GitHub, but adding support here for convenience
+    # example - echo '{"id": {"global_id": "<global_id>"} }' | script/twirpcurl trusttier GetTrustTier
+    HMAC=$GITHUB_TWIRP_HMAC_SECRET
+    HOST=$GITHUB_TWIRP_ADDR/twirp
+    URL_PATH=/trusttiers.trusttier.v1.TrustTierAPI
+    ;;
+repos)
+    HMAC=$GITHUB_TWIRP_HMAC_SECRET
+    HOST=$GITHUB_TWIRP_ADDR/twirp
+    URL_PATH=/actions.core.v1.RepositoriesAPI
+    ;;
+*)
+
+    echo "Usage: echo <json> | script/twirp <service> <endpoint>"
+    exit 1
+    ;;
+esac
+
+TIMESTAMP=$(date +%s)
+HMAC_SIG=$(echo -n $TIMESTAMP | openssl sha256 -hmac $HMAC | sed 's/^.* //')
+
+curl -s -d @- -H 'Content-Type: application/json' -H "Request-HMAC: $TIMESTAMP.$HMAC_SIG" $HOST$URL_PATH/"$2" | jq .

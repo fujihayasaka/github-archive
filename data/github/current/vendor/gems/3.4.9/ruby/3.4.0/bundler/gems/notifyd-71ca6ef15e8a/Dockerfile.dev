@@ -1,0 +1,103 @@
+# ===================================================================
+# Stage base: Base image for go builds
+# ===================================================================
+
+FROM ghcr.io/github/gh-base-image/gh-builder-focal:latest AS base
+
+# ===================================================================
+# Stage tools: Image that contains tools used to generate go code,
+#   run formatters and linters
+# ===================================================================
+FROM base AS tools
+
+ARG PROTOBUF_VERSION=27.2
+ARG PROTOC_GEN_TWIRP_VERSION=8.1.1
+ARG PROTOC_GEN_TWIRP_RUBY_VERSION=1.11.0
+ARG PROTOC_GEN_GO_VERSION=1.34.2
+ARG MOCKERY_VERSION=2.43.1
+ARG GOLANGCI_VERSION=1.53.3
+ARG GOLANG_MIGRATE=4.15.2
+
+RUN apt-get clean && apt-get update && apt-get install -y unzip mysql-client && \
+    curl --location --silent -o protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOBUF_VERSION/protoc-$PROTOBUF_VERSION-linux-x86_64.zip && \
+    unzip protoc.zip -d /usr/local/ && \
+    rm -fr protoc.zip && \
+    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v$GOLANGCI_VERSION && \
+    go install google.golang.org/protobuf/cmd/protoc-gen-go@v$PROTOC_GEN_GO_VERSION && \
+    go install github.com/twitchtv/twirp/protoc-gen-twirp@v$PROTOC_GEN_TWIRP_VERSION && \
+    go install github.com/arthurnn/twirp-ruby/protoc-gen-twirp_ruby@v$PROTOC_GEN_TWIRP_RUBY_VERSION && \
+    go install github.com/vektra/mockery/v2@v$MOCKERY_VERSION && \
+    go install github.com/golang-migrate/migrate/v4/cmd/migrate@v$GOLANG_MIGRATE && \
+    go install golang.org/x/tools/cmd/goimports@latest
+
+CMD ["go", "version"]
+
+# ===================================================================
+# Stage test: Image to run tests
+# ===================================================================
+FROM base AS test
+
+RUN go install github.com/go-delve/delve/cmd/dlv@latest
+COPY . /go/src
+WORKDIR /go/src
+
+CMD ["sh", "-c", "make ctx=local ci"]
+
+# ===================================================================
+# Stage gh-lite: Image to run gh-lite used in integration tests
+# ===================================================================
+FROM test AS gh-lite
+
+RUN make dev
+
+RUN groupadd -g 700 notifyd && \
+    useradd -r -u 700 -g notifyd notifyd
+USER notifyd
+
+ENV APP_ENV=test
+EXPOSE 8088
+CMD ["./bin/gh-lite"]
+
+# ===================================================================
+# Stage build: Image for dev shared container
+# ===================================================================
+FROM tools AS build
+
+WORKDIR /go/src/github.com/github/notifyd
+ADD . .
+RUN make
+RUN skeema_profile=development GO111MODULE=on go build -mod=vendor -o ./bin/migrate ./cmd/migrate
+
+FROM ghcr.io/github/gh-base-image/gh-base-focal:20250303-142242-g3659d9547 AS run
+
+# Temporary because the base image doesn't have curl
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /go/src/github.com/github/notifyd/bin/api /go/bin/api
+COPY --from=build /go/src/github.com/github/notifyd/bin/delete-repository /go/bin/delete-repository
+COPY --from=build /go/src/github.com/github/notifyd/bin/delete-repository-for-users /go/bin/delete-repository-for-users
+COPY --from=build /go/src/github.com/github/notifyd/bin/delete-user /go/bin/delete-user
+COPY --from=build /go/src/github.com/github/notifyd/bin/delete-user-repositories /go/bin/delete-user-repositories
+COPY --from=build /go/src/github.com/github/notifyd/bin/email /go/bin/email
+COPY --from=build /go/src/github.com/github/notifyd/bin/mobile /go/bin/mobile
+COPY --from=build /go/src/github.com/github/notifyd/bin/notify /go/bin/notify
+COPY --from=build /go/src/github.com/github/notifyd/bin/transition-job /go/bin/transition-job
+COPY --from=build /go/src/github.com/github/notifyd/bin/migrate /go/bin/migrate
+COPY --from=build /go/src/github.com/github/notifyd/migrations /migrations
+COPY --from=build /go/src/github.com/github/notifyd/dotcom-codespaces-development/entrypoint.sh /go/bin/entrypoint.sh
+
+RUN groupadd -g 700 notifyd && \
+    useradd -r -u 700 -g notifyd notifyd
+USER notifyd
+
+EXPOSE 8088
+
+# chatops
+EXPOSE 8082
+
+# twirp API
+EXPOSE 8080
+
+CMD ["/go/bin/api"]

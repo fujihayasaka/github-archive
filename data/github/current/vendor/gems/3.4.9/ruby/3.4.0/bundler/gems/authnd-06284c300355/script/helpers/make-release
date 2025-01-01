@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+root="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." >/dev/null 2>&1 && pwd )"
+cd "$root"
+
+set -eo pipefail
+
+fatal() {
+    echo "$@" 1>&2
+    exit 1
+}
+
+[ -n "$RELEASE_VERSION" ] || fatal "missing required environment variable 'RELEASE_VERSION'"
+[ -n "$TAG_PREFIX" ] || fatal "missing required environment variable 'TAG_PREFIX'"
+[ -n "$CHANGELOG_PATH" ] || fatal "missing required environment variable 'CHANGELOG_PATH'"
+
+if [ "$ALLOW_NON_MAIN" != "1" ] && [ "$(git rev-parse --abbrev-ref HEAD)" != "main" ]; then
+    fatal "You must be on 'main' to make a release!"
+fi
+
+COMMIT=$(git rev-parse HEAD)
+
+# Check that it's valid
+if ! [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    fatal "release version '$RELEASE_VERSION' is not valid (expected to match '[0-9]+\.[0-9]+\.[0-9]+')"
+fi
+
+# Fetch the latest
+git fetch origin
+
+TAG="$TAG_PREFIX/v$RELEASE_VERSION"
+
+# Check if the tag already exists
+if [[ "$(git tag -l "$TAG" | wc -l)" -ne "0" ]]; then
+    echo "git tag $TAG already exists, not creating or pushing it"
+else
+    echo "creating tag $TAG to point to $COMMIT"
+    git tag "$TAG" "$COMMIT"
+
+    if [ -z "$SKIP_PUSH_TAGS" ]; then
+        echo "pushing tags to origin..."
+        git push --tags origin
+    fi
+fi
+
+
+if [ -z "$SKIP_CREATE_RELEASE" ]; then
+    if type gh >/dev/null 2>&1; then
+        notes_file=$(mktemp)
+        cat "$CHANGELOG_PATH" | awk "/^## v$RELEASE_VERSION\$/{flag=1;next}/^## v.*\$/{flag=0}flag" | sed '1d;$d' > $notes_file
+
+        release_url=$(gh release create --title "$TITLE_PREFIX v$RELEASE_VERSION" --notes-file $notes_file "$TAG")
+        echo "release created, open $release_url to review"
+        rm $notes_file
+    else
+        echo "tags pushed but you don't have the 'gh' command line so I can't create a release"
+        echo "go to https://github.com/github/authnd/tags and create the release"
+    fi
+else
+    echo "tags pushed but you chose not to create a release"
+    echo "go to https://github.com/github/authnd/tags and create the release"
+fi

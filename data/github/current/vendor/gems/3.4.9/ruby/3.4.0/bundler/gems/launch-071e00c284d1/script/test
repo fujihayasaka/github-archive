@@ -1,0 +1,43 @@
+#!/bin/bash
+# Used by the CI build to run all the tests.
+# To run individual tests, use `go test`.
+
+set -o pipefail
+
+# Enforce UTC timezone, some tests fail in other timezones
+export TZ="GMT"
+
+if [ -z "$LAUNCH_HAS_TEST_DB" ]; then
+  exec script/with-test-db -- "$0" "$@"
+fi
+
+go version
+
+if [ $# -eq 0 ]; then
+  set -- github.com/github/launch/...
+fi
+
+mkdir -p tmp/
+COVERAGE_FILE=tmp/coverage.out
+rm -f $COVERAGE_FILE
+
+# Check for $GITHUB_ACTIONS or $CI to see if we're running in ci
+if [[ ($GITHUB_ACTIONS || $CI) ]]
+then
+  # Install the binary.
+
+  # https://github.com/github/goproxy/blob/main/doc/user.md#janky
+  echo "machine goproxy.githubapp.com login nobody password $BP_GITHUB_TOKEN" > "$HOME/.netrc"
+  export GOPROXY=https://goproxy.githubapp.com/mod,https://proxy.golang.org,direct
+  export GOPRIVATE=
+  export GONOPROXY=
+  export GONOSUMDB="github.com/github/*"
+
+  # Remove `GOFLAGS=-mod=vendor` to workaround https://github.com/golang/go/issues/45811
+  GOFLAGS="" go install github.com/github/go-json-dumper/cmd/go-json-dumper@v1.2.0
+
+  # In CI we want to have JSON output
+  go test -coverprofile=$COVERAGE_FILE -json -race -timeout 100s "$@" | go-json-dumper -tee
+else
+  go test -coverprofile=$COVERAGE_FILE -race -timeout 100s "$@"
+fi

@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20231218100928_resync_codeql_repos.go on GHES

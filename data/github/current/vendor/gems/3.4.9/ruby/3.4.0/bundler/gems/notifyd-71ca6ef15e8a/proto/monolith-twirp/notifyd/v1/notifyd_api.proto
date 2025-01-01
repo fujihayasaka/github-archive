@@ -1,0 +1,180 @@
+syntax = "proto3";
+
+package notifications.notifyd.v1;
+
+import "google/protobuf/wrappers.proto";
+import "google/protobuf/struct.proto";
+
+option go_package = "notifyd/v1";
+option ruby_package = "MonolithTwirp::Notifications::Notifyd::V1";
+
+// Notifyd API in the monolith for mobile push notifications
+service NotifydAPI {
+  // CheckDeliverMobilePushPolicy checks whether a mobile push notification can be delivered to an
+  // authorized recipient. The check assumes that the user has access to the notification's content
+  // and only checks policies relevant for mobile pushes.
+  rpc CheckDeliverMobilePushPolicy(CheckDeliverMobilePushPolicyRequest) returns (CheckDeliverMobilePushPolicyResponse);
+
+  // CheckDeliverEmailPolicy checks whether an email notification can be delivered to an authorized
+  // recipient. It assumes that the user has access to the notification's content and only checks
+  // policies relevant for emails.
+  //
+  // NOTE: In its current form and temporarily while we develop email notifications it is a noop
+  // operation that merely checks the recipient has an specific feature flag enabled and always uses
+  // the GH's email configured for them.
+  rpc CheckDeliverEmailPolicy(CheckDeliverEmailPolicyRequest) returns (CheckDeliverEmailPolicyResponse);
+
+  // BatchCheckNotifyPolicy checks whether users should receive notifications based on a given context.
+  // This check is not channel-specific so checks whether the user should be notified at all or not, e.g.
+  // are they ignoring the repository?
+  rpc BatchCheckNotifyPolicy(BatchCheckNotifyPolicyRequest) returns (BatchCheckNotifyPolicyResponse);
+
+  // BatchCheckIgnoredRepository checks whether recipients have a given repository ignored
+  // NOTE: This is intended as a temporary endpoint to check for ignored repositories by users.
+  // Once we have all this information migrated to Notifyd we won't need it.
+  rpc BatchCheckIgnoredRepository(BatchCheckIgnoredRepositoryRequest) returns (BatchCheckIgnoredRepositoryResponse);
+
+  // PostProcessEmailContent API is used for post processing emails step.
+  // We use this twirp Endpoint to inline css rules in our emails. Monolith already supports this so for MVP we decided
+  // to rely on monolith twirp endpoint instead of creating and managing new service.
+  rpc PostProcessEmailContent(PostProcessEmailContentRequest) returns (PostProcessEmailContentResponse);
+
+  // GetDeliverEmailData returns data necessary for email delivery from the monolith
+  rpc GetDeliverEmailData(GetDeliverEmailDataRequest) returns (GetDeliverEmailDataResponse);
+}
+
+message CheckDeliverMobilePushPolicyRequest {
+  // User ID of the recipient.
+  int32 user_id = 1;
+  // Flag indicating whether SAML should be enforced or not, e.g. if the notification's subject is not owned by an organization.
+  bool skip_saml_enforcement = 2;
+  // ID of the organization owning the notification's subject.
+  int32 organization_id = 3;
+  // ID of the oauth access associated to the recipient's mobile device token
+  int64 oauth_access_id = 4;
+  // List of reasons the user is being notified for.
+  repeated string reasons = 5;
+}
+
+message CheckDeliverMobilePushPolicyResponse {
+  // Flag indicating whether the push notification can be delivered.
+  bool is_deliverable = 1;
+  // Reason describing why the push notification can not be delivered.
+  string error = 2;
+  // Login handle corresponding to to the userid
+  string login = 3;
+}
+
+message CheckDeliverEmailPolicyRequest {
+  // User ID of the recipient.
+  int32 user_id = 1;
+  // ID of the organization owning the notification's subject.
+  int32 organization_id = 2;
+}
+
+message CheckDeliverEmailPolicyResponse {
+  // Flag indicating whether the email can be delivered.
+  bool is_deliverable = 1;
+  // Reason describing why the email can not be delivered (only in case is_deliverable is false).
+  string error = 2;
+  // Email address that has to be used to deliver the notification.
+  string email = 3;
+  // Login handle corresponding to to the userid
+  string login = 4;
+}
+
+message GetDeliverEmailDataRequest {
+  // User ID of the recipient.
+  int32 user_id = 1;
+  // ID of the organization owning the notification's subject.
+  int32 organization_id = 2;
+  // Data needed to generate authentication tokens
+  repeated AuthTokenRequest auth_token_requests = 3;
+}
+
+message AuthTokenRequest {
+  string scope = 1;
+  google.protobuf.Struct data = 2;
+}
+
+message GetDeliverEmailDataResponse {
+   // Flag indicating whether the email can be delivered.
+  bool is_deliverable = 1;
+  // Reason describing why the email can not be delivered (only in case is_deliverable is false).
+  string error = 2;
+  // Email address that has to be used to deliver the notification.
+  string email = 3;
+  // Login handle corresponding to to the userid
+  string login = 4;
+  // List of auth tokens for unsubscribe/reply
+  repeated AuthToken auth_tokens = 5;
+}
+
+message AuthToken {
+  string scope = 1;
+  string token = 2;
+}
+
+message ShouldNotifyRequestContext {
+  // optional repository id: if the notification is scoped to a repository it's id should be here
+  google.protobuf.Int64Value repository_id = 2;
+  // optional actor id: if notification has issuing actor, it should be passed here
+  int32 actor_id = 3;
+  // optional owner_id id: Id of the organization or user owning the subject used by notifyd to prevent spammy notifications
+  google.protobuf.Int64Value owner_id = 4;
+}
+
+message CheckNotifyPolicyResponse {
+  // ID of user
+  int32 user_id = 1;
+
+  // Flag indicating whether the user should be notified.
+  bool notify = 2;
+
+  // Reason describing why the notification can not be delivered.
+  string error = 3;
+}
+
+message Reason {
+  string name = 1;
+}
+
+message Recipient {
+  int32  user_id = 1;
+  repeated Reason reasons = 2;
+}
+
+message BatchCheckNotifyPolicyRequest {
+  // IDs of users who we want to check the policy for
+  repeated int32 user_ids = 1 [deprecated = true];
+
+  // Context data
+  ShouldNotifyRequestContext context = 2;
+
+  // repeated struct that represents a recipients that should receive a notification for specific reasons
+  repeated Recipient recipients = 3;
+}
+
+message BatchCheckNotifyPolicyResponse {
+  repeated CheckNotifyPolicyResponse responses = 1;
+}
+
+message BatchCheckIgnoredRepositoryRequest {
+  // repository id
+  google.protobuf.Int64Value repository_id = 2;
+
+  // repeated struct that represents a recipients that should receive a notification for specific reasons
+  repeated Recipient recipients = 3;
+}
+
+message BatchCheckIgnoredRepositoryResponse {
+  repeated CheckNotifyPolicyResponse responses = 1;
+}
+
+message PostProcessEmailContentRequest {
+  string raw_html = 1;
+}
+
+message PostProcessEmailContentResponse {
+  string processed_html = 1;
+}

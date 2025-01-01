@@ -1,0 +1,78 @@
+#!/usr/bin/env ruby
+#
+# Usage: script/sample-alerts
+#
+# Generate a CSV of sample repository vulnerability alerts
+
+
+# NOTE: THIS SCRIPT WILL NOT WORK
+# We got rid of the RepoIndex which this development script relies on
+# I'm not sure how often it's used so I'm not going to fix it until needed
+# - @mveytsman 2018-12-07
+
+require_relative "../config/environment"
+
+csv = CSV.open("sample-alerts.csv", "wb")
+csv << [
+  :repository_id,
+  :repository,
+  :vulnerability,
+  :affects,
+  :vulnerable_range,
+  :manifest,
+  :vulnerable_requirements,
+]
+
+def google_sheets_link(text, url)
+  "=HYPERLINK(\"#{url}\",\"#{text}\")"
+end
+
+VulnerableVersionRange.all.each do |range|
+  puts "Processing #{range.package_name} #{range.version_range}"
+
+  query = Queries::VersionRangeDependentsQuery.new({
+    package_manager: range.package_manager,
+    package_name: range.package_name,
+    serialized_requirements: range.version_range,
+    limit: 1000
+  })
+  dependents = query.dependents.shuffle.take(10)
+
+  if dependents.none?
+    puts "No dependents sampled for #{range.package_name} #{range.version_range}"
+  end
+
+  repo_names = Ingest::RepoIndex::GitHubRepository
+    .joins("INNER JOIN users ON users.id = repositories.owner_id")
+    .where(id: dependents.map(&:github_repository_id))
+    .select("repositories.id, repositories.name, users.login")
+    .index_by(&:id)
+
+  vulnerability_id = VulnerableVersionRange::GitHubVulnerableVersionRange
+    .find(range.github_id)
+    .vulnerability_id
+
+  dependents.each do |dependent|
+    if repo = repo_names[dependent.github_repository_id]
+      nwo = [
+        repo.login,
+        repo.name
+      ].join("/")
+    end
+
+    manifest = [
+      dependent.manifest_path,
+      dependent.manifest_filename
+    ].reject(&:blank?).join("/")
+
+    csv << [
+      dependent.github_repository_id,
+      google_sheets_link(nwo, "https://github.com/#{nwo}"),
+      google_sheets_link(vulnerability_id, "https://github.com/stafftools/vulnerabilities/#{vulnerability_id}"),
+      range.package_name,
+      range.version_range,
+      google_sheets_link(manifest, "https://github.com/#{nwo}/blob/master/#{manifest}"),
+      dependent.requirements.sub(/^=/, "'=")
+    ]
+  end
+end

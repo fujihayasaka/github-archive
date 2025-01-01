@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20220401091351_delete_local_tools.go on GHES

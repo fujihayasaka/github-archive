@@ -1,0 +1,48 @@
+name: Go fmt
+on:
+  push:
+    paths-ignore:
+      - "docs/**"
+    reuse-previous-outcome: true
+jobs:
+  gofmt:
+    name: Go fmt
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # for setup-goproxy
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: ./go/src/github.com/github/launch
+
+      - name: OIDC Setup for goproxy
+        uses: github/setup-goproxy@v1.1.0
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ./go/src/github.com/github/launch/go.mod
+          cache-dependency-path: ./go/src/github.com/github/launch/go.sum
+
+      - run: go version
+
+      - name: Get goimports
+        run: go install golang.org/x/tools/cmd/goimports@latest
+
+      - name: Run script/gofmt
+        env:
+          GOPATH: /home/runner/work/launch/launch/go
+        run: script/gofmt
+        working-directory: /home/runner/work/launch/launch/go/src/github.com/github/launch
+
+      - name: Commit changes
+        working-directory: /home/runner/work/launch/launch/go/src/github.com/github/launch
+        run: |
+          git config --global user.email "actions@github.com" &&
+          git config --global user.name "Actions" &&
+          (git diff-index HEAD -- &&
+          git commit -a -m 'Add changes produced by gofmt' &&
+          git push) || true

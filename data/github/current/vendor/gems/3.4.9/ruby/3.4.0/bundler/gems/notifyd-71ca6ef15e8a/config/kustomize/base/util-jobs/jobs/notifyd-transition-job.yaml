@@ -1,0 +1,31 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: notifyd-transition-job
+  annotations:
+    heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: "api"
+spec:
+  activeDeadlineSeconds: 86400
+  template:
+    metadata:
+      labels:
+        app: notifyd-transition-job
+      annotations:
+        observability.github.com/logger: fluent-bit
+        fluentbit.io/parser_stdout: logfmt
+        fluentbit.io/parser_stderr: json
+    spec:
+      containers:
+      - name: notifyd-transition-job
+        image: notifyd
+        command: ["/go/bin/transition-job"]
+        envFrom:
+          - configMapRef:
+              name: kube-cluster-metadata
+          - secretRef:
+              name: vault-secrets
+        env:
+          - name: STATSD_ADDR
+            value: "$(KUBE_NODE_HOSTNAME):28125"
+      restartPolicy: Never
+  backoffLimit: 1

@@ -1,0 +1,1 @@
+ALTER TABLE `meta_routing_settings` DROP INDEX `idx_meta_routing_settings_user_id`;

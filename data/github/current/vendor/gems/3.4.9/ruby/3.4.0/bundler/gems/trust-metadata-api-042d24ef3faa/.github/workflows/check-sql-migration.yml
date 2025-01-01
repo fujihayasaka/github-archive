@@ -1,0 +1,36 @@
+name: "Check SQL migrations"
+
+on:
+  pull_request:
+    branches:
+    - main
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  changedfiles:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4.2.2
+      - name: Get changed files
+        id: changes
+        run: |
+          git fetch origin ${{  github.event.pull_request.base.ref  }}
+          echo "Changed files:"
+          git diff --name-only --diff-filter=ACMRT  origin/${{ github.event.pull_request.base.ref }} ':!db/query'
+          echo "sql=$(git diff --name-only --diff-filter=ACMRT  origin/${{ github.event.pull_request.base.ref }} ':!db/query' | grep .sql$ | xargs)" >> $GITHUB_OUTPUT
+          echo "go=$(git diff --name-only --diff-filter=ACMRT  origin/${{ github.event.pull_request.base.ref }} ':!db/query' | grep .go$ | xargs)" >> $GITHUB_OUTPUT  
+      - name: Check changed files
+        if: ${{ steps.changes.outputs.sql != '' && steps.changes.outputs.go != '' }}
+        run: |
+          echo "Please make SQL and source code changes in separate PRs"
+          echo
+          echo "Changed .go files:"
+          echo "${{steps.changes.outputs.go}}"
+          echo
+          echo "Changed .sql files:"
+          echo "${{steps.changes.outputs.sql}}"
+          exit 1

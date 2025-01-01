@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20210915150555_remove_rule_tags_without_rules.go on GHES

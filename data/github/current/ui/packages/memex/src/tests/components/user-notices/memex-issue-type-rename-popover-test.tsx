@@ -13,7 +13,12 @@ import {createUserNoticesStateProvider} from './user-notices-test-helpers'
 function seedIslands() {
   seedJSONIsland('memex-user-notices', ['memex_issue_types_rename_prompt'])
   seedJSONIsland('memex-enabled-features', ['issue_types'])
-  seedJSONIsland('memex-viewer-privileges', {role: 'admin', canChangeProjectVisibility: true, canCopyAsTemplate: true})
+  seedJSONIsland('memex-viewer-privileges', {
+    role: 'admin',
+    canChangeProjectVisibility: true,
+    canCopy: true,
+    canCopyAsTemplate: true,
+  })
   seedJSONIsland('memex-owner', org)
 }
 
@@ -35,6 +40,7 @@ describe('MemexIssueTypeRenamePopover', () => {
     seedJSONIsland('memex-viewer-privileges', {
       role: 'write',
       canChangeProjectVisibility: true,
+      canCopy: true,
       canCopyAsTemplate: true,
     })
 

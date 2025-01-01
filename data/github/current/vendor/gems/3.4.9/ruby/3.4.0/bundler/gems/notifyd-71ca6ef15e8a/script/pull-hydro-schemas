@@ -1,0 +1,47 @@
+#!/bin/bash
+
+# The hydro schemas we need to generate go code for
+SCHEMAS="notifyd/v0/entities \
+         notifyd/v0/notify.proto \
+         notifyd/v0/deliver_mobile_push.proto \
+         notifyd/v0/delivered_notification.proto \
+         notifyd/v0/deliver_email.proto \
+         notifyd/v0/deliver_web.proto \
+         notifyd/v1/deliver_web.proto \
+         notifyd/v1/delete_repository.proto \
+         notifyd/v1/delete_user.proto \
+         notifyd/v1/delete_user_repositories.proto \
+         notifyd/v1/delete_repository_for_users.proto \
+        "
+
+# Read first argument as $hydro_schemas_path
+hydro_schemas_path=$1
+
+# Print usage message if no argument is given
+if [ -z "$hydro_schemas_path" ]; then
+  echo -e "\nRebuilds the go code for required hydro schemas."
+  echo -e "You will need to have github/hydro-schemas checked out,"
+  echo -e "and and pass its path as the first argument."
+  echo -e "\nUsage: $0 <path/to/hydro/schemas/project> <optional branch>"
+  exit 1
+fi
+
+# Read second argument as $branch defaulting to "main"
+branch=${2:-"main"}
+
+# Get path to the project root
+project_root="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && cd .. && pwd )"
+
+cd $hydro_schemas_path
+git switch $branch
+git pull
+
+for schema in $(echo $SCHEMAS | xargs); do
+  echo "Generating: $schema"
+  script/generate \
+    --go-out="$project_root" \
+    --go-prefix=notifyd \
+    --protoc-gen-go google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2 \
+    --protoc-version 27.2 \
+    "proto/hydro/schemas/$schema"
+done

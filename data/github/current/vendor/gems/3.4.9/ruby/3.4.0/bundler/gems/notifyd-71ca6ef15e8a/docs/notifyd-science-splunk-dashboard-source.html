@@ -1,0 +1,94 @@
+<form>
+  <label>notifyd-science</label>
+  <fieldset submitButton="false" autoRun="true">
+    <input type="time" token="timespan">
+      <label></label>
+      <default>
+        <earliest>-60m@m</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="dropdown" token="direction_query" searchWhenChanged="true">
+      <label>Direction</label>
+      <choice value="((notification_source=newsies AND candidate_type=potential) OR (notification_source=notifyd AND candidate_type=actual))">Reverse (notifyd)</choice>
+      <choice value="((notification_source=newsies AND candidate_type=actual) OR (notification_source=notifyd AND candidate_type=potential))">Darkship (Newsies)</choice>
+    </input>
+    <input type="dropdown" token="subject_type_regex">
+      <label>Subject Type</label>
+      <choice value="experiment_id=&quot;*/issues/*&quot; NOT experiment_id=&quot;*/issues/discussions*&quot; NOT experiment_id=&quot;*/discussions*&quot;">Issues and Issue comments</choice>
+      <choice value="experiment_id=&quot;*/issues/*&quot; NOT experiment_id=&quot;*/issues/*#issuecomment-*&quot; NOT experiment_id=&quot;*/issues/discussions*&quot; NOT experiment_id=&quot;*/discussions*&quot;">Issue only</choice>
+      <choice value="experiment_id=&quot;*/issues/*#issuecomment-*&quot;">Issue comments only</choice>
+      <choice value="experiment_id=*">All</choice>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <chart>
+        <title>Matches and mismatches %</title>
+        <search>
+          <query>index=notifyd (TERM(notifyd_science_experiment=push) OR TERM(notifyd_science_experiment)) notifyd_science_experiment=push experiment_id=* $direction_query$ $subject_type_regex$ | stats min(_time) as _time, dc(candidate_type) as sources_count, values(candidate_type) as candidate_types, count as event_count by experiment_id | eval result=if(sources_count&gt;1, "pass", "fail") | timechart span=30m count by result</query>
+          <earliest>$timespan.earliest$</earliest>
+          <latest>$timespan.latest$</latest>
+        </search>
+        <option name="charting.chart">area</option>
+        <option name="charting.chart.stackMode">stacked100</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>Matches and mismatches counts</title>
+        <search>
+          <query>index=notifyd (TERM(notifyd_science_experiment=push) OR TERM(notifyd_science_experiment)) notifyd_science_experiment=push experiment_id=* $direction_query$ $subject_type_regex$ | stats min(_time) as _time, dc(candidate_type) as sources_count, values(candidate_type) as candidate_types, count as event_count by experiment_id | eval result=if(sources_count&gt;1, "pass", "fail") | timechart span=30m count by result</query>
+          <earliest>$timespan.earliest$</earliest>
+          <latest>$timespan.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Sent by actual but not potential</title>
+        <search>
+          <query>index=notifyd (TERM(notifyd_science_experiment=push) OR TERM(notifyd_science_experiment)) notifyd_science_experiment=push experiment_id=*  $direction_query$ $subject_type_regex$ | stats min(_time) as _time, dc(candidate_type) as sources_count, values(candidate_type) as candidate_types, count as event_count by experiment_id | search sources_count=1 candidate_types="actual" | sort -_time</query>
+          <earliest>$timespan.earliest$</earliest>
+          <latest>$timespan.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>Sent by potential but not actual</title>
+        <search>
+          <query>index=notifyd (TERM(notifyd_science_experiment=push) OR TERM(notifyd_science_experiment)) notifyd_science_experiment=push experiment_id=*  $direction_query$ $subject_type_regex$ | stats min(_time) as _time, dc(candidate_type) as sources_count, values(candidate_type) as candidate_types, count as event_count by experiment_id | search sources_count=1 candidate_types="potential" | sort -_time</query>
+          <earliest>$timespan.earliest$</earliest>
+          <latest>$timespan.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Sent by both</title>
+        <search>
+          <query>(index=rails OR index=notifyd)  (TERM(notifyd_science_experiment=push) OR TERM(notifyd_science_experiment)) notifyd_science_experiment=push experiment_id=*  $direction_query$ $subject_type_regex$ | stats min(_time) as _time, dc(candidate_type) as sources_count, values(candidate_type) as candidate_types, count as event_count by experiment_id | search sources_count=2</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+</form>

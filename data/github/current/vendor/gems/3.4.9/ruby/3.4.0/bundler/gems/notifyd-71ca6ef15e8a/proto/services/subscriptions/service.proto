@@ -1,0 +1,121 @@
+syntax = "proto3";
+
+package notifyd.api.subscriptions_v2;
+option go_package = "proto/services/subscriptions";
+option ruby_package = "Notifyd::Proto::Subscriptions";
+
+// Detailed explanation of the interface can be found here: https://github.com/github/notifyd/blob/main/docs/proposals/generic-subscriptions.md
+
+// Service to manage subscriptions in Notifyd
+service Subscriptions {
+    rpc Get(GetRequest) returns (GetResponse);
+    rpc BatchReplace(BatchReplaceRequest) returns (BatchReplaceResponse);
+
+    // BatchCreateAndDelete is deprecated and it shouldn't be used. It will always return an error.
+    // BatchCreateAndDelete will be removed in a future version of the API.
+    rpc BatchCreateAndDelete(BatchCreateAndDeleteRequest) returns (BatchCreateAndDeleteResponse);
+}
+
+// Subscription topic
+message Topic {
+    string type = 1;
+    string value = 2;
+}
+
+// Custom field of a subscription
+message CustomField {
+    string name = 1;
+    string value = 2;
+}
+
+// Rule describing how to match certain attribute on the message
+message MatchRule {
+    string attribute = 1;
+    string value = 2;
+    string match_rule = 3;
+}
+
+message Filter {
+    string subject_type = 1;
+    string trigger = 2;
+    repeated MatchRule match_rules = 3;
+}
+
+// Request to create a subscription
+message CreateRequest {
+    int32 user_id = 1;
+    string reason = 2;
+    repeated Topic topics = 3;
+    repeated Filter filters = 4;
+    repeated CustomField custom_fields = 5;
+}
+
+// Request to create a subscription to replace another
+message BatchReplaceCreateRequest {
+    string reason = 1;
+    repeated Topic topics = 2;
+    repeated Filter filters = 3;
+    repeated CustomField custom_fields = 4;
+}
+
+// Request to get subscriptions filtered by user and custom fields
+message GetRequest {
+    int32 user_id = 1;
+    repeated CustomField filter_by_custom_fields = 2;
+    Page page = 3;
+}
+
+// Request to delete subscriptions by user and topics
+message DeleteRequest {
+    int32 user = 1;
+    int64 id = 2;
+}
+
+// Response in return to Get request
+message GetResponse {
+    repeated Subscription subscriptions = 1;
+    Pages pages = 2;
+}
+
+message Subscription {
+    int64 id = 1;
+    int32 user_id = 2;
+    repeated CustomField custom_fields = 3;
+    string reason = 4;
+    int64 created_at = 5;
+}
+
+// Request to create and delete multiple subscriptions
+message BatchCreateAndDeleteRequest {
+    repeated CreateRequest to_create = 1;
+    repeated DeleteRequest to_delete = 2;
+}
+
+// Response in return to CreateAndDeleteBatchRequest
+message BatchCreateAndDeleteResponse {
+    repeated int64 created_ids = 1;
+    string error = 2;
+}
+
+// Request to replace routing settings by user and custom fields
+message BatchReplaceRequest {
+    int32 user_id = 1;
+    repeated CustomField replace_by_custom_fields = 2;
+    repeated BatchReplaceCreateRequest new_subscriptions = 3;
+}
+
+// Response for BatchReplaceRequest operation
+message BatchReplaceResponse {
+    repeated int64 created_ids = 1;
+}
+
+// Page is the pagination request parameter for Subscriptions
+message Page {
+    string cursor = 1;
+    int64 limit = 2;
+}
+
+// Pages is pagination response parameter for Subscriptions
+message Pages {
+    string next = 1; // this is the cursor to the next page
+}

@@ -1,0 +1,1249 @@
+syntax = "proto3";
+
+package github.turboscan;
+
+import "google/protobuf/timestamp.proto";
+import "turboscan/proto/turboscan.proto";
+
+option go_package = "./;proto";
+option ruby_package = "Turboscan::Proto";
+
+
+// Results primarily provides a read-only view over Code scanning data and is implemented by turboscansvc.
+// There are a few write operations (updating an alert resolution, for example), however the majority of the operations
+// exist to allow the GitHub monolith to query and display Code scanning data.
+// To find the part of the codebase responsible for processing uploaded analyses, see hydrosvc / processor.go.
+service Results {
+  // GetAnalysis returns the data associated with a SARIF run, the tool and any processing errors that occurred.
+  // This endpoint is primarily used by the API.
+  rpc GetAnalysis(AnalysisRequest) returns (AnalysisResponse);
+  // GetAnalysisSarif reconstructs a SARIF document from the data we have in the database related to a SARIF run.
+  // We do not return the original SARIF document, so any data that TurboScan does not use is likely to be omitted by the
+  // document that is returned.
+  // This endpoint is primarily used by the API.
+  rpc GetAnalysisSarif(AnalysisSarifRequest) returns (AnalysisSarifResponse);
+  // GetAnalyses pages through the analyses associated with a repository with some basic filtering and sorting options.
+  rpc GetAnalyses(AnalysesRequest) returns (AnalysesResponse);
+  // GetAlerts pages through the logical alerts associated with a repository with filtering and sorting options.
+  // It attempts to search the data using Elastic Search, falling back to MySQL if Elastic Search is not available.
+  // The alert data is augmented with information like which rule produced the alert and its fixed state.
+  rpc GetAlerts(AlertsRequest) returns (AlertsResponse);
+  // GetAlertTitles returns a mapping between alert numbers and the short description of their rules.
+  // It is primarily used to provide rich links to Code Scanning alerts.
+  rpc GetAlertTitles(AlertTitlesRequest) returns (AlertTitlesResponse);
+  // GetCounts returns a count of the open logical alerts associated with a repository.
+  // It is a heavily used endpoint that is cached by the monolith.
+  rpc GetCounts(CountsRequest) returns (CountsResponse);
+  // GetCountsByTool returns a count of the open logical alerts associated with a repository, broken down by the tool
+  // that reported them.
+  rpc GetCountsByTool(CountsByToolRequest) returns (CountsByToolResponse);
+  // GetAlert returns the data for a single logical alert.
+  // The alert data is augmented with information like which rule produced the alert, where it is in the codebase
+  // and its fixed state.
+  rpc GetAlert(AlertRequest) returns (AlertResponse);
+  // GetCodePaths returns where an alert is in the codebase, plus execution path details that illustrate a
+  // possible problem in the code.
+  rpc GetCodePaths(CodePathsRequest) returns (CodePathsResponse);
+  // GetRuleTags returns the complete set of tags that a tool has provided. This is used to power a dropdown that allows
+  // the user to filter results based on tag. An example of a tag might be a CVE identifier, for example.
+  // Unlike GetRules, GetRulesTags does not attempt to filter out tags for rules that do not have any alerts associated
+  // with them.
+  rpc GetRuleTags(RuleTagsRequest) returns (RuleTagsResponse);
+  // GetRules returns a list of rules for alerts associated with this repository. It excludes rules belonging to alerts
+  // that are associated with deleted analyses.
+  rpc GetRules(RulesRequest) returns (RulesResponse);
+  // GetTimelineEvents returns the lifecycle events associated with an alert. It is used to populate the alert history.
+  rpc GetTimelineEvents(TimelineEventsRequest) returns (TimelineEventsResponse);
+  // PullRequestAlerts returns the new alerts introduced in a PR, and the information needed for the "Code Scanning results" check run.
+  rpc PullRequestAlerts(PullRequestAlertsRequest) returns (PullRequestAlertsResponse);
+  // PullRequestIntroducedAlerts returns all the alerts introduced in a PR including the alerts introduced and fixed in the PR.
+  rpc PullRequestIntroducedAlerts(PullRequestIntroducedAlertsRequest) returns (PullRequestIntroducedAlertsResponse);
+  // ToolNames returns names of the code scanning tools that have been run against this repository.
+  rpc ToolNames(ToolNamesRequest) returns (ToolNamesResponse);
+  // Annotations is called when rendering the alerts on the files changed tab on pull requests. You ask it for a set of
+  // alert numbers and it returns much the same information about the alerts as Diff does, but does not have to perform
+  // an expensive diffing operation in order to work out which alerts to show.
+  rpc Annotations(AnnotationsRequest) returns (AnnotationsResponse);
+  // SetAlertsStatus allows the monolith to set a resolution for an alert. This can be used to resolve an alert
+  // or reopen an alert that was resolved.
+  rpc SetAlertsStatus(SetAlertsStatusRequest) returns (SetAlertsStatusResponse);
+  // DeleteAnalysis soft deletes an analysis record. If it was the most recent analysis then it updates the previous
+  // analysis to be the new most recent analysis.
+  rpc DeleteAnalysis(DeleteAnalysisRequest) returns (DeleteAnalysisResponse);
+  // GetAlertInstances returns a list of physical alerts for a specific logical alerts. It is used by both the API and
+  // the show page, and in the Ruby code it is currently called with Turboscan.instances.
+  rpc GetAlertInstances(AlertInstancesRequest) returns (AlertInstancesResponse);
+  // GetAlertConfigurationStatuses returns information about the status of an alert in all configurations where that
+  // alert has been detected. It is used for the Affected Branches section of the alert show page.
+  rpc GetAlertConfigurationStatuses(AlertConfigurationStatusesRequest) returns (AlertConfigurationStatusesResponse);
+  // GetDelivery returns information about a SARIF upload. A single delivery can be responsible for creating multiple
+  // analyses.
+  rpc GetDelivery(DeliveryRequest) returns (DeliveryResponse);
+  // GetAlertsByRepo is a security center endpoint which uses ElasticSearch data, augmented with information from the database
+  // to provide alert information across a set of repository IDs.
+  rpc GetAlertsByRepo(AlertsByRepoRequest) returns (AlertsByRepoResponse);
+  // GetToolNamesForOrg is a security center endpoint that uses ElasticSearch to return a list of all the tool names used across a set of repository IDs.
+  rpc GetToolNamesForOrg(ToolNamesForOrgRequest) returns (ToolNamesResponse);
+  // GetToolStatus returns information about the most recent analyses uploaded to a repository. It powers the
+  // tool status page.
+  rpc GetToolStatus(ToolStatusRequest) returns (ToolStatusResponse);
+  // GetFilesExtracted returns information about which files were discovered by a tool during code scanning and if they
+  // were successfully extracted or not.
+  rpc GetFilesExtracted(FilesExtractedRequest) returns (FilesExtractedResponse);
+  // GetFilesExtractedSummary returns summary information about which files were discovered by a tool during code scanning.
+  rpc GetFilesExtractedSummary(FilesExtractedSummaryRequest) returns (FilesExtractedSummaryResponse);
+  // GetToolStatusRules returns the rules used by all the analyses for a ref.
+  rpc GetToolStatusRules(ToolStatusRulesRequest) returns (ToolStatusRulesResponse);
+  // GetRulesForOrg is a security center endpoint that uses ElasticSearch to return a list of all the rules used across a set of repository IDs.
+  rpc GetRulesForOrg(RulesForOrgRequest) returns (RulesForOrgResponse);
+  // GetRepositoryIDsForOrg is a security center endpoint thatuses ElasticSearch to filter a list of repository IDs to a matching owner.
+  rpc GetRepositoryIDsForOrg(RepositoryIDsForOrgRequest) returns (RepositoryIDsResponse);
+  // GetSeveritiesForOrg is a security center endpoint that uses ElasticSearch to return a list of alert counts for each severity.
+  rpc GetSeveritiesForOrg(SeveritiesForOrgRequest) returns (SeveritiesForOrgResponse);
+  // GetRuleTagsForOrg is a security center endpoint that uses ElasticSearch to return a list of tags used across a set of repository IDs.
+  rpc GetRuleTagsForOrg(RuleTagsForOrgRequest) returns (RuleTagsForOrgResponse);
+  // GetCountsByRepo uses ElasticSearch to return a count of the open/closed logical alerts associated with a repository,
+  // broken down by the repository.
+  rpc GetCountsByRepo(CountsByRepoRequest) returns (CountsByRepoResponse);
+  // GetCountsByCampaigns is a security campaigns endpoint that uses ElasticSearch to return a count of open alerts for the given campaigns.
+  rpc GetCountsByCampaigns(CountsByCampaignsRequest) returns (CountsByCampaignsResponse);
+  // GetTotalCountsForCampaigns returns the total counts for the given filter
+  rpc GetTotalCountsForCampaigns(TotalCountsForCampaignsRequest) returns (TotalCountsForCampaignsResponse);
+  // CreateDelivery synchronously creates a delivery record to track SARIF uploads. If a delivery is missing when the
+  // hydrosvc pipeline is started then it will be created. This ensures we will always have a delivery, even if
+  // TurboScan was unavailable at time of upload.
+  rpc CreateDelivery(CreateDeliveryRequest) returns (CreateDeliveryResponse);
+  // GetCodeScanningEnabled determines whether code scanning is considered to be enabled on a repo or not.
+  rpc GetCodeScanningEnabled(GetCodeScanningEnabledRequest) returns (GetCodeScanningEnabledResponse);
+  // EvalRefUpdateRules evaluates a list of code scanning ref update rules to determine whether the ref update should be allowed or not.
+  // It returns a list of evaluation results in the same order that the rule configs were provided in.
+  // See code_scanning_rule.rb in the monolith.
+  rpc EvalRefUpdateRules(EvalRefUpdateRulesRequest) returns (EvalRefUpdateRulesResponse);
+  // GetLinksForAlerts fetches all linked branches and pull requests for a set of alert numbers
+  rpc GetLinksForAlerts(GetLinksForAlertsRequest) returns (GetLinksForAlertsResponse);
+  // CreateAlertLinks creates a link between an alert and a branch or pull request
+  rpc CreateAlertLinks(CreateAlertLinksRequest) returns (CreateAlertLinksResponse);
+  // CreateSecurityCampaignAlerts creates security campaigns alerts
+  rpc CreateSecurityCampaignAlerts(CreateSecurityCampaignAlertsRequest) returns (CreateSecurityCampaignAlertsResponse);
+  // DeleteSecurityCampaignAlerts deletes security campaigns alerts
+  rpc DeleteSecurityCampaignAlerts(DeleteSecurityCampaignAlertsRequest) returns (DeleteSecurityCampaignAlertsResponse);
+  // DeleteAlertLinks deletes alert links
+  rpc DeleteAlertLinks(DeleteAlertLinksRequest) returns (DeleteAlertLinksResponse);
+}
+
+enum AlertSortOrder {
+  WEIGHT = 0;
+  CREATED_ASCENDING = 1;
+  CREATED_DESCENDING = 2;
+  UPDATED_ASCENDING = 3;
+  UPDATED_DESCENDING = 4;
+}
+
+enum TimelineEventType {
+  reserved 2, 5, 8;
+  TIMELINE_EVENT_TYPE_UNKNOWN = 0;
+  TIMELINE_EVENT_TYPE_ALERT_APPEARED_IN_BRANCH = 1;
+  TIMELINE_EVENT_TYPE_ALERT_CLOSED_BECAME_FIXED = 3;
+  TIMELINE_EVENT_TYPE_ALERT_CLOSED_BY_USER = 4;
+  TIMELINE_EVENT_TYPE_ALERT_CREATED = 6;
+  TIMELINE_EVENT_TYPE_ALERT_REAPPEARED = 7;
+  TIMELINE_EVENT_TYPE_ALERT_REOPENED_BY_USER = 9;
+  TIMELINE_EVENT_TYPE_ALERT_DELETED_BY_USER = 10;
+  TIMELINE_EVENT_TYPE_ALERT_CLOSED_BECAME_OUTDATED = 11;
+}
+
+enum AnalysisStatus {
+  UNKNOWN = 0;
+  MISSING = 1;
+  PENDING = 2;
+  FAILED = 3;
+  COMPLETE = 4;
+}
+
+enum DeliveryOrigin {
+  DELIVERY_ORIGIN_UNKNOWN = 0; // We don't know what this is, but it could be a new enablement advanced/third-party tools setup.
+  DELIVERY_ORIGIN_YML = 1;     // YML-Based analysis. The YML is available in the repo.
+  DELIVERY_ORIGIN_MANAGED = 2; // Managed Analysis.
+  DELIVERY_ORIGIN_DYNAMIC = 3; // Dynamic Actions Run (excl. Managed Analysis).
+  DELIVERY_ORIGIN_API = 4;     // Analysis from API.
+}
+
+message Analysis {
+  reserved 2, 4, 18, 19, 20, 22, 23;
+  uint64 id = 1;
+  string analysis_key = 3;
+  string environment = 5;
+  string errors = 6;
+  google.protobuf.Timestamp created_at = 7;
+  string commit_oid = 8;
+  string sarif_id = 9;
+  uint32 results_count = 10;
+  uint32 rules_count = 11;
+  ToolDescription tool_description = 12;
+  bool most_recent = 13;
+  string process_warning = 14;
+  string category = 15;
+  google.protobuf.Timestamp build_started_at = 16;
+  google.protobuf.Timestamp upload_started_at = 17;
+  uint64 workflow_run_id = 21;
+  AnalysisStatus status = 24;
+  bytes ref_name_bytes = 25;
+  DeliveryOrigin delivery_origin = 26;
+  bytes workflow_path = 27;
+  bool is_outdated = 28;
+  bool deletable = 29;
+}
+
+enum AnalysesSortOrder {
+  ANALYSES_CREATED_DESCENDING = 0;
+  ANALYSES_CREATED_ASCENDING = 1;
+}
+
+message AnalysesRequest {
+  reserved 2;
+  uint64 repository_id = 1; // required
+  string tool = 3;
+  uint32 limit = 4;
+  uint32 numeric_page = 5;
+  string sarif_id = 6;
+  string tool_guid = 7;
+  AnalysesSortOrder sort_order = 8;
+  repeated bytes ref_names_bytes = 9;
+}
+
+message AnalysesResponse {
+  repeated Analysis analyses = 1;
+  uint64 total_count = 2;
+  bool complete_analysis_exists = 3;
+}
+
+message AnalysisRequest {
+  uint64 repository_id = 1; // required
+  uint64 analysis_id = 2;
+}
+
+message AnalysisResponse {
+  Analysis analysis = 1;
+}
+
+message AnalysisSarifRequest {
+  uint64 repository_id = 1; // required
+  uint64 analysis_id = 2;
+  string repo_html_url = 3;
+  string alerts_api_url = 4;
+}
+
+message AnalysisSarifResponse {
+  string sarif = 1;
+}
+
+message AlertsRequest {
+  reserved 2, 3, 4, 9, 11, 12, 13, 16, 18, 32;
+  uint64 repository_id = 1; // required
+  uint32 limit = 5;
+  uint32 numeric_page = 6;
+  bool resolved_only = 7;
+  AlertSortOrder sort_order = 8;
+  repeated string rule_tags = 10;
+  AlertStateFilter state = 14;
+  AlertClassificationFilter classification = 15;
+  string search_query = 17;
+  repeated string excluded_rule_tags = 19;
+  repeated Severity severities = 20;
+  repeated string tools = 21;
+  repeated string tool_guids = 22;
+  repeated string excluded_rule_ids = 23;
+  repeated string excluded_tools = 24;
+  repeated ResultResolutionFilter excluded_resolutions = 25;
+  repeated Severity excluded_severities = 26;
+  repeated string rule_sarif_identifiers = 27;
+  repeated ResultResolutionFilter resolutions = 28;
+  repeated bytes ref_names_bytes = 29;
+  repeated string file_paths = 30;
+  repeated string language_file_paths = 31;
+  Cursor cursor = 33;
+  repeated uint32 numbers = 34;
+  uint64 owner_id = 35;
+}
+
+message Cursor {
+  string value = 1;
+  bool descending = 2;
+}
+
+
+message AlertsResponse {
+  reserved 2, 3, 7;
+  repeated Result results = 1;
+  uint64 open_count = 4;
+  uint64 resolved_count = 5;
+  bool analysis_exists = 6;
+  uint64 total_count = 8;
+  SearchStatus search_status = 9;
+  string next_cursor = 10;
+  string prev_cursor = 11;
+}
+
+message AlertRequest {
+  reserved 2, 4, 5, 6, 7, 8;
+  uint64 repository_id = 1; // required
+  uint32 number = 3;
+  bool include_related_locations = 9;
+}
+
+message AlertResponse {
+  reserved 2, 5, 8, 10;
+  Result result = 1;
+  repeated RelatedLocation related_locations = 3;
+  repeated string rule_tags = 4;
+  bool has_code_paths = 6;
+  string rule_help = 7;
+  string query_uri = 9;
+  bytes ref_name_bytes = 11;
+}
+
+message AlertTitlesRequest {
+  repeated uint64 repository_ids = 1;
+  repeated uint32 alert_numbers = 2;
+}
+
+message AlertTitlesResponse {
+  repeated uint64 repository_ids = 1;
+  repeated uint32 alert_numbers = 2;
+  repeated string titles = 3;
+}
+
+message CountsRequest {
+  reserved 2;
+  uint64 repository_id = 1; // required
+  string tool_name = 3;
+  repeated bytes ref_names_bytes = 4;
+}
+
+message CountsResponse {
+  uint64 open_count = 1;
+  bool analysis_exists = 2;
+  google.protobuf.Timestamp latest_analysis = 3;
+}
+
+message CountsByToolRequest {
+  reserved 2;
+  uint64 repository_id = 1; // required
+  repeated bytes ref_names_bytes = 3; // empty means no refs, not all refs
+}
+
+message CountsByToolResponse {
+  reserved 1;
+  repeated ToolAlertCount tool_counts = 2;
+}
+
+message ToolAlertCount {
+  string tool_name = 1;
+  uint64 open_count = 2;
+}
+
+message CodePath {
+  reserved 1;
+  repeated CodePathStep steps = 2;
+}
+
+message CodePathStep {
+  Location location = 1;
+  string message = 2;
+}
+
+message Location {
+  string file_path = 1;
+  uint32 start_line = 2;
+  uint32 end_line = 3;
+  uint32 start_column = 4;
+  uint32 end_column = 5;
+}
+
+message AlertInstance {
+  reserved 2;
+  string commit_oid = 1;
+  Location location = 3;
+  bool is_fixed = 4;
+  bool has_file_classification = 5;
+  AnalysisKey analysis_key = 6;
+  repeated string classification = 7;
+  string message_text = 8;
+  google.protobuf.Timestamp created_at = 9;
+  bytes ref_name_bytes = 10;
+  bool is_outdated = 11;
+}
+
+message CodePathsRequest {
+  reserved 3, 4, 5;
+  uint64 repository_id = 1;
+  uint32 number = 2;
+}
+
+message CodePathsResponse {
+  reserved 4;
+  Result result = 1;
+  repeated CodePath code_paths = 2;
+  repeated RelatedLocation related_locations = 3;
+  bytes ref_name_bytes = 5;
+}
+
+message RelatedLocation {
+  reserved 1, 4 to 8, 11;
+  google.protobuf.Timestamp created_at = 2;
+  google.protobuf.Timestamp updated_at = 3;
+  string message = 9;
+  uint32 replacement_index = 10;
+  Location location = 12;
+}
+
+// A Result corresponds to a row from ts_logical_alerts
+// WARNING: This message is also used as part of the AlertEvent hydro schema. Any change should be synced
+// with: https://github.com/github/hydro-schemas/blob/master/proto/hydro/schemas/turboscan/v0/alert_event.proto
+message Result {
+  reserved 1 to 7, 11, 12, 13, 18, 19, 20, 23, 24, 26;
+  reserved "classification", "rule_id", "rule_short_description", "rule_full_description", "rule_name", "rule_sarif_identifier", "instances";
+  string message_text = 8;
+  RuleSeverity rule_severity = 9; // TODO: rename - this relates to a single physical alert’s severity and is usually derived from rule severity but can be different
+  google.protobuf.Timestamp created_at = 10;
+  ResultResolution resolution = 14;
+  uint32 resolver_id = 15;
+  google.protobuf.Timestamp resolved_at = 16;
+  uint32 number = 17;
+  ToolDescription tool = 21;
+  string message_markdown = 22;
+  string guid = 25;
+  SecuritySeverity security_severity = 27;
+  AlertInstance most_recent_instance = 28;
+  bool is_fixed = 29;
+  Rule rule = 30;
+  google.protobuf.Timestamp fixed_at = 31;
+  google.protobuf.Timestamp updated_at = 32;
+  string resolution_note = 33;
+  uint64 dismissal_approver_id = 34;
+}
+
+message TimelineEvent {
+  reserved 7;
+  uint64 id = 1;
+  uint64 logical_alert_id = 2;
+  TimelineEventType type = 3;
+  string message = 4;
+  google.protobuf.Timestamp timestamp = 5;
+  string commit_oid = 6;
+  uint32 user_id = 8;
+  ResultResolution resolution = 9;
+  string file_path = 10;
+  uint32 start_line = 11;
+  string tool_version = 12;
+  repeated EnvironmentData environment = 13;
+  uint64 workflow_run_id = 14;
+  string category = 15;
+  string resolution_note = 16;
+  bytes ref_name_bytes = 17;
+}
+
+message EnvironmentData {
+  string key = 1;
+  string value = 2;
+}
+
+message RuleTagsRequest {
+  reserved 2;
+  uint64 repository_id = 1; // required
+  repeated string tools = 3;
+}
+
+message RuleTagsResponse {
+  repeated string rule_tags = 1;
+}
+
+message RulesRequest {
+  reserved 2;
+  uint64 repository_id = 1; // required
+  repeated string tools = 3;
+  string search_query = 4;
+}
+
+message RulesResponse {
+  repeated Rule rules = 1;
+}
+
+message Rule {
+  string sarif_identifier = 1;
+  string short_description = 2;
+  repeated string tags = 3;
+  string name = 4;
+  RuleSeverity severity = 5;
+  string full_description = 6;
+  string help = 7;
+  string query_uri = 8;
+  string help_uri = 9;
+}
+
+message TimelineEventsRequest {
+  reserved 3;
+  uint64 repository_id = 1;
+  uint32 number = 2;
+  repeated bytes ref_names_bytes = 4;
+}
+
+message TimelineEventsResponse {
+  repeated TimelineEvent events = 1;
+}
+
+message PullRequestAlertsRequest {
+  uint64 repository_id = 1;
+  string tool = 2;
+  bytes base_ref_bytes = 3;
+  string head_commit_oid = 4;
+  string merge_commit_oid = 5;
+  repeated FileChange file_changes = 6;
+}
+
+message PullRequestAlertsResponse {
+  reserved 10;
+  repeated DiffedAlert new_alerts = 1;
+  uint64 new_count = 2;
+  uint64 security_critical_count = 3;
+  uint64 security_high_count = 4;
+  uint64 security_medium_count = 5;
+  uint64 security_low_count = 6;
+  uint64 error_count = 7;
+  uint64 warning_count = 8;
+  uint64 note_count = 9;
+  map<string, NewCategorySummary> new_categories = 11;
+  map<string, MissingCategorySummary> missing_categories = 12;
+  repeated DiffedAlert fixed_alerts = 13;
+  uint64 fixed_count = 14;
+  google.protobuf.Timestamp latest_upload_time = 15;
+}
+
+message PullRequestIntroducedAlertsRequest {
+  uint64 repository_id = 1;
+  string tool = 2;
+  bytes base_ref_bytes = 3;
+  string head_commit_oid = 4;
+  string merge_commit_oid = 5;
+  uint32 pr_number = 6;
+  repeated FileChange file_changes = 7;
+}
+
+message PullRequestIntroducedAlertsResponse {
+  repeated AlertInPullRequest alerts = 1;
+  uint64 total_count = 2;
+}
+
+message AlertInPullRequest {
+  uint32 alert_number = 1;
+  uint64 analysis_id = 2;
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp updated_at = 4;
+  reserved 5;
+  ResultResolution resolution = 6;
+  SecuritySeverity severity = 7;
+  bytes ref_name_bytes = 8;
+  string tool = 9;
+  string rule_sarif_identifier = 10;
+  bool has_autofix = 11;
+  bool autofix_accepted = 12;
+  bool fixed = 13;
+  google.protobuf.Timestamp fixed_at = 14;
+  google.protobuf.Timestamp resolved_at = 15;
+}
+
+message NewCategorySummary {
+  reserved 1;
+  uint64 alert_count = 2;
+}
+
+message MissingCategorySummary {
+  DeliveryOrigin delivery_origin = 1;
+  bytes workflow_path = 2;
+}
+
+message FileChange {
+  string file_path = 1;
+  repeated Change changes = 2;
+}
+
+message Change {
+  bool added = 1;
+  uint32 start_line = 2;
+  uint32 end_line = 3;
+}
+
+message DiffedAlert {
+  uint32 number = 1;
+  RuleSeverity rule_severity = 2;
+  string message_text = 3;
+  string rule_short_description = 4;
+  Location location = 5;
+  string message_markdown = 7;
+  SecuritySeverity security_severity = 8;
+  string rule_sarif_identifier = 9;
+}
+
+message AnalysisKey {
+  uint64 id = 1;
+  string analysis_key = 2;
+  string tool = 3;
+  string environment = 4;
+  string category = 5;
+  string commit_oid = 6;
+}
+
+message FilesExtractedSummaryRequest {
+  // __(Required)__ Repository ID for retrieving Tool Status information.
+  uint64 repository_id = 1;
+  // __(Required)__ Ref is the branch reference.
+  bytes ref = 2;
+  // __(Required)__ The name of the tool to provide file information for.
+  string tool = 3; // required
+}
+
+message FilesExtractedSummaryResponse {
+  // Top-level information about how many files were extracted
+  ToolStatusExtracted total_extracted = 1;
+  // Language-level information about how many files were extracted
+  map<string, ToolStatusExtracted> languages_extracted = 2;
+}
+
+// FilesExtractedResponse requests information used for the tool status extracted files CSV download
+message FilesExtractedRequest {
+  // __(Required)__ Repository ID for retrieving Tool Status information.
+  uint64 repository_id = 1;
+  // __(Required)__ Ref is the branch reference, base64 encoded.
+  bytes ref = 2;
+  // __(Required)__ The name of the tool to provide file information for.
+  string tool = 3; // required
+  // __(Required)__ List of analyses to return extracted files for.
+  repeated uint64 analysis_ids = 4;
+}
+
+// FilesExtractedResponse returns information used for the tool status extracted files CSV download
+message FilesExtractedResponse {
+  // Categories contains a map of analysis categories to files that were extracted.
+  map<string, ExtractedCategoryFiles> categories = 1;
+}
+
+// ExtractedCategoryFiles contains a mapping of languages to extracted file information
+message ExtractedCategoryFiles {
+  // Languages contains a map of languages that are empty if no files were extracted
+  map<string, ExtractedLanguageFiles> languages = 1;
+}
+
+// ExtractedLanguagesFiles contains the extracted file information for a language
+message ExtractedLanguageFiles {
+  // Files contains the list of files that were provided in the baseline
+  repeated ExtractedFile files = 1;
+}
+
+// ExtractedFile contains information about a path and if it was extracted successfully.
+message ExtractedFile {
+  // Path of the file that was extracted
+  bytes path = 1;
+  // Success tracks if the path was successfully extracted or not
+  bool success = 2;
+  // Message contains the error message if the path was not successfully extracted
+  bytes message = 3;
+}
+
+message ToolStatusRulesRequest {
+  // __(Required)__ Repository ID for retrieving Tool Status information.
+  uint64 repository_id = 1;
+  // __(Required)__ Ref is the branch reference, base64 encoded.
+  bytes ref = 2;
+  // __(Required)__ The name of the tool to provide information for.
+  string tool = 3; // required
+  // __(Required)__ List of analyses to return rules for.
+  repeated uint64 analysis_ids = 4;
+}
+
+message ToolStatusRulesResponse {
+  message CategoryRules {
+    message Rule {
+      string sarif_identifier = 1;
+      uint64 results = 2;
+    }
+
+    message RuleOrigins  {
+      RuleOrigin origin = 1;
+      repeated Rule rules = 2;
+    }
+
+    repeated RuleOrigins origins = 1;
+  }
+
+  // Categories contains a map of analysis categories to files that were extracted.
+  map<string, CategoryRules> categories = 1;
+}
+
+// Represents Tool Status page request
+message ToolStatusRequest {
+  reserved 3;
+  // __(Required)__ Repository ID for retrieving Tool Status information
+  uint64 repository_id = 1;
+  // Ref is the branch reference, base64 encoded
+  bytes ref = 2; // __(Required)__
+}
+
+message ToolStatusResponse {
+  repeated ToolStatus tools = 1;
+}
+
+// AnalysisMessageLevel represents how a Code Scanning status message relates to the status of a Code Scanning tool.
+// When aggregating tool status across multiple analyses, the highest value is taken as the overall status.
+enum AnalysisMessageLevel {
+  // Messages that affirm Code Scanning worked correctly
+  SUCCESS = 0;
+  // Code scanning worked, however the tool may be misconfigured
+  ATTENTION = 1;
+  // Code scanning is not working
+  DANGER = 2;
+}
+
+// AnalysisMessage contains a serialized `ts_analysis_messages` record that describes something that happened when an
+// analysis was processed. These messages feed in to the overall status of a tool.
+message AnalysisMessage {
+  // A high level overview of this message
+  string title = 1;
+  // A markdown formatted document that contains detailed, actionable information
+  string message = 2;
+  // The severity of this message and how it affects the tool status
+  AnalysisMessageLevel level = 3;
+  // The type of this message. Used when rolling up several messages of the same time and determining the priority of
+  // messages
+  string key = 4;
+  // The locations of the cause of the alert, if applicable
+  repeated Location locations = 5;
+  // Links for the user that lead to further documentation
+  repeated string help_links = 6;
+  // Does this message have a corresponding analysis or is it only related to a delivery?
+  bool has_analysis = 7;
+}
+
+message ToolStatus {
+  reserved 3, 4;
+  string name = 1; // The name of the tool this ToolStatus record is for
+  repeated CategoryStatus categories = 2; // Information about the latest analysis for each category
+}
+
+// ToolStatusExtracted contains aggregated information about which files were extracted during an analysis
+message ToolStatusExtracted {
+  // The number of files successfully extracted
+  uint64 extracted = 2;
+  // The total number of files that the tool found in the repository
+  uint64 total = 3;
+}
+
+message ConfigurationGroup {
+  DeliveryOrigin delivery_origin = 1;
+  bytes workflow_path = 2;
+}
+
+message CategoryStatus {
+  reserved 4, 12, 13;
+  message QuerySuite {
+    enum Type {
+      QUERY_SUITE_UNKNOWN = 0;
+      QUERY_SUITE_BUILTIN_SUITE = 1;
+      QUERY_SUITE_LOCAL_QUERY = 2;
+      QUERY_SUITE_EXTERNAL_REPOSITORY = 3;
+    }
+    Type type = 1;
+    string uses = 2;
+  }
+  reserved 10;
+  uint64 workflow_run_id = 1;
+  AnalysisStatus analysis_status = 2;
+  string commit_oid = 3;
+  google.protobuf.Timestamp updated_at = 5;
+  string category = 6;
+  string tool_version = 7;
+  repeated AnalysisMessage messages = 8;
+  google.protobuf.Timestamp created_at = 9;
+  repeated RuleOrigin extensions = 11;
+  uint64 analysis_id = 14;
+  bool is_outdated = 15;
+  repeated QuerySuite query_suites = 16;
+  bool default_queries_disabled = 17;
+  bool has_most_recent = 18;
+  bytes configuration_hash = 19;
+  ConfigurationGroup configuration_group = 20;
+}
+
+message RuleOrigin {
+  string name = 1;
+  string version = 2;
+}
+
+message ToolNamesRequest {
+  uint64 repository_id = 1; // required
+}
+
+message ToolDescription {
+  reserved 2;
+  string name = 1;
+  string guid = 3;
+  string version = 4;
+  uint64 alert_count = 5;
+}
+
+message ToolNamesResponse {
+  reserved 1;
+  repeated ToolDescription tools = 2;
+}
+
+message AnnotationsRequest {
+  uint64 repository_id = 1;
+  repeated uint32 numbers = 2;
+  string head_commit_oid = 3;
+  string merge_commit_oid = 4;
+}
+
+message AnnotationResult {
+  Result result = 1;
+  repeated RelatedLocation related_locations = 2;
+  bool has_code_paths = 3;
+  bool is_quality = 4;
+}
+
+message AnnotationsResponse {
+  repeated AnnotationResult results = 1;
+}
+
+message SetAlertsStatusRequest {
+  reserved 5;
+  uint64 repository_id = 1; // required
+  ResultResolution resolution = 2; // required
+  uint32 resolver_id = 3; // required
+  repeated uint32 numbers = 4; // required
+  string resolution_note = 6;
+  repeated bytes ref_names_bytes = 7;
+  string resolver_login = 8;
+  uint64 org_id = 9;
+  string org = 10;
+  uint64 business_id = 11;
+  string business = 12;
+  uint64 dismissal_approver_id = 13;
+  string dismissal_approver_login = 14;
+}
+
+message SetAlertsStatusResponse {
+  repeated Result results = 1;
+}
+
+message DeleteAnalysisRequest {
+  reserved 4;
+  uint64 repository_id = 1;
+  uint64 analysis_id = 2;
+  bool confirm_config_delete = 3;
+}
+
+message DeleteAnalysisResponse {
+  uint64 new_most_recent_analysis_id = 1;
+}
+
+message AlertInstancesRequest {
+  reserved 3;
+  uint64 repository_id = 1; // required
+  uint32 alert_number = 2; // required
+  uint32 limit = 4;
+  uint32 numeric_page = 5;
+  bool skip_pagination = 6;
+  bool branches_only = 7;
+  bool no_count = 8;
+  repeated bytes ref_names_bytes = 9;
+}
+
+message AlertInstancesResponse {
+  repeated AlertInstance instances = 1;
+  uint64 total_count = 8;
+}
+
+message AlertConfigurationStatusesRequest {
+  uint64 repository_id = 1; // required
+  uint32 alert_number = 2;  // required
+  uint32 limit = 3;
+}
+
+message AlertConfigurationStatus {
+  bytes ref_name_bytes = 1;
+  string category = 2;
+  string tool = 3;
+  // created_at(_oid) may be null if we cannot determine when the alert was
+  // first detected for this configuration
+  google.protobuf.Timestamp created_at = 4;
+  string created_at_oid = 5;
+  // fixed_at(_oid) will be null if the alert is not fixed in this configuration
+  google.protobuf.Timestamp fixed_at = 6;
+  string fixed_at_oid = 7;
+}
+
+message AlertConfigurationStatusesResponse {
+  repeated AlertConfigurationStatus statuses = 1;
+}
+
+enum SearchStatus {
+  STATUS_OK = 0;
+  STATUS_INTERNAL_ERROR = 1;
+  STATUS_NOT_CONFIGURED = 2;
+  STATUS_INVALID_QUERY = 3;
+}
+
+message AlertsByRepoRequest {
+  reserved 1, 7, 8, 9, 10, 18;
+  uint32 limit = 2;
+  uint32 numeric_page = 3;
+  AlertSortOrder sort_order = 4;
+  AlertStateFilter state = 5;
+  repeated uint64 repository_ids = 6;
+  string search_query = 11;
+  string before_cursor = 12;
+  string after_cursor = 13;
+  repeated uint64 excluded_repository_ids = 14;
+  repeated string excluded_rule_sarif_identifiers = 15;
+  repeated string excluded_tools = 16;
+  repeated Severity excluded_severities = 17;
+  repeated ResultResolutionFilter excluded_resolutions = 19;
+  repeated Severity severities = 20;
+  repeated uint64 owner_ids = 21;
+  repeated string tools = 23;
+  repeated string tool_guids = 24;
+  repeated string rule_sarif_identifiers = 25;
+  repeated string rule_tags = 32;
+  repeated string excluded_rule_tags = 33;
+  repeated RepositoryVisibility repository_visibilities = 26;
+  repeated ResultResolutionFilter resolutions = 27;
+  repeated RepoNumber repo_numbers = 28;
+  AlertClassificationFilter classification = 29;
+  AlertLinksFilter alert_links = 30;
+  AutofixFilter autofix = 31;
+  repeated AutofixFilter autofixes = 34;
+  repeated AutofixFilter excluded_autofixes = 35;
+  repeated uint64 security_campaign_ids = 36;
+}
+
+message AlertsByRepoResponse {
+  repeated RepoResult results = 1;
+  uint64 open_count = 2;
+  uint64 resolved_count = 3;
+  uint64 open_with_links_count = 6;
+  string next_cursor = 4;
+  string prev_cursor = 5;
+}
+
+message RepoResult {
+  uint64 repository_id = 1;
+  Result result = 2;
+}
+
+message ToolNamesForOrgRequest {
+  reserved 1;
+  repeated uint64 repository_ids = 2;
+  AlertsFilter filter = 3;
+  repeated uint64 excluded_repository_ids = 4;
+  repeated uint64 owner_ids = 5;
+}
+
+message RulesForOrgRequest {
+  reserved 1;
+  repeated uint64 repository_ids = 2;
+  AlertsFilter filter = 3;
+  repeated uint64 excluded_repository_ids = 4;
+  repeated uint64 owner_ids = 5;
+}
+
+// The rule response is different from the repo-level one as we do not have the same level
+// of rule detail available on the organization level
+message RulesForOrgResponse {
+  repeated OrgRule rules = 1;
+}
+
+message OrgRule {
+  string sarif_identifier = 1;
+  string short_description = 2;
+  uint64 alert_count = 3;
+  repeated string tags = 4;
+}
+
+message RepositoryIDsForOrgRequest {
+  reserved 1;
+  AlertsFilter filter = 2;
+  repeated uint64 owner_ids = 3;
+  repeated uint64 repository_ids = 4;
+  repeated uint64 excluded_repository_ids = 5;
+}
+
+message RepositoryIDsResponse {
+  reserved 1;
+  repeated Repository repositories = 2;
+
+  message Repository {
+    uint64 repository_id = 1;
+    uint64 alert_count = 2;
+  }
+}
+
+message SeveritiesForOrgRequest {
+  reserved 1;
+  repeated uint64 repository_ids = 2;
+  AlertsFilter filter = 3;
+  repeated uint64 excluded_repository_ids = 4;
+  repeated uint64 owner_ids = 5;
+}
+
+message SeveritiesForOrgResponse {
+  repeated SeverityItem severities = 1;
+
+  message SeverityItem {
+    Severity severity = 1;
+    uint64 alert_count = 2;
+  }
+}
+
+message RuleTagsForOrgRequest {
+  repeated uint64 owner_ids = 1;
+  repeated uint64 repository_ids = 2;
+  repeated uint64 excluded_repository_ids = 3;
+  AlertsFilter filter = 4;
+}
+
+message RuleTagsForOrgResponse {
+  repeated OrgRuleTag rule_tags = 1;
+}
+
+message OrgRuleTag {
+  string tag = 1;
+  uint64 alert_count = 2;
+}
+
+message CountsByRepoRequest {
+  repeated uint64 owner_ids = 1;
+  repeated uint64 repository_ids = 2;
+  repeated uint64 excluded_repository_ids = 3;
+  AlertsFilter filter = 4;
+}
+
+message CountsByRepoResponse {
+  message RepositoryCounts {
+    uint64 repository_id = 1;
+    uint64 open_count = 2;
+    uint64 closed_count = 3;
+    uint64 open_with_links_count = 4;
+  }
+  uint64 open_count = 1; // total number of open alerts
+  uint64 closed_count = 2; // total number of closed alerts
+  uint64 open_with_links_count = 3; // total number of open alerts with links
+  repeated RepositoryCounts repository_counts = 4; // number of open and closed alerts by repository id
+}
+
+message CountsByCampaignsRequest {
+  repeated uint64 owner_ids = 1;
+  repeated uint64 repository_ids = 2;
+  repeated uint64 excluded_repository_ids = 5;
+  repeated uint64 security_campaign_ids = 3;
+  AlertsFilter filter = 4;
+}
+
+message CountsByCampaignsResponse {
+  message CampaignCounts {
+    uint64 campaign_id = 1;
+    uint64 open_count = 2;
+    uint64 closed_count = 3;
+    uint64 open_with_links_count = 4;
+    uint64 dismissed_count = 5;
+    uint64 autofix_supported_count = 6;
+    uint64 autofix_generated_count = 7;
+    uint64 autofix_accepted_count = 8;
+  }
+  reserved 1, 2, 3;
+  repeated CampaignCounts campaign_counts = 4;
+}
+
+message TotalCountsForCampaignsRequest {
+  repeated uint64 owner_ids = 1;
+  repeated uint64 repository_ids = 2;
+  repeated uint64 excluded_repository_ids = 3;
+  AlertsFilter filter = 4;
+}
+
+message TotalCountsForCampaignsResponse {
+  uint64 open_count = 1;
+  uint64 closed_count = 2;
+  uint64 open_with_links_count = 3;
+  uint64 dismissed_count = 4;
+  uint64 autofix_supported_count = 5;
+  uint64 autofix_generated_count = 6;
+  uint64 autofix_accepted_count = 7;
+}
+
+message CreateDeliveryRequest {
+  message ZipTooBig {
+    string max = 1;
+  }
+  message SarifTooBig {
+    string max = 1;
+  }
+  message InvalidSarif {
+    string message = 1;
+  }
+  message InvalidZip {
+    bool empty = 1;
+  }
+  reserved 7, 18;
+  uint64 repository_id = 1; // required
+  string repository_nwo = 2;
+  bytes ref = 3; // required
+  string commit_oid = 4; // required
+  string sarif_id = 5; // required
+  string request_id = 6;
+  string analysis_key = 8;
+  string environment = 9;
+  string checkout_uri = 10;
+  google.protobuf.Timestamp build_started_at = 11;
+  uint64 workflow_run_id = 12;
+  int64 workflow_run_attempt = 25;
+  google.protobuf.Timestamp upload_started_at = 13; // required
+  google.protobuf.Timestamp upload_finished_at = 14; // required
+  google.protobuf.Timestamp hydro_enqueued_at = 15; // required
+  string sarif_path = 16; // required
+  uint64 source_repository_id = 17;
+  OutdatedConfiguration outdated_configuration = 19;
+  bool rejected = 20;
+  oneof error {
+    ZipTooBig zip_too_big_error = 21;
+    SarifTooBig sarif_too_big_error = 22;
+    InvalidSarif invalid_sarif_error = 23;
+    InvalidZip invalid_zip_error = 24;
+  }
+  string head_commit_oid = 26;
+}
+
+message OutdatedConfiguration {
+  string tool_name = 1;
+  string category = 2;
+}
+
+message CreateDeliveryResponse {
+  uint64 id = 1;
+}
+
+message DeliveryRequest {
+  uint64 repository_id = 1;
+  string sarif_id = 2;
+}
+
+message DeliveryResponse {
+  uint64 analysis_count = 1;
+  repeated ProcessError errors = 2;
+  bytes ref = 3;
+}
+
+message ProcessError {
+  string error_type = 1;
+  string message = 2;
+}
+
+message GetCodeScanningEnabledRequest {
+  uint64 repository_id = 1;
+  bytes default_ref_name_bytes = 2;
+}
+
+message GetCodeScanningEnabledResponse {
+  bool is_enabled = 1;
+}
+
+message EvalRefUpdateRulesRequest {
+  uint64 repository_id = 1;
+  bytes base_ref_bytes = 2;
+  string head_commit_oid = 3;
+  string merge_commit_oid = 4;
+  repeated FileChange file_changes = 5;
+  repeated RuleConfig rule_configs = 6;
+  bool is_dependabot = 7;
+
+  message RuleConfig {
+    repeated ToolConfig tool_configs = 1;
+  }
+
+  message ToolConfig {
+    string name = 1;
+    SeverityChoice alerts_threshold = 2;
+    SecuritySeverityChoice security_alerts_threshold = 3;
+  }
+
+  enum SeverityChoice {
+    SEVERITY_NONE = 0;
+    SEVERITY_ERRORS = 1;
+    SEVERITY_ERRORS_AND_WARNINGS = 2;
+    SEVERITY_ALL = 3;
+  }
+
+  enum SecuritySeverityChoice {
+    SECURITY_SEVERITY_NONE = 0;
+    SECURITY_SEVERITY_CRITICAL = 1;
+    SECURITY_SEVERITY_HIGH_OR_HIGHER = 2;
+    SECURITY_SEVERITY_MEDIUM_OR_HIGHER = 3;
+    SECURITY_SEVERITY_ALL = 4;
+  }
+}
+
+message EvalRefUpdateRulesResponse {
+  repeated EvalResult results = 1;
+
+  message EvalResult {
+    bool passed = 1;
+    string failure_message = 2;
+  }
+}
+
+message GetLinksForAlertsRequest {
+  repeated RepoNumber repos_and_alerts = 1;
+}
+
+message GetLinksForAlertsResponse {
+  repeated AlertLink links = 1;
+}
+
+message AlertLink {
+  uint64 repository_id = 1;
+  uint32 alert_number = 2;
+  uint64 pull_request_id = 3;
+  bytes ref_name_bytes = 4;
+}
+
+message AlertLinkPayload {
+  uint32 alert_number = 1;
+  uint64 pull_request_id = 2;
+  bytes ref_name_bytes = 3;
+}
+
+message CreateAlertLinksRequest {
+  reserved 2, 3, 4;
+  uint64 repository_id = 1;
+  repeated AlertLinkPayload links = 5;
+}
+
+message CreateAlertLinksResponse {}
+
+message CreateSecurityCampaignAlertsRequest {
+  uint64 security_campaign_id = 1;
+  repeated RepoNumber repo_numbers = 2;
+}
+
+message CreateSecurityCampaignAlertsResponse {}
+
+message DeleteSecurityCampaignAlertsRequest {
+  uint64 security_campaign_id = 1;
+}
+
+message DeleteSecurityCampaignAlertsResponse {}
+
+message DeleteAlertLinksRequest {
+  uint64 repository_id = 1;
+  repeated AlertLinkPayload links = 2;
+}
+
+message DeleteAlertLinksResponse {}

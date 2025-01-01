@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+
+set -e
+
+function usage() {
+    cat <<EOF
+Usage: script/setup [--restart]
+  Deploys base resources and dependencies of application
+
+  Optional parameters:
+    --restart                       Clean up any exising resources and re-deploy resources from scratch.
+
+Examples:
+    script/setup
+    script/setup --restart
+
+EOF
+}
+
+function get-deployments-list() {
+  kubectl get -k $RESOURCES_CONFIG_PATH --output=jsonpath='{.items[?(@.kind=="Deployment")].metadata.name}'
+}
+
+function is-already-deployed() {
+  if ! kubectl get -k $RESOURCES_CONFIG_PATH &> /dev/null ; then
+    return 1
+  fi
+
+  return 0
+}
+
+function wait-for-deployments-stabilizing() {
+  local deployments_raw=$(get-deployments-list)
+  local deployments_list=$(echo $deployments_raw | tr ' ' ',')
+  kubectl wait --namespace $KUBE_NAMESPACE --for=condition=ready --timeout=60s pods --selector "app in ($deployments_list)"
+}
+
+function wait-for-database-ready() {
+  for i in {1..1200}; do # 2 minutes
+    if script/db-shell --execute 'select now()' --no-db &>/dev/null; then
+      break
+    fi
+    sleep .1
+  done
+}
+
+function pull-private-docker-images() {
+    # Minikube doesn't use docker auth from host machine and passing docker auth to Minikube node is pretty tricky
+    # So, we just pull private images directly to Minikube node after starting minikube
+
+    # Configure host docker-cli to use docker engine inside minikube
+    eval $(minikube docker-env --profile $CLUSTER_NAME)
+
+    for image in "${PRIVATE_DOCKER_IMAGES[@]}"; do
+        image_exist=$(docker images --quiet "$image")
+        if [[ -z $image_exist ]]; then
+            docker pull "$image"
+        fi
+    done
+}
+
+CLUSTER_NAME=actions-dev
+KUBE_NAMESPACE="hosted-compute-ims"
+RESOURCES_PROFILE="base-resources"
+RESOURCES_CONFIG_PATH="config/kustomize/devoverlays/$RESOURCES_PROFILE"
+PRIVATE_DOCKER_IMAGES=(
+    "ghcr.io/github/aqueduct-lite/aqueduct-lite:24d6a7197f57ceda9510224350efc538f505f094"
+)
+
+RESTART=false
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --restart)
+      RESTART=true; shift ;;
+    --help)
+      usage; exit 0 ;;
+    *)
+      echo "Unknown option $1"; usage; exit 1 ;;
+  esac
+done
+
+script/helpers/ensure-minikube-is-running
+pull-private-docker-images
+
+if [[ $RESTART == true ]]; then
+    skaffold delete --profile $RESOURCES_PROFILE
+fi
+
+if is-already-deployed ; then
+    echo "Skip deploying base resources. Already deployed"
+    echo "Wait for base resources stabilizing"
+    wait-for-database-ready
+    wait-for-deployments-stabilizing
+else
+    echo "Deploying base resources"
+    skaffold deploy --profile $RESOURCES_PROFILE
+fi

@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+
+# The script is intended to seed IMS database with shared curated images
+# Shared curated images are read-only curated images for quick testing of Runner service
+# During shared curated images provisioning, script truncates all data from database
+
+set -e
+
+function provision-curated-image() {
+    local image_details_raw="$1"
+    IFS=',' read -r -a image_details_parsed <<< "$image_details_raw"
+
+    local image_id=${image_details_parsed[0]}
+    local image_name=${image_details_parsed[1]}
+    local image_os=${image_details_parsed[2]}
+    local image_arch=${image_details_parsed[3]}
+    local gallery_image_name=${image_details_parsed[4]}
+
+    echo "  image '$image_name'"
+    script/db-shell --execute "INSERT INTO image_definition (id, owner_id, name, image_type, os_type, architecture, azure_subscription_id) VALUES ($image_id, 'github', '$image_name', 'Curated', '$image_os', '$image_arch', 1)"
+
+    local image_versions=$(az sig image-version list \
+        --subscription $SHAREDGALLERY_SUBSCRIPTION_ID \
+        --resource-group $SHAREDGALLERY_RESOURCE_GROUP \
+        --gallery-name $SHAREDGALLERY_GALLERY_NAME \
+        --gallery-image-definition $gallery_image_name \
+        --query "[].[name, storageProfile.osDiskImage.sizeInGB]" --output tsv
+    )
+
+    echo "$image_versions" | while IFS= read -r image_version_raw; do
+        image_version_parsed=($image_version_raw)
+        image_version=${image_version_parsed[0]}
+        image_size=${image_version_parsed[1]}
+
+        echo "    image version '$image_version' (${image_size}GB)"
+        script/db-shell --execute "INSERT INTO image_version (version, image_definition_id, state, size_gb) VALUES ('$image_version', $image_id, 'Ready', $image_size)"
+    done
+}
+
+function provision-curated-image-pointer() {
+    local image_details_raw="$1"
+    IFS=',' read -r -a image_details_parsed <<< "$image_details_raw"
+
+    local image_id=${image_details_parsed[0]}
+    local image_name=${image_details_parsed[1]}
+    local image_os=${image_details_parsed[2]}
+    local image_arch=${image_details_parsed[3]}
+    local image_points_to=${image_details_parsed[4]}
+
+    echo "  image '$image_name'"
+    script/db-shell --execute "INSERT INTO image_definition (id, owner_id, name, image_type, os_type, architecture, points_to_image_definition_id) VALUES ($image_id, 'github', '$image_name', 'Curated', '$image_os', '$image_arch', $image_points_to)"
+}
+
+SHARED_IMAGES_CONFIG="config/kustomize/devoverlays/shared-images.yml"
+
+echo "Reading config"
+SHAREDGALLERY_SUBSCRIPTION_ID="9ed6f940-4ca4-4512-a8f8-a08f8d151201" # 'GitHub - NonProd - Compute Products - Actions Platform'
+SHAREDGALLERY_RESOURCE_GROUP=$(yq '.sharedGallery.resourceGroup' $SHARED_IMAGES_CONFIG)
+SHAREDGALLERY_GALLERY_NAME=$(yq '.sharedGallery.galleryName' $SHARED_IMAGES_CONFIG)
+CURATED_IMAGES=$(yq '.curatedImages.[] | [.id, .name, .os, .arch, .sharedGalleryImageName] | join(",")' $SHARED_IMAGES_CONFIG)
+CURATED_IMAGE_POINTERS=$(yq '.curatedImagePointers.[] | [.id, .name, .os, .arch, .pointsToImageId] | join(",")' $SHARED_IMAGES_CONFIG)
+
+echo "Cleaning up existing images and azure subscriptions from database"
+script/db-shell --execute "TRUNCATE TABLE azure_subscription; TRUNCATE TABLE image_definition; TRUNCATE TABLE image_version;"
+
+echo "Adding azure subscriptions to DB"
+script/db-shell --execute "INSERT INTO azure_subscription (id, subscription_id, image_type, image_count, resources_prefix) VALUES
+        (1, '$SHAREDGALLERY_SUBSCRIPTION_ID', 'Curated', 1000000, '');
+"
+
+echo "Provisioning curated shared images"
+echo "$CURATED_IMAGES" | while IFS= read -r image_details_raw; do
+    provision-curated-image "$image_details_raw"
+done
+
+echo "Provisioning curated latest images"
+echo "$CURATED_IMAGE_POINTERS" | while IFS= read -r image_details_raw; do
+    provision-curated-image-pointer "$image_details_raw"
+done

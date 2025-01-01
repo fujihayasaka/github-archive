@@ -1,0 +1,48 @@
+#!/bin/bash
+
+set -eu
+set -o pipefail
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+. "$DIR/ensure-devcontainer.sh"
+
+usage() {
+cat << USAGE
+  usage: $0 <migration name>
+USAGE
+  if [[ ! -z "${1-}" ]]; then
+    printf "\n!! ERROR: $1\n"
+  fi
+  exit 1
+}
+
+if [[ $# -lt 1 ]]; then
+  usage
+fi
+
+PREFIX="$(date --utc +%Y%m%d%H%M%S)"
+RELATIVE_FILE="migrations/${PREFIX}_$1.up.sql"
+FILE="$DIR/../$RELATIVE_FILE"
+
+cd "$DIR/../schemas"
+# The `tail` command discards two lines of the form:
+#     -- instance: db:3306
+#     USE `turboscan_development`;
+echo "Running skeema to create '$RELATIVE_FILE'"
+skeema diff development_without_vitess --allow-unsafe | tail -n +3 | tee "$FILE" || true
+
+if [ ! -s "$FILE" ]
+then
+  # Delete empty file if we failed
+  rm -v "$FILE"
+  exit 1
+fi
+
+if grep -q ' AFTER ' "$FILE";
+then
+  rm -v "$FILE"
+
+  >&2 printf "\n\nAFTER \`<column>\` detected in migration!\n\nPlease put new columns at the end of the table definition before creating a migration.\n"
+  exit 1
+fi
+
+"$DIR/set-next-migration" "${PREFIX}"

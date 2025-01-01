@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+CONFIG_PATH="$REPO_ROOT/config"
+RUBY_MODULE_FILE="$CONFIG_PATH/ruby.json"
+TS_MODULE_FILE="$CONFIG_PATH/ts.json"
+
+rm -rf "$REPO_ROOT/gen"
+mkdir -p "$REPO_ROOT/gen/go"
+mkdir -p "$REPO_ROOT/gen/ruby"
+mkdir -p "$REPO_ROOT/gen/ts"
+
+# Replicate any *.go files into the gen/go directory.
+# (These .go files are supported as a mechanism for augmenting/extending generated protobuf types.)
+# Include all directories and all files with the .go extension.  Exclude all other files.
+rsync -r --include='*/' --include='*.go' --exclude='*' "$REPO_ROOT/proto/" "$REPO_ROOT/gen/go"
+
+echo "Generating Go code from protos..."
+"$REPO_ROOT/script/buf" generate --template buf.gen.go.yaml
+
+echo "Validating Go code (including extensions) compiles ..."
+go build -C "$REPO_ROOT/gen/go" ./...
+
+echo "Running Go Unit Tests ..."
+go test -C "$REPO_ROOT/gen/go" ./...
+
+echo $"Generating Ruby code from protos..."
+echo $"Only generating Ruby for the following paths from ruby.json:"
+jq < $RUBY_MODULE_FILE '.[]'
+ruby_paths=$(jq < $RUBY_MODULE_FILE -r '[to_entries[] | "--path \(.value)"] | join(" ")')
+echo "$ruby_paths"
+"$REPO_ROOT/script/buf" generate --template buf.gen.ruby.yaml "$ruby_paths"
+
+echo $"Generating Typescript code from protos..."
+echo $"Only generating Typescript for the following paths from ts.json:"
+jq < $TS_MODULE_FILE '.[]'
+ts_paths=$(jq < $TS_MODULE_FILE -r '[to_entries[] | "--path \(.value)"] | join(" ")')
+echo "$ts_paths"
+"$REPO_ROOT/script/buf" generate --template buf.gen.ts.yaml "$ts_paths"
+

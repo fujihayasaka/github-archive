@@ -1,0 +1,53 @@
+#!/bin/bash
+
+set -e
+
+function usage() {
+    cat <<EOF
+Usage: script/skeema [command] [environment]
+    
+    Available commands:
+    - lint                              Check for problems in filesystem representation of database objects
+    - diff                              Compare a DB server's schemas to the filesystem
+    - push                              Alter objects on DBs to reflect the filesystem representation
+
+    Available environments:
+    - development                       Local database. Defaults to this environment if no environment is specified
+    - lab                               Lab database. More details: https://professorx.githubapp.com/mysql/cluster/hosted-compute-ims-db-lab
+
+Examples:
+    script/skeema lint
+    script/skeema diff
+    script/skeema push lab
+
+EOF
+}
+
+SKEEMA_COMMAND="$1"
+SKEEMA_ENV=${2:-development}
+
+case $SKEEMA_COMMAND in
+    lint|diff|push)
+        ;;
+    *)
+        usage; exit 1 ;;
+esac
+
+if [[ $SKEEMA_ENV == "development" ]]; then
+    : # no actions required for dev
+elif [[ $SKEEMA_ENV == "lab" ]]; then
+    if [[ -z "$MYSQL_PWD" ]]; then
+        echo 'Lab environment requires password.'
+        echo "Put password to MYSQL_PWD environment variable."
+        exit 1
+    fi
+else
+    echo "failed to run skeema against unknown environment. Allowed environments: development, lab"
+    exit 1
+fi
+
+pushd ./schema > /dev/null
+echo "Running skeema $SKEEMA_COMMAND on $SKEEMA_ENV environment"
+skeema $SKEEMA_COMMAND $SKEEMA_ENV
+popd > /dev/null
+

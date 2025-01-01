@@ -219,12 +219,15 @@ export type CollaboratorType = ObjectValues<typeof CollaboratorType>
 export interface Privileges {
   role: Role
   canChangeProjectVisibility: boolean
+  /** May be absent from older server payloads during the deploy window. */
+  canCopy?: boolean
   canCopyAsTemplate: boolean
 }
 
 export const DefaultPrivileges: Privileges = {
   role: Role.Read,
   canChangeProjectVisibility: false,
+  canCopy: false,
   canCopyAsTemplate: false,
 }
 

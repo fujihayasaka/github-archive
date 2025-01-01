@@ -1671,6 +1671,9 @@ class Organization < User
       scope = scope.publicly_belongs_to(id)
     end
 
+    # On GHES, filter out all suspended users (regardless of suspension source).
+    scope = scope.not_suspended if GitHub.enterprise?
+
     scope
   end
 
@@ -1693,6 +1696,17 @@ class Organization < User
     end
 
     return user_ids if user_ids.empty?
+
+    # On GHES, filter out suspended users.
+    if GitHub.enterprise?
+      suspended_ids = Set.new
+
+      GitHub::BatchedScope.batched(values: user_ids) do |values|
+        suspended_ids.merge(User.where(id: values).suspended.pluck(:id))
+      end
+
+      user_ids = user_ids.reject { |id| suspended_ids.include?(id) }
+    end
 
     if limit_to_public_members?(viewer, include_indirect_abilities: include_indirect_abilities)
       # Anonymous users, non-org-members, and users using oauth apps blocked by

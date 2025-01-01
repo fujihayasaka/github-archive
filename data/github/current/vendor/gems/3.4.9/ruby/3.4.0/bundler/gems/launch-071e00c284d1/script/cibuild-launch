@@ -1,0 +1,28 @@
+#!/bin/bash
+# This script is run by the "launch" ci build.
+
+: ${IMAGE_NAME:="launch:$(git rev-parse HEAD)"}
+
+set -e
+
+export LAUNCH_CI=1
+
+docker build -f Dockerfile.test -t "$IMAGE_NAME" .
+bash script/with-test-db --clean --migrate-image "$IMAGE_NAME" --skeema-env ci -- bash <<CIBUILD
+docker run -v /var/run/docker.sock:/var/run/docker.sock --rm \
+  -v$(pwd):/go/src/github.com/github/launch \
+  --link \$LAUNCH_TEST_DATABASE_CONTAINER_NAME:mysql \
+  --link \$LAUNCH_TEST_REDIS_CONTAINER_NAME:redis \
+  --link \$AZURITE_CONTAINER_NAME:azurite \
+  --env LAUNCH_CONTAINER=true \
+  --env LAUNCH_HAS_TEST_DB=y \
+  --env LAUNCH_DEPLOYER_TEST_DATABASE_URL=\$LAUNCH_DEPLOYER_TEST_DATABASE_URL_IN_DOCKER \
+  --env ACTIONS_PAYLOADS_TEST_DATABASE_URL=\$ACTIONS_PAYLOADS_TEST_DATABASE_URL_IN_DOCKER \
+  --env AZURITE_BLOB_HOST=\$AZURITE_BLOB_HOST_IN_DOCKER \
+  --env GITHUB_ACTIONS=\$GITHUB_ACTIONS \
+  --env CI=\$CI \
+  --env LAUNCH_REDIS_URL=\$LAUNCH_REDIS_URL_IN_DOCKER \
+  --env BP_GITHUB_TOKEN=\$BP_GITHUB_TOKEN \
+  "$IMAGE_NAME" \
+  bash -c 'script/cibuild'
+CIBUILD

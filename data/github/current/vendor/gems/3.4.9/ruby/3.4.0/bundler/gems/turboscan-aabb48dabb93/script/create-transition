@@ -1,0 +1,33 @@
+#!/bin/bash
+
+set -eu
+set -o pipefail
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+. "$DIR/ensure-devcontainer.sh"
+
+usage() {
+cat << USAGE
+  usage: $0 <transition name>
+USAGE
+  if [[ ! -z "${1-}" ]]; then
+    printf "\n!! ERROR: $1\n"
+  fi
+  exit 1
+}
+
+if [[ $# -lt 1 ]]; then
+  usage
+fi
+
+PREFIX="$(date --utc +%Y%m%d%H%M%S)"
+NAME="${PREFIX}_$1"
+MIGRATION="$DIR/../migrations/${NAME}.up.sql"
+TRANSITION="$DIR/../migrations/${NAME}.go"
+
+echo -e 'package migrations\n\nvar _ = Transitions.Batched("some_table", "SELECT * WHERE id BETWEEN ? AND ? -- replace this with a real transition")' > "${TRANSITION}"
+echo -e "./bin/migratorctl --transition ${NAME}.go" >> "${DIR}/db-migrate"
+
+read -p "Also create migration for GHES? (Y/N): " confirm && [[ $confirm == [yY] ]] || exit 1
+
+echo -e "-- this is a wrapper migration to run ${NAME}.go on GHES" > "${MIGRATION}"
+"$DIR/set-next-migration" "${PREFIX}"

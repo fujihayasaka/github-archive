@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+#/ DESCRIPTION:
+#/ 
+#/ Checks if all string-literal attributes used by logging and tracing are present in an 'otel-attributes' file.
+#/ It will log warnings for attributes that aren't string literals, but it will not fail.
+#/ 
+#/ Docs: https://github.com/github/thehub/blob/03ad81ccf68ca7e12a465859560a23ce81c91002/docs/epd/engineering/dev-practicals/observability/logging/opentelemetry-logging.md
+#/
+#/ USAGE: 
+#/   script/check-semconv [--format (log|table|annotations)] [--print-attrs] [--dry-run] [--namespace-check] [--help]
+#/
+#/ SYNOPSIS:
+#/   --format: log | table | annotations (default: annotations)
+#/      log: Prints a standard log message for each attribute that is not present in the otel-attributes file.
+#/      table: Prints a markdown table with all attributes used in the codebase.
+#/      annotations: Prints GitHub Actions annotations for each attribute that is not present in the otel-attributes file.
+#/   --dry-run: Exits with 0 even if there are errors. Useful for the transition phase.
+#/   --print-attrs: Print all unique attributes used (does not validate). Useful for updating the otel-attributes file.
+#/   --namespace-check: Checks if attributes are namespaced, outputs warnings and does not fail the script.
+#/   --help: Prints this message
+
+set -euo pipefail
+
+trap 'echo "Script failed at line $LINENO"' ERR
+
+ROOT="$(git rev-parse --show-toplevel)"
+# Where the otel-attributes are stored
+OTEL_FILE_NAME=".otel-attributes"
+OTEL_FILE_PATH="$ROOT/$OTEL_FILE_NAME"
+# Where the ignored otel-violators are stored
+OTEL_IGNORED_ATTRIBUTES_FILE_NAME=".otel-attributes.ignored-attributes"
+OTEL_IGNORED_ATTRIBUTES_FILE_PATH="$ROOT/$OTEL_IGNORED_ATTRIBUTES_FILE_NAME"
+# The path patterns stored in the .otel-attributes.ignore file 
+# will be excluded from the search
+OTEL_IGNORED_PATHS_FILE_NAME=".otel-attributes.ignored-paths"
+OTEL_IGNORED_PATHS_FILE_PATH="$ROOT/$OTEL_IGNORED_PATHS_FILE_NAME"
+TMP_FILE="$(mktemp)"
+GO_GREP_VERSION="v0.5.0"
+# The URL to the semantic conventions user guide
+GUIDE_URL="https://github.com/github/launch/blob/master/docs/otel-attributes.md"
+
+# Parse arguments
+PRINT_UNIQUE_ATTRS="false"
+FORMAT="ANNOTATIONS"
+DRY_RUN="false"
+NAMESPACE_CHECK="false"
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --print-attrs)
+      PRINT_UNIQUE_ATTRS="true"
+      shift # past argument
+      ;;
+    --format)
+      FORMAT="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --dry-run)
+      DRY_RUN="true"
+      shift # past argument
+      ;;
+    --namespace-check)
+      NAMESPACE_CHECK="true"
+      shift # past argument
+      ;;
+    -h|--help)
+      grep '^#/' <"$0" | cut -c 4-
+      exit 0
+      ;;
+    *)
+      ;;
+  esac
+done
+
+if [ ! -f "$OTEL_FILE_PATH" ]; then
+  echo "otel-attributes file not found"
+  exit 1
+fi
+
+if ! command -V gogrep &>/dev/null; then
+  # If stdin is a tty, ask the user if they want to install gogrep
+  if test -t 0; then
+    # Ask if the user wants to proceed installing dependencies
+    read -r -p "gogrep is available. Do you want to install it? [y/N] " response
+  else
+    # If stdin is not a tty, assume yes
+    response="y"
+  fi
+  if [[ "$response" =~ ^([yY][eE][sS]|[yY])+$ ]]; then
+    echo "Installing gogrep: github.com/quasilyte/gogrep/cmd/gogrep@$GO_GREP_VERSION"
+    go install github.com/quasilyte/gogrep/cmd/gogrep@$GO_GREP_VERSION
+  else
+    echo "Aborting..."
+    exit 1
+  fi
+fi
+
+# Receives: log level, message, attribute, filename, line number
+log() {
+  if [[ "$(echo "$FORMAT" | tr '[:upper:]' '[:lower:]')" == "log" ]]; then
+    echo "$4:$5 - $3"
+  else
+    echo "::$1 file=$4,line=$5::$3 $2"
+  fi
+}
+
+generate_attributes_file() {
+  # Build exclusion list from the content of .otel-attributes.ignore
+  EXCLUDE=""
+  if [ -f "$OTEL_IGNORED_PATHS_FILE_PATH" ]; then
+    # By setting IFS to an empty value, we prevent read from trimming 
+    # leading and trailing whitespace from the lines it reads. This allows
+    # read to read all the lines in the file even if the file does not have
+    # a trailing newline.
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      # skip empty lines and comments
+      if [[ "$line" == "" ]] || [[ "$line" == \#* ]]; then
+        continue
+      fi
+      EXCLUDE="$EXCLUDE|$line"
+    done < "$OTEL_IGNORED_PATHS_FILE_PATH"
+  fi
+  gogrep -no-color -limit 0 -exclude ".*_test.go\$$EXCLUDE" -format "$1" . "kvp.\$_(\$x, \$_)" 2>/dev/null >> "$TMP_FILE"
+  gogrep -no-color -limit 0 -exclude ".*_test.go\$$EXCLUDE" -format "$1" . "attribute.\$_(\$x, \$_)" 2>/dev/null >> "$TMP_FILE"
+  sort -u "$TMP_FILE" -o "$TMP_FILE"
+}
+
+# Cross-compare attributes grepped by generated_attributes_file() and contained in a tmp file
+# with the .otel-attributes file.
+validate_attributes() {
+  generate_attributes_file '{{.x}},{{.Filename}},{{.Line}}'
+
+  code=0
+  while read -r line; do
+    filename=$(echo "$line" | cut -d',' -f2)
+    lineno=$(echo "$line" | cut -d',' -f3)
+    possible_attribute=$(echo "$line" | cut -d',' -f1)
+
+  attribute_ignored=$(grep -wq "^$possible_attribute$" "$OTEL_IGNORED_ATTRIBUTES_FILE_PATH"; echo $?)
+  if [[ "$possible_attribute" != *\"*\"* ]] && [[ "$attribute_ignored" -ne 0 ]]; then
+    log warning "non-string otel attribute specified. Refer to this guide: $GUIDE_URL" "$possible_attribute" "$filename" "$lineno"
+    continue
+  fi
+
+    attribute=$(echo "$line" | cut -d',' -f1 | tr -d '"')
+    if ! grep -wq "^$attribute$" "$OTEL_FILE_PATH" && ! grep -wq "^$attribute$" "$OTEL_IGNORED_ATTRIBUTES_FILE_PATH"; then
+      log error "is not present in: $OTEL_FILE_NAME" "$attribute" "$filename" "$lineno"
+      if [[ "$DRY_RUN" == "false" ]]; then
+        code=1
+      fi
+    fi
+
+    # Attributes can look like: gh.launch.attr_name
+    # where gh.launch is the namespace used. Here we check that at least
+    # one namespace is used in the attribute.
+    if ! [[ "$attribute" == *"."* ]] && [[ "$NAMESPACE_CHECK" == "true" ]]; then
+      log warning "is not namespaced. Refer to this guide: $GUIDE_URL" "$attribute" "$filename" "$lineno"
+    fi
+  done < "$TMP_FILE"
+
+  exit $code
+}
+
+print_attributes() {
+  generate_attributes_file '{{.x}}'
+  while read -r line; do
+    if [[ "$line" != *\"*\"* ]]; then
+      continue
+    fi
+
+    echo "$line" | tr -d '"'
+  done < "$TMP_FILE"
+}
+
+print_table() {
+  generate_attributes_file '{{.x}},{{.Filename}},{{.Line}}'
+  echo "Attributes used in the codebase:"
+  echo
+  echo "| Filename:Line | Attribute |"
+  echo "|----------|-----------|"
+  while read -r line; do
+    attribute=$(echo "$line" | cut -d',' -f1 | tr -d '"')
+    filename=$(echo "$line" | cut -d',' -f2)
+    lineno=$(echo "$line" | cut -d',' -f3)
+    echo "| $filename:$lineno | $attribute |"
+  done < "$TMP_FILE"
+}
+
+if [[ "$PRINT_UNIQUE_ATTRS" == "true" ]]; then
+  print_attributes
+elif [[ "$(echo "$FORMAT" | tr '[:upper:]' '[:lower:]')" == "table" ]]; then
+  print_table
+else
+  validate_attributes
+fi

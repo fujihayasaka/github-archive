@@ -1,0 +1,26 @@
+name: stale-code-gen
+on:
+  pull_request: {}
+  push:
+    branches:
+      - main
+permissions:
+  contents: read
+jobs:
+  pr:
+    name: generated code is up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to registry
+        run: echo "${{ secrets.CONTAINER_BUILDER_TOKEN }}" | docker login ghcr.io -u ${{github.actor}} --password-stdin
+      - run: go version
+      - name: Run code gen for mocks, protobuf
+        run: 'make generate'
+      - name: Check for stale Go proto outputs
+        run: 'if [[ `git status --porcelain proto` ]]; then echo "FAIL (run: make generate)"; exit 1; fi'
+      - name: Check for stale Ruby proto outputs
+        run: 'if [[ `git status --porcelain ruby/lib/notifyd/proto` ]]; then echo "FAIL (run: make generate)"; exit 1; fi'
+      - name: Check for stale generated mocks
+        run: 'if [[ `git status --porcelain internal` ]]; then echo "FAIL (run: make mocks)"; exit 1; fi'
+

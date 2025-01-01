@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -eu
+
+# On Linux we need the userid inside the container to match that on
+# the host for files to be created with the right permissions.
+BUILD_ARGS="${BUILD_ARGS:=}"
+UNAME="$(uname -s)"
+case "${UNAME}" in
+    Linux*)
+              # Only set build args if user is not root [to support dotcom codespaces]
+              if [ "$(id -u)" -gt "0" ]; then
+                BUILD_ARGS="$BUILD_ARGS --build-arg USER_UID=$(id -u) --build-arg USER_GID=$(id -g)"
+              fi
+              ;;
+    *)        ;;
+esac
+
+# On Janky TURBOSCAN_DSP_CODE_SCANNING_BOT_TOKEN is a build secret that can be used as GH_TOKEN
+if [ -z "${GH_TOKEN:-}" ] && [ -n "${TURBOSCAN_DSP_CODE_SCANNING_BOT_TOKEN:-}" ]; then
+  export GH_TOKEN="${TURBOSCAN_DSP_CODE_SCANNING_BOT_TOKEN}"
+fi
+
+if [ -z "${GH_TOKEN:-}" ]; then
+  if [ -z "${GITHUB_TOKEN:-}" ]; then
+    status="$(gh auth status --hostname github.com)"
+    # add the read:packages scope to gh so we can download Cocofix
+    if ! echo "$status" | grep 'Token scopes:.*:packages' &>/dev/null; then
+      gh auth refresh --hostname github.com --scopes read:packages
+    fi
+  fi
+
+  export GH_TOKEN=$(gh auth token)
+fi
+
+DOCKER_BUILDKIT=1 docker build --build-arg BUILDKIT_INLINE_CACHE=1 $BUILD_ARGS --secret id=GH_TOKEN,src=<(echo "${GH_TOKEN}") --target "${TARGET:-dev-run}" -f .devcontainer/Dockerfile "$@" .

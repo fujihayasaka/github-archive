@@ -1,0 +1,1 @@
+ALTER TABLE `ts_analyses` DROP KEY `idx_analyses_on_sarif_cleaned_created_at`, DROP KEY `idx_analyses_on_fixes_cleaned_created_at`, DROP KEY `idx_analyses_on_alerts_cleaned_created_at`, DROP KEY `idx_analyses_on_metrics_cleaned_created_at`, DROP KEY `idx_analyses_on_incomplete_cleaned_created_at`, DROP KEY `idx_analyses_on_archival_created_at`;

@@ -1,0 +1,61 @@
+#!/usr/bin/ruby
+# frozen_string_literal: true
+
+# / Usage: script/protoc [FILE...]
+# /  by default, all proto files are compiled
+#
+# Expected to execute inside the docker container built from /config/tools/protoc/Dockerfile
+#
+
+require "fileutils"
+
+# If files were provide, check if they exist
+ARGV.each do |x|
+  next if File.file?(x)
+
+  File.foreach(__FILE__) do |line|
+    # Print out the usage instructions
+    print line[4..] if line.start_with?("# /")
+  end
+  exit 1
+end
+
+# If no files were provided, find all proto files
+proto_files = ARGV.empty? ? Dir.glob("proto/**/*.proto") : ARGV
+
+go_path = ENV["GOPATH"] || `go env GOPATH`.chomp
+
+FileUtils.mkdir_p "ruby/proto"
+
+def do_protoc(label, *args)
+  start_gen label
+  system "protoc", "--proto_path=proto", *args
+  ok_gen
+end
+
+def start_gen(arg)
+  print format("  %7s", arg)
+end
+
+def ok_gen
+  printf " \033[32m✔︎\033[0m"
+end
+
+proto_files.each do |proto|
+  puts proto
+  if proto.start_with?("proto/monolith")
+    start_gen " [go] Skipped for monolith"
+  else
+    do_protoc "[go]", proto, "--twirp_out=#{go_path}/src", "--go_out=#{go_path}/src"
+  end
+
+  if proto.start_with?("proto/external", "proto/monolith")
+    start_gen " [ruby] Skipped for /proto/external & monolith files"
+  else
+    do_protoc "[ruby]", proto,
+              "--twirp_ruby_out=ruby/proto",
+              "--ruby_out=ruby/proto"
+  end
+
+  puts
+end

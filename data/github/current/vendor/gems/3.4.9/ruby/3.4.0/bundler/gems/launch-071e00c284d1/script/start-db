@@ -1,0 +1,28 @@
+#!/bin/bash
+# Usage: start-db
+# Starts the MySQL docker container.
+
+set -e
+
+. script/_serverenv
+
+# app config
+APP_ROOT="$(git rev-parse --show-toplevel)"
+
+start_db() {
+  # Mysql can take ~30 seconds or so to be ready for connections, so use script/retry to wait up to 1 minute
+  quiesce_unless_error \
+    script/docker-compose up -d db
+  quiesce_unless_error \
+    script/retry script/docker-compose exec -T db mysql -u root -p${MYSQL_ROOT_PASSWORD} -h db -e "select now()"
+}
+
+quiesce_unless_error() {
+  if ! "$@" &> "$APP_ROOT/tmp/step.log"; then
+    echo "$* failed:"
+    cat "$APP_ROOT/tmp/step.log"
+    exit 1
+  fi
+}
+
+(cd "$APP_ROOT" && start_db)

@@ -1,0 +1,194 @@
+#!/bin/bash
+#/ Usage: script/with-verify-db -- COMMAND ARGS...
+#/ Starts an instance of mysql in a docker container, creates a
+#/ 'launch_test' database in it, sets up launch's schema in it,
+#/ sets $LAUNCH_TEST_DATABASE_URL to a DSN that Go can use to
+#/ connect to it, and runs COMMAND.
+#/ where OPTIONS may include:
+#/ --migrate-image IMAGE
+#/     the docker image from which skeema should be run.
+#/     default: run skeema on this machine
+#/ --skeema-env ENV
+#/     the name of the skeema environment to use.
+#/     default: test
+
+# Get the default server env, then override some values.
+. script/_serverenv
+export DB_NAME=launch_test
+export DEPLOYER_DB_NAME=launch_deployer_test
+export PAYLOADS_DB_NAME=actions_workflow_payloads_test
+
+APP_ROOT=$(git rev-parse --show-toplevel)
+
+if [ "$LAUNCH_CI" = "1" ]; then
+  MYSQL_CONTAINER_NAME=${MYSQL_CONTAINER_NAME:-launch-test-mysql8}
+  MYSQL_IMAGE_NAME=${MYSQL_IMAGE_NAME:-mysql:8.0.36}
+  export MYSQL_ROOT_PASSWORD=my-secret-pw
+  export MYSQL_PORT=5200
+fi
+
+main() {
+  start_mysql
+  trap stop_mysql EXIT
+  wait_for_mysql
+  set_env
+  migrate_db
+
+  "$@"
+}
+
+set_env() {
+  # Tell script/test that it doesn't need to make a test db. (In other words, stop recursing.)
+  export LAUNCH_HAS_TEST_DB=y
+  # Tell script/cibuild-launch where it can link to for mysql.
+  export LAUNCH_TEST_DATABASE_CONTAINER_NAME=$MYSQL_CONTAINER_NAME
+
+  # Avoid setting both charset and collation - https://github.com/github/engineering/discussions/2827#discussioncomment-4799965
+
+  # The DSN that you can use from the host machine.
+  export LAUNCH_TEST_DATABASE_URL="root:$MYSQL_ROOT_PASSWORD@tcp(127.0.0.1:$MYSQL_PORT)/$DB_NAME?parseTime=true&collation=utf8mb4_bin"
+  export LAUNCH_DEPLOYER_TEST_DATABASE_URL="root:$MYSQL_ROOT_PASSWORD@tcp(127.0.0.1:$MYSQL_PORT)/$DEPLOYER_DB_NAME?parseTime=true&collation=utf8mb4_bin"
+  export ACTIONS_PAYLOADS_TEST_DATABASE_URL="root:$MYSQL_ROOT_PASSWORD@tcp(127.0.0.1:$MYSQL_PORT)/$PAYLOADS_DB_NAME?parseTime=true&collation=utf8mb4_bin"
+  # The DSN that you can use from another docker container started with "--link $LAUNCH_TEST_DATABASE_CONTAINER_NAME:mysql".
+  export LAUNCH_DEPLOYER_TEST_DATABASE_URL_IN_DOCKER="root:$MYSQL_ROOT_PASSWORD@tcp(mysql:3306)/$DEPLOYER_DB_NAME?parseTime=true&collation=utf8mb4_bin"
+  export ACTIONS_PAYLOADS_TEST_DATABASE_URL_IN_DOCKER="root:$MYSQL_ROOT_PASSWORD@tcp(mysql:3306)/$PAYLOADS_DB_NAME?parseTime=true&collation=utf8mb4_bin"
+}
+
+migrate_db() {
+  if [ "$LAUNCH_CI" = "1" ]; then
+    # Loop through and creatte databases as necessary.
+    for db in $DEPLOYER_DB_NAME $PAYLOADS_DB_NAME; do
+      if ! in_migration_image migratorctl setup --url "root:$MYSQL_ROOT_PASSWORD@tcp(mysql:3306)/" --name $db; then
+        docker logs --tail 20 $MYSQL_CONTAINER_NAME
+        exit 1
+      fi
+    done
+    if ! in_migration_image migratorctl migrate deployer -d "$LAUNCH_DEPLOYER_TEST_DATABASE_URL_IN_DOCKER" --source migrations/deployer; then
+      docker logs --tail 20 $MYSQL_CONTAINER_NAME
+      exit 1
+    fi
+
+    if ! in_migration_image migratorctl migrate payloads -d "$ACTIONS_PAYLOADS_TEST_DATABASE_URL_IN_DOCKER" --source migrations/actions_workflow_payloads; then
+      docker logs --tail 20 $MYSQL_CONTAINER_NAME
+      exit 1
+    fi
+  else
+    for db in $DEPLOYER_DB_NAME $PAYLOADS_DB_NAME; do
+      script/docker-compose exec -T db mysql -u root -prootsekrit -h db -e "DROP DATABASE $db"
+    done
+
+    migratorctl migrate deployer -d "$LAUNCH_DEPLOYER_TEST_DATABASE_URL" --source migrations/deployer
+    migratorctl migrate payloads -d "$ACTIONS_PAYLOADS_TEST_DATABASE_URL" --source migrations/actions_workflow_payloads
+  fi
+}
+
+in_migration_image() {
+  if [ -n "$MIGRATE_IMAGE" ]; then
+    docker run --rm \
+      --link $LAUNCH_TEST_DATABASE_CONTAINER_NAME:mysql \
+      --env MYSQL_HOST=mysql \
+      --env SKEEMA_MYSQL_USER=root \
+      --env SKEEMA_MYSQL_PASS=${MYSQL_ROOT_PASSWORD} \
+      --env SKEEMA_MYSQL_SCHEMA=production \
+      --env LAUNCH_CI=1 \
+      --env LAUNCH_ENV=test \
+      --env LAUNCH_MODE=hosted \
+      --env STATS_ADDR=${STATS_ADDR} \
+      --env IS_DRY_RUN=false \
+      "$MIGRATE_IMAGE" "$@"
+  else
+    env \
+      MYSQL_HOST=127.0.0.1 \
+      MYSQL_PORT=5200 \
+      SKEEMA_MYSQL_USER=root \
+      SKEEMA_MYSQL_PASS=${MYSQL_ROOT_PASSWORD} \
+      SKEEMA_MYSQL_SCHEMA=production \
+      LAUNCH_CI=1 \
+      IS_DRY_RUN=false \
+      "$@"
+  fi
+}
+
+start_mysql() {
+  if [ "$LAUNCH_CI" = "1" ]; then
+    msg starting $MYSQL_CONTAINER_NAME...
+    if [ "$USE_CLEAN_LAUNCH_TEST_DB" = "y" ] && docker inspect $MYSQL_CONTAINER_NAME >&/dev/null; then
+      docker rm -f $MYSQL_CONTAINER_NAME >/dev/null
+    fi
+    if ! docker inspect $MYSQL_CONTAINER_NAME >&/dev/null; then
+      if ! docker create -p $MYSQL_PORT:3306 \
+              --name $MYSQL_CONTAINER_NAME \
+              --volume "$APP_ROOT/tmp/my.cnf.dev:/etc/mysql/conf.d/github.cnf" \
+              --env MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD \
+              --env MYSQL_DATABASE=$DB_NAME \
+              $MYSQL_IMAGE_NAME >/dev/null; then
+        exit 1
+      fi
+    fi
+    if ! docker start $MYSQL_CONTAINER_NAME >/dev/null; then
+      exit 1
+    fi
+  else
+    if ! script/docker-compose start db; then
+      exit 1
+    fi
+  fi
+}
+
+wait_for_mysql() {
+  msg waiting for mysql to start...
+  START_TIME=$SECONDS
+  if [ "$LAUNCH_CI" = "1" ]; then
+    if ! script/retry docker exec $MYSQL_CONTAINER_NAME mysql -e 'SELECT NOW()' -uroot -p"$MYSQL_ROOT_PASSWORD" &>/dev/null; then
+      docker logs --tail 20 $MYSQL_CONTAINER_NAME
+      msg "mysql did not start in time"
+      exit 1
+    fi
+  else
+    if ! script/retry script/docker-compose exec -T db mysql -u root -prootsekrit -h db -e 'SELECT NOW()' &>/dev/null; then
+      script/docker-compose logs --tail 20 db
+      msg "mysql did not start in time"
+      exit 1
+    fi
+  fi
+  msg mysql booted in $(($SECONDS - $START_TIME)) seconds
+}
+
+stop_mysql() {
+  if [ "$LAUNCH_CI" = "1" ]; then
+    msg stopping $MYSQL_CONTAINER_NAME...
+    docker stop $MYSQL_CONTAINER_NAME >/dev/null
+  fi
+}
+
+msg() {
+  echo "$@" 1>&2
+}
+
+usage_and_exit() {
+  cat "$0" | grep ^#/ | cut -c4-
+  exit 1
+}
+
+SKEEMA_ENV=test
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --migrate-image)
+      MIGRATE_IMAGE=$2
+      shift; shift;;
+    --skeema-env)
+      SKEEMA_ENV=$2
+      shift; shift;;
+    --clean)
+      USE_CLEAN_LAUNCH_TEST_DB=y
+      shift;;
+    --)
+      # the rest of the args are the command to run.
+      shift; break;;
+    *)
+      usage_and_exit;;
+  esac
+done
+
+[ $# -gt 0 ] || usage_and_exit
+main "$@"

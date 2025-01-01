@@ -1,0 +1,38 @@
+name: "CodeQL analysis"
+
+# When a dependabot PR triggers an action on "push", it only gets a read-only token, but CodeQL needs a read/write token.
+# However, on "pull_request" events, the dependabot PR does get a read/write token.
+# Running on 'push' for our branches is still beneficial because it means the action triggers as soon as you push
+# and the results may be ready by the time your PR is opened.
+# So, we configure the action to run on "push" for non-dependabot branches, and "pull_request" for dependabot branches.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *"
+  push:
+    branches-ignore:
+      - "dependabot/**"
+  pull_request:
+    branches:
+      - "dependabot/**"
+
+jobs:
+  build:
+
+    strategy:
+      fail-fast: false
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Configure git private repo access
+      env:
+        GITHUB_TOKEN: ${{ secrets.CONTAINER_BUILDER_TOKEN }}
+        GOFLAGS: "-mod=vendor"
+      run: |
+        git config --global --add url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+    - uses: actions/checkout@v4
+    - uses: github/codeql-action/init@v3
+      with:
+        languages: go
+    - uses: github/codeql-action/analyze@v3

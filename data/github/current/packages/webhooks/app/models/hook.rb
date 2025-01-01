@@ -30,6 +30,11 @@ class Hook < ApplicationRecord::Domain::Hooks
     Regexp.new("\\A(.*\\.)?localhost\.?\\z", Regexp::IGNORECASE),
     Regexp.new("\\A(127|0)\.(?=.*[^\.]$)((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.?){3}\\z", Regexp::IGNORECASE), # match all ip addresses in the 0.0.0.0/8 and 127.0.0.1/8 range
   ].freeze
+  # ELM webhooks only allow true loopback addresses (localhost and 127.0.0.0/8), excluding 0.0.0.0/8
+  ELM_WEBHOOKS_LOOPBACK_PATTERN = [
+    Regexp.new("\\A(.*\\.)?localhost\.?\\z", Regexp::IGNORECASE),
+    Regexp.new("\\A127\.(?=.*[^\.]$)((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.?){3}\\z", Regexp::IGNORECASE), # match only 127.0.0.0/8 range
+  ].freeze
   INSECURE_SSL_DEFAULT_VALUE = "0".freeze
 
   belongs_to :installation_target, polymorphic: true
@@ -876,7 +881,21 @@ class Hook < ApplicationRecord::Domain::Hooks
 
   def disallow_loopback?(uri)
     return false if GitHub.enterprise? && integration_hook? && installation_target.can_set_loopback_webhook?
+    return false if elm_webhooks_loopback_allowed?(uri)
     true if !GitHub.allow_webhook_loopback_addresses? && LOOPBACK_HOSTS_PATTERN.any? { |pattern| !!pattern.match(uri.host) }
+  end
+
+  # Private: Checks if the URI is an allowed ELM webhooks loopback address.
+  # Only allows true loopback addresses (localhost and 127.0.0.0/8) on the specific ELM webhooks port (9178).
+  # This is more restrictive than LOOPBACK_HOSTS_PATTERN which also includes 0.0.0.0/8.
+  #
+  # uri - The URI to check
+  #
+  # Returns true if the URI is an allowed ELM webhooks loopback address, false otherwise.
+  def elm_webhooks_loopback_allowed?(uri)
+    return false unless GitHub.elm_webhooks_loopback_address_enabled?
+    return false unless uri.port == GitHub.elm_webhooks_allowed_port
+    ELM_WEBHOOKS_LOOPBACK_PATTERN.any? { |pattern| !!pattern.match(uri.host) }
   end
 
   def only_subscribes_to_allowed_events

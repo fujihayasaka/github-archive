@@ -1,0 +1,71 @@
+name: Docker Image
+
+on:
+  push: {}
+  merge_group: {}
+
+permissions:
+  contents: read
+  id-token: write
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      BUILD_SHA: ${{ github.sha }}
+
+    name: Docker Image
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container registry (ghcr.io)
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Tools Image
+        env:
+          BUILD_SHA: ${{ github.sha }}
+        if: github.ref == 'refs/heads/main'
+        run: |
+          docker pull ghcr.io/github/turboghas/turboghas:tools
+          docker build --cache-from ghcr.io/github/turboghas/turboghas:tools \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            --push \
+            --target tools \
+            --tag ghcr.io/github/turboghas/turboghas:tools \
+            --tag ghcr.io/github/turboghas/turboghas:tools-$BUILD_SHA \
+            .
+
+      - name: Build Image
+        env:
+          BUILD_SHA: ${{ github.sha }}
+        run: |
+          docker build \
+            --tag "octofactory-ang.githubapp.com/moda-artifacts-docker/turboghas:$BUILD_SHA" \
+            --tag "ghcr.io/github/turboghas/turboghas:$BUILD_SHA" \
+            .
+
+      - name: Push Image (ghcr.io)
+        run: docker push "ghcr.io/github/turboghas/turboghas:$BUILD_SHA"
+
+      - name: Fetch ANG Token
+        run: |
+          set -exuo pipefail
+
+          OIDC_TOKEN="$(curl --silent --fail --retry 5 -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=ang-custom-audience" | jq -r '.value')"
+          cat <<< $(jq --arg token "${OIDC_TOKEN}" '.HttpHeaders = {"X-Meta-X-Ang-Authentication": $token}' ~/.docker/config.json) > ~/.docker/config.json
+
+      - name: Log in (octofactory.githubapp.com)
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        with:
+          registry: octofactory-ang.githubapp.com
+          username: ${{ secrets.OCTOFACTORY_USER }}
+          password: ${{ secrets.OCTOFACTORY_TOKEN }}
+
+      - name: Push Image (octofactory.githubapp.com)
+        run: docker push "octofactory-ang.githubapp.com/moda-artifacts-docker/turboghas:$BUILD_SHA"

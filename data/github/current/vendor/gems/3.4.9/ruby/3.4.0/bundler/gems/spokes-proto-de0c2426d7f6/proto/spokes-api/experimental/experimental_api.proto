@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package github.spokes.experimental.v1;
+
+option go_package = "github.com/github/spokes-proto/gen/go/v1/experimental";
+option ruby_package = "GitHub::Spokes::Proto::Experimental::V1";
+
+import "spokes-api/types/selectors/v1/object_selector.proto";
+import "spokes-api/types/v1/object.proto";
+import "spokes-api/types/v1/repository.proto";
+import "spokes-api/types/v1/request_context.proto";
+
+// ExperimentalAPI defines experimental APIs that we want to iterate on
+// quickly. These APIs are likely to change in backwards-incompatible ways.
+service ExperimentalAPI {
+  // ResolveObjects performs object resolutions for all
+  // the provided
+  // repositories in the request and returns multiple resolved objects. The
+  // entries in the response are in the same order as the items in the request.
+  rpc ResolveObjects(ResolveObjectsRequest) returns (ResolveObjectsResponse);
+}
+
+message ResolveObjectsRequest {
+  // List of objects to resolve grouped by repo
+  repeated ObjectSelectorsByRepo object_selectors_by_repo = 1;
+
+  github.spokes.types.v1.RequestContext request_context = 2;
+}
+
+message ResolveObjectsResponse {
+  // List of resolved items grouped by repository
+  repeated ResolvedItemsByRepo resolved_batches = 1;
+}
+
+// ObjectSelectorsByRepo represents a single batch of object selectors to
+// resolve for a given repo.
+message ObjectSelectorsByRepo {
+  // repository is the repository to scope the object lookup to.
+  github.spokes.types.v1.Repository repository = 1;
+
+  // selectors defines the objects to select.
+  //
+  // Reference names passed here must be valid ref, branch, or tag names and
+  // follow the rules in
+  // https://git-scm.com/docs/git-check-ref-format#_description. For example,
+  // "main", "refs/heads/main", "v1.0", "refs/tags/v1.0" are all valid ref
+  // names. In particular, ref names may not include NUL (\0), NL (\n), or
+  // colon (:). If a selector includes an invalid reference name, the
+  // corresponding response item will be the error "unprocessable".
+  repeated github.spokes.types.selectors.v1.ObjectSelector selectors = 2;
+}
+
+// ResolvedItemsByRepo represents a single batch of items that were resolved for
+// given repo
+message ResolvedItemsByRepo {
+  // respository associated with the resolved items.
+  github.spokes.types.v1.Repository repository = 1;
+
+  // items is the list of resolved objects, in the same order that they
+  // appear in the request.
+  repeated ResolvedItem items = 2;
+
+  message ResolvedItem {
+    oneof item {
+      // If the object could not be found, this will be set to "missing".
+      // If the object's selector was not valid, this will be set to
+      // "unprocessable".
+      string error = 1;
+
+      // The object's information.
+      github.spokes.types.v1.Object object = 2;
+    }
+  }
+}

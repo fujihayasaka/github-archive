@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20231027133705_update-default-setup-languages.go on GHES

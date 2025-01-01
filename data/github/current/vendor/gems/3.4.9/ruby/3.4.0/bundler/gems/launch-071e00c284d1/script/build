@@ -1,0 +1,118 @@
+#!/bin/bash
+
+debug=false
+
+for arg; do
+  case "$arg" in
+    --debug)
+      debug=true
+      shift;;
+    *)
+      exit 1 ;;
+  esac
+done
+
+git config --global --add safe.directory '*'
+
+version=$(git rev-parse HEAD 2>/dev/null)
+if [ $? -ne 0 ]; then
+  version="$LAUNCH_BUILD_VERSION"
+fi
+if [ -z "$version" ]; then
+  version="${BUILD_SHA}"
+fi
+if [ -z "$version" ]; then
+  version="unknown"
+fi
+
+verify_version() {
+  local binary="$1"
+  local base=$(basename "$binary")
+  output=$("$binary" -version 2>&1 || true)
+  test "$output" = "$base version $version"
+}
+
+copy_binary() {
+  local binary="$1"
+
+  # Split GOPATH on semicolon
+  for gopath in $(echo $GOPATH | tr : '\n')
+  do
+    local binpath="$gopath/$binary"
+    if [ ! -f "$binpath" ]; then
+      # file doesn't exist in this path, try the next one
+      continue
+    fi
+
+    cp -v $binpath "$binary"
+    verify_version "$binary" || {
+      echo "Looks like $binary doesn't have the right BuildVersion."
+      echo "Make sure it's using github.com/github/launch/cli.ParseFlags() in the main() function."
+      return 1
+    }
+
+    # Copied and verified, all done
+    return 0
+  done
+  echo "Looks like $binary was not correctly built, ensure that launch is in the \$GOPATH."
+  return 1
+}
+
+# if no GOPATH set ask Golang for it
+if [ -z "${GOPATH}" ]; then
+  export GOPATH=$(go env GOPATH)
+fi
+
+# if still no GOPATH then follow 1.8 semantics
+if [ -z "${GOPATH}" ]; then
+  export GOPATH="${HOME}/go"
+  mkdir -p "${GOPATH}"
+fi
+
+set -e
+
+go version
+
+if [ $# -eq 0 ]; then
+  set -- cmd/*
+fi
+
+# Remove any pre-existing binaries we want to build from GOPATH/bin.
+# This ensures that we always get a fresh build, but still offers
+# significant time savings.
+for cmd; do
+  # Split GOPATH on semicolon
+  for gopath in $(echo $GOPATH | tr : '\n')
+  do
+    binpath="$gopath/bin"
+    test -f "$binpath/$(basename $cmd)" && rm "$binpath/$(basename $cmd)" || true
+    test -f "bin/$(basename $cmd)" && rm "bin/$(basename $cmd)" || true
+  done
+done
+
+# Use `go install` instead of `go build` to build & output all the binaries
+# at once. This writes them to $GOPATH/bin.
+ldflags=""
+ldflags="${ldflags} -X github.com/github/launch/cli.BuildVersion=${version}"
+gcflags=""
+
+if $debug; then
+  # Disable compiler optimizations and inlining when doing a debug build
+  gcflags="all=-N -l"
+fi
+
+(set -x; go install \
+  -gcflags="$gcflags" \
+  -ldflags "$ldflags" \
+  "github.com/github/launch/cmd/...")
+
+go test ./... -run "not a test name, this tests that the tests compile"
+
+# Once the binaries are built, copy then to $PWD/bin from $GOPATH/bin.
+# Once they are copied, verify that the version in bin/ is the version we
+# just built.
+test -d bin || mkdir bin
+for cmd; do
+  binary=bin/$(basename $cmd)
+  copy_binary "$binary" || exit 1
+done

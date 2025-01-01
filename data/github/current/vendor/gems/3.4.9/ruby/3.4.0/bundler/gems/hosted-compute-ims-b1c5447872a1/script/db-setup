@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+
+set -e
+
+function usage() {
+    cat <<EOF
+Usage: script/db-setup [--recreate] [--skip-seed]
+  Creates database, creates tables and seed initial data
+
+  Optional parameters:
+    --recreate                      Deletes existing database and creates a new database.
+
+  Environment variables:
+    MY_SQL_DATABASE                 Overrides MySQL database name
+    SEED_AZURE_SUBSCRIPTION         Overrides azure subscription id to seed
+
+EOF
+}
+
+TABLE_SCHEMA_DIR=schema/*.sql
+DEFAULT_DEV_AZURE_SUBSCRIPTION="9a8bfc7d-d62b-45e0-89fa-af3ee76dd7c5" # GitHub - NonProd - Dev - Hosted Compute IMS - 001
+
+DELETE_DATABASE=false
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --recreate)
+      DELETE_DATABASE=true; shift ;;
+    --help)
+      usage; exit 0 ;;
+    *)
+      echo "Unknown option $1"; usage; exit 1 ;;
+  esac
+done
+
+if [[ -z "${MY_SQL_DATABASE}" ]]; then
+  MY_SQL_DATABASE=hosted_compute_ims_development
+fi
+
+function test-connection() {
+    ./script/db-shell --execute 'select now()' --no-db 1> /dev/null
+}
+
+function create-database() {
+    echo "Creating database $MY_SQL_DATABASE..."
+    ./script/db-shell --execute "CREATE DATABASE IF NOT EXISTS $MY_SQL_DATABASE CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci;" --no-db
+    echo "Done creating database..."
+}
+
+function delete-database() {
+    echo "Deleting existing database..."
+    ./script/db-shell --execute "DROP DATABASE IF EXISTS $MY_SQL_DATABASE;" --no-db
+    echo "Done deleting database..."
+}
+
+function check-database-exists() {
+    local tables_found=$(./script/db-shell --execute "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '$MY_SQL_DATABASE';" --no-db --raw-output)
+    if [[ -n "$tables_found" ]]; then
+        true
+    else
+        false
+    fi
+}
+
+function create-tables() {
+    echo "creating all tables..."
+    for schema in ${TABLE_SCHEMA_DIR}
+    do
+        echo "creating table ${schema}..."
+
+        ./script/db-shell --file ${schema}
+    done
+}
+
+function check-database-table-has-rows() {
+    local table="$1"
+    local rows_count=$(script/db-shell --execute  "SELECT COUNT(*) FROM $table;" --raw-output)
+    if [[ $rows_count -gt 0 ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+function check-database-already-seeded() {
+    local all_tables_raw=$(script/db-shell --execute 'SHOW tables;' --raw-output)
+    local all_tables=($all_tables_raw)
+    for table in "${all_tables[@]}"; do
+        if check-database-table-has-rows $table ; then
+           return 0
+        fi
+    done
+
+    return 1
+}
+
+function seed-azure-subscription() {
+    ./script/db-shell --execute "INSERT INTO azure_subscription (subscription_id, image_type, resources_prefix) VALUES ('$1', 'Mixed', '$2')"
+}
+
+function seed-database() {
+    local seed_subscription_resources_prefix=$(date +%Y%m%d%H%M%S)
+
+    if [[ -n "${SEED_AZURE_SUBSCRIPTION}" ]]; then
+        echo "Seeding DB with custom azure subscription: $SEED_AZURE_SUBSCRIPTION"
+        seed-azure-subscription "$SEED_AZURE_SUBSCRIPTION" "$seed_subscription_resources_prefix"
+    else
+        if [[ $GITHUB_REPOSITORY == "github/github" ]]; then
+            echo "Seeding DB with shared curated images for gh/gh codespace"
+            script/helpers/provision-shared-images
+        fi
+
+        echo "Seeding DB with default dev azure subscription"
+        seed-azure-subscription "$DEFAULT_DEV_AZURE_SUBSCRIPTION" "$seed_subscription_resources_prefix"
+    fi
+}
+
+test-connection
+
+if [[ $DELETE_DATABASE == true ]]; then
+    delete-database
+fi
+
+if check-database-exists; then
+    echo "Database already exists. Skipping table creation."
+else
+    create-database
+    create-tables
+fi
+
+if check-database-already-seeded; then
+    echo "Database already has data. Skipping seeding."
+else
+    seed-database
+fi

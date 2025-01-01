@@ -1,0 +1,124 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+    name: launch-transitions
+    annotations:
+        heaven.githubapp.com/image-placeholder: "launch"
+        heaven.githubapp.com/deploy-requirement: "false"
+        moda.github.net/log-job-output: "true"
+        # https://github.com/github/moda-linter/blob/75731cd9f59e29883cb363020804c83d1d7f4ab8/rules/docs/env_var_already_injected_by_annotation.md
+        heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: run-latest-transition
+spec:
+    backoffLimit: 0
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: prod-launch
+                observability.github.com/splunk_sourcetype: launch-fluentbit
+                observability.github.com/kafka_topic: launch
+        spec:
+            restartPolicy: Never
+            containers:
+                - name: run-latest-transition
+                  image: launch
+                  command:
+                    # remove "echo" when you're ready for a transition to run
+                    - /usr/bin/tools/istio-job-wrapper
+                    - echo
+                    - migratorctl
+                    - transition
+                  resources:
+                    requests:
+                        cpu: "0.1"
+                        memory: "1Gi"
+                    limits:
+                        # Adjust GOMAXPROCS in tandem. It's recommended the cpu limit be set to GOMAXPROCS+1.
+                        cpu: 2
+                        memory: "2Gi"
+                  env:
+                    - name: GOMAXPROCS
+                      value: "1"
+                    - name: KUBE_POD
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.name
+                    - name: KUBE_NAMESPACE
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.namespace
+                    - name: REGION
+                      valueFrom:
+                        configMapKeyRef:
+                            name: kube-cluster-metadata
+                            key: region
+                    - name: STATS_PREFIX
+                      value: launch
+                    - name: STATS_ADDR
+                      value: "$(KUBE_NODE_HOSTNAME):28125"
+                    - name: FRENO_ADDR
+                      value: "freno.service.github.net:8111"
+                    - name: LAUNCH_ENV
+                      value: production
+                    - name: LAUNCH_MODE
+                      value: hosted
+                    - name: DEPLOYER_DATABASE_URL
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: mysql-deployer-rw-db
+                    - name: API_HOST
+                      value: "https://internal-api.service.$(REGION).github.net"
+                    - name: DEPENDABOT_APP_RELAY_ID
+                      value: "A_kwHNJr_NcbY"
+                    - name: CODESPACES_APP_RELAY_ID
+                      value: "A_kwHNJr_N0vc"
+                    - name: GITHUB_SECRETS_APP_RELAY_ID
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: github-secrets-app-relay-id
+                    - name: GITHUB_TWIRP_HMAC_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: github-twirp-hmac-secret
+                    - name: EARTHSMOKE_CUSTOM_TASKS_KEY
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: earthsmoke-custom-tasks-key
+                    - name: EARTHSMOKE_DEPENDABOT_SECRETS_KEY
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: earthsmoke-dependabot-secrets-key
+                    - name: EARTHSMOKE_CODESPACES_SECRETS_KEY
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: earthsmoke-codespaces-secrets-key
+                    - name: GITHUB_TWIRP_ADDR
+                      value: "https://internal-api.service.iad.github.net/internal"
+                    - name: TELEMETRY_ROUND_TRIPPER_ENABLE_LOGS
+                      value: "true"
+                    - name: LAUNCH_REDIS_URL
+                      value: "db-redis-launch-rw.service.github.net:6379"
+                    - name: LAUNCH_REDIS_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: launch-redis-secret
+                    - name: FAILBOT_HAYSTACK_URL
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: failbot-haystack-url
+                    - name: DISABLE_FRENO
+                      value: "false"
+                    - name: IS_DRY_RUN
+                      value: "true"
+                  envFrom:  # order matters! Subsequent entries can override earlier entries.
+                    - secretRef:
+                        name: vault-secrets

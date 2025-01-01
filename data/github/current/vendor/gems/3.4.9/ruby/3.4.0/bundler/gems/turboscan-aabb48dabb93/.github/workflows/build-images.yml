@@ -1,0 +1,50 @@
+# The golden image build is not triggered properly when using the merge queue. This job triggers it manually.
+
+name: Build Images
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - .github/workflows/build-images.yml
+
+permissions:
+  contents: read
+
+env:
+  GH_TOKEN: ${{ secrets.DSP_CODE_SCANNING_TOKEN }}
+
+jobs:
+  build-codespace:
+    name: Build Codespace Image
+    runs-on: self-hosted
+    steps:
+      - name: Login to Docker Registry
+        run: |
+          echo "${{ secrets.CONTAINER_BUILDER_TOKEN }}" | docker login ghcr.io --username gh-containers-bot --password-stdin
+
+      - name: Checkout Repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+
+      - name: Build image
+        run: |
+          docker pull ghcr.io/github/turboscan/codespace
+          TARGET=codespace script/build-devcontainer-image --cache-from ghcr.io/github/turboscan/codespace -t ghcr.io/github/turboscan/codespace
+          docker push ghcr.io/github/turboscan/codespace
+
+  build-golden-image:
+    name: Build Golden Image
+    runs-on: self-hosted
+    steps:
+      - name: Login to Docker Registry
+        run: |
+          echo "${{ secrets.OCTOFACTORY_TOKEN }}" | docker login octofactory.githubapp.com --username "${{ secrets.OCTOFACTORY_USER }}" --password-stdin || true
+
+      - name: Checkout Repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+
+      - name: Build Image
+        run: |
+          ./script/build-devcontainer-image --no-cache -t octofactory.githubapp.com/github-golden-docker/github-turboscan:turboscan-dev
+           docker push octofactory.githubapp.com/github-golden-docker/github-turboscan:turboscan-dev

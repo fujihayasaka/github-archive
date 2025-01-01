@@ -1,0 +1,1 @@
+ALTER TABLE `ts_analyses` DROP COLUMN `repository_nwo`, DROP COLUMN `ref`, DROP COLUMN `enqueued_to_hydro_at`, DROP COLUMN `processing_started_at`, DROP COLUMN `processing_completed_at`, DROP COLUMN `metrics_cleaned`, DROP COLUMN `lines_of_code_analyzed`, DROP COLUMN `lines_of_code_baseline`, DROP KEY `idx_analyses_on_metrics_cleaned_updated_at`;

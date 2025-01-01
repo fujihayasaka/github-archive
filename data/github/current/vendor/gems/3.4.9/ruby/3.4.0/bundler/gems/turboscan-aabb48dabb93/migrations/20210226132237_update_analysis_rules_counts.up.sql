@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20210226132237_update_analysis_rules_counts.go on GHES

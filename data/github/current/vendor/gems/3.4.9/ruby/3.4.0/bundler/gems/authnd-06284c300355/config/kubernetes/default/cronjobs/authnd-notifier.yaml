@@ -1,0 +1,57 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    annotations:
+        heaven.githubapp.com/deploy-requirement: "false"
+        moda.github.net/cluster-preferences: |
+            {
+              "general-1-ash1-iad":  {
+                "spec": {
+                  "suspend": false
+                }
+              }
+            }
+        moda.github.net/log-job-output: "false"
+    name: authnd-notifier
+spec:
+    concurrencyPolicy: Forbid
+    failedJobsHistoryLimit: 3
+    jobTemplate:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt_sloppy
+                observability.github.com/logger: fluent-bit
+        spec:
+            activeDeadlineSeconds: 1800
+            template:
+                spec:
+                    containers:
+                        - command:
+                            - /usr/bin/tools/istio-job-wrapper
+                            - /app/bin/authnd-notifier
+                          env:
+                            - name: STATS_PERIOD
+                              value: 5s
+                            - name: STATS_ADDR
+                              value: $(KUBE_NODE_HOSTNAME):28125
+                          envFrom:
+                            - secretRef:
+                                name: vault-secrets
+                            - configMapRef:
+                                name: kube-cluster-metadata
+                            - configMapRef:
+                                name: common-config
+                          image: authnd
+                          name: authnd-notifier
+                          volumeMounts:
+                            - mountPath: /config
+                              name: authnd-configmap
+                    restartPolicy: Never
+                    volumes:
+                        - configMap:
+                            name: authnd
+                          name: authnd-configmap
+    schedule: 0 * * * *
+    successfulJobsHistoryLimit: 3
+    suspend: true

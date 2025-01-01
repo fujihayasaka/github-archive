@@ -13,6 +13,7 @@
  */
 
 import {verifiedFetch} from '@github-ui/verified-fetch'
+import {isEnterprise} from '@github-ui/runtime-environment'
 
 type AssetBase = {href: string; id: string}
 
@@ -80,6 +81,7 @@ export async function uploadFile(file: File, policy: UploadPolicy, signal: Abort
       ...policy.form,
       file,
     }),
+    credentials: isEnterprise() ? 'include' : 'same-origin',
     signal,
   })
 

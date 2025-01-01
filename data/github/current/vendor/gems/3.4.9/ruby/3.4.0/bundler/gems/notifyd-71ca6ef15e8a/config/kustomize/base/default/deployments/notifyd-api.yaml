@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: notifyd-api
+    annotations:
+        heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: "api"
+spec:
+    selector:
+        matchLabels:
+            app: notifyd-api
+    template:
+        metadata:
+            labels:
+                app: notifyd-api
+            annotations:
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: notifyd
+                fluentbit.io/parser_stdout: logfmt
+                fluentbit.io/parser_stderr: json
+        spec:
+            dnsPolicy: ClusterFirst
+            containers:
+                - name: api
+                  image: notifyd
+                  resources:
+                    requests:
+                        cpu: 100m
+                        memory: 100Mi
+                    limits:
+                        cpu: 1000m
+                        memory: 500Mi
+                  command: ["/go/bin/api"]
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command: ["sleep", "5"]
+                  readinessProbe:
+                    initialDelaySeconds: 5
+                    timeoutSeconds: 1
+                    httpGet:
+                        path: /_ping
+                        port: 8080
+                  envFrom:
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: NOTIFYD_API_ADDR
+                      value: ":8080"
+                    - name: NOTIFYD_API_TIMEOUT
+                      value: 5s
+                    - name: CHATOPS_ENABLED
+                      value: "true"
+                    - name: CHATOPS_ADDR
+                      value: ":8082"
+                    - name: EXCEPTION_HTTP_EXPORTER
+                      value: "true"
+                    - name: GOMAXPROCS
+                      valueFrom:
+                        resourceFieldRef:
+                          containerName: api
+                          resource: limits.cpu
+                    - name: STATSD_ADDR
+                      value: "$(KUBE_NODE_HOSTNAME):28125"
+                    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                      value: http://otelcol-mesh.otelcol-production.svc.cluster.local:14318/v1/traces
+                  ports:
+                    - name: http
+                      containerPort: 8080
+                      protocol: TCP
+                    - name: pprof
+                      containerPort: 8081
+                      protocol: TCP
+                    - name: chatops
+                      containerPort: 8082
+                      protocol: TCP

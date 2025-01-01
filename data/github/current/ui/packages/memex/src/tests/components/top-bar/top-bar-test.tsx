@@ -1,6 +1,8 @@
 import {render, screen} from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 
 import type {Owner} from '../../../client/api/common-contracts'
+import {Role} from '../../../client/api/common-contracts'
 import {TopBar} from '../../../client/components/top-bar'
 import {MemexTitle} from '../../../client/components/top-bar/memex-title'
 import {useEnabledFeatures} from '../../../client/hooks/use-enabled-features'
@@ -96,6 +98,67 @@ describe('TopBar', () => {
       )
 
       expect(screen.getByTestId('memex_without_limits_beta_label')).toBeInTheDocument()
+    })
+  })
+
+  describe('Copy permissions', () => {
+    const loggedInUser = {
+      id: 1,
+      login: 'monalisa',
+      name: 'monalisa',
+      avatarUrl: 'https://github.com/github.png',
+      global_relay_id: 'ABC123',
+      isSpammy: false,
+      paste_url_link_as_plain_text: false,
+    }
+
+    async function renderTopBarWithPrivileges(privileges: {role: Role; canCopy: boolean; canCopyAsTemplate: boolean}) {
+      const user = userEvent.setup()
+      const memex = memexFactory.build({titleHtml: 'My Memex'})
+      createTestEnvironment({
+        'memex-data': memex,
+        'logged-in-user': loggedInUser,
+        'memex-viewer-privileges': {
+          canChangeProjectVisibility: false,
+          ...privileges,
+        },
+      })
+      asMockHook(useEnabledFeatures).mockReturnValue({})
+
+      render(
+        <TestAppContainer>
+          <TopBar isProjectPath>
+            <MemexTitle />
+          </TopBar>
+        </TestAppContainer>,
+      )
+
+      await user.click(screen.getByTestId('project-menu-button'))
+    }
+
+    it('shows "Make a copy" when canCopy is true', async () => {
+      await renderTopBarWithPrivileges({role: Role.Write, canCopy: true, canCopyAsTemplate: false})
+      expect(screen.getByTestId('copy-project-button')).toBeInTheDocument()
+    })
+
+    it('hides "Make a copy" when canCopy is false (Read role)', async () => {
+      await renderTopBarWithPrivileges({role: Role.Read, canCopy: false, canCopyAsTemplate: false})
+      expect(screen.queryByTestId('copy-project-button')).not.toBeInTheDocument()
+    })
+
+    it('hides "Make a copy" when canCopy is false (Write role)', async () => {
+      await renderTopBarWithPrivileges({role: Role.Write, canCopy: false, canCopyAsTemplate: false})
+      expect(screen.queryByTestId('copy-project-button')).not.toBeInTheDocument()
+    })
+
+    it('shows "Copy as template" when canCopyAsTemplate is true', async () => {
+      await renderTopBarWithPrivileges({role: Role.Write, canCopy: true, canCopyAsTemplate: true})
+      expect(screen.getByTestId('copy-as-template-button')).toBeInTheDocument()
+    })
+
+    it('hides "Copy as template" when canCopyAsTemplate is false', async () => {
+      await renderTopBarWithPrivileges({role: Role.Write, canCopy: true, canCopyAsTemplate: false})
+      expect(screen.queryByTestId('copy-as-template-button')).not.toBeInTheDocument()
     })
   })
 

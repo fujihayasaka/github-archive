@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20201014131732_create_tool_version_from_analyses.go on GHES

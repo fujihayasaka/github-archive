@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+root="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." >/dev/null 2>&1 && pwd )"
+cd "$root"
+
+set -eo pipefail
+
+tests=()
+
+for file in $(find ruby/test -name '*_test.rb'); do
+  if [[ "$file" == *"integration_test.rb" ]]; then
+    if [ "$INTEGRATION" == "1" ]; then
+      tests+=("$file")
+    fi
+  else
+    tests+=("$file")
+  fi
+done
+
+if [ "$COVERAGE" == "1" ] && [ -d ./coverage ]; then
+  rm -Rf ./coverage
+fi
+
+if [ "$INTEGRATION" == "1" ]; then
+  if [[ ! -f ${root}/dev/rsa256-priv-key.pem ]]; then
+    echo "Cannot find identity keys when running in integration test mode. Exiting"
+    exit 1
+  else
+    echo "found identity keys in expected location"
+    export IDENTITY_PRIVATE_KEY=$(cat ${root}/dev/rsa256-priv-key.pem)
+    export IDENTITY_PUBLIC_KEY=$(cat ${root}/dev/rsa256-key.pub)
+    export IDENTITY_CERTIFICATE=$(cat ${root}/dev/rsa256-priv-key.crt)
+  fi
+fi
+
+echo "==> starting tests..."
+# always require test_helper first in order to setup test coverage properly
+bundle exec ruby -I .:ruby/lib/:ruby/test/ -r "pry-byebug" -e "require \"ruby/test/test_helper\"; ARGV.each{|f| require f}" ${tests[@]}
+
+if [ "$COVERAGE" == "1" ]; then
+  open ./coverage/index.html
+fi

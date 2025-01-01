@@ -1,0 +1,39 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: launch-incomplete-workflows
+    annotations:
+        # https://github.com/github/moda-linter/blob/75731cd9f59e29883cb363020804c83d1d7f4ab8/rules/docs/env_var_already_injected_by_annotation.md
+        heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: launch-incomplete-workflows
+spec:
+    # suspend can be overwritten for a single cluster with moda.github.net/cluster-preferences annotation.
+    suspend: true
+    concurrencyPolicy: Forbid
+    jobTemplate:
+        spec:
+            ttlSecondsAfterFinished: 86400
+            backoffLimit: 1
+            # Terminate runaway pods after 10 minutes.
+            activeDeadlineSeconds: 600
+            template:
+                spec:
+                    dnsPolicy: Default
+                    restartPolicy: Never
+                    containers:
+                        - name: launch-incomplete-workflows
+                          image: launch
+                          command:
+                            - /usr/bin/tools/istio-job-wrapper
+                            - job-cli
+                            - jobs
+                            - percentIncompleteWorkflows
+                            - --interval
+                            - "1"
+                          resources:
+                            requests:
+                                cpu: "0.1"
+                                memory: "128Mi"
+                            limits:
+                                # Adjust GOMAXPROCS in tandem. It's recommended the cpu limit be set to GOMAXPROCS+1.
+                                cpu: "3"
+                                memory: "256Mi"

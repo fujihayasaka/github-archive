@@ -124,7 +124,7 @@ const SettingsOverflowMenu = memo(function SettingsOverflowMenu() {
   const [isOpen, setIsOpen] = useState(false)
   const {postStats} = usePostStats()
 
-  const {hasWritePermissions, isLoggedIn, canCopyAsTemplate} = ViewerPrivileges()
+  const {hasWritePermissions, isLoggedIn, canCopyAsTemplate, canCopy} = ViewerPrivileges()
 
   const toggleIsOpen = useCallback(() => {
     setIsOpen(s => !s)
@@ -200,7 +200,7 @@ const SettingsOverflowMenu = memo(function SettingsOverflowMenu() {
       )
     }
 
-    if (isLoggedIn) {
+    if (isLoggedIn && canCopy) {
       items.push(
         <CopyDialogAction
           dialogId={`copy-project-dialog-${projectNumber}`}
@@ -276,6 +276,7 @@ const SettingsOverflowMenu = memo(function SettingsOverflowMenu() {
   }, [
     hasWritePermissions,
     isLoggedIn,
+    canCopy,
     showCopyAsTemplate,
     openChangelog,
     feedbackLink,
@@ -320,7 +321,7 @@ const SettingsOverflowMenu = memo(function SettingsOverflowMenu() {
 
       <Portal>
         <div>
-          {isLoggedIn && <include-fragment src={encodeURI(copyProjectPartialUrl)} />}
+          {isLoggedIn && canCopy && <include-fragment src={encodeURI(copyProjectPartialUrl)} />}
           {showCopyAsTemplate && <include-fragment src={encodeURI(`${copyProjectPartialUrl}?copy_as_template=true`)} />}
         </div>
       </Portal>

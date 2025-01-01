@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+#/ Usage: script/server [--no-build] [--no-dotcom] [--dotcom-path <PATH>] [--help]
+#/
+#/ Launches all the services needed for an end-to-end authnd flow.
+#/
+#/ Options:
+#/     --no-build                   Don't rebuild the authnd binary, if present.
+#/     --no-dotcom                  Don't check to see if dotcom is running.
+#/     --except <APP>               Skip starting the specified app (see Procfile for the names). Often useful when you want to launch it in a debugger.
+#/     --dotcom-path <PATH>         Specify the path to your local github/github clone (defaults to a 'github' directory that is a sibling to your 'authnd' clone).
+#/     --mysql-port <PORT>          Specify the port to use for the mysql server (defaults to 3001).
+#/     --help                       Show this help.
+
+root="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." >/dev/null 2>&1 && pwd )"
+cd "$root"
+
+set -e
+
+source "script/helpers/_utils.sh"
+
+MYSQL_PATH=$(find_mysql)
+
+build_authnd=true
+require_dotcom=true
+mysql_port=3001
+except=()
+
+while [[ "$#" > 0 ]]; do
+    key="$1"
+    shift
+
+    case "$key" in
+        --no-build)
+            build_authnd=false
+            ;;
+        --no-dotcom)
+            require_dotcom=false
+            ;;
+        --except)
+            except=($except "$1")
+            shift
+            ;;
+        --dotcom-path)
+            repo_github="$1"
+            shift
+            ;;
+        --mysql-port)
+            mysql_port="$1"
+            shift
+            ;;
+        --enterprise)
+            export IS_ENTERPRISE_SERVER=true
+            export AUTHND_DATABASE=github_enterprise_authnd
+            export GITHUB_DATABASE=github_enterprise
+            require_dotcom=false
+            ;;
+        --help)
+            cat "$0" | grep ^#/ | cut -c4-
+            exit 1 ;;
+    esac
+done
+
+if [[ $CODESPACES == "true" ]]; then
+  echo "Running server for codespaces"
+
+  if [[ $GITHUB_REPOSITORY != "github/github" ]]; then
+    require_dotcom=false
+  fi
+
+  # We use a locally running MySQL in codespaces, always use 3306 for the port
+  mysql_port=3306
+fi
+
+# Try to find repos
+[ -n "$repo_github" ] || repo_github="$(find_sibling github)"
+
+echo "==> checking for authnd MySQL instance..."
+if ! $MYSQL_PATH -uroot -P $mysql_port --protocol=tcp -e "SELECT 1" >/dev/null 2>&1; then
+    fatal "authnd MySQL instance is not running on port $mysql_port, run 'script/setup'"
+fi
+
+if $require_dotcom; then
+    if [ -z "$repo_github" ]; then
+        fatal "could not find github/github clone, use --dotcom-path to specify it if it's not a sibling of this repo"
+    fi
+
+    echo "==> dotcom repo: $repo_github"
+    # Check if dotcom is running, as a pre-req
+    if ! pgrep kafka-lite >/dev/null 2>&1; then
+        fatal "github/github isn't running, launch it in a separate window/tab/pane first"
+    fi
+fi
+
+# if we've gotten here and kafka-lite still isn't running, send kafka messages to a file
+if ! pgrep kafka-lite >/dev/null 2>&1; then
+    export KAFKA_DEVELOPMENT=true
+fi
+
+export OVERMIND_IGNORED_PROCESSES=$(IFS=, ; echo "${except[*]}")
+
+if ! $build_authnd; then
+  if [ ! -f bin/authnd ]; then
+    echo "authnd binary not found..."
+    build_authnd=true
+  fi
+fi
+
+if $build_authnd; then
+  script/build
+fi
+
+if [ -z "${IDENTITY_PRIVATE_KEY}" ] && [ ! -f "dev/rsa256-priv-key.pem" ]; then
+	echo "IDENTITY_PRIVATE_KEY not set and dev/rsa256-priv-key.pem not found.  Generate it with script/bootstrap."
+fi
+export IDENTITY_PRIVATE_KEY=${IDENTITY_PRIVATE_KEY:=$(cat dev/rsa256-priv-key.pem)}
+
+if [ -z "${IDENTITY_PUBLIC_KEY}" ] && [ ! -f "dev/rsa256-key.pub" ]; then
+	echo "IDENTITY_PUBLIC_KEY not set and dev/rsa256-key.pub not found.  Generate it with script/bootstrap."
+fi
+export IDENTITY_PUBLIC_KEY=${IDENTITY_PUBLIC_KEY:=$(cat dev/rsa256-key.pub)}
+
+if [ -z "${IDENTITY_CERTIFICATE}" ] && [ ! -f "dev/rsa256-priv-key.crt" ]; then
+	echo "IDENTITY_CERTIFICATE not set and dev/rsa256-priv-key.crt not found.  Generate it with script/bootstrap."
+fi
+export IDENTITY_CERTIFICATE=${IDENTITY_CERTIFICATE:=$(cat dev/rsa256-priv-key.crt)}
+
+echo "==> launching"
+export MYSQL_AUTHND_RW_HOST=localhost:$mysql_port
+export MYSQL_AUTHND_RO_HOST=localhost:$mysql_port
+export MYSQL_AUTHND_STATS_HOST=localhost:$mysql_port
+
+exec ./bin/authnd

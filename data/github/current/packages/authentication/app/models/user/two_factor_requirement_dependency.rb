@@ -218,7 +218,7 @@ module User::TwoFactorRequirementDependency
   # array of access privileges this user has to that Organization
   # :access can be one or more of [:admin, :member, :billing_manager, :outside_collaborator]
   # exception: :admin overrides :member, so those two will never be combined
-  def affiliated_organizations_with_roles
+  memoize def affiliated_organizations_with_roles
     orgs_with_access_hash = Hash.new { |h, k| h[k] = [] }
     owned_organizations.each { |org| orgs_with_access_hash[org] << :admin }
     organizations.each { |org| orgs_with_access_hash[org] << :member if orgs_with_access_hash[org].empty? }
@@ -252,7 +252,7 @@ module User::TwoFactorRequirementDependency
   # organization but is not a member of the organization itself.
   #
   # Returns an ActiveRecord::Relation
-  def outside_collaborator_organizations
+  memoize def outside_collaborator_organizations
     repository_ids = Authorization.service.subject_ids(actor: self, subject_type: "Repository")
 
     outside_collaborator_organization_ids = \

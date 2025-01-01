@@ -1,0 +1,43 @@
+environments:
+  - name: production
+    extra_start_message: "Checkout the [Datadog dashboard](https://app.datadoghq.com/dashboard/v8r-xt4-tpg/advisory-db) and [Sentry issues](https://github.sentry.io/issues/?project=1864109) so you're the first to know if anything is broken."
+    cluster_selector:
+      name: general-2-ac4-iad
+  - name: staging
+    auto_deploy: true
+    cluster_selector:
+      name: general-2-ac4-iad
+    # this should allow us to deploy successfully built PRs to staging even if they are a little behind tip.
+    skip_auto_merge: true
+notifications:
+  slack_channels:
+    - "#advisory-db-ops"
+required_builds:
+  - advisory-db / advisory-db
+  - advisory-db-docker-image / advisory-db-docker-image
+  - advisory-db-docker-security / advisory-db-docker-security
+  - advisory-db-moda-config-bundle / advisory-db-moda-config-bundle
+
+# explicitly setting ok_for_moda_to_remove_from_deprecating_clusters to false
+# this is because we have a glb entry to make advisory-db.githubapp.com DNS entry work
+# we need that DNS entry for webhooks to work
+# And the GLB entry is tied to specific "sites" where clusters live
+# Therefore, we need to make sure our DNS entry works before we migrate clusters
+ok_for_moda_to_remove_from_deprecating_clusters: false
+auto_start_pipeline: production_rollout
+pipelines:
+  production_rollout:
+    # thread_notifications is an experimental feature to group Slack notifications about the deploy in a thread
+    # See https://github.com/github/heaven/discussions/11819
+    thread_notifications: true
+    timeout: 1200
+    stages:
+      - name: full_production
+        kind: deployment
+        start_message: We are now going to deploy {{app}}/{{ref}}! Please pause or cancel the pipeline after the deploy if you want more time before your pull request(s) auto merges.
+        config:
+          environment: production
+          timeout: 320
+        gates:
+          - kind: timer
+            duration: 300

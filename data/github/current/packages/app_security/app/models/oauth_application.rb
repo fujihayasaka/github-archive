@@ -302,7 +302,7 @@ class OauthApplication < ApplicationRecord::Domain::Integrations
       GitHub.dogstats.increment "oauth_application", tags: ["action:callback_url_exact_match"]
       return valid_callback_url?(url)
     elsif Apps::Privileged.capable?(:proxima_first_party_sync, app: self)
-      if application_callback_urls.map(&:url).any? { |u| u.match?(url) }
+      if application_callback_urls.any? { |application_callback_url| application_callback_url.url == url }
         GitHub.dogstats.increment "oauth_application", tags: ["action:callback_url_exact_match"]
         return valid_callback_url?(url)
       end

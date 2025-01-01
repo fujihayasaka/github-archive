@@ -1,0 +1,94 @@
+#!/#!/usr/bin/env ruby
+#
+# Create a Package and PackageRelease objects for a certain repository ID.
+# This is meant to be used in development to get a Used By button to show up on github.localhost
+# Usage: bin/rails r script/dev/create-package-for-repo REPO_ID
+
+unless defined?(Rails)
+  puts "Don't call this script directly, use Rails Runner: `bin/rails r script/dev/create-package-for-repo`"
+  exit
+end
+
+if Rails.env.production?
+  puts "Don't use this script in production!"
+  exit
+end
+
+require "optparse"
+
+# Set default options for the package name and manager
+options = { package_name: "dev-package", package_manager: Types::PackageManager[:rubygems] }
+
+begin
+  OptionParser.new do |opts|
+    opts.banner = "Usage: bin/rails r script/dev/create-package-for-repo [options]"
+
+    opts.on("--repo-id ID", Integer, "ID of the Repository you'd like to create a package for") do |id|
+      options[:repo_id] = id
+    end
+
+    opts.on("--nwo NWO", String, "Repository name with owner (e.g. monalisa/my-repo)") do |nwo|
+      options[:nwo] = nwo
+    end
+
+    opts.on("--package-name [NAME]", String, "Name of the package (optional, defaults to dev-package)") do |name|
+      options[:package_name] = name
+    end
+
+    opts.on("--package-manager [MANAGER]", String, "Package manager (optional, defaults to RubyGems)") do |manager|
+      options[:package_manager] = Types::PackageManager[manager.to_sym]
+    end
+  end.parse!
+rescue OptionParser::MissingArgument => e
+  puts e.message
+  puts "Run with --help to list arguments"
+  exit
+rescue ArgumentError => e
+  puts e.message
+
+  if e.message.include?("Could not find Types::PackageManager")
+    puts %(Allowed package managers are: #{Types::PackageManager.to_a.join ", "})
+  end
+  exit
+end
+
+if options[:repo_id].blank? || options[:nwo].blank?
+  puts "Missing either --repo-id or --nwo argument!"
+  puts "Run with --help to list arguments"
+  exit
+end
+
+# Create a reusable Hash containing the package_name and package_manager so we can find existing records.
+package_name_and_manager = {
+  package_name: options[:package_name],
+  package_manager: options[:package_manager],
+}
+published_at = Time.now
+
+Repository.create(github_repository_id: options[:repo_id], nwo: options[:nwo])
+
+package = Package.find_or_create_by({
+  name: package_name_and_manager[:package_name],
+  package_manager: package_name_and_manager[:package_manager],
+})
+package.update_attributes({
+  last_published_at: published_at,
+  repository_id: options[:repo_id],
+  repository_id_certainty: PackageToRepoMapping::Certainty::OVERRIDE,
+})
+
+PackageRelease.find_or_create_by(package_name_and_manager.merge({ name: "1.2.3" })) do |record|
+  record.package_id = package.id
+  record.published_at = published_at
+end
+
+# Find or create an abstract dependency counts. If it's a new record, set the count to a random number.
+Views::AbstractRepositoryDependencyCount.find_or_create_by(package_name_and_manager) do |record|
+  record.dependent_count = rand(999)
+end
+
+Views::AbstractPackageDependencyCount.find_or_create_by(package_name_and_manager) do |record|
+  record.dependent_count = rand(999)
+end
+
+puts "Created Package #{package_name_and_manager[:package_name]} and mapped to #{options[:nwo]} (#{options[:repo_id]})"

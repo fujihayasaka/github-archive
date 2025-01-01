@@ -1,0 +1,38 @@
+name: "End to end test hydrosvc and turboscansvc"
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  GH_TOKEN: ${{ secrets.DSP_CODE_SCANNING_TOKEN }}
+
+jobs:
+  test-hydro-and-turboscan:
+    runs-on: self-hosted
+    steps:
+      - name: Login to Docker Registry
+        run: |
+          echo "${{ secrets.CONTAINER_BUILDER_TOKEN }}" | docker login ghcr.io --username gh-containers-bot --password-stdin
+          echo "${{ secrets.OCTOFACTORY_TOKEN }}" | docker login octofactory.githubapp.com --username "${{ secrets.OCTOFACTORY_USER }}" --password-stdin || true
+
+      - name: Checkout repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+
+      - name: Run make test-services
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            docker compose --profile processor down
+          }
+          trap cleanup EXIT
+          docker compose --profile processor up --wait
+          ./script/dev-run make -j2 s3-init azure-init
+          ./script/dev-run make db-migrate
+          ./script/dev-run make test-services

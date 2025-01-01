@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: usage-report-fan-out
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: usage-report-fan-out
+  template:
+    metadata:
+      labels:
+        app: usage-report-fan-out
+      annotations:
+        observability.github.com/logger: fluent-bit
+        observability.github.com/splunk_index: billing
+        fluentbit.io/parser: logfmt
+    spec:
+      dnsPolicy: ClusterFirst
+      terminationGracePeriodSeconds: 80
+      containers:
+      - name: usage-report-fan-out
+        image: billing-platform
+        command: ["./bin/queue-worker"]
+        env:
+        - name: WORKER_TYPE
+          value: "usage-report-fan-out"
+        - name: script
+          value: build
+        - name: STATS_ADDR
+          value: "$(KUBE_NODE_HOSTNAME):28125"
+        - name: APP_SHA
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.annotations['heaven.githubapp.com/sha']
+        - name: APP_REF
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.annotations['heaven.githubapp.com/ref']
+        envFrom:
+          - configMapRef:
+              name: environment
+          - configMapRef:
+              name: kube-cluster-metadata
+          - secretRef:
+              name: vault-secrets
+        readinessProbe:
+          exec:
+            command:
+             - cat
+             - /tmp/consumer_healthy
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            cpu: 0.4
+            memory: "1024Mi"
+          limits:
+            # Adjust GOMAXPROCS in tandem. It's recommended the cpu limit be set to GOMAXPROCS+1.
+            cpu: 3.0
+            memory: "4096Mi"

@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backfill
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: turboghas
+      role: backfill
+  template:
+    metadata:
+      labels:
+        app: turboghas
+        role: backfill
+      annotations:
+        observability.github.com/logger: fluent-bit
+        fluentbit.io/parser: logfmt
+        observability.github.com/splunk_index: turboghas
+    spec:
+      dnsPolicy: ClusterFirst
+      containers:
+        - name: turboghas
+          image: turboghas
+          command:
+            - backfill
+          ports:
+            - name: http
+              containerPort: 8866
+              protocol: TCP
+          env:
+            - name: STATS_ADDR
+              value: "$(KUBE_NODE_HOSTNAME):28125"
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  containerName: turboghas
+                  resource: limits.cpu
+          envFrom:
+            - configMapRef:
+                name: environment
+            - secretRef:
+                name: vault-secrets
+          readinessProbe:
+            exec:
+              command: [ "noop" ]
+            initialDelaySeconds: 10
+          resources:
+            requests:
+              memory: 512Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+              cpu: 1000m

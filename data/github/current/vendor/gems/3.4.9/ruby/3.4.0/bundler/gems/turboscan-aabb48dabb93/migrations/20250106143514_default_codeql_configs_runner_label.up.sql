@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20250106143514_default_codeql_config_runner_label.go on GHES

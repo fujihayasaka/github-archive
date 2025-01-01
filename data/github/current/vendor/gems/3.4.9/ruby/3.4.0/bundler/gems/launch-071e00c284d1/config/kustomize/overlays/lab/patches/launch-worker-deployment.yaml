@@ -1,0 +1,293 @@
+# http://kubernetes.io/docs/user-guide/deployments/#what-is-a-deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: launch-worker
+    annotations:
+        heaven.githubapp.com/image-placeholder: "launch"
+        heaven.githubapp.com/deploy-requirement: "true"
+        moda.github.net/canary-v2: "true"
+        moda.github.net/canary-label: "role"
+spec:
+    selector:
+        matchLabels:
+            service: launch-worker
+            role: lab
+    replicas: 2
+    template:
+        metadata:
+            # Labels are applied to all pods created by this deployment so we can
+            # tell the service load balancer where to send traffic.
+            # http://kubernetes.io/docs/user-guide/labels/
+            labels:
+                service: launch-worker
+                role: lab
+        spec:
+            containers:
+                - name: launch-worker
+                  resources:
+                    requests:
+                        # Recommendations: https://app.datadoghq.com/s/59fe6c40c/5v3-d94-gjw
+                        cpu: "25m"
+                        memory: "100Mi"
+                    limits:
+                        # Adjust GOMAXPROCS in tandem. It's recommended the cpu limit be set to GOMAXPROCS+1.
+                        cpu: "2"
+                        memory: "200Mi"
+                  envFrom:  # order matters! Subsequent entries can override earlier entries.
+                    - secretRef:
+                        name: vault-secrets
+                    - configMapRef:
+                        name: static-config
+                  env:
+                    - name: KUBE_POD
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.name
+                    - name: KUBE_NAMESPACE
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.namespace
+                    - name: REGION
+                      valueFrom:
+                        configMapKeyRef:
+                            name: kube-cluster-metadata
+                            key: region
+                    # Federated secret
+                    - name: FAILBOT_HAYSTACK_URL
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: failbot-haystack-url
+                    - name: EARTHSMOKE_CUSTOM_TASKS_KEY
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: earthsmoke-custom-tasks-key
+                    - name: EARTHSMOKE_DEPENDABOT_SECRETS_KEY
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: earthsmoke-dependabot-secrets-key
+                    - name: INTERNAL_ADDR
+                      value: ":6824"
+                    - name: HTTP_PROXY
+                      value: "network-proxy.service.github.net:3128"
+                    - name: HTTPS_PROXY
+                      value: "network-proxy.service.github.net:3128"
+                    - name: NO_PROXY
+                      value: "github.net,github.com,*.cluster.local,*.blob.core.windows.net"
+                    - name: LAUNCH_REDIS_URL
+                      value: "db-redis-launch-rw.service.github.net:6379"
+                    - name: LAUNCH_REDIS_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: launch-redis-secret
+                    - name: AQUEDUCT_APP
+                      value: "actions-production"
+                    - name: AQUEDUCT_URL
+                      value: "https://aqueduct-gateway-production.service.iad.github.net"
+                    - name: AQUEDUCT_TIMEOUT_MS
+                      value: "4000"
+                    - name: AQUEDUCT_QUEUE_WEBHOOKS
+                      value: "webhooks-lab"
+                    - name: AQUEDUCT_NUM_WORKERS
+                      value: "12"
+                    - name: AQUEDUCT_NUM_WORKERS_NON_WEBHOOK
+                      value: "2"
+                    - name: AQUEDUCT_QUEUE_SCHEDULED_BUILDS
+                      value: "scheduled_builds-lab"
+                    - name: AQUEDUCT_QUEUE_DYNAMIC_BUILDS
+                      value: "dynamic_builds-lab"
+                    - name: AQUEDUCT_HEARTBEAT_ATTEMPT_INTERVAL_MS
+                      value: "5000"
+                    - name: AQUEDUCT_MAX_TIME_WITHOUT_HEARTBEAT_MS
+                      value: "30000"
+                    - name: API_HOST
+                      value: "https://internal-api.service.iad.github.net"
+                    - name: EXTERNAL_API_HOST
+                      value: "https://api.github.com"
+                    - name: EXTERNAL_GITHUB_HOST
+                      value: "https://github.com"
+                    - name: KAFKA_ROOT_CA_PATH
+                      value: "/etc/ssl/certs/cp1-iad-production-1487801205-root.pem"
+                    - name: KAFKA_BROKERS
+                      value: "hydro-kafka-potomac-boot-1.service.iad.github.net:9093,hydro-kafka-potomac-boot-2.service.iad.github.net:9093,hydro-kafka-potomac-boot-3.service.iad.github.net:9093"
+                    # The app id(s) for the Launch GitHub App (prod and lab)
+                    # These are multiline strings because of https://github.com/kubernetes-sigs/kustomize/issues/4146
+                    - name: GITHUB_ACTIONS_APP_IDS
+                      value: |
+                        15368
+                        15470
+                    # The global id for the Dependabot GitHub App
+                    - name: DEPENDABOT_APP_RELAY_ID
+                      value: "A_kwHNJr_NcbY"
+                    # The master key for generating action-runner keys
+                    - name: ACTION_RUNNER_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: deployer-action-runner-secret
+                    # As of July 2024, RECEIVER_URL is not used to make service-to-service calls within the cluster's service mesh.
+                    # Instead, it's used to provide the receiver URL to external services that need to callback/postback.
+                    # For these reasons, it should remain "unmeshified."
+                    - name: RECEIVER_URL
+                      value: "https://launch-receiver-lab.githubapp.com"
+                    # RECEIVER_INTERNAL_URL is used for run-service to make requests to the receiver for requesting pre_job_info, ex: GITHUB_TOKEN
+                    - name: RECEIVER_INTERNAL_URL
+                      value: https://launch-receiver-internal-lab.service.iad.github.net
+                    # RESULTS_RECEIVER_URL is ultimately advertised to the runner as a callback endpoint.  It should remain "unmeshified."
+                    - name: RESULTS_RECEIVER_URL
+                      value: "https://actions-results-receiver-lab.githubapp.com/"
+                    # RECEIVER_PUBLIC_URL is used in 4-nines runs for the runner to callback to the receiver for resolving actions.
+                    - name: RECEIVER_PUBLIC_URL
+                      value: "https://launch-receiver-lab.githubapp.com"
+                    - name: TRACING_ENABLED
+                      value: "true"
+                    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                      value: "https://opentelemetry-collector-production.service.iad.github.net/v1/traces"
+                    - name: OTEL_EXPORTER_OTLP_TRACES_HEADERS
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: otel-exporter-otlp-traces-headers
+                    - name: GITHUB_TWIRP_HMAC_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: github-twirp-hmac-secret
+                    - name: EARTHSMOKE_KEYSTORE_AZP_ORGANIZATION
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: earthsmoke-keystore-azp-organization-lab
+                    - name: GITHUB_TWIRP_ADDR
+                      value: "https://internal-api.service.iad.github.net/internal"
+                    - name: TENANT_KEY_GENERATOR_BUFFER_SIZE
+                      value: "100"
+                    - name: TENANT_KEY_GENERATOR_WORKERS
+                      value: "5"
+                    - name: AZP_ORG_CREATE_API_BASE_URL
+                      value: "https://pipelines.actions.githubusercontent.com/serviceDeployments/pipelinesghubeus20"
+                    - name: "PIPELINE_SCALE_UNIT_URLS"
+                      value: |
+                        https://pipelinesghubeus20.actions.githubusercontent.com
+                    - name: AZP_ORG_REGION
+                      value: "RING0"
+                    - name: EMULATE_PREPARED_STATEMENTS
+                      value: "true"
+                    - name: USE_UTC_FOR_MYSQL
+                      value: "true"
+                    - name: FORCE_CHARSET_FOR_MYSQL
+                      value: "true"
+                    - name: SCHEDULE_SCATTER_OFFSET_DURATION
+                      value: "240s"
+                    - name: SPOKESD_URL
+                      value: "https://spokesd-staging.service.iad.github.net:10033"
+                    - name: SPOKESD_CONFIG_TLS
+                      value: "true"
+                    - name: SPOKESD_CERT_PEM
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: spokesd-cert-pem
+                    - name: SPOKESD_CHAIN_PEM
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: spokesd-chain-pem
+                    - name: SPOKESD_KEY_PEM
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: spokesd-key-pem
+                    - name: AUTHZD_URL
+                      value: "https://authzd-production.service.iad.github.net"
+                    - name: KREDZ_HTTP_ADDR
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: kredz-http-addr
+                    - name: KREDZ_HMAC_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: kredz-hmac-secret
+                    - name: VARZ_HTTP_ADDR
+                      value: "https://kredz-varz-lab.service.iad.github.net"
+                    - name: VARZ_HMAC_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: varz-hmac-secret
+                    - name: TELEMETRY_ROUND_TRIPPER_ENABLE_LOGS
+                      value: "true"
+                    - name: TOP_100_CUSTOMERS
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: top-100-customers
+                    - name: TEMPORARY_FOUR_NINES_STAGE_ROLLOUT_ENTERPRISE_NAMES
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: temporary-four-nines-stage-rollout-enterprise-names
+                    - name: RUN_SERVICE_URL
+                      value: "https://actions-run-service-lab.service.azure-eastus.github.net"
+                    - name: RUN_SERVICE_HMAC_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: run-service-hmac-secret
+                    - name: RESULTS_CORE_ADDR
+                      value: "https://actions-results-core-lab.service.iad.github.net"
+                    - name: RESULTS_CORE_HMAC_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: results-core-hmac-secret
+                    - name: GOMAXPROCS
+                      value: "1"
+                    - name: LAUNCH_LOG_DEBUG
+                      value: "true"
+                    - name: QUEUE_RUN_RATE_LIMIT_ENABLED
+                      value: "true"
+                    - name: QUEUE_RUN_RATE_LIMIT_ENABLED
+                      value: "true"
+                    - name: WEBHOOK_RATE_LIMIT_ENABLED
+                      value: "true"
+                    - name: AZURE_STORAGE_ACCOUNT_PREFIX
+                      value: "launchlabsa"
+                    - name: AZURE_BLOB_STORAGE_ACCOUNT_COUNT
+                      value: "6"
+                    - name: AZURE_SPN_CLIENT_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-blob-lab
+                            name: launch-lab
+                    - name: AZURE_SPN_CLIENT_ID
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-blob-lab-client-id
+                            name: launch-lab
+                    - name: AZURE_SPN_TENANT_ID
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-blob-lab-tenant-id
+                            name: launch-lab
+                    - name: ACTIONS_SERVICE_SPN_CLIENT_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-actions-s2s-lab
+                            name: launch-lab
+                    - name: ACTIONS_SERVICE_SPN_CLIENT_ID
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-actions-s2s-lab-client-id
+                            name: launch-lab
+                    - name: ACTIONS_SERVICE_SPN_TENANT_ID
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-actions-s2s-lab-tenant-id
+                            name: launch-lab

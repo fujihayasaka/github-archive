@@ -1,0 +1,63 @@
+name: TurboTest
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/turbotest.yml
+  deployment: {}
+
+permissions:
+  deployments: read
+
+jobs:
+  turbotest:
+    if: >-
+      ${{
+        github.event_name != 'deployment' || github.event.deployment.environment == 'staff-wus2-01'
+      }}
+    name: TurboTest
+    runs-on: ubuntu-22.04
+    env:
+      TURBOTEST_COMMIT: c36988dca541bf5d88a7fad8b64ae6b407fdadcc
+    steps:
+      - name: Login to Docker Registry
+        run: |
+          echo "${{ secrets.CONTAINER_BUILDER_TOKEN }}" | docker login ghcr.io --username gh-containers-bot --password-stdin
+
+      - name: Pull Image
+        run: |
+          docker pull "ghcr.io/github/turbotest:$TURBOTEST_COMMIT"
+
+      - name: Wait for Deployment
+        if: ${{ github.event_name == 'deployment' }}
+        timeout-minutes: 15
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUSES_URL: ${{ github.event.deployment.statuses_url }}
+        run: |
+          while sleep 5; do
+            states="$(gh api --jq ".[].state" "$STATUSES_URL")"
+            >&2 echo "Deployment states: $(printf "%s" "$states" | tr "\n" ",")"
+            if [ "$(echo "$states" | grep -c "success")" -gt 0 ]; then
+              >&2 echo "Deployment succeeded."
+              break
+            fi
+            if [ "$(echo "$states" | grep -c "failure")" -gt 0 ]; then
+              >&2 echo "Deployment failed."
+              exit 1
+            fi
+          done
+
+      - name: TurboTest
+        timeout-minutes: 5
+        if: ${{ vars.SKIP_TURBOTEST != 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.TURBOTEST_INTEGRATION_TOKEN }}
+        run: |
+          docker run \
+            --interactive \
+            --rm \
+            --net=host \
+            --privileged \
+            --env GITHUB_TOKEN \
+            "ghcr.io/github/turbotest:$TURBOTEST_COMMIT" run --organization turbocanary --cleanup skip --url "https://staffship-01.ghe.com/" tag:turboscan-canary
