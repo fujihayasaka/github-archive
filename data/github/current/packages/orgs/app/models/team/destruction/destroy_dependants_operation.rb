@@ -91,8 +91,15 @@ module Team::Destruction
     def instrument_destruction(org, team_ids_to_info)
       return unless org
       team_ids_to_info.each do |team_id, info|
-        # skip instrumenting enterprise managed teams
-        next if info[:enterprise_team_managed] && EnterpriseTeam.enabled_for_organizations?(business: org.business)
+        # skip instrumenting enterprise managed teams, log instead
+        if info[:enterprise_team_managed] && EnterpriseTeam.enabled_for_organizations?(business: org.business)
+          GitHub.logger.info(
+            "Skipping destroy instrumentation for enterprise managed team",
+            "gh.organization.id" => org.id,
+            "gh.team.id" => team_id,
+          )
+          next
+        end
 
         combined_slug = "#{org.login}/#{info[:slug]}"
         GitHub.instrument("team.destroy", {

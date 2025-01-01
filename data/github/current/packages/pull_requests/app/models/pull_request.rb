@@ -676,10 +676,8 @@ class PullRequest < ApplicationRecord::Domain::IssuesPullRequests
   sig { params(opener: T.untyped).returns(T::Boolean) }
   def reopened(opener)
     synchronize!(user: opener, repo: T.must(head_repository), reopened: true)
-    if repository&.feature_enabled?(:clear_mergeable_on_reopen)
-      update(merge_commit_sha: nil)
-      enqueue_mergeable_update
-    end
+    update(merge_commit_sha: nil)
+    enqueue_mergeable_update
     GlobalInstrumenter.instrument("pull_request.reopen", {
       pull_request: self,
       actor: opener,

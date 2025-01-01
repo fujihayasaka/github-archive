@@ -9,7 +9,7 @@ Gem::Specification.new do |s|
   s.required_rubygems_version = Gem::Requirement.new(">= 0".freeze) if s.respond_to? :required_rubygems_version=
   s.require_paths = ["lib".freeze]
   s.authors = ["Arthur Neves".freeze, "Evan Weaver".freeze]
-  s.date = "2025-10-24"
+  s.date = "2025-11-12"
   s.description = "An interface to the libmemcached C client.".freeze
   s.email = "arthurnn@gmail.com".freeze
   s.extensions = ["ext/rlibmemcached/extconf.rb".freeze]

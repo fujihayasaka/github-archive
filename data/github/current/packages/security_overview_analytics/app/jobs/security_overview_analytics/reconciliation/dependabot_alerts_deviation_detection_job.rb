@@ -53,6 +53,13 @@ module SecurityOverviewAnalytics
         end
       end
 
+      sig { override.params(arguments: T.untyped).void }
+      def initialize(**arguments)
+        @deviations_found = T.let(false, T::Boolean)
+        # Workaround for https://sorbet.org/docs/error-reference#7019
+        super(**T.unsafe(arguments))
+      end
+
       around_enqueue do |job, block|
         repository_id = job.arguments.dig(0, :repository_id)
         if repository_id.blank?
@@ -175,6 +182,7 @@ module SecurityOverviewAnalytics
 
           # Handle missing alert
           if latest_revision.nil?
+            @deviations_found = true
             report_deviation_and_queue_remediation(
               deviations: [:missing_alert],
               alert:,
@@ -206,6 +214,7 @@ module SecurityOverviewAnalytics
 
           if initial_revision.nil?
             # Queue remediation to upsert initial revision
+            @deviations_found = true
             report_deviation_and_queue_remediation(
               deviations: [:missing_initial_revision],
               alert:,
@@ -217,6 +226,7 @@ module SecurityOverviewAnalytics
           deviations = latest_revision.fields_with_deviation(alert:)
           next unless deviations.any?
 
+          @deviations_found = true
           report_deviation_and_queue_remediation(
             deviations:,
             alert:,
@@ -234,8 +244,11 @@ module SecurityOverviewAnalytics
           PostReconciliationRepoDeviationCountsJob.perform_with_delay(repository_id:, owner_id:, feature: "dependabot")
         end
 
-        # Even if we didn't correct any data, recalculate our rollup anyway
-        UpdateFeatureStatusSummaryJob.enqueue(repository_id:)
+        # On GitHub.com, recalculate rollup even if we didn't correct any data
+        # On GHES, only recalculate if deviations were found
+        if !GitHub.enterprise? || @deviations_found
+          UpdateFeatureStatusSummaryJob.enqueue(repository_id:)
+        end
       end
 
       sig { returns(Reconciliation::Session) }

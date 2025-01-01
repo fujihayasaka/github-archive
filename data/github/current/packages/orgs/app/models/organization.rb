@@ -4540,6 +4540,14 @@ class Organization < User
 
       organization_ids.each do |org_id|
         org_team = org_teams[org_id]&.first
+        unless org_team
+          GitHub.logger.warn("Organization team not found",
+            "code.namespace" => self.class.name,
+            "code.function" => __method__,
+            "gh.organization_id" => org_id,
+          )
+          next
+        end
 
         already_members_user_ids = existing_memberships.select { |_, subject_ids| subject_ids.include?(org_id) }.keys
         # avoid creating admin entries just because the user was already in the org due to membership from another ET managed team
@@ -4567,6 +4575,7 @@ class Organization < User
       org_teams ||= Team.where(id: team_ids).group_by(&:organization_id)
       organization_ids.each do |org_id|
         org_team = org_teams[org_id]&.first
+        next unless org_team
         users_added = needed_memberships.select { |_, subject_ids| subject_ids.include?(org_id) }.keys
         with_write { T.must(org_team).organization&.bulk_add_organization_membership_entry(user_ids: users_added, team: org_team, caller_type: caller_type, adder_type: :enterprise_team) if users_added.any? }
       end

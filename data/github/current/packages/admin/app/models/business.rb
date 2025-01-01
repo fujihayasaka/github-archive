@@ -2351,7 +2351,6 @@ class Business < ApplicationRecord::Domain::Users
   #
   # Returns Boolean
   def supports_unaffiliated_user_accounts?
-    return true if enterprise_server_scim_enabled?
     return false if GitHub.single_business_environment?
 
     return true if enterprise_managed_user_enabled?

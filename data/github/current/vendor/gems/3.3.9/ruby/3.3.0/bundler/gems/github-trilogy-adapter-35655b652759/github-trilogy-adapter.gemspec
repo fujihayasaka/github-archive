@@ -9,7 +9,7 @@ Gem::Specification.new do |s|
   s.metadata = { "bug_tracker_uri" => "https://github.com/github/github-trilogy-adapter/issues", "changelog_uri" => "https://github.com/github/github-trilogy-adapter/blob/master/CHANGELOG.md", "source_code_uri" => "https://github.com/github/github-trilogy-adapter" } if s.respond_to? :metadata=
   s.require_paths = ["lib".freeze]
   s.authors = ["GitHub Engineering".freeze]
-  s.date = "2025-10-24"
+  s.date = "2025-11-12"
   s.email = ["opensource+trilogy@github.com".freeze]
   s.extra_rdoc_files = ["README.md".freeze, "LICENSE.md".freeze]
   s.files = ["LICENSE.md".freeze, "README.md".freeze, "lib/github-trilogy-adapter.rb".freeze, "lib/github_trilogy_adapter".freeze, "lib/github_trilogy_adapter/connection_instrumentation.rb".freeze, "lib/github_trilogy_adapter/deadlock_retries.rb".freeze, "lib/github_trilogy_adapter/driver.rb".freeze, "lib/github_trilogy_adapter/native_database_types.rb".freeze, "lib/github_trilogy_adapter/query_data.rb".freeze, "lib/github_trilogy_adapter/query_retries.rb".freeze, "lib/github_trilogy_adapter/quoting.rb".freeze, "lib/github_trilogy_adapter/schema_version.rb".freeze, "lib/github_trilogy_adapter/support_overrides.rb".freeze, "lib/github_trilogy_adapter/version.rb".freeze]
