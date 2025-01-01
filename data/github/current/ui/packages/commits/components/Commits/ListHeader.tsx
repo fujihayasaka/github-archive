@@ -4,7 +4,8 @@ import {RefSelector} from '@github-ui/ref-selector'
 import {useNavigate} from '@github-ui/use-navigate'
 import {type User, UserSelector} from '@github-ui/user-selector'
 import {CalendarIcon, TriangleDownIcon} from '@primer/octicons-react'
-import {ActionList, Box, type BoxProps, BranchName, Breadcrumbs, Button, Heading, Octicon} from '@primer/react'
+import {ActionList, BranchName, Breadcrumbs, Button, Heading, Stack} from '@primer/react'
+import {Octicon} from '@primer/react/deprecated'
 import {isValid, parseISO} from 'date-fns'
 import React, {lazy, Suspense} from 'react'
 
@@ -26,10 +27,9 @@ interface ListHeaderProps {
   contributorsUrl: string
   since: string | null
   until: string | null
-  sx?: BoxProps['sx']
 }
 
-export function ListHeader({repo, refInfo, path, author, contributorsUrl, since, until, sx = {}}: ListHeaderProps) {
+export function ListHeader({repo, refInfo, path, author, contributorsUrl, since, until}: ListHeaderProps) {
   let refNameOrCommit = refInfo.name
   if (refNameOrCommit === refInfo.currentOid) {
     refNameOrCommit = shortSha(refInfo.currentOid)
@@ -47,7 +47,7 @@ export function ListHeader({repo, refInfo, path, author, contributorsUrl, since,
   const pathSplit = path?.split('/')
 
   return (
-    <Box sx={{display: 'flex', flexDirection: 'row', justifyContent: 'space-between', gap: 2, ...sx}}>
+    <Stack direction="horizontal" gap="condensed" justify="space-between" className="mb-3">
       {path && (
         <div className="d-flex flex-items-center">
           <div className="d-flex flex-items-baseline flex-column flex-sm-row">
@@ -187,6 +187,6 @@ export function ListHeader({repo, refInfo, path, author, contributorsUrl, since,
           />
         </Suspense>
       </div>
-    </Box>
+    </Stack>
   )
 }

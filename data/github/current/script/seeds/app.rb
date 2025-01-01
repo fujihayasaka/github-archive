@@ -1057,10 +1057,14 @@ module Seeds
 
     desc "ghes", Seeds::Runner::Ghes.help.lines.first
     long_desc Seeds::Runner::Ghes.help
-    method_option :debug, type: :boolean, aliases: "-d", desc: "Enable debug logging", default: false
-    method_option :size, type: :string, aliases: "-s", desc: "Size of the dataset (small, medium, large)", default: "small"
-    method_option :config, type: :string, aliases: "-c", desc: "Configuration overrides as JSON", default: nil
-    method_option :print_config, type: :boolean, aliases: "-p", desc: "Print the final config and exit", default: false
+    method_option :debug, type: :boolean, aliases: "-d", default: false, desc: "Enable debug logging. This disables the progress bar."
+    method_option :size, type: :string, aliases: "-s", default: "small", desc: "Size of the dataset (small, medium, large)"
+    method_option :config, type: :string, aliases: "-c", default: nil, desc: "Configuration overrides as JSON. Absent values will be set to size's default value unless explicitly set to 0."
+    method_option :config_override, type: :string, aliases: "-C", default: nil, desc: "Configuration overrides as JSON. Absent values will be set to 0."
+    method_option :print_config, type: :boolean, aliases: "-p", default: false, desc: "Print the final config and exit"
+    method_option :processes, type: :numeric, aliases: "-P", default: 0, desc: "Number of parallel processes to use. By default parallel processes are disabled (0)."
+    method_option :print_data_types, type: :boolean, aliases: "-T", default: false, desc: "Print the supported data types. Use the help command to get more information about each data type."
+    method_option :data_type, type: :string, aliases: "-t", default: nil, desc: "Define which data type should be used. Raises exception if data type cannot be found. This parameter allows you to only run specific subsets. Please use with caution as some subsets will require other types of data (i.e. PRs and Issues require Repositories)"
     def ghes
       Seeds::Runner::Ghes.execute(options)
     end

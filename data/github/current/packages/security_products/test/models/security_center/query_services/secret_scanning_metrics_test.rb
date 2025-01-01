@@ -148,6 +148,35 @@ module SecurityCenter
               assert_equal 3, T.cast(result, SecretScanning::Models::PushProtectionMetrics).total_block_count
             end
 
+            test "it sets `repo_ids` in request input if no other repo filters" do
+              target_repo = @private_soa_repos.first
+
+              MetricsService
+                .expects(:get_push_protection_metrics)
+                .with do |*_, **kwargs|
+                  kwargs[:repos_in_archived_state] == true &&
+                  kwargs[:repo_ids] == [target_repo.id]
+                end
+                .returns([::SecretScanning::Models::PushProtectionMetrics.new(
+                  bypassed_alert_count: 1,
+                  successful_block_count: 2,
+                  total_block_count: 3
+                ), false])
+
+              result, error = SecretScanningMetrics.new(
+                scope: @org,
+                user: @org_owner,
+                user_session: @org_owner_session,
+                query_parser: QueryParser.new("archived:true"),
+                allowed_repo_ids: [target_repo.id],
+              ).get_push_protection_metrics
+
+              assert result.is_a?(SecretScanning::Models::PushProtectionMetrics)
+              assert_equal 1, T.cast(result, SecretScanning::Models::PushProtectionMetrics).bypassed_alert_count
+              assert_equal 2, T.cast(result, SecretScanning::Models::PushProtectionMetrics).successful_block_count
+              assert_equal 3, T.cast(result, SecretScanning::Models::PushProtectionMetrics).total_block_count
+            end
+
             test "it sets `repo_ids` in request input if there are other repo filters" do
               target_repo = @archived_soa_repos.first
 

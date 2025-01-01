@@ -10,39 +10,27 @@ namespace :enterprise do
     # owner_email: The email address for the owner
     # owner_names: "^" separated list of possible owner names to try
     # org_names: "^" separated list of possible org names to try
+    # allow_past_logins: If not "false", will allow the owner to have already logged in.  This should only be allowed when the ownership of the user is known.
+    #                    Passing as string because rake doesn't support booleans as arguments.  Additionally allow for empty string to support rolling out the change
     #
     # (Yes, the "^" separation is weird, blame rake argument parsing)
     #
     desc "seeds the actions owner and org for enterprise"
-    task :init_actions_owner_and_org, [:owner_email, :owner_names, :org_names] => [:environment] do |_t, args|
+    task :init_actions_owner_and_org, [:owner_email, :owner_names, :org_names, :allow_past_logins] => [:environment] do |_t, args|
       next unless GitHub.single_or_multi_tenant_enterprise?
 
       owner = find_or_create_owner(args[:owner_email], args[:owner_names].split("^"))
+
+      # Disallow past logins unless allow_past_logins is set
+      # If allow_past_logins is set, the caller is responsible for computing if accounts that have already logged are safe
+      if !owner.last_ip.blank? && args[:allow_past_logins] == "false"
+        raise RuntimeError, "User #{owner.login} has already logged in. If this is expected run 'ghe-config app.actions.admin-allow-pass-login true' and try again, if not please reach out to support"
+      end
+
       org = find_or_create_org(owner, args[:org_names].split("^"))
 
       puts "Actions organization owner: #{owner.login}"
       puts "Actions organization name: #{org.login}"
-    end
-
-    # Initialize the two first party organizations that will own the in-the-box actions. Won't use existing
-    # ones unless they have the right email/login:
-    #
-    # Required arguments:
-    # owner_email: The email address for the owner
-    # owner_names: "^" separated list of possible owner names to try
-    # actions_org_names: "^" separated list of possible org names to try when creating the Actions organization
-    # github_org_names: "^" separated list of possible org names to try when creating the GitHub organization
-    #
-    task :init_actions_owner_and_first_party_orgs, [:owner_email, :owner_names, :actions_org_names, :github_org_names] => [:environment] do |_t, args|
-      next unless GitHub.single_or_multi_tenant_enterprise?
-
-      owner = find_or_create_owner(args[:owner_email], args[:owner_names].split("^"))
-      actions_org = find_or_create_org(owner, args[:actions_org_names].split("^"))
-      github_org = find_or_create_org(owner, args[:github_org_names].split("^"))
-
-      puts "First party organizations owner: #{owner.login}"
-      puts "Actions organization name: #{actions_org.login}"
-      puts "GitHub organization name: #{github_org.login}"
     end
 
     def find_or_create_owner(email, names)

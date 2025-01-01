@@ -37,11 +37,14 @@ module GitRPC
       send_message(:nw_link)
     end
 
-    # Public: Synchronize changes from this repository into the linked network.git repository.
+    # Public: Synchronize changes from this repository into the linked
+    # network.git repository.
+    #
+    # ignore_locking_errors      - Return success on locking errors
     #
     # Returns nil on success, or raises GitRPC::CommandFailed on failure.
-    def nw_sync
-      send_message(:nw_sync)
+    def nw_sync(options = {})
+      send_message(:nw_sync, **options)
     end
 
     # Public: Disable object storage sharing with a network.git alternate repository.

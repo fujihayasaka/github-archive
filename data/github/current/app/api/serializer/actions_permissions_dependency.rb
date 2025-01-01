@@ -11,12 +11,7 @@ module Api::Serializer::ActionsPermissionsDependency
   end
 
   def actions_repository_selected_actions_hash(data, options = {})
-    if GitHub.enterprise?
-      # Verified is unavailable for GHES
-      data.slice(:github_owned_allowed, :patterns_allowed)
-    else
-      data.slice(:github_owned_allowed, :patterns_allowed, :verified_allowed)
-    end
+    data.slice(:github_owned_allowed, :patterns_allowed, :verified_allowed)
   end
 
   def actions_repository_share_policy_hash(data, options = {})
@@ -51,12 +46,7 @@ module Api::Serializer::ActionsPermissionsDependency
   end
 
   def actions_enterprise_selected_actions_hash(data, options = {})
-    if GitHub.enterprise?
-      # Verified is unavailable for GHES
-      data.slice(:github_owned_allowed, :patterns_allowed)
-    else
-      data.slice(:github_owned_allowed, :patterns_allowed, :verified_allowed)
-    end
+    data.slice(:github_owned_allowed, :patterns_allowed, :verified_allowed)
   end
 
   def actions_organization_allowed_repositories_hash(data, options = {})
@@ -67,12 +57,7 @@ module Api::Serializer::ActionsPermissionsDependency
   end
 
   def actions_organization_selected_actions_hash(data, options = {})
-    if GitHub.enterprise?
-      # Verified is unavailable for GHES
-      data.slice(:github_owned_allowed, :patterns_allowed)
-    else
-      data.slice(:github_owned_allowed, :patterns_allowed, :verified_allowed)
-    end
+    data.slice(:github_owned_allowed, :patterns_allowed, :verified_allowed)
   end
 
   def actions_default_workflow_permissions_hash(data, options = {})

@@ -13,7 +13,7 @@ module SpokesAPI
     #
     # Returns true when oid is a valid oid
     def valid_oid?(oid)
-      oid.is_a?(String) && oid.size == 40 && OID_REGEXP.match?(oid)
+      oid.is_a?(String) && oid.bytesize == 40 && OID_REGEXP.match?(oid.b)
     end
   end
 end

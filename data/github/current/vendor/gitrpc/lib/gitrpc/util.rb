@@ -25,7 +25,7 @@ module GitRPC
     #
     # Returns true when oid is exactly 40 or 64 valid object ID characters.
     def valid_full_oid?(oid)
-      oid.is_a?(String) && VALID_HEX_OBJECT_ID_SIZES.include?(oid.size) && oid =~ FULL_OID_STANDALONE_REGEXP
+      oid.is_a?(String) && VALID_HEX_OBJECT_ID_SIZES.include?(oid.bytesize) && oid.b =~ FULL_OID_STANDALONE_REGEXP
     end
 
     # Raise an InvalidFullOid exception if the given string is
@@ -76,7 +76,7 @@ module GitRPC
     #
     # Returns true when oid is at least 7 and no more than 64 object ID characters.
     def valid_oid?(oid)
-      oid.is_a?(String) && oid =~ /\A[a-f0-9]{7,64}\Z/
+      oid.is_a?(String) && oid.b =~ /\A[a-f0-9]{7,64}\Z/
     end
 
     # Raise an InvalidOid exception if the given string is not a valid
