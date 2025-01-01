@@ -44,6 +44,7 @@ describe('Organization Settings Security Products', () => {
     })
     expect(screen.getByTestId('subhead-description')).toBeInTheDocument()
     expect(screen.getByText('New configuration')).toBeInTheDocument()
+    expect(screen.queryByText('Tip: As a GitHub, Inc admin, you can', {exact: false})).not.toBeInTheDocument()
   })
 
   it('renders for a standalone organization', async () => {
@@ -96,6 +97,19 @@ describe('Organization Settings Security Products', () => {
     expect(screen.getByTestId('new-configuration').getAttribute('href')).toEqual(
       '/organizations/github/settings/security_products/configurations/new',
     )
+  })
+
+  describe('as an enterprise admin', () => {
+    it('renders', async () => {
+      const routePayload = getOrganizationSettingsSecurityProductsRoutePayload()
+      routePayload.enterpriseAdmin = true
+      render(<TestComponent />, {
+        routePayload,
+      })
+      expect(screen.getByTestId('subhead-description')).toBeInTheDocument()
+      expect(screen.getByText('New configuration')).toBeInTheDocument()
+      expect(screen.getByText('Tip: As a GitHub, Inc admin, you can', {exact: false})).toBeInTheDocument()
+    })
   })
 })
 

@@ -58,6 +58,11 @@ module FeatureFlagHelper
     current_user_available = respond_to?(:current_user, true)
     actor = (GitHub.enterprise? || !current_user_available) ? nil : T.unsafe(self).current_user
     features = possible_flags.select { |flag| actor.nil? ? GitHub.flipper[flag].enabled? : actor.feature_enabled?(flag) }
+
+    if GitHub.issues_react_ghes_enabled?
+      features.push(:issues_advanced_search, :issue_types, :sub_issues)
+    end
+
     @client_side_feature_flags = features.map { |feature| feature.to_sym }
     @client_side_feature_flags += app_specific_flags
   end

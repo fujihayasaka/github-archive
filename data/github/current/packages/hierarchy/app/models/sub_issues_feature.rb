@@ -45,6 +45,7 @@ module SubIssuesFeature
   sig { params(entity: T.nilable(T.any(Repository, Organization, User, MemexProject)), actor: T.nilable(User)).returns(T::Boolean) }
   def self.enabled?(entity, actor: nil)
     return false unless entity
+    return true if GitHub.issues_react_ghes_enabled?
     if entity.is_a?(Organization)
       enabled_for_organization?(entity, actor: actor)
     elsif entity.is_a?(Repository)

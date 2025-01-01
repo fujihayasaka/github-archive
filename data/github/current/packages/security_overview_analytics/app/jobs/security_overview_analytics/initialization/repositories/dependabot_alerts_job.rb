@@ -8,6 +8,8 @@ module SecurityOverviewAnalytics
     module Repositories
       class DependabotAlertsJob < BaseBatchedJob
         include GitHub::Memoizer
+        include FanoutThrottler
+        include BatchedJobThrottler
 
         queue_as :security_overview_analytics_repository_dependabot_alerts_initialization
 
@@ -134,6 +136,12 @@ module SecurityOverviewAnalytics
           end
 
           true
+        end
+
+        sig { override.returns(T::Array[T.class_of(ApplicationJob)]) }
+        def fanout_jobs
+          # If any of the below job queue is being throttled, delay the entire batch.
+          [DependabotAlertRevisionIngestionJob]
         end
 
         private

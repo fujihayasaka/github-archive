@@ -16,7 +16,7 @@ module Platform
 
         is_issues_search = arguments[:type] == "Issues" || arguments[:type] == "IssuesAdvanced"
 
-        if arguments[:type] == "IssuesAdvanced" && GitHub.flipper[:issues_advanced_search].enabled?(@context[:viewer])
+        if arguments[:type] == "IssuesAdvanced" && GitHub.issues_advanced_search_enabled?(@context[:viewer])
           query_class = ::Search::Queries::ConditionalIssueQuery
         end
 

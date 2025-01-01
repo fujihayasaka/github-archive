@@ -14,6 +14,9 @@ module SecurityOverviewAnalytics
     sig { params(base: Module).void }
     def self.included(base)
       T.unsafe(base).around_enqueue do |job, block|
+        # Do nothing if job already enqueued with wait
+        next block.call unless job.scheduled_at.nil?
+
         # Explicitly rescue and report errors for throttler logic
         begin
           wait = job.wait_between_batches_in_seconds

@@ -403,6 +403,19 @@ module GitHub
       "https://api.githubcopilot.com"
     end
 
+    # Whether issues react is enabled with all features - sub-issues, issue types, and advanced search
+    # This is specifically for GHES, and only enabled through the env var ENTERPRISE_ISSUES_REACT_GHES_ENABLED
+    def issues_react_ghes_enabled?
+      return @issues_react_ghes_enabled if defined?(@issues_react_ghes_enabled)
+      false
+    end
+    attr_writer :issues_react_ghes_enabled
+
+    def issues_advanced_search_enabled?(user)
+      return true if GitHub.issues_react_ghes_enabled?
+      user&.feature_enabled?(:issues_advanced_search)
+    end
+
     # Whether GitHub Actions is enabled.
     # - Always enabled for dotcom.
     # - Disabled for Enterprise by default. Checks for ENTERPRISE_ACTIONS_ENABLED variable.

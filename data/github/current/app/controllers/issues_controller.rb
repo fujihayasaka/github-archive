@@ -506,7 +506,7 @@ class IssuesController < AbstractRepositoryController
   end
 
   def index
-    self.pulls_only = index_flow.pulls_only unless GitHub.flipper[:issues_advanced_search].enabled?(current_user) && issue_react_enabled?
+    self.pulls_only = index_flow.pulls_only unless GitHub.issues_advanced_search_enabled?(current_user) && issue_react_enabled?
 
     # React handler used before the index_flow logic as the react app does not support these URLs yet
     # More in https://github.com/github/issues/issues/8269

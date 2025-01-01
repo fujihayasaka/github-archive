@@ -297,7 +297,8 @@ const OrganizationSettingsSecurityProducts: React.FC = () => {
                     header="Enterprise configurations"
                     managedBy={`Managed by ${enterprise.name}`}
                   />
-                  {enterpriseAdmin && <Box sx={{mt: 2, mb: 4}}>{enterpriseAdminTip(enterprise)}</Box>}
+                  {/* we should always render the box so that there is spacing between the two tables */}
+                  <Box sx={{mt: 2, mb: 4}}>{enterpriseAdmin && enterpriseAdminTip(enterprise)}</Box>
                 </>
               )}
             </>

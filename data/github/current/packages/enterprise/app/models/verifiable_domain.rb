@@ -11,6 +11,7 @@ class VerifiableDomain < ApplicationRecord::Ballast
   include GitHub::Validations
   include GitHub::Relay::GlobalIdentification
   include Instrumentation::Model
+  include GitHub::Memoizer
 
   VALID_OWNER_TYPES = %w(User Business).freeze
   AUDIT_LOG_EVENT_PREFIXES = {
@@ -644,7 +645,7 @@ class VerifiableDomain < ApplicationRecord::Ballast
     AUDIT_LOG_EVENT_PREFIXES[owner_type]
   end
 
-  def async_dns_records
+  memoize def async_dns_records
     async_owner.then do
       begin
         dns_resolver.getresources(dns_host_name, Resolv::DNS::Resource::IN::TXT).select do |record|

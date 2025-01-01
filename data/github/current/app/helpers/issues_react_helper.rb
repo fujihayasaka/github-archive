@@ -433,7 +433,7 @@ module IssuesReactHelper
   # Warning, this function must stay in sync with its counterpart in the backend
   # see ui/packages/list-view-items-issues-prs/utils/query.ts#get_query
   def get_repo_query(query:, owner:, name:)
-    advanced_search_enabled = feature_enabled_globally_or_for_user?(feature_name: :issues_advanced_search)
+    advanced_search_enabled = feature_enabled_globally_or_for_user?(feature_name: :issues_advanced_search) || GitHub.issues_react_ghes_enabled?
 
     query = replace_today_macro(query)
     parsed_query = Search::Queries::IssueQuery.parse(query)
@@ -581,7 +581,8 @@ module IssuesReactHelper
       return true if GitHub.flipper[:issues_react_logged_out].enabled?
     end
 
-    false
+    # enabled on GHES through an env var, disabled otherwise
+    GitHub.issues_react_ghes_enabled?
   end
 
   memoize def emoji_skin_tone_preference

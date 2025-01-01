@@ -13,7 +13,8 @@ module Organization::IssueTypesDependency
   sig { returns(T::Boolean) }
   def issue_types_enabled?
     T.bind(self, Organization)
-    self.feature_enabled?(:issue_types)
+    # on GHES, we have the option of enabling issue types globally
+    self.feature_enabled?(:issue_types) || GitHub.issues_react_ghes_enabled?
   end
 
   sig { returns(T.untyped) }

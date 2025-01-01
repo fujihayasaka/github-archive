@@ -12,6 +12,106 @@ module GitHub
         self.table_name = :users
       end
 
+      class SecurityConfiguration < ApplicationRecord::Notify
+        self.table_name = :security_configurations
+        belongs_to :target, polymorphic: true
+        has_many :security_configuration_defaults, dependent: :delete_all, inverse_of: :security_configuration
+
+        FEATURE_STATES = T.let({ disabled: 0, enabled: 1, not_set: 2 }, T::Hash[T.untyped, T.untyped])
+        enum :private_vulnerability_reporting, FEATURE_STATES, prefix: true, validate: true
+        enum :dependency_graph, FEATURE_STATES, prefix: true, validate: true
+        enum :dependency_graph_autosubmit_action, FEATURE_STATES, prefix: true, validate: { allow_nil: true }
+        enum :dependabot_alerts, FEATURE_STATES, prefix: true, validate: true
+        enum :dependabot_security_updates, FEATURE_STATES, prefix: true, validate: true
+        enum :code_scanning, FEATURE_STATES, prefix: true, validate: true
+        enum :secret_scanning, FEATURE_STATES, prefix: true, validate: true
+        enum :secret_scanning_push_protection, FEATURE_STATES, prefix: true, validate: true
+        enum :secret_scanning_validity_checks, FEATURE_STATES, prefix: true, validate: { allow_nil: true }
+        enum :secret_scanning_non_provider_patterns, FEATURE_STATES, prefix: true, validate: { allow_nil: true }
+        # DO NOT ADD NEW FIELDS HERE! These enums should match the state of the model on 2024-08-05!
+
+        # This block allows us to set a default value for columns that don't exist in the initial version of the
+        # database, but exit in notify-structure.sql. This lets the tests pass without a default value in the DB.
+        if Rails.env.test? # rubocop:disable GitHub/DoNotBranchOnRailsEnv
+          attribute :secret_scanning_delegated_bypass, default: FEATURE_STATES[:not_set]
+        end
+      end
+
+      class SecurityConfigurationDefault < ApplicationRecord::Notify
+        belongs_to :security_configuration, inverse_of: :security_configuration_defaults
+        belongs_to :target, polymorphic: true
+
+        scope :for_organization, -> (o) { where(target: o) }
+
+        sig do
+          params(
+            target: T.any(::Organization, User),
+            default_for_new_public_repos: T::Boolean,
+            default_for_new_private_repos: T::Boolean,
+            security_configuration_id: Integer,
+          ).void
+        end
+        def self.create_or_update_defaults(
+          target:,
+          default_for_new_public_repos:,
+          default_for_new_private_repos:,
+          security_configuration_id:
+        )
+          defaults = for_organization(target)
+
+          return if defaults.where(
+            security_configuration_id:, default_for_new_public_repos:, default_for_new_private_repos:
+          ).exists?
+
+          ActiveRecord::Base.connected_to(role: :writing) do
+            transaction do
+              skip = false
+              if default_for_new_public_repos && default_for_new_private_repos
+                defaults.each(&:destroy!)
+              elsif default_for_new_public_repos || default_for_new_private_repos
+                defaults.default_for_new_public_repos.first&.destroy if default_for_new_public_repos
+                defaults.default_for_new_private_repos.first&.destroy if default_for_new_private_repos
+
+                default_record = defaults.default_for_new_public_and_private_repos.first
+                if default_record.present?
+                  if default_record.security_configuration_id == security_configuration_id
+                    # When config A is the default for all repos,
+                    # and we change it to only be the default for either public or private repos,
+                    # then we can just update the existing record for the config with the given values.
+                    default_record.update(
+                      default_for_new_public_repos: default_for_new_public_repos,
+                      default_for_new_private_repos: default_for_new_private_repos
+                    )
+                  else
+                    # When config A is the default for all repos,
+                    # and we are setting config B as default for only either public or private repos,
+                    # then we update the existing record to be the default for the other type of repos.
+                    default_record.update(
+                      default_for_new_public_repos: !default_for_new_public_repos,
+                      default_for_new_private_repos: !default_for_new_private_repos
+                    )
+                  end
+                end
+              else
+                defaults.find_by(target:, security_configuration_id:)&.destroy
+                # In transactions, the usage of `return`, `break`, or `throw` is being deprecated and causes test failures.
+                # Hence the usage of `skip` boolean value here, to skip creating/updating defaults if both defaults are false
+                skip = true
+              end
+
+              unless skip
+                default = find_or_initialize_by(target:, security_configuration_id:)
+                # Even if the record is freshly initialized, `update` will persist it with the updated values:
+                default.update(
+                  default_for_new_public_repos:,
+                  default_for_new_private_repos:
+                )
+              end
+            end
+          end
+        end
+      end
+
       iterate_over :database_table, params: {
         model_class: User,
         conditions: "type = 'Organization'",
@@ -65,7 +165,7 @@ module GitHub
         end
 
         # Skip if there is already a configuration default for the org
-        if ::SecurityConfigurationDefault.for_target(org).exists?
+        if SecurityConfigurationDefault.for_organization(org).exists?
           log "skipping, already has a default security configuration"
           return
         end
@@ -83,7 +183,7 @@ module GitHub
           secret_scanning_push_protection: :disabled,
           secret_scanning_validity_checks: :disabled,
           secret_scanning_non_provider_patterns: :disabled,
-          secret_scanning_delegated_bypass: :disabled,
+          # IMPORTANT: DO NOT ADD FEATURES HERE!
         }
 
         # Create service manager instance to check if the desired services are enabled in the instance
@@ -148,7 +248,7 @@ module GitHub
             target: org,
             default_for_new_public_repos: true,
             default_for_new_private_repos: true,
-            security_configuration: security_configuration,
+            security_configuration_id: security_configuration.id,
           )
         end
 

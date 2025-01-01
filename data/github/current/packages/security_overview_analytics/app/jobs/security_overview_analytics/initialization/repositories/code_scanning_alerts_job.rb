@@ -8,6 +8,8 @@ module SecurityOverviewAnalytics
     module Repositories
       class CodeScanningAlertsJob < BaseBatchedJob
         include GitHub::Memoizer
+        include FanoutThrottler
+        include BatchedJobThrottler
 
         TurboscanInsightsAlert = ::Turboscan::Proto::InsightsAlert
 
@@ -153,6 +155,12 @@ module SecurityOverviewAnalytics
           # Because the hash lock is only on the `repository_id` parameter, enqueues for subsequent batches would fail.
           # Release here before the next batch is enqueued.
           clear_lock
+        end
+
+        sig { override.returns(T::Array[T.class_of(ApplicationJob)]) }
+        def fanout_jobs
+          # If any of the below job queue is being throttled, delay the entire batch.
+          [CodeScanningAlertRevisionIngestionJob]
         end
 
         protected

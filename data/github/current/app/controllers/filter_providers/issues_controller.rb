@@ -45,7 +45,7 @@ class FilterProviders::IssuesController < FilterProvidersController
   end
 
   memoize def advanced_search_enabled?
-    feature_enabled_globally_or_for_current_user?(:issues_advanced_search)
+    feature_enabled_globally_or_for_current_user?(:issues_advanced_search) || GitHub.issues_react_ghes_enabled?
   end
 
   memoize def parent_search_enabled?

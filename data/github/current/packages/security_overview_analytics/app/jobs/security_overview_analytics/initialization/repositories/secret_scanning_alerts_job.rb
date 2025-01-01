@@ -8,6 +8,8 @@ module SecurityOverviewAnalytics
     module Repositories
       class SecretScanningAlertsJob < BaseBatchedJob
         include GitHub::Memoizer
+        include FanoutThrottler
+        include BatchedJobThrottler
 
         SecretScanningMetricsAPI = ::GitHub::Proto::SecretScanning::Metrics::V1
 
@@ -184,6 +186,12 @@ module SecurityOverviewAnalytics
           end
 
           true
+        end
+
+        sig { override.returns(T::Array[T.class_of(ApplicationJob)]) }
+        def fanout_jobs
+          # If any of the below job queue is being throttled, delay the entire batch.
+          [SecretScanningAlertRevisionIngestionJob]
         end
 
         private
