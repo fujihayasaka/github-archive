@@ -16,7 +16,7 @@ module Rules
       .returns(T::Array[Integer])
     end
     def exemption_request_ids_by_repo_ids(repo_ids:, request_type: nil, start_date: nil, end_date: nil, ids: nil)
-      scope = ::Exemptions::ExemptionRequest.where(repository_id: repo_ids)
+      scope = ::Exemptions::ExemptionRequest.not_expired.where(repository_id: repo_ids)
       scope = scope.where(request_type: request_type) if request_type
 
       scope = scope.where(created_at: start_date.beginning_of_day..) if start_date

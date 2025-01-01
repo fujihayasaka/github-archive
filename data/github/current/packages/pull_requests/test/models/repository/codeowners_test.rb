@@ -6,6 +6,8 @@ require "test_helper"
 class RepositoryCodeownersTest < GitHub::TestCase
   include DogstatsTestHelpers
   include GitHub::LoggerHelper
+  include GitHub::QueryAssertionTestHelpers
+  include PerformanceTestHelpers
 
   fixtures do
     @owner = create(:user, login: "abc")
@@ -285,6 +287,36 @@ class RepositoryCodeownersTest < GitHub::TestCase
 
     @owner.expects(:team_ids).once.returns([@team.id])
 
+    rpc_counts = {
+      authzd: {
+        single: 0,
+        batch: 0,
+      },
+      gitrpc: 0,
+    }
+
+    # Check for expected queries
+    assert_rpc_calls(rpc_counts) do
+      # Repository::Codeowners::ActiveRecordOwnerResolver#users_by_username
+      # User::AuthorEmailsDependency::ClassMethods#find_by_emails
+      # Repository::Codeowners::ActiveRecordOwnerResolver#teams_by_teamname (2)
+      # Ability::Subject#subject_actor_ids (2)
+      # Repository::AbilityDependency#fgp_users
+      # Repository::AbilityDependency#all_repo_role_grants (2)
+      # Platform::Loaders::UserTeams#fetch
+      # User::OrganizationsDependency#team_ids
+      assert_query_count(TestEnv.test_all_features? ? 9 : 10) do
+        owners.paths_for_owner(@owner)
+      end
+    end
+
+    assert_rpc_calls(rpc_counts) do
+      assert_query_counts(0) do
+        owners.paths_for_owner(@owner)
+      end
+    end
+
+    # Check for accuracy
     assert_equal %w(README.md), owners.paths_for_owner(@owner)
     assert_equal %w(README.md), owners.paths_for_owner(@owner)
     assert_equal %w(other.rb), owners.paths_for_owner(@collaborator)

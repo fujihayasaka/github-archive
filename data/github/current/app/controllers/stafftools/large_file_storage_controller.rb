@@ -100,9 +100,6 @@ class Stafftools::LargeFileStorageController < StafftoolsController
     @data_pack_change = ::Billing::PlanChange::DataPackChange.new(this_user,
       total_packs: total_packs)
 
-    # Make sure the browser caches AJAX responses separately from regular HTML responses.
-    response.headers["Vary"] = "X-Requested-With"
-
     respond_to do |format|
       format.json do
         render json: {

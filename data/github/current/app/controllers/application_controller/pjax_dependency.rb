@@ -104,11 +104,7 @@ module ApplicationController::PjaxDependency
   # Ensures PJAX requests are always cached seperately from their full response
   # counterparts.
   def set_vary_pjax
-    if response.headers["Vary"]
-      response.headers["Vary"] += ", X-PJAX, X-PJAX-Container"
-    else
-      response.headers["Vary"] = "X-PJAX, X-PJAX-Container"
-    end
+    add_headers_to_vary(%w(X-PJAX X-PJAX-Container))
   end
 
   def instrument_pjax_version_change(pjax:, csp:, css:, js:, headers_present:)

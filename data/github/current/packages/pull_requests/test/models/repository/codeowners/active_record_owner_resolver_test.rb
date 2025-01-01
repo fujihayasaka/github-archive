@@ -13,7 +13,6 @@ class RepositoryCodeownersActiveRecordOwnerResolverTest < GitHub::TestCase
 
   setup do
     @resolver = Repository::Codeowners::ActiveRecordOwnerResolver.new(@repository)
-    enable_feature_flag(:codeowners_check_all_repo_role)
   end
 
   context "#register_owners" do
@@ -50,20 +49,10 @@ class RepositoryCodeownersActiveRecordOwnerResolverTest < GitHub::TestCase
   end
 
   context "#resolve" do
-    test "calls team_ids_with_direct_privileged_access when codeowners_check_all_repo_role is enabled" do
+    test "calls team_ids_with_direct_privileged_access" do
       team_owner = ::Codeowners::Owner.new("@#{@team.combined_slug}")
       @resolver.register_owners([team_owner])
       @repository.expects(:team_ids_with_direct_privileged_access).returns([])
-
-      @resolver.resolve("@#{@team.combined_slug}")
-    end
-
-    test "calls actor_ids when codeowners_check_all_repo_role is disabled" do
-      disable_feature_flag(:codeowners_check_all_repo_role)
-
-      team_owner = ::Codeowners::Owner.new("@#{@team.combined_slug}")
-      @resolver.register_owners([team_owner])
-      @repository.expects(:actor_ids).twice.returns([])
 
       @resolver.resolve("@#{@team.combined_slug}")
     end

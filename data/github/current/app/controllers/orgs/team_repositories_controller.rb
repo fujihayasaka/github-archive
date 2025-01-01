@@ -57,7 +57,6 @@ class Orgs::TeamRepositoriesController < Orgs::Controller
     override_analytics_location "/orgs/<org-login>/teams/<team-name>/repositories"
     respond_to do |format|
       format.html do
-        response.headers["Vary"] = "X-Requested-With"
         if request.xhr?
           render(
             partial: "orgs/team_repositories/list",

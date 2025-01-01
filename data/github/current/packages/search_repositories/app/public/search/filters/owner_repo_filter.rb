@@ -136,6 +136,8 @@ module Search
           []
         elsif current_user&.governed_by_oauth_application_policy?
           []
+        elsif current_user&.using_auth_via_granular_actor?
+          []
         else
           owners.filter do |owner|
             owner.adminable_by?(current_user)

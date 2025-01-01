@@ -52,9 +52,6 @@ class AssetStatusController < ApplicationController
 
   sig { void }
   def upgrade # rubocop:todo GitHub/UseRestfulActions
-    # Make sure the browser caches AJAX responses separately from regular HTML responses.
-    response.headers["Vary"] = "X-Requested-With, X-PJAX-Container, Turbo-Frame, Turbo-Visit"
-
     respond_to do |format|
       format.json do
         render json: {
@@ -80,9 +77,6 @@ class AssetStatusController < ApplicationController
 
   sig { void }
   def downgrade # rubocop:todo GitHub/UseRestfulActions
-    # Make sure the browser caches AJAX responses separately from regular HTML responses.
-    response.headers["Vary"] = "X-Requested-With, X-PJAX-Container, Turbo-Frame, Turbo-Visit"
-
     respond_to do |format|
       format.json do
         render json: {

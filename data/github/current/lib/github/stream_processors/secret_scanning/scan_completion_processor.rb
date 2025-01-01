@@ -110,9 +110,9 @@ module GitHub
             return
           end
 
-          unless repo.advanced_security_enabled?
+          unless ::SecretScanning::Features::AdvancedSecurityHelper.secret_scanning_available?(repo)
             GitHub.logger.info(
-              "Advanced security is not purchased/enabled on repo, skipping message",
+              "Secret scanning is not available on repo, skipping message",
               "code.namespace": self.class.name,
               "gh.repo.id": repo_id
             )

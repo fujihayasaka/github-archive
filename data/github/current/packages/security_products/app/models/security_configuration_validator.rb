@@ -55,7 +55,7 @@ class SecurityConfigurationValidator < ActiveModel::Validator
 
     # Secret scanning disabled and generic secrets enabled or not_set
     # Secret scanning not_set and generic secrets enabled
-    if (config.secret_scanning_disabled? && !config.secret_scanning_generic_secrets_disabled?) || (config.secret_scanning_not_set? && config.secret_scanning_generic_secrets_enabled?)
+    if (config.secret_scanning_disabled? && !config.secret_scanning_generic_secrets_disabled? && !config.secret_scanning_generic_secrets.nil?) || (config.secret_scanning_not_set? && config.secret_scanning_generic_secrets_enabled?)
       config.errors.add :secret_scanning_generic_secrets, "Generic Secrets must be disabled when secret scanning is disabled"
     end
 

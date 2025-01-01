@@ -25,7 +25,6 @@ class SeatsController < ApplicationController
   before_action :ensure_not_enterprise_or_invoiced, only: [:show]
   before_action :use_available_pending_plan_change, only: [:remove_seats]
   before_action :seat_change, only: [:show, :remove_seats, :update]
-  before_action :set_header_for_ajax, except: [:update, :switch]
 
   depends_on_clusters ApplicationRecord::Mysql1,
     ApplicationRecord::IamAbilities,
@@ -292,11 +291,6 @@ class SeatsController < ApplicationController
 
   memoize def seat_change
     Billing::PlanChange::SeatChange.new(target, seats: target.seats + seat_delta)
-  end
-
-  def set_header_for_ajax
-    # Make sure the browser caches AJAX responses separately from regular HTML responses.
-    response.headers["Vary"] = "X-Requested-With, X-PJAX-Container, Turbo-Frame, Turbo-Visit"
   end
 
   def default_seat_delta

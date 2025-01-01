@@ -720,6 +720,7 @@ module Search
         if current_user
           return false unless can_search_private_repositories_for_user?
           return false if current_user.governed_by_oauth_application_policy?
+          return false if current_user.using_auth_via_granular_actor?
         end
 
         !protected_account_logins.include?(single_owner.display_login)

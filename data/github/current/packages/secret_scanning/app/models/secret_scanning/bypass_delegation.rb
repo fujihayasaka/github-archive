@@ -66,7 +66,7 @@ module SecretScanning
     sig { params(rule_suite_id: Integer, requester: RuleEngine::Types::Actor, resource_id: String, reason: String, requester_comment: T.nilable(String)).returns(Exemptions::ExemptionRequest) }
     def create_secret_scanning_request!(rule_suite_id, requester, resource_id, reason, requester_comment = nil)
       suite = RuleEngine::RuleSuite.find_by!(id: rule_suite_id)
-      repo = suite.repository&.fork? ? suite.repository&.network&.root : suite.repository
+      repo = suite.repository
       raise UnauthorizedOnRoot unless repo&.readable_by?(requester)
 
       existing_requests = existing_secret_scanning_requests_for_ref_and_commits(suite, requester, resource_id, true)

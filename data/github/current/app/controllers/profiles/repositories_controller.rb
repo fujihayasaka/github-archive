@@ -40,8 +40,6 @@ module Profiles
 
       respond_to do |format|
         format.html do
-          response.headers["Vary"] = "X-Requested-With"
-
           instrument_hydro
 
           if request.xhr? && !pjax?
