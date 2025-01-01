@@ -3,6 +3,7 @@
 
 class Api::RepositoryReleases < Api::App
   include ReceiveSchemaWithOpenApi
+  include Api::App::CopilotSweAgentDeny
 
   before do
     @accepted_scopes = [:repo]
@@ -111,6 +112,7 @@ class Api::RepositoryReleases < Api::App
       allow_integrations: true,
       allow_user_via_granular_actor: true
 
+    deny_copilot_swe_agent!
     ensure_repo_writable!(repo)
 
     Releases::Public.delete_release(release)
@@ -158,6 +160,8 @@ class Api::RepositoryReleases < Api::App
       resource: release,
       allow_integrations: true,
       allow_user_via_granular_actor: true
+
+    deny_copilot_swe_agent!
 
     ensure_repo_writable!(repo)
 
@@ -212,6 +216,7 @@ class Api::RepositoryReleases < Api::App
       allow_user_via_granular_actor: true,
       target_commitish: data["target_commitish"]
 
+    deny_copilot_swe_agent!
     ensure_repo_writable!(repo)
 
     parameters = data.symbolize_keys.slice(:tag_name, :name, :body, :draft, :prerelease, :target_commitish, :make_latest, :generate_release_notes)
@@ -315,6 +320,7 @@ class Api::RepositoryReleases < Api::App
       allow_integrations: true,
       allow_user_via_granular_actor: true
 
+    deny_copilot_swe_agent!
     ensure_repo_writable!(repo)
 
     data = receive_with_schema("release-asset", "update")
@@ -373,6 +379,7 @@ class Api::RepositoryReleases < Api::App
       allow_integrations: true,
       allow_user_via_granular_actor: true
 
+    deny_copilot_swe_agent!
     ensure_repo_writable!(repo)
 
     if asset.destroy

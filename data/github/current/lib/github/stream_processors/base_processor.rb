@@ -70,7 +70,7 @@ module GitHub
       set_callback :batch, :before, :safe_trigger_heartbeat
       set_callback :batch, :after, :reset_error_context
 
-      set_callback :message, :before, :push_service_mapping_context
+      set_callback :message, :before, :clear_contexts
       set_callback :message, :around, :with_remote_call_source_datadog_tags
       set_callback :message, :around, :error_handling
       set_callback :message, :around, :mysql_instrumentation
@@ -481,6 +481,15 @@ module GitHub
             GitHub.dogstats.count("stream_processor.rpc.mysql.count.writes", counts[:write].to_i, tags: tags_with_host)
           end
         end
+      end
+
+      def clear_contexts
+        GitHub.context.clear
+        ::Audit.context.clear
+        SensitiveData.context.clear
+        Failbot.reset_context
+        GitHub.context.push(from: self.class.name)
+        push_service_mapping_context
       end
 
       def with_remote_call_source_datadog_tags

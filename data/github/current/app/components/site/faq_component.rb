@@ -46,7 +46,7 @@ module Site
           end
         }
 
-        content_tag(:script, @structured_data.to_json, { type: "application/ld+json" }, false)
+        content_tag(:script, json_escape(@structured_data.to_json).html_safe, type: "application/ld+json") # rubocop:disable Rails/OutputSafety
       end
     end
 

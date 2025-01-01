@@ -5,17 +5,17 @@ class Api::RepositoryDependencyGraphDiff < Api::App
   include DependencyReviewHelper
   include ReceiveSchemaWithOpenApi
 
-  # DR-specific access checks are performed here
-  before do
-    enforce_dependency_review_access
-  end
-
   # timing measured automatically via "request.dist.time" and filtering on controller name
   get "/repositories/:repository_id/dependency-graph/compare/:basehead", operation_id: "dependency-graph/diff-range" do
+    deliver_error!(404) unless logged_in?
+    deliver_error!(404) unless current_repo
+
     control_access :get_contents,
       resource: current_repo,
       allow_integrations: true,
       allow_user_via_granular_actor: true
+
+    deliver_error!(403, message: "Forbidden") unless current_repo.dependency_review_enabled?
 
     # extract and resolve base and head params
     base, head = params[:basehead].split("...", 2)
@@ -60,14 +60,6 @@ class Api::RepositoryDependencyGraphDiff < Api::App
 
     api_response_diff = reshape_for_api_response(diff)
     deliver_raw(api_response_diff)
-  end
-
-  # Ensure current repo and user are cached and coarse-grained
-  # access checks are performed before controller actions
-  def enforce_dependency_review_access
-    deliver_error!(404) if !logged_in?
-    deliver_error!(404) unless current_repo
-    deliver_error!(403, message: "Forbidden") unless current_repo.dependency_review_enabled?
   end
 
   # If warnings is non-empty, join them into a single string and

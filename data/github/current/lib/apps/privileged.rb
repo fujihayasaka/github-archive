@@ -30,6 +30,7 @@ module Apps
     autoload :CopilotXcodeLanguageServerAuth, "apps/privileged/copilot_xcode_language_server_auth"
     autoload :Dependabot, "apps/privileged/dependabot"
     autoload :Desktop, "apps/privileged/desktop"
+    autoload :ElmExporterSecrets, "apps/privileged/elm_exporter_secrets"
     autoload :FeatureFlagLifecycleApp, "apps/privileged/feature_flag_lifecycle_app"
     autoload :GCMCore, "apps/privileged/gcm_core"
     autoload :GHN, "apps/privileged/ghn"
@@ -242,6 +243,7 @@ module Apps
           Apps::Privileged::CopilotXcodeLanguageServerAuth::PRODUCTION,
           Apps::Privileged::Dependabot::PRODUCTION,
           Apps::Privileged::Dependabot::STAGING,
+          Apps::Privileged::ElmExporterSecrets::PRODUCTION,
           Apps::Privileged::FeatureFlagLifecycleApp::PRODUCTION,
           Apps::Privileged::GitSrcMigrator::PRODUCTION,
           Apps::Privileged::Heaven::PRODUCTION,

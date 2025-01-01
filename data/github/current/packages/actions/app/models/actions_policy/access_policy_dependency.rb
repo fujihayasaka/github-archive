@@ -103,7 +103,7 @@ module ActionsPolicy::AccessPolicyDependency
   end
 
   def owner_restricts_allowed_actions?
-    most_restrictive_owner_allowlist.present?
+    most_restrictive_owner_allowlist.present? && !most_restrictive_owner_allowlist.all_allowed?
   end
 
   def owner_requires_sha_pinning?

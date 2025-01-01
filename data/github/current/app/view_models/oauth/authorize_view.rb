@@ -281,10 +281,16 @@ class Oauth::AuthorizeView < ViewModel # rubocop:todo ViewComponent/NoMoreViewMo
   def org_access_value
     if org_admin_access?
       "full"
+    elsif org_write_access? && org_manage_runners_access?
+      "write-and-manage-runners"
+    elsif org_read_access? && org_manage_runners_access?
+      "read-and-manage-runners"
     elsif org_write_access?
       "write"
     elsif org_read_access?
       "read"
+    elsif org_manage_runners_access?
+      "manage-runners"
     else
       "none"
     end
@@ -380,7 +386,7 @@ class Oauth::AuthorizeView < ViewModel # rubocop:todo ViewComponent/NoMoreViewMo
     case
     when packages_write_access? && packages_read_access?
       "full"
-    when packages_write_access?
+    when packages_write_access? || packages_delete_access?
       "write"
     when packages_read_access?
       "read"
