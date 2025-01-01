@@ -41,7 +41,6 @@ class Api::AuditLog::Streams < Api::App
 
   get "/enterprises/:enterprise_id/audit-log/streams", operation_id: "enterprise-admin/get-audit-log-streams" do
     enterprise = find_enterprise!
-    deliver_error! 404 unless GitHub.flipper[:audit_log_streaming_conf_api].enabled?(enterprise)
 
     control_access :list_audit_log_streams,
       allow_integrations: false,
@@ -51,17 +50,14 @@ class Api::AuditLog::Streams < Api::App
     streams = find_audit_log_stream_configurations!
 
     begin
-      streams_hash = bundle_audit_log_stream(streams)
-      deliver_raw(streams_hash, status: 200)
+      deliver_raw(streams.as_json, status: 200)
     rescue NoMatchFoundError => e
       deliver_error 404, message: e
     end
   end
 
-
   get "/enterprises/:enterprise_id/audit-log/stream-key", operation_id: "enterprise-admin/get-audit-log-stream-key" do
     enterprise = find_enterprise!
-    deliver_error! 404 unless GitHub.flipper[:audit_log_streaming_conf_api].enabled?(enterprise)
 
     key_id = GitHub.driftwood_stream_key_id
     key = GitHub.driftwood_stream_key
@@ -85,7 +81,6 @@ class Api::AuditLog::Streams < Api::App
 
   get "/enterprises/:enterprise_id/audit-log/streams/:stream_id", operation_id: "enterprise-admin/get-one-audit-log-stream" do
     enterprise = find_enterprise!
-    deliver_error! 404 unless GitHub.flipper[:audit_log_streaming_conf_api].enabled?(enterprise)
     stream = find_audit_log_stream_configurations!
 
     control_access :list_audit_log_streams,
@@ -94,8 +89,7 @@ class Api::AuditLog::Streams < Api::App
       resource: enterprise
 
     begin
-      stream_hash = bundle_audit_log_stream(stream)
-      deliver_raw(stream_hash, status: 200)
+      deliver_raw(stream.as_json, status: 200)
     rescue NoMatchFoundError => e
       deliver_error 404, message: e
     end
@@ -103,7 +97,6 @@ class Api::AuditLog::Streams < Api::App
 
   delete "/enterprises/:enterprise_id/audit-log/streams/:stream_id", operation_id: "enterprise-admin/delete-audit-log-stream" do
     enterprise = find_enterprise!
-    deliver_error! 404 unless GitHub.flipper[:audit_log_streaming_conf_api].enabled?(enterprise)
 
     control_access :delete_audit_log_stream,
       allow_integrations: false,
@@ -122,7 +115,6 @@ class Api::AuditLog::Streams < Api::App
 
   put "/enterprises/:enterprise_id/audit-log/streams/:stream_id", operation_id: "enterprise-admin/update-audit-log-stream" do
     enterprise = find_enterprise!
-    deliver_error! 404 unless GitHub.flipper[:audit_log_streaming_conf_api].enabled?(enterprise)
     stream = find_audit_log_stream_configurations!
 
     control_access :edit_audit_log_stream,
@@ -132,17 +124,18 @@ class Api::AuditLog::Streams < Api::App
 
     data = receive_with_openapi
 
+    vendor_specific_data = data["vendor_specific"]
+    deliver_error! 400 if vendor_specific_data.nil?
     deliver_error! 404 if data["stream_type"].downcase != stream.sink.sink_type.downcase
-
-    deliver_error! 409, message: "Invalid key_id" if data["vendor_specific"]["key_id"] != GitHub.driftwood_stream_key_id
+    deliver_error! 409, message: "Invalid key_id" if vendor_specific_data["key_id"] != GitHub.driftwood_stream_key_id
 
     begin
-      stream = update_vendor_specific_fields(stream, data)
-      deliver_error 400 if stream.nil?
-
-      stream_hash = bundle_audit_log_stream(stream)
-
-      deliver_raw(stream_hash, status: 200)
+      stream = update_vendor_specific_fields!(stream, data)
+      if stream.nil?
+        deliver_error 400
+      else
+        deliver_raw(stream.as_json, status: 200)
+      end
     rescue SinkError => e
       deliver_error 400, message: e.message
     rescue ActiveRecord::RecordInvalid => e
@@ -152,7 +145,6 @@ class Api::AuditLog::Streams < Api::App
 
   post "/enterprises/:enterprise_id/audit-log/streams", operation_id: "enterprise-admin/create-audit-log-stream" do
     enterprise = find_enterprise!
-    deliver_error! 404 unless GitHub.flipper[:audit_log_streaming_conf_api].enabled?(enterprise)
 
     control_access :create_audit_log_stream,
       allow_integrations: false,
@@ -161,16 +153,18 @@ class Api::AuditLog::Streams < Api::App
 
     data = receive_with_openapi
 
-    deliver_error! 409 if data["vendor_specific"]["key_id"] != GitHub.driftwood_stream_key_id
+    stream_type = data["stream_type"]
+    vendor_specific_data = data["vendor_specific"]
+    deliver_error! 400 if vendor_specific_data.nil?
+    deliver_error! 409 if vendor_specific_data["key_id"] != GitHub.driftwood_stream_key_id
 
     begin
-      stream_type = data["stream_type"]
-      vendor_specific_data = data["vendor_specific"]
-
       config = STREAM_TYPE_MAPPING[stream_type]
-      raise StandardError, "Unsupported stream type" unless config
+      raise SinkError, "Unsupported stream type" unless config
 
       permitted_data = vendor_specific_data.deep_symbolize_keys.slice(*config[:permitted_params])
+
+      fix_data!(stream_type, permitted_data)
 
       sink = config[:model].new(permitted_data)
       stream = ::AuditLogStreamConfiguration.new(sink: sink)
@@ -181,12 +175,10 @@ class Api::AuditLog::Streams < Api::App
       stream = enterprise.audit_log_stream_configurations.build(sink: sink, enabled: data["enabled"])
 
       if stream.save
-        stream_hash = bundle_audit_log_stream(stream)
-        deliver_raw(stream_hash, status: 200)
+        deliver_raw(stream.as_json, status: 200)
       else
         deliver_error 422, message: stream.errors.full_messages.to_sentence
       end
-
     rescue SinkError => e
       deliver_error 400, message: e.message
     rescue ActiveRecord::RecordInvalid => e
@@ -194,7 +186,22 @@ class Api::AuditLog::Streams < Api::App
     end
   end
 
-  def update_vendor_specific_fields(stream, data)
+  def fix_data!(stream_type, data)
+    if stream_type == "Amazon S3"
+      if data.key?(:authentication_type)
+        auth_type = data[:authentication_type]
+        if GitHub.enterprise? && auth_type != AuditLogS3SinkConfiguration::ACCESS_KEYS
+          raise SinkError, "Only Access Keys authentication is supported in GitHub Enterprise"
+        end
+
+        if auth_type == "oidc"
+          data[:authentication_type] = AuditLogS3SinkConfiguration::OIDC_AUDITLOG
+        end
+      end
+    end
+  end
+
+  def update_vendor_specific_fields!(stream, data)
     stream_type = data["stream_type"]
     vendor_specific_data = data["vendor_specific"]
     enabled = data["enabled"]
@@ -207,6 +214,8 @@ class Api::AuditLog::Streams < Api::App
     raise SinkError, "Unsupported sink type" unless sink.is_a?(config[:model])
 
     permitted_data = vendor_specific_data.deep_symbolize_keys.slice(*config[:permitted_params])
+
+    fix_data!(stream_type, permitted_data)
 
     sink = config[:model].new(permitted_data)
     test_stream = ::AuditLogStreamConfiguration.new(sink: sink)
@@ -221,10 +230,6 @@ class Api::AuditLog::Streams < Api::App
       sink: sink,
     )
     stream
-  end
-
-  def bundle_audit_log_stream(stream)
-    stream.as_json
   end
 
   def rate_limit_configuration

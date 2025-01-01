@@ -398,6 +398,7 @@ class Organization
     end
 
     def set_default_configurations
+      return if GitHub.single_business_environment?
       return if business_owned
       return unless GitHub.flipper[:set_default_fg_pat_expr_limit_on_org_creation].enabled?
 

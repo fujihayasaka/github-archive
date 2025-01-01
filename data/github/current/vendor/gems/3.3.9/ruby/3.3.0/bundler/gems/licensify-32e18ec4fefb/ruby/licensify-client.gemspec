@@ -9,7 +9,7 @@ Gem::Specification.new do |s|
   s.metadata = { "allowed_push_host" => "https://rubygems.pkg.github.com", "github_repo" => "ssh://github.com/github/licensify", "homepage_uri" => "https://github.com/github/licensify" } if s.respond_to? :metadata=
   s.require_paths = ["lib".freeze]
   s.authors = ["#licensing".freeze]
-  s.date = "2025-08-25"
+  s.date = "2025-10-24"
   s.files = ["lib/licensify.rb".freeze, "lib/licensify/client.rb".freeze, "lib/licensify/services/v1/common_pb.rb".freeze, "lib/licensify/services/v1/common_twirp.rb".freeze, "lib/licensify/services/v1/customer_api_pb.rb".freeze, "lib/licensify/services/v1/customer_api_twirp.rb".freeze, "lib/licensify/services/v1/customer_license_api_pb.rb".freeze, "lib/licensify/services/v1/customer_license_api_twirp.rb".freeze, "lib/licensify/services/v1/product_enablement_api_pb.rb".freeze, "lib/licensify/services/v1/product_enablement_api_twirp.rb".freeze, "lib/licensify/twirp/hmac/request_signing_middleware.rb".freeze, "lib/licensify/version.rb".freeze]
   s.homepage = "https://github.com/github/licensify".freeze
   s.required_ruby_version = Gem::Requirement.new(">= 2.6.0".freeze)

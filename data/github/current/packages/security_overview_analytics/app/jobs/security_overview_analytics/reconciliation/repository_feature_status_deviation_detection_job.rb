@@ -164,7 +164,7 @@ module SecurityOverviewAnalytics
 
       sig { override.returns(T::Array[T.class_of(ApplicationJob)]) }
       def fanout_jobs
-        [RepositoryFeatureStatusDeviationRemediationJob]
+        [RepositoryFeatureStatusDeviationRemediationJob, UpdateFeatureStatusSummaryJob]
       end
 
       protected
