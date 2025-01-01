@@ -1,0 +1,49 @@
+#!/bin/bash
+#/ Usage: start-query-harvester
+#/ Starts an app local version of Query Harvester from https://github.com/github/query-harvester
+
+set -e
+
+echo "Starting up query-harvester"
+cd "$(dirname "${BASH_SOURCE[0]}")/../.."
+
+if [ ! "$(docker images -q query-harvester:latest 2> /dev/null)" ]; then
+  echo "Docker image not found. Finishing early"
+elif [ "$(docker ps -q -f name=query-harvester-container)" ]; then
+  echo "Query Harvester container is already running."
+else
+  echo "Running Docker image for Query Harvester"
+
+  prod_tables=$(awk -F': ' '{print $1}' db/tableowners.yaml | grep -v '^$' | grep -v '_idx$' | grep -v '_seq$' | paste -sd "," -)
+  echo "Prod tables for filtering: $prod_tables"
+
+  docker run -d --name query-harvester-container \
+    --network host \
+    -e MYSQL_RO_USER="root" \
+    -e MYSQL_CLUSTERS="127.0.0.1:3306" \
+    -e SITES_API_URL="localhost" \
+    -e RUN_ID="$GITHUB_RUN_ID" \
+    -e BRANCH="$BUILD_BRANCH" \
+    -e PROD_TABLES="$prod_tables" \
+    -e spn_query_harvester_client_id="$SPN_GITHUB_PANORAMA_CLIENT_ID" \
+    -e spn_query_harvester="$SPN_GITHUB_PANORAMA" \
+    -e spn_query_harvester_tenant_id="$SPN_GITHUB_PANORAMA_TENANT_ID" \
+    -e EVENTHUB_NS="query-harvester-ci.servicebus.windows.net" \
+    -e EVENTHUB_NAME="ci-ingest" \
+    -e HARVEST_PERIOD="100ms" \
+    -e HARVEST_MAX_STATEMENT_COUNT="2000" \
+    -e HARVEST_CAPTURE_ALL="true" \
+    query-harvester:latest
+
+  echo "Query Harvester started."
+
+  echo "End outputting docker logs for Query Harvester"
+  docker logs --follow query-harvester-container > tmp/query-harvester &
+  PID=$!
+  echo $PID > tmp/query-harvester.pid
+fi
+
+if [[ "$1" == "--submit-summary" ]]; then
+  echo "Running Query Harvester stmt_summary crop"
+  docker exec query-harvester-container curl "http://localhost:8080/harvest/stmt_summary/"
+fi

@@ -1,0 +1,31 @@
+declare const styles: {
+  readonly "UnderlineNav": string;
+  readonly "active": string;
+  readonly "alertBanner": string;
+  readonly "attachImageButton": string;
+  readonly "attachmentToolbar": string;
+  readonly "chatInputContainer": string;
+  readonly "container": string;
+  readonly "content": string;
+  readonly "description": string;
+  readonly "footer": string;
+  readonly "formContainer": string;
+  readonly "formContainerActions": string;
+  readonly "fullscreenPreviewPane": string;
+  readonly "headerBlock": string;
+  readonly "icon": string;
+  readonly "innerContent": string;
+  readonly "input": string;
+  readonly "left": string;
+  readonly "main": string;
+  readonly "previewPane": string;
+  readonly "promptInputContainer": string;
+  readonly "referenceToken": string;
+  readonly "referenceTokenLabel": string;
+  readonly "underlinePanels": string;
+  readonly "underlinenavItem": string;
+  readonly "viewer": string;
+  readonly "wide": string;
+};
+export = styles;
+

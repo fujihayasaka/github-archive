@@ -1,0 +1,145 @@
+<%# erblint:counter DeprecatedComponentsCounter 2 %>
+<% error ||= nil %>
+
+<% page_info title: title,
+             selected_link: :business_copilot_settings,
+             sidebar: :policies %>
+
+<% refresh_feature_enabled = this_business.feature_enabled?(:enterprise_copilot_policies_refresh) %>
+
+<% header_component_action = render Primer::Beta::Button.new(
+  scheme: :link,
+  id: "view-licensing-link",
+  test_selector: "view-licensing-link",
+  tag: :a,
+  mr: 3,
+  href: copilot_licensing_enterprise_path(this_business)
+  ) do %>
+  View licensing
+<% end %>
+
+<%= render layout: "businesses/layout",
+  locals: {
+    business: this_business,
+    title: title,
+    container_attributes: "itemscope itemtype='http://schema.org/Business'",
+    header_component_action: refresh_feature_enabled ? header_component_action : ""
+  } do %>
+
+  <% if !copilot_business.copilot_billable? && !copilot_business.has_trial_organization? %>
+    <%= render(Primer::Alpha::Banner.new(scheme: :danger, icon: "credit-card", mb: 3)) do |component| %>
+      <% component.with_action_content do %>
+        <%= render(Primer::ButtonComponent.new(tag: :a, href: settings_billing_tab_enterprise_path(this_business, tab: :payment_information))) do %>
+          Add payment method
+        <% end %>
+      <% end %>
+      <%= render(Primer::Beta::Text.new) do %>
+        You must add a payment method in order to use Copilot.
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if error.present? %>
+    <%= render(Primer::Beta::Flash.new(scheme: :danger, icon: :stop, mb: 3)) do %>
+      <%= error %>
+    <% end %>
+  <% end %>
+
+  <% if this_business.trial? || copilot_business.copilot_billable? || copilot_business.has_trial_organization? %>
+    <% unless refresh_feature_enabled %>
+      <%= render(Primer::Alpha::UnderlineNav.new(label: "#{copilot_business.copilot_plan_enterprise? ? Copilot::ENTERPRISE_PRODUCT_NAME : Copilot::BUSINESS_PRODUCT_NAME} Policy Navigation", mb: 3)) do |nav| %>
+        <% if this_business.feature_enabled?(:enterprise_copilot_licensing) %>
+          <% tab = "policies" if tab == "access" %>
+        <% else %>
+          <% nav.with_tab(
+            href: settings_copilot_enterprise_path(this_business.slug),
+            selected: tab == "access",
+            test_selector: "copilot-access-tab"
+          ) { "Access management" } %>
+        <% end %>
+        <% nav.with_tab(
+          href: settings_copilot_enterprise_path(this_business.slug, tab: "policies"),
+          selected: tab == "policies",
+          test_selector: "copilot-policies-tab"
+        ) { "Policies" } %>
+
+        <% nav.with_tab(
+          href: settings_copilot_enterprise_path(this_business.slug, tab: "models"),
+          selected: tab == "models",
+          test_selector: "copilot-models-tab"
+        ) { "Models" } %>
+
+        <% if !this_business.trial? %>
+          <% nav.with_tab(
+            href: settings_copilot_enterprise_path(this_business.slug, tab: "content-exclusion"),
+            selected: tab == "content-exclusion",
+            test_selector: "copilot-content-exclusion-tab"
+          ) { "Content exclusion" } %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if refresh_feature_enabled %>
+    <%= render(Primer::Beta::BorderBox.new(padding: :default, mb: 3)) do |component| %>
+      <% if !this_business.trial? %>
+        <%= component.with_row(scheme: :default) do %>
+          <%= render(Copilot::Policies::SubpageLinkFormComponent.new(
+            title: "Content exclusion",
+            description: "Prevent Copilot from reading specific files or repositories.",
+            path: settings_copilot_content_exclusion_enterprise_path(this_business)
+            )) %>
+        <% end %>
+      <% end %>
+      <%= component.with_row(scheme: :default) do %>
+        <%= render(Copilot::Policies::SubpageLinkFormComponent.new(
+          title: "Models",
+          description: "Select which models can be used with Copilot.",
+          path: settings_copilot_models_enterprise_path(this_business)
+          )) %>
+      <% end %>
+    <% end %>
+
+    <%= render partial: "businesses/copilot_settings/policies", locals: {
+      business: this_business,
+      copilot_business: copilot_business,
+      copilot_custom_models: copilot_custom_models,
+      features_for_data_retention: features_for_data_retention,
+      render_copilot_feedback_opt_in_settings: render_copilot_feedback_opt_in_settings,
+      render_copilot_beta_features_opt_in_settings: render_copilot_beta_features_opt_in_settings,
+      render_copilot_swe_agent_settings: render_copilot_swe_agent_settings
+    } %>
+  <% else %>
+    <% if tab == "access" %>
+      <%= render partial: "businesses/copilot_settings/access_management", locals: {
+        business: this_business,
+        copilot_business: copilot_business,
+        organizations: organizations,
+        feature_requests: feature_requests
+      } %>
+    <% elsif tab == "policies" %>
+      <%= render partial: "businesses/copilot_settings/policies", locals: {
+        business: this_business,
+        copilot_business: copilot_business,
+        copilot_custom_models: copilot_custom_models,
+        features_for_data_retention: features_for_data_retention,
+        render_copilot_feedback_opt_in_settings: render_copilot_feedback_opt_in_settings,
+        render_copilot_beta_features_opt_in_settings: render_copilot_beta_features_opt_in_settings,
+        render_copilot_swe_agent_settings: render_copilot_swe_agent_settings
+      } %>
+    <% elsif tab == "models" %>
+      <%= render partial: "businesses/copilot_settings/models", locals: {
+        business: this_business,
+        copilot_business: copilot_business,
+        copilot_custom_models: copilot_custom_models,
+        features_for_data_retention: features_for_data_retention
+      } %>
+    <% elsif tab == "content-exclusion" %>
+      <%= render_react_partial(name: "copilot-content-exclusion", disable_ssr: true, props: { initialPayload: content_exclusions_partial_payload, contentExclusionSaveSpeedbump: this_business.feature_enabled?(:content_exclusion_save_speedbump) }) %>
+    <% end %>
+  <% end %>
+
+  <% if enable_msft_analytics %>
+    <microsoft-analytics></microsoft-analytics>
+  <% end %>
+<% end %>

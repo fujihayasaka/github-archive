@@ -1,0 +1,26 @@
+name: Detect Terraform config drift
+
+on:
+  pull_request:
+    paths:
+      - 'config/generator/templates/terraform/**'
+      - 'config/generator/gen-terraform*.sh'
+      - 'terraform/**'
+
+jobs:
+  compare-config:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.0.0
+      - name: Run gen-terraform-all.sh
+        run: |
+          cd ./config/generator
+          ./gen-terraform-all.sh
+      - name: Verify no file changes
+        run: |
+          git diff --exit-code -- . ':!terraform/**/variables.tf'
+          if [ $? -ne 0 ]; then
+            echo "Error: Files were changed. Did you alter config files without updating scripts/templates in config/generator?"
+            exit 1
+          fi

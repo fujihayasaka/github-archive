@@ -1,0 +1,19 @@
+#!/usr/bin/env ruby
+# typed: true
+# frozen_string_literal: true
+
+require_relative "../config/environment"
+processor = GitHub::StreamProcessors::GitHubFeCoreForwardingProcessor.new
+consumer = GitHub.with_hydro_cluster("request-analytics") { GitHub.hydro_consumer(processor.options) }
+
+GitHubFeCoreForwardingProcessorError = Class.new(StandardError)
+
+begin
+  GitHub.logger.info("start", { "code.namespace" => processor.class.name })
+  GitHub.hydro_client.run(processor, consumer: consumer, shutdown_signals: [:INT, :TERM])
+  GitHub.logger.info("finish", { "code.namespace" => processor.class.name })
+rescue => e
+  GitHub.logger.error("failed to run stream processor", { "code.namespace" => processor.class.name, :exception => e })
+  Failbot.report(GitHubFeCoreForwardingProcessorError.new(e))
+  raise
+end

@@ -1,0 +1,105 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "optparse"
+
+class ClusterServiceownerParser
+  attr_reader :cluster, :serviceowner, :tableowners, :tables_by_serviceowners
+
+  def initialize(opts = {})
+    opts = { cluster: "mysql1" }.merge(opts)
+    @cluster = opts[:cluster]
+    @serviceowner = normalize_serviceowner(opts[:filter]) if opts[:filter]
+    @tableowners = YAML.safe_load(File.read("db/tableowners.yaml"))
+    @tables_by_serviceowners = {}
+  end
+
+  def run
+    parse_tables_from_schema
+    summarize
+  end
+
+  private
+
+  def normalize_serviceowner(serviceowner)
+    return serviceowner if serviceowner.start_with?("github/")
+    "github/#{serviceowner}"
+  end
+
+  def summarize
+    puts "Tableowners Summary for the #{cluster} cluster"
+    puts "Number of tables: #{tables_by_serviceowners.values.sum { |tables| tables.count }}"
+    puts "Number of serviceowners on the cluster: #{tables_by_serviceowners.keys.count}"
+    puts "============================================================="
+
+    if serviceowner
+      if tables_by_serviceowners[serviceowner]
+        sorted_serviceowners = [serviceowner]
+      else
+        puts "Unable to find any associated tables for #{serviceowner}."
+        return
+      end
+    else
+      sorted_serviceowners = tables_by_serviceowners.keys.sort_by { |owner| -1 * tables_by_serviceowners[owner].count }
+    end
+
+    sorted_serviceowners.each do |owner|
+      tables = tables_by_serviceowners[owner]
+      puts "#{owner} (#{tables.count})"
+      tables.each do |table|
+        puts "  - #{table}"
+      end
+    end
+  end
+
+  def parse_tables_from_schema
+    raw_schema_lines = File.read(schema_file_for_cluster).split("\n")
+    raw_schema_lines.each do |line|
+      table = parse_table(line)
+      next unless table
+
+      owner = tableowners[table]
+
+      if tables_by_serviceowners[owner]
+        tables_by_serviceowners[owner] << table
+      else
+        tables_by_serviceowners[owner] = [table]
+      end
+    end
+  end
+
+  def parse_table(line)
+    match = /^CREATE TABLE `(?<table>\w+)` \($/.match(line)
+    match[:table] if match
+  end
+
+  def schema_file_for_cluster
+    if cluster == "mysql1"
+      "db/structure.sql"
+    else
+      "db/#{cluster}-structure.sql"
+    end
+  end
+end
+
+if __FILE__ == $0
+  options = {}
+  OptionParser.new do |opts|
+    opts.banner = "Usage: bin/serviceowners-for-cluster [options]"
+
+    opts.on("-c", "--cluster CLUSTER", "Name of DB cluster to summarize serviceowners for") do |cluster|
+      options[:cluster] = cluster
+    end
+
+    opts.on("-f", "--filter SERVICEOWNER", "Scope tables to a single serviceowner") do |service|
+      options[:filter] = service
+    end
+
+    opts.on("-h", "--help", "Prints this help") do
+      puts opts
+      exit 1
+    end
+  end.parse!
+
+  ClusterServiceownerParser.new(options).run
+end

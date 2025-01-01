@@ -1,0 +1,2 @@
+(globalThis.webpackChunk=globalThis.webpackChunk||[]).push([["ui-version"],{88298:(s,h,i)=>{"use strict";i(79111)},79111:()=>{globalThis.UI_VERSION="dotcom"}},s=>{s(s.s=88298)}]);
+//# sourceMappingURL=ui-version-d50493a8dba2.js.map

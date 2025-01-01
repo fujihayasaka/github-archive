@@ -1,0 +1,303 @@
+#!/bin/bash
+set -e
+trap "trap - SIGTERM && kill -- -$$" SIGINT SIGTERM EXIT
+
+TIMESTAMP=$(date +%s)
+pids=()
+log_prefix="/tmp//migrate-css-modules.${TIMESTAMP}"
+summary_log="/tmp/migrate-css-modules.log"
+status=0
+
+# based on script/cibuild-github-lint-erb
+t() {
+  local log="${log_prefix}.${#pids[*]}"
+  echo "++++++++++++++++++++++++++++++++++++++++++++++++++" >>"$log"
+  echo "+ " "$@" >>"$log"
+  echo "++++++++++++++++++++++++++++++++++++++++++++++++++" >>"$log"
+  set +e
+  (time "$@") >>"$log" 2>&1 &
+  set -e
+  pids+=("$!")
+  wait "$!" || status=$?
+}
+
+# based on script/cibuild-github-lint-erb
+summary() {
+  rm -f $summary_log
+  touch $summary_log
+
+  for f in "$log_prefix"*; do
+    cat "$f"
+    cat "$f" >> $summary_log
+    echo -e "\n" >> $summary_log
+    echo
+    rm -f "$f"
+  done
+
+  echo -e "\nSummary of logs saved in: $summary_log\n"
+
+  return $status
+}
+
+skipWarning=false
+isDryRun=false
+packageName=""
+serviceOwner=""
+components=()
+files=()
+runLinters=""
+# retrieve flags
+while [[ $# -gt 0 ]]; do
+  arg="$1"
+  case $arg in
+    --dry)
+      isDryRun=true
+      shift
+      ;;
+    -p|--package)
+      packageName="$2"
+      shift 2
+      ;;
+    -f|--files)
+      IFS=',' read -r -a files <<< "$2"
+      shift 2
+      ;;
+    -s|--service-owner)
+      serviceOwner="$2"
+      shift 2
+      ;;
+    -l|--lint)
+      runLinters=true
+      shift
+      ;;
+    --skip-lint)
+      runLinters=false
+      shift
+      ;;
+    --skip-warning)
+      skipWarning=true
+      shift
+      ;;
+    -c|--components)
+      if [ -n "$2" ]; then
+        IFS=',' read -r -a components <<< "$2"
+        shift 2
+      else
+        shift
+      fi
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+echo "Flags:"
+echo "  --dry: Run the codemod in dry run mode"
+echo "  -p, --package: Specify the package name to run the codemod on"
+echo "  -f, --files: Specify the file paths to run the codemod on"
+echo "  -s, --service-owner: Specify the service owner to run the codemod on"
+echo "  -l, --lint: Run linters after the codemod is run"
+echo "  -c, --components: Specify the component names to run the codemod on"
+echo "  --skip-lint: Skip the prompt to run linters after the codemod is run"
+echo "  --skip-warning: Skip the warning prompt"
+echo
+
+if [ "$skipWarning" = false ]; then
+  echo -e "\e[31mWARNING: This is an experimental codemod and contains known issues and limitations (https://github.com/github/codemod-sx-to-css-modules/issues).\e[0m"
+  echo
+  echo "Do you wish to proceed? (y/N)"
+  read -r response
+  if [ "$response" != "y" ]; then
+    echo "Exiting..."
+    exit 0
+  fi
+fi
+
+if [ -z "$runLinters" ]; then
+  echo
+  echo "Do you want to run type-checking and linting after the codemod is run? (y/N)"
+  read -r response
+  if [ "$response" == "y" ]; then
+    runLinters=true
+  else
+    runLinters=false
+  fi
+fi
+
+if [ ! -z "$serviceOwner" ]; then
+  echo "Fetching files owned by $serviceOwner..."
+  # if file paths are provided, only check those directories against the service owner
+  if [ ${#files[@]} -ne 0 ]; then
+    for file in "${files[@]}"; do
+      globPattern="${file}"
+      # check if file is a directory
+      if [ -d "$file" ]; then
+        echo "Checking files in the following directories: ${file}"
+        # remove last slash if it exists
+        file=$(echo "$file" | sed 's:/*$::')
+        globPattern="${file}/**/*"
+      fi
+
+      mapfile -t files < <(bin/serviceowners-ls-files "$serviceOwner" --glob "$globPattern" | tail -n +3 | grep -E '\.tsx$|\.jsx$')
+    done
+  else
+    mapfile -t files < <(bin/serviceowners-ls-files "$serviceOwner" | tail -n +3 | grep -E '\.tsx$|\.jsx$')
+  fi
+
+  if [ ${#files[@]} -eq 0 ]; then
+    echo -e "\e[31mError: No files found for service owner '$serviceOwner'.\e[0m"
+    exit 1
+  fi
+fi
+
+# error if no package name and file path is provided
+if [ -z "$packageName" ] && [ ${#files[@]} -eq 0 ]; then
+  echo -e "\e[31mError: Please provide a package name (-p/--package), file path (-f/--files) or service owner (-s/--service-owner) to run the codemod on.\e[0m"
+  exit 1
+fi
+
+# error if both package name and file path are provided
+if [ ! -z "$packageName" ] && [ ${#files[@]} -ne 0 ]; then
+  echo -e "\e[31mError: Both package name and file path are provided. Please provide only one or the other.\e[0m"
+  exit 1
+fi
+
+# check if package exists in ui/packages
+if [ ! -d "./ui/packages/$packageName" ]; then
+  echo -e "\e[31mError: Package must exist within 'ui/packages'. Please provide a valid package name to run the codemod on.\e[0m"
+  exit 1
+fi
+
+cd /workspaces
+
+# install codemod-sx-to-css-modules if it doesn't exist
+if  [ ! -d "/workspaces/codemod-sx-to-css-modules" ]; then
+  echo "Cloning codemod-sx-to-css-modules..."
+  git clone git@github.com:github/codemod-sx-to-css-modules.git
+else
+  cd codemod-sx-to-css-modules
+  git checkout main
+  git pull
+  cd ..
+  echo "Switching to and updating main branch of codemod-sx-to-css-modules..."
+fi
+
+cd codemod-sx-to-css-modules
+
+echo "Installing 'codemod-sx-to-css-modules' dependencies..."
+npm install
+
+# build codemod args
+codemodArgs=()
+if $isDryRun; then
+  codemodArgs+=("--dry")
+fi
+
+if [ ! -z "$componentName" ]; then
+  codemodArgs+=("--componentName")
+  codemodArgs+=("$componentName")
+fi
+
+if [ ! -z "$packageName" ]; then
+  if [ ${#components[@]} -ne 0 ]; then
+    for component in "${components[@]}"; do
+    echo "Running codemod on component $component for @github-ui/$packageName package..."
+    t npm start -- ../github/ui/packages/$packageName --componentName "$component" ${codemodArgs[@]}
+    done
+  else
+    echo "Running codemod for @github-ui/$packageName package..."
+    t npm start -- ../github/ui/packages/$packageName ${codemodArgs[@]}
+  fi
+
+  if $isDryRun; then
+    exit 0
+  fi
+
+  cd ../github
+
+  clsx_version=$(jq -r '.dependencies.clsx' ./ui/packages/react-core/package.json)
+  clsx_not_installed=$(jq -r '.dependencies.clsx // empty' ./ui/packages/$packageName/package.json)
+  if [ -z "$clsx_not_installed" ]; then
+    echo "clsx is not installed. Installing clsx..."
+    npm install clsx@$clsx_version -w @github-ui/$packageName
+
+    jq '.dependencies.clsx = "*"' ./ui/packages/$packageName/package.json > tmp.$$.json && mv tmp.$$.json ./ui/packages/$packageName/package.json
+    # rerunning npm install since clsx has been updated to * from numbered version during linting
+    npm install -w @github-ui/$packageName
+  else
+    echo "clsx is already installed."
+  fi
+
+  # Check if .eslintrc.js exists and update it
+  eslint_config="./ui/packages/$packageName/.eslintrc.js"
+  if [ -f "$eslint_config" ]; then
+    echo "Updating .eslintrc.js to include 'no-sx' rule..."
+    if grep -q "rules: {" "$eslint_config"; then
+      if ! grep -q "'@github-ui/github-monorepo/no-sx': 'error'" "$eslint_config"; then
+        sed -i "/rules: {/a \ \ \ \ '@github-ui/github-monorepo/no-sx': 'error'," "$eslint_config"
+        echo "Rule 'no-sx' added to .eslintrc.js."
+      else
+        echo "Rule 'no-sx' already exists in .eslintrc.js."
+      fi
+    else
+      echo -e "\e[31mUnable to find 'rules' object in .eslintrc.js. Please add the 'no-sx' rule manually.\e[0m"
+    fi
+  else
+    echo -e "\e[31m.eslintrc.js not found in the package.\e[0m"
+  fi
+
+  if $runLinters; then
+    # run lint and tsc in the passed in directory
+    echo "Running lint on @github-ui/$packageName package..."
+    t npm run lint -w @github-ui/$packageName -- --fix
+
+    echo "Running tsc on @github-ui/$packageName package..."
+    t npm run tsc -w @github-ui/$packageName
+
+    echo "Running stylelint on @github-ui/$packageName package..."
+    t npm run stylelint -w @github-ui/$packageName -- --fix
+  fi
+else
+  # get absolute path of file
+  cd ../github
+  for file in "${files[@]}"; do
+    file=$(realpath "$file")
+    if [ ! -f "$file" ] && [ ! -d "$file" ]; then
+      echo -e "\e[31mError: File path '$file' is not valid. Please provide a valid file path to run the codemod on.\e[0m"
+      exit 1
+    fi
+
+    cd ../codemod-sx-to-css-modules
+
+    # run codemod on file path
+    if [ ${#components[@]} -ne 0 ]; then
+      for component in "${components[@]}"; do
+      echo "Running codemod on component $component in $file..."
+      t npm start -- "$file" --componentName "$component" ${codemodArgs[@]}
+      done
+    else
+      echo "Running codemod on $file..."
+      t npm start -- "$file" ${codemodArgs[@]}
+    fi
+
+    if $isDryRun; then
+      exit 0
+    fi
+
+    cd ../github
+  done
+
+  if $runLinters; then
+    echo "Running lint on dotcom, may take a while..."
+    t npm run lint -- --fix
+
+    echo "Running tsc on dotcom, may take a while..."
+    t npm run tsc
+
+    echo "Running stylelint on dotcom, may take a while..."
+    t npm run stylelint -- --fix
+  fi
+fi
+
+summary

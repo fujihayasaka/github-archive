@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+
+set -e
+
+echo "Deploying unit-tests dependencies"
+script/setup
+
+echo "Preparing database for unit-tests"
+MY_SQL_DATABASE=hosted_compute_ims_test script/db-setup --recreate 1> /dev/null
+MY_SQL_DATABASE=hosted_compute_ims_test_transitions script/db-setup --recreate 1> /dev/null
+
+TESTS_TIMEOUT="300s"
+if [[ ($GITHUB_ACTIONS || $CI) ]]; then
+    echo "Running unit tests in CI"
+    echo "# Unit tests" > tests-output.md
+    go test -race -timeout $TESTS_TIMEOUT -p 20 -json -cover -v $(go list ./... | grep -v e2e) | tee "tests-output-raw.json" && GOTEST_EXIT_CODE=$? || GOTEST_EXIT_CODE=$?
+
+    # Output for summary and comment
+    cat "tests-output-raw.json" | tparse -format=markdown -notests >> tests-output.md || true
+    # Make test output a little less shouty
+    sed -i 's/^# /### /g; s/^## /#### /g' tests-output.md
+    # Make it take up less space
+    sed -i 's|github.com/github/hosted-compute-ims|.|g' tests-output.md
+    # Trim out items without any tests
+    sed -i '/|  0   |  0   |  0   |/d' tests-output.md
+    
+    # Output put when reading actions logs as basic text
+    cat "tests-output-raw.json" | tparse -format=plain
+    (exit $GOTEST_EXIT_CODE) # Fail only if exit code is not 0
+else
+    echo "Running unit tests"
+    go test -race \
+        -timeout $TESTS_TIMEOUT \
+        -p 20 \
+        -json \
+        $SUITE_PARAM \
+        $(go list ./... | grep -v e2e) | tparse -follow -format=plain
+fi

@@ -1,0 +1,65 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ims-retention-job-customer-image
+spec:
+  # Runs every 30 minutes
+  schedule: "*/30 * * * *"
+  # Prevent multiple jobs from running at the same time
+  concurrencyPolicy: Forbid
+  # suspend is overwritten for a single cluster
+  suspend: true
+  # Keep jobs for debugging failures and issues
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        app: ims-retention-job-customer-image
+    spec:
+      # Will cleanup and delete resources after N seconds when job completed
+      ttlSecondsAfterFinished: 60
+      # Will terminate the job after N seconds
+      activeDeadlineSeconds: 3600
+      # Will attempt to run job N times before marking as failed
+      backoffLimit: 0
+      template:
+        metadata:
+          annotations:
+            fluentbit.io/parser: logfmt
+            observability.github.com/logger: fluent-bit
+            observability.github.com/kafka_topic: launch
+            observability.github.com/splunk_index: hosted_compute_ims
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: ims-retention-job-customer-image
+            image: hosted-compute-ims
+            command:
+              - /usr/bin/tools/istio-job-wrapper
+              - /app/bin/hosted-compute-ims-cronjobs
+              - customer-image-retention
+            envFrom:
+              - configMapRef:
+                  name: application-config
+              - secretRef:
+                  name: vault-secrets
+            env:
+              - name: GOMAXPROCS
+                valueFrom:
+                  resourceFieldRef:
+                    containerName: ims-retention-job-customer-image
+                    resource: limits.cpu
+              - name: STATSD_ADDR
+                value: "$(KUBE_NODE_HOSTNAME):28125"
+              - name: STATS_ADDR
+                valueFrom:
+                  fieldRef:
+                    fieldPath: spec.nodeName
+            resources:
+              requests:
+                cpu: "1"
+                memory: "256Mi"
+              limits:
+                cpu: "2"
+                memory: "512Mi"

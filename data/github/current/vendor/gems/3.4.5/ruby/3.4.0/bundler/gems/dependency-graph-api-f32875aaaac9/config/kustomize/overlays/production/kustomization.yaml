@@ -1,0 +1,79 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base/production
+  - ../../base/api
+  - ../../base/workers
+  - cronjobs/sync_vulnerabilities.yaml
+  - cronjobs/abstract_dependent_counts.yaml
+  - cronjobs/backfill_business_plus_orgs.yaml
+  - cronjobs/extract_cargo_packages.yaml
+  - cronjobs/extract_composer_packages.yaml
+  - cronjobs/extract_maven_packages.yaml
+  - cronjobs/extract_nuget_packages.yaml
+  - cronjobs/extract_pub_packages.yaml
+  - cronjobs/extract_pypi_packages.yaml
+  - cronjobs/extract_ruby_packages.yaml
+  - cronjobs/rebuild_package_release_vulnerabilities_count.yaml
+  - deployments/extract_go_packages.yaml
+  - deployments/extract_npm_packages.yaml
+  - deployments/ingest_packages.yaml
+  - deployments/package_metadata.yaml
+  - deployments/repo_visibility_changes.yaml
+  - namespaces/namespace.yaml
+  - pdb.yml
+  - clusterrole.yaml
+  - clusterrolebinding.yaml
+  - service-mesh-config.yaml
+
+components:
+  - ../../components/logging
+  - ../../components/istio-proxy-resources
+
+patches:
+  - target:
+      kind: Deployment
+    patch: |-
+      - op: add
+        path: /spec/template/spec/dnsPolicy
+        value: ClusterFirst
+  - target:
+      kind: CronJob
+    patch: |-
+      - op: add
+        path: /spec/jobTemplate/spec/template/spec/dnsPolicy
+        value: ClusterFirst
+  - target:
+      kind: Service
+      name: api
+    patch: |-
+      - op: add
+        path: /metadata/annotations/moda.github.net~1domain-name
+        value: dependency-graph-api.service.%site%.github.net,dependency-graph-api.service.%region%.github.net
+      - op: add
+        path: "/metadata/annotations/moda.github.net~1istio-ingress-enabled"
+        value: true
+  - target:
+      kind: Service
+      name: slow-query-api
+    patch: |-
+      - op: add
+        path: /metadata/annotations/moda.github.net~1domain-name
+        value: dependency-graph-api-slow-queries.service.%site%.github.net,dependency-graph-api-slow-queries.service.%region%.github.net
+      - op: add
+        path: "/metadata/annotations/moda.github.net~1istio-ingress-enabled"
+        value: true
+  - target:
+      kind: CronJob
+    patch: |-
+      - op: add
+        path: /spec/jobTemplate/spec/ttlSecondsAfterFinished
+        value: 86400
+  - target:
+      kind: Deployment
+      name: api
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/annotations/sidecar.istio.io~1proxyCPU
+        value: 500m

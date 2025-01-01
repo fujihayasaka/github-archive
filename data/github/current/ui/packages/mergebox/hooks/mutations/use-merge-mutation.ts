@@ -1,0 +1,49 @@
+import {useMutation, useQueryClient} from '@github-ui/react-query'
+import {PageData} from '@github-ui/pull-request-page-data-tooling/page-data'
+import {usePageDataUrl} from '@github-ui/pull-request-page-data-tooling/use-page-data-url'
+import {
+  fetchWithErrorHandling,
+  throwErrorsIfBadResponse,
+  parseJSONWithBetterErrors,
+} from '@github-ui/pull-request-page-data-tooling/fetch-error-handling'
+
+import {useMergeBoxPageDataQueryKey} from '../../page-data/loaders/use-merge-box-page-data'
+import {MergeError} from '../../helpers/merge-error'
+
+export type MutationData = {
+  authorEmail?: string | null | undefined
+  commitMessage?: string | null | undefined
+  commitTitle?: string | null | undefined
+  mergeMethod: string
+  bypassBranchProtections?: boolean
+}
+
+export function useMergeMutation({onError}: {onError: (error: Error) => void}) {
+  const apiURL = usePageDataUrl(PageData.merge)
+  const mergeBoxQueryKey = useMergeBoxPageDataQueryKey()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (data: MutationData) => {
+      const response = await fetchWithErrorHandling(apiURL, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+        },
+        body: data,
+      })
+      const json = await parseJSONWithBetterErrors(response)
+      const predefinedError = new MergeError(
+        json?.error || 'Unknown error occurred',
+        json?.metadata?.ruleErrors || [],
+        response.status,
+      )
+      throwErrorsIfBadResponse(response, json, predefinedError)
+      return json
+    },
+    onSuccess: () => {
+      return queryClient.invalidateQueries({queryKey: mergeBoxQueryKey}, {cancelRefetch: false})
+    },
+    onError: (e: Error) => onError(e),
+  })
+}

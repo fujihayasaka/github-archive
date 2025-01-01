@@ -1,0 +1,128 @@
+name: Request leaf certificate
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment associated with the certificate being requested [production, staging, <stamp-name>]'
+        type: string
+        required: true
+      nbf:
+        description: 'ISO 8601 date time that represents the time the certificate should not be used before, ex: 2023-06-06T12:00:00Z'
+        required: false
+        type: string
+      key:
+        description: 'name of the private key to use'
+        type: string
+        required: true
+    outputs:
+      cert_req_pr:
+        description: Certificate request pull request URL
+        value: ${{ jobs.request_cert.outputs.cert_req_pr }}
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment associated with the certificate being requested'
+        type: environment
+        required: true
+      nbf:
+        description: 'ISO 8601 date time that represents the time the certificate should not be used before, ex: 2023-06-06T12:00:00Z'
+        required: false
+        type: string
+      key:
+        description: 'name of the private key to use'
+        type: string
+        required: true
+
+jobs:
+  build_request_cert_args:
+    name: Build certificate request arguments
+    runs-on: ubuntu-latest
+    outputs:
+      script_env: ${{ steps.get_args.outputs.script_env }}
+      cert_profile: ${{ steps.get_args.outputs.cert_profile }}
+      cert_key: ${{ steps.get_args.outputs.cert_key }}
+    steps:
+      - id: get_args
+        run: |
+          echo "cert_key=attester-${{ inputs.environment }}.vault.azure.net/${{ inputs.key }}" >> $GITHUB_OUTPUT
+          # This needs to be updated in the future, production proxima
+          # stamps only contains 'prod' in the name
+          if [ ${{ inputs.environment }} = "production" ]; then
+            echo "script_env=prod" >> $GITHUB_OUTPUT
+            echo "cert_profile=leaf-attester" >> $GITHUB_OUTPUT
+          elif [ ${{ inputs.environment }} = "staging" ]; then
+            echo "script_env=staging" >> $GITHUB_OUTPUT
+            echo "cert_profile=leaf-attester" >> $GITHUB_OUTPUT
+          elif [[ ${{ inputs.environment }} == *"staff"* ]]; then
+            echo "script_env=staging" >> $GITHUB_OUTPUT
+            echo "cert_profile=leaf-attester-${{ inputs.environment }}" >> $GITHUB_OUTPUT
+          else
+            echo "script_env=prod" >> $GITHUB_OUTPUT
+            echo "cert_profile=leaf-attester-${{ inputs.environment }}" >> $GITHUB_OUTPUT
+          fi
+
+  request_cert:
+    name: Request a new leaf certificate
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      GITHUB_USER: ${{ github.actor }}
+      # used by the sigstore Azure KMS client
+      AZURE_AUTH_METHOD: cli
+    needs: build_request_cert_args
+    outputs:
+      cert_req_pr: ${{ steps.call_script.outputs.cert_req_pr }}
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.CERT_MANAGER_AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.CERT_MANAGER_AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.CERT_MANAGER_AZURE_SUBSCRIPTION_ID }}
+
+      - name: Generate certtool app token
+        id: generate_token
+        uses: actions/create-github-app-token@3ff1caaa28b64c9cc276ce0a02e2ff584f3900c5
+        with:
+          app-id: ${{ secrets.CERTTOOL_APP_ID }}
+          private-key: ${{ secrets.CERTTOOL_PRIVATE_KEY }}
+          repositories: certtool
+
+      - name: Checkout certtool
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.0.0
+        with:
+          repository: 'github/certtool'
+          ref: 'main'
+          token: ${{ steps.generate_token.outputs.token }}
+
+      - name: Setup go
+        uses: actions/setup-go@dca8468d37b6d090cde2c7b97b738a37134f5ffb #v5.1.0
+        with:
+          go-version-file: go.mod
+
+      - name: OIDC Setup for goproxy
+        uses: github/setup-goproxy@5e60e1074d42316dfe2949ebf9a92bf77b24645b # v1.1.0
+
+      - name: Build certtool binary
+        run: make certtool
+
+      - name: Request leaf certificate
+        id: call_script
+        run: |
+          NBF=${{inputs.nbf}}
+          if [ -z "$NBF" ]; then
+            NOW=$(date +'%Y-%m-%dT%H:%M:%SZ')
+            echo "No NBF provided, using current time $NOW"
+            NBF=$NOW
+          fi
+          script_output=$(GITHUB_TOKEN=${{ steps.generate_token.outputs.token }} ./scripts/request_cert.sh \
+            ${{needs.build_request_cert_args.outputs.script_env}} \
+            ${{needs.build_request_cert_args.outputs.cert_profile}} \
+            ${{needs.build_request_cert_args.outputs.cert_key}} \
+            $NBF | tee /dev/stderr)
+          cert_req_pr=$(echo $script_output | grep -o "https://github.com/github/certtool/pull/[0-9]\+")
+          echo "cert_req_pr=${cert_req_pr}" >> $GITHUB_OUTPUT

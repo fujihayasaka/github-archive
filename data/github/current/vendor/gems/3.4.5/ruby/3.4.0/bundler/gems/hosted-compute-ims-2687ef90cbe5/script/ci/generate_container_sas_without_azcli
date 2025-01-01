@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+
+# This script retrieves an OIDC Token and calls the Golang Azure SDK to generate an SAS token for accessing an Azure Storage Container
+# This script is intended to be run ONLY in a GitHub Actions workflow and will always fail if invoked locally
+# as it is not possible to generate an OIDC token in a local environment: https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect
+# Pre-requirements for running script
+# - Pass "AZURE_CLIENT_ID" and "AZURE_TENANT_ID" via environment variables
+# - Make sure that the workflow YAML has "id-token: write" permissions in order to get an access to "ACTIONS_ID_TOKEN_REQUEST_URL" and "ACTIONS_ID_TOKEN_REQUEST_TOKEN" variables
+#
+# This script uses Bash and calls another script written in Golang. This combination is used to generate a container SAS token using self-hosted runners
+# We have to use self-hosted runners for E2E tests to access internal GitHub resources
+# As soon as E2E tests are migrated to hosted runners, this script can be replaced with Azure CLI usage and "script/generate-vhd-url"
+
+set -e -o pipefail
+
+if [ -z "$CI" ]; then
+    echo "Script must be run in GitHub Actions CI"
+    exit 1
+fi
+
+if [ -z "$ACTIONS_ID_TOKEN_REQUEST_URL" ] || [ -z "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ]; then
+    echo "'ACTIONS_ID_TOKEN_REQUEST_URL' or 'ACTIONS_ID_TOKEN_REQUEST_TOKEN' are not defined."
+    echo "Ensure the script is run from GitHub Actions CI and workflow has 'id-token: write' permissions"
+    exit 1
+fi
+
+echo "Retrieving OIDC token"
+ID_TOKEN_URL="${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api%3A%2F%2FAzureADTokenExchange"
+ID_TOKEN_RESPONSE=$(curl --silent --header "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" $ID_TOKEN_URL)
+ID_TOKEN=$(echo "$ID_TOKEN_RESPONSE" | jq -r '.value')
+
+
+if [ -z "$ID_TOKEN" ] || [ "$ID_TOKEN" = "null" ]; then
+    echo "Failed to request OIDC token"
+    exit 1
+fi
+
+if [ -z "$AZURE_CLIENT_ID" ] || [ -z "$AZURE_TENANT_ID" ]; then
+    echo "'AZURE_CLIENT_ID' or 'AZURE_TENANT_ID' are not defined."
+    exit 1
+fi
+
+export AZURE_STORAGE_ACCOUNT_NAME="imstestimagesprem"
+export AZURE_STORAGE_CONTAINER_NAME="vhds"
+export AZURE_ID_TOKEN=$ID_TOKEN
+
+echo "Generating container SAS token"
+CONTAINER_SAS_TOKEN=$(go run script/ci/generate_container_sas_without_azcli.go)
+echo "Container SAS token is generated successfully"
+
+echo "Masking SAS token"
+echo "::add-mask::$CONTAINER_SAS_TOKEN"
+
+echo "Saving CONTAINER_SAS_TOKEN to step output"
+echo "CONTAINER_SAS_TOKEN=$CONTAINER_SAS_TOKEN" >> $GITHUB_OUTPUT
+

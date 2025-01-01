@@ -1,0 +1,61 @@
+#!/bin/bash
+#
+# Expected to execute inside the docker container built from config/tools/protoc/Dockerfile
+#
+set -e
+
+echo "Cleaning older version..."
+
+rm -rf gen/docs/*
+
+echo "Generating doc files..."
+
+# NOTE: StreamingAPI is omitted as a special case - it's not Twirp-based
+twirp_services=
+other_protos=
+for protofile in $(find ./proto -name '*.proto' -type f | sort); do
+  case "$protofile" in
+  *streaming*)
+    other_protos="$other_protos $protofile" ;;
+  *_api.proto)
+    twirp_services="$twirp_services $protofile" ;;
+  *)
+    other_protos="$other_protos $protofile" ;;
+  esac
+done
+
+protoc --proto_path=proto --doc_out=gen/docs \
+  --doc_opt=_template/docs/index.md.tmpl,README.md \
+  $twirp_services $other_protos
+protoc --proto_path=proto --doc_out=gen/docs \
+  --doc_opt=_template/docs/index.csv.tmpl,index.csv \
+  $twirp_services $other_protos
+
+outname() {
+  # Change './proto/spokes-api/blobs/v1/blobs_api.proto' into 'blobs_api.proto.md'.
+  printf '%s.md' "$(basename "$1" .proto)"
+}
+
+outdir() {
+  # Change './proto/spokes-api/blobs/v1/blobs_api.proto' into 'spokes-api/blobs/v1'.
+  dirname "$1" | cut -d / -f 3-
+}
+
+for f in $twirp_services; do
+  outdir=gen/docs/$(outdir $f)
+  mkdir -p $outdir
+  protoc --proto_path=proto --doc_out=$outdir \
+    --doc_opt=_template/docs/service.md.tmpl,$(outname $f) \
+    $f
+done
+
+for f in $other_protos; do
+  outdir=gen/docs/$(outdir $f)
+  mkdir -p $outdir
+  protoc --proto_path=proto --doc_out=$outdir \
+    --doc_opt=_template/docs/proto.md.tmpl,$(outname $f) \
+    $f
+done
+
+echo "Fixing links..."
+go run _template/docs/fixlinks.go gen/docs

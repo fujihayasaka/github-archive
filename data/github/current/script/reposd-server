@@ -1,0 +1,151 @@
+#!/bin/bash
+
+SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+REPOSD_VENDOR_PATH="${SCRIPT_DIR}/../vendor/reposd"
+
+source $SCRIPT_DIR/dx/lib/subproject-containers
+
+if [ ! -d $REPOSD_VENDOR_PATH ]; then
+    echo "Directory $REPOSD_VENDOR_PATH does not exist, you need to clone reposd"
+    exit 1
+fi
+
+# Define environment variables
+export HEAVEN_DEPLOYED_ENV=test
+export GITHUB_TELEMETRY_LOGS_LEVEL=debug
+export DATABASE_CONFIG_PATH=${DATABASE_CONFIG_PATH:-./config/db.test.yaml}
+export TOKEN_EXCHANGER_PUBLIC_KEYS=$(cat ${SCRIPT_DIR}/../test/fixtures/authnd/ta-signing-key.pub)
+export SPOKESD_URL=${SPOKESD_URL:-http://127.0.0.1:1345}
+export AUTHZD_URL=${AUTHZD_URL:-http://127.0.0.1:8081}
+export AUTHND_URL=${AUTHND_URL:-http://127.0.0.1:8082}
+export BINARY=${BINARY:-reposd}
+export COMBINE_INTERNAL_API=1
+
+if [ "$BINARY" != "reposd" ] && [ "$BINARY" != "gotauth" ]; then
+  echo "BINARY must be either reposd or gotauth"
+  exit 1
+fi
+
+# Write environment variables to a temporary file to be used by the container
+ENV_FILE=$(mktemp)
+
+env_vars=(
+  AUTHND_URL
+  AUTHZD_URL
+  ALAMBIC_ASSETS_URL
+  DATABASE_CONFIG_PATH
+  FM_LITE_URL
+  GITHUB_TELEMETRY_LOGS_LEVEL
+  HEAVEN_DEPLOYED_ENV
+  PORT
+  SPOKESD_URL
+  TOKEN_EXCHANGER_PUBLIC_KEYS
+  COMBINE_INTERNAL_API
+
+  DATABASE_COLLAB_NAME
+  DATABASE_COLLAB_PASSWORD
+  DATABASE_COLLAB_USER
+  DATABASE_COLLAB_NET
+  DATABASE_COLLAB_ADDRESS
+
+  DATABASE_CONFIGURATIONS_NAME
+  DATABASE_CONFIGURATIONS_PASSWORD
+  DATABASE_CONFIGURATIONS_USER
+  DATABASE_CONFIGURATIONS_NET
+  DATABASE_CONFIGURATIONS_ADDRESS
+
+  DATABASE_IAM_ABILITIES_NAME
+  DATABASE_IAM_ABILITIES_PASSWORD
+  DATABASE_IAM_ABILITIES_USER
+  DATABASE_IAM_ABILITIES_NET
+  DATABASE_IAM_ABILITIES_ADDRESS
+
+  DATABASE_LODGE_NAME
+  DATABASE_LODGE_PASSWORD
+  DATABASE_LODGE_USER
+  DATABASE_LODGE_NET
+  DATABASE_LODGE_ADDRESS
+
+  DATABASE_MYSQL1_NAME
+  DATABASE_MYSQL1_PASSWORD
+  DATABASE_MYSQL1_USER
+  DATABASE_MYSQL1_NET
+  DATABASE_MYSQL1_ADDRESS
+
+  DATABASE_REPOSITORIES_NAME
+  DATABASE_REPOSITORIES_PASSWORD
+  DATABASE_REPOSITORIES_USER
+  DATABASE_REPOSITORIES_NET
+  DATABASE_REPOSITORIES_ADDRESS
+
+  DATABASE_PERMISSIONS_NAME
+  DATABASE_PERMISSIONS_PASSWORD
+  DATABASE_PERMISSIONS_USER
+  DATABASE_PERMISSIONS_NET
+  DATABASE_PERMISSIONS_ADDRESS
+)
+
+ENV_FILE=$(mktemp)
+
+for var in "${env_vars[@]}"; do
+  if [ "${!var+x}" ]; then
+    echo "$var=${!var}" >> "$ENV_FILE"
+  fi
+done
+
+start_reposd() {
+  cd $REPOSD_VENDOR_PATH || exit 1
+
+  CMD="script/server"
+  if [ "$GITHUB_CI" = "1" ]; then
+    CMD="$CMD --no-build"
+  fi
+  if [ "$BINARY" == "reposd" ]; then
+    CMD="$CMD --reposd"
+  fi
+
+  exec $CMD
+}
+
+start_reposd_docker() {
+  # Run the service as a container using an image published via GitHub Actions for PRs or merges to main
+  # Images can be found at https://github.com/github/reposd/pkgs/container/reposd%2Fdev
+  # The commit sha is defined in /config/reposd-version
+  SUBPROJECT_VERSION=$(subproject_version "reposd")
+  CONTAINER_NAME="${BINARY}-${PORT}"
+
+  start_subproject --name=$CONTAINER_NAME \
+    --entrypoint /app/bin/$BINARY \
+    --env-file "$ENV_FILE" \
+    --volume $(pwd)/tmp/$CONTAINER_NAME:/tmp/ \
+    "ghcr.io/github/reposd/dev:$SUBPROJECT_VERSION"
+}
+
+if [[ "$DX_EDGE" = true ]] && [[ "$DX_FEATURE_SUBPROJECT_CONTAINERS" = true ]]; then
+  start_reposd_docker
+elif [ "$GITHUB_CI" = "1" ] || [ "$GITHUB_USE_DOCKER" = "1" ]; then
+  if [[ "$DX_FEATURE_SUBPROJECT_CONTAINERS" = true ]]; then
+    start_reposd_docker
+  else
+    start_reposd
+  fi
+else
+  if [ ! -x "${REPOSD_VENDOR_PATH}/bin/${BINARY}" ]; then
+  cat << EOF
+The reposd server is not built and could not be started, this could lead to:
+ - requests not working as expected in dotcom
+ - some tests will fail
+
+In order to address the above problems:
+ - install and start docker - this only used to build reposd, can be stopped afterwards
+ - build reposd: run script/build-subproject reposd
+ - test reposd works: run script/reposd-server to check the server is working as expected. If you see a long log message and you don't see this message anymore, then you are done!
+
+This script will block indefinitely in order to avoid breaking bin/server
+
+If you keep seeing this message, please contact #repos
+EOF
+  fi
+  until [ -x "${REPOSD_VENDOR_PATH}/bin/${BINARY}" ]; do sleep 60; done
+  start_reposd
+fi

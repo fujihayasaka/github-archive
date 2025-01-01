@@ -1,0 +1,1 @@
+export const BREAKPOINT_DESKTOP_MIN_HEIGHT = 640 // px

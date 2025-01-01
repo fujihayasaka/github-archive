@@ -1,0 +1,44 @@
+<%
+  name = 'Pull Requests Index'
+  view = Stafftools::RepositoryViews::Search::PullRequestsView.new(:repository => repository)
+  repair_job = RepairPullRequestsIndexJob.new("pull-requests", repo_id: current_repository.id)
+%>
+<% if view.purge? %>
+  <%= form_tag gh_purge_stafftools_repository_pull_requests_path(repository), :method => "post" do %>
+    <%= render Primer::Beta::Button.new(type: :submit, scheme: :primary, classes: "boxed-action") do %>Purge Pull Requests<% end %>
+  <% end %>
+  <h4 class="attention"><%= primer_octicon(:alert, mr: 1, classes: "error") %><%= name %></h4>
+  <p><%= view.purge_reason %></p>
+<% elsif view.reindex? %>
+  <%= form_tag gh_reindex_stafftools_repository_pull_requests_path(repository), :method => "post" do %>
+    <%= render Primer::Beta::Button.new(type: :submit, scheme: :primary, classes: "boxed-action") do %>Reindex Pull Requests<% end %>
+    <% if view.purge_before_reindex? %>
+      <input type="hidden" name="purge" value="true">
+    <% end %>
+  <% end %>
+  <% if current_user.feature_enabled?(:elastomer_use_repair_job_for_repo_reindex) %>
+    <% if view.active_repair? %>
+      <%= form_tag gh_stop_stafftools_repository_pull_requests_path(repository), :method => "post" do %>
+        <%= render Primer::Beta::Button.new(type: :submit, scheme: :danger, classes: "boxed-action") do %>Stop Reindexing<% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+  <h4 class="attention"><%= primer_octicon(:alert, mr: 1, classes: "error") %><%= name %></h4>
+  <p><%= view.reindex_reason %></p>
+<% elsif view.searchable? %>
+  <%= form_tag gh_reindex_stafftools_repository_pull_requests_path(repository), :method => "post" do %>
+    <%= render Primer::Beta::Button.new(type: :submit, classes: "boxed-action") do %>Reindex Pull Requests<% end %>
+  <% end %>
+    <% if current_user.feature_enabled?(:elastomer_use_repair_job_for_repo_reindex) %>
+      <% if view.active_repair? %>
+        <%= form_tag gh_stop_stafftools_repository_pull_requests_path(repository), :method => "post" do %>
+          <%= render Primer::Beta::Button.new(type: :submit, scheme: :danger, classes: "boxed-action") do %>Stop Reindexing<% end %>
+        <% end %>
+      <% end %>
+   <% end %>
+  <h4><%= name %></h4>
+  <p>The search index contains <%= pluralize(view.document_count, "pull request") %>.</p>
+<% else %>
+  <h4><%= name %></h4>
+  <p>The search index is up to date. No action needs to be taken.</p>
+<% end %>

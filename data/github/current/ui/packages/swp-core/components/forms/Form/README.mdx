@@ -1,0 +1,211 @@
+import {Canvas, Meta} from '@storybook/blocks'
+
+import * as FormStories from './Form.stories'
+
+<Meta of={FormStories} />
+
+# Form
+
+The Form component is a fully-equipped solution for creating marketing forms that comply with Privacy and Legal requirements. It is designed to work in conjunction with the useForm hook.
+
+## Philosophy
+
+The Form component uses a compound component interface, comprising subcomponents like Form.Heading, Form.Submit, and Form.Error. The reasoning behind this design is to provide as much functionality as possible while preserving flexibility for users of the component.
+
+### Example
+
+```tsx
+function SampleForm() {
+  return (
+    <Form>
+      <Stack direction="vertical" gap="condensed">
+        <Form.Heading>Simple Form</Form.Heading>
+
+        {/* ...form fields...*/}
+
+        <Form.Errors />
+
+        <Form.Submit>Submit</Form.Submit>
+      </Stack>
+    </Form>
+  )
+}
+```
+
+## `useForm`
+
+Although it isn't required, the Form component is intended to work in conjunction with the useForm hook. The idea is that while the Form component manages the form interface and general UX, the useForm hook handles form management and logic. To connect the Form component with the useForm hook, a FormContext component needs to wrap the main Form component.
+
+### Setup
+
+The useForm hook returns several useful functions along with form state data.
+
+```tsx
+const {errors, formFields, formState, handleSubmit, register} = useForm()
+```
+
+| Name           | Description                                                                                                  |
+| -------------- | ------------------------------------------------------------------------------------------------------------ |
+| `errors`       | A simple key-value object that defines which fields have errors and their corresponding error messages.      |
+| `formFields`   | A detailed representation of all the form fields registered in the form.                                     |
+| `formState`    | An object representing key aspects of the form state, such as `touched` and `errors`.                        |
+| `handleSubmit` | A higher-order function to wrap the main `onSubmit` function. It performs validation and data normalization. |
+| `register`     | The main function for registering form fields in the form.                                                   |
+
+### `register`
+
+The `register` function is probably the most important function returned by the `useForm` hook. Its main objective is to register form fields into the form and make the data available while submitting the form. To register a new form field, pass the HTML `name` of the field as the first parameter, and use the optional second parameter to pass down further options:
+
+| Option        | Description                                                                                                                                                         |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `label`       | (Optional) The label for this field. Useful if you want to access the label for specific form fields from different `Form.*` components.                            |
+| `required`    | (Optional) Specifies if the form field should be required.                                                                                                          |
+| `validations` | (Optional) A collection of validations to perform on this form field before submission. Each validation should be an object with `message` and `schema` properties. |
+
+The `register` function returns a collection of input-like props that can be directly forwarded to the input: `id`, `name`, `onChange`, and `ref`. While using the inline `register` approach is very convenient, there might be instances where you need to register the form field separately (for example, when using Primer Brand's `FormControl` component):
+
+```tsx
+const formContext = useForm()
+
+const emailProps = formContext.register('email', {
+  label: 'Your email',
+  required: true,
+  validations: [{message: 'Please introduce a valid email.', schema: z.email()}],
+})
+
+return (
+  <FormContext.Provider value={formContext}>
+    <Form onSubmit={formContext.handleSubmit(onSubmit)}>
+      <Stack direction="vertical" gap="condensed">
+        <Form.Heading>Simple Form</Form.Heading>
+
+        <FormControl id={emailProps.id} fullWidth required>
+          <FormControl.Label>Your email</FormControl.Label>
+
+          <TextInput {...emailProps} placeholder="mona@github.com" type="email" />
+        </FormControl>
+
+        <Form.Errors />
+
+        <Form.Submit>Submit</Form.Submit>
+      </Stack>
+    </Form>
+  </FormContext.Provider>
+)
+```
+
+## Subcomponents
+
+### `Form.Heading`
+
+Represents a heading for the form.
+
+### `Form.Submit`
+
+Renders a Primer Brand `Button` component of type `submit`.
+
+### `Form.Errors`
+
+This component uses the `FormContext` to automatically render an error banner that includes all form fields with errors. For accessibility reasons, it is important not to conditionally render this component; otherwise, it will not announce to the user when there are errors that require attention.
+
+**❌ Don't**
+
+```tsx
+function SampleForm() {
+  const formContext = useForm()
+
+  return (
+    <Form>
+      <Stack direction="vertical" gap="condensed">
+        <Form.Heading>Simple Form</Form.Heading>
+
+        {formContext.formState.errors && <Form.Errors />}
+
+        <Form.Submit>Submit</Form.Submit>
+      </Stack>
+    </Form>
+  )
+}
+```
+
+**✅ Do**
+
+```tsx
+function SampleForm() {
+  return (
+    <Form>
+      <Stack direction="vertical" gap="condensed">
+        <Form.Heading>Simple Form</Form.Heading>
+
+        {/*
+            Do not conditionally render this component. It won't show up if
+            there are no errors but will announce errors to users who use assistive
+            technologies
+          */}
+        <Form.Errors />
+
+        <Form.Submit>Submit</Form.Submit>
+      </Stack>
+    </Form>
+  )
+}
+```
+
+### `Form.Octocaptcha`
+
+The `Form.Octocaptcha` component provides an out-of-the-box integration with Octocaptcha. Just include this component inside your `Form` component, and the `Octocaptcha` component will render, making the `octocaptchaToken` available within the `formData` object in the `onSubmit` handler.
+
+To render the correct Octocaptcha, you'll need an `OctocaptchaContext.Provider` somewhere higher in the component tree to supply Octocaptcha with two key settings: `hostName` and `originPage`. These options typically come from the Rails server and might vary per page.
+
+| Option       | Description                                                                                                       |
+| ------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `hostName`   | Defines the host for the Octocaptcha `iframe`. We typically use the value of `GitHub.urls.octocaptcha_host_name`. |
+| `originPage` | The name of the application using Octocaptcha. For marketing pages, this is typically `marketing_forms`.          |
+
+#### How to use it
+
+```tsx
+/**
+ * This is a simple example of how we may mount the component for a specific route.
+ */
+function ShowRoute() {
+  const payload = useRoutePayload()
+
+  return (
+    <OctocaptchaContext.Provider
+      value={{
+        hostName: payload.octocaptchaHostName,
+        originPage: payload.octocaptchaOriginPage,
+      }}
+    >
+      <Page />
+    </OctocaptchaContext.Provider>
+  )
+}
+
+/**
+ * Then we can create a simple page using a Form component. It will automatically use the Octocaptcha settings
+ * from the context.
+ */
+function Page() {
+  const formContext = useForm()
+
+  const onSubmit: OnSubmit = async formData => {
+    /**
+     * `octocaptchaToken` will be now available inside the formData object!
+     */
+  }
+
+  return (
+    <FormContext.Provider value={formContext}>
+      <Form onSubmit={formContext.handleSubmit(onSubmit)}>
+        <Form.Heading>Simple Form</Form.Heading>
+
+        <Form.Octocaptcha />
+
+        <Form.Submit>Submit</Form.Submit>
+      </Form>
+    </FormContext.Provider>
+  )
+}
+```

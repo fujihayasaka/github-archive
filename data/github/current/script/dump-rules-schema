@@ -1,0 +1,579 @@
+#!/usr/bin/env ruby
+# typed: true
+# frozen_string_literal: true
+
+require "optparse"
+require "version_sorter"
+require_relative "../config/environment"
+
+extend T::Sig # rubocop:todo Sorbet/RedundantExtendTSig
+
+@openapi_changed = T.let(false, T::Boolean)
+@openapi_rules = T.let(Hash.new, T::Hash[Symbol, T.untyped])
+
+@dry_run = T.let({
+  errors: Hash.new { |h, k| h[k] = [] }, # { rule_type => [error, ...]}
+  changes: {
+    added: [], # [file_path, ...]
+    modified: [],
+    deleted: []
+  }
+}, T::Hash[Symbol, T::Hash[Symbol, T::Array[String]]])
+
+sig { params(path: String, contents: String, file_type: Symbol).void }
+def write_file(path, contents, file_type: :graphql)
+  if file_type == :graphql
+    @gql_writer.write(path, contents, @options[:dry])
+  else
+    exists = false
+    if File.exist?(path)
+      exists = true
+      existing = File.read(path)
+      return if existing == contents
+    end
+
+    if @options[:dry]
+      change_type = exists ? :modified : :added
+      # TODO: add the contents to the dry run so its viewable while debugging
+      @dry_run[:changes][change_type] << path
+    else
+      File.write(path, contents)
+    end
+  end
+
+
+  case file_type
+  when :openapi
+    @openapi_changed = true
+  end
+end
+
+sig { params(base: RuleEngine::ParameterSchema::Base).returns(T::Array[String]) }
+def validate_base(base)
+  errors = []
+  unless base.root
+    errors << "Name empty" if base.name.empty?
+    errors << "Description empty for #{base.name}" if base.description.empty?
+  end
+  errors
+end
+
+sig { params(field: RuleEngine::ParameterSchema::Field).returns(T::Array[String]) }
+def validate_field(field)
+  errors = validate_base(field)
+
+  errors << "Unknown type #{field.type} for #{field.name}" unless RuleEngine::ParameterSchema::Field::CLASS_TYPES.has_key?(field.type)
+  errors
+end
+
+sig { params(object: RuleEngine::ParameterSchema::Object).returns(T::Array[String]) }
+def validate_object(object)
+  errors = validate_base(object)
+
+  object.fields.group_by(&:name).each do |name, fields|
+    errors << "Duplicate field #{name}" if fields.size > 1
+  end
+
+  object.fields.each do |field|
+    field_errors = validate_generic(field)
+    if field_errors&.any?
+      errors << "Invalid field #{field.name}: "
+      field_errors.each do |error|
+        errors << "  #{error}"
+      end
+    end
+  end
+
+  errors
+end
+
+sig { params(array: RuleEngine::ParameterSchema::Array).returns(T::Array[String]) }
+def validate_array(array)
+  errors = validate_base(array)
+
+  if array.content_type == :object
+    content_errors = validate_object(array.content_object)
+    if content_errors.any?
+      errors << "Invalid contents for #{array.name}: "
+      content_errors.each do |error|
+        errors << "  #{error}"
+      end
+    end
+  else
+    errors << "Unknown type #{array.content_type} for array #{array.name}" unless RuleEngine::ParameterSchema::Field::CLASS_TYPES.has_key?(array.content_type)
+  end
+
+  errors
+end
+
+sig { params(schema_obj: RuleEngine::ParameterSchema::Base).returns(T.nilable(T::Array[String])) }
+def validate_generic(schema_obj)
+  if schema_obj.is_a?(RuleEngine::ParameterSchema::Array)
+    validate_array(schema_obj)
+  elsif schema_obj.is_a?(RuleEngine::ParameterSchema::Object)
+    validate_object(schema_obj)
+  elsif schema_obj.is_a?(RuleEngine::ParameterSchema::Field)
+    validate_field(schema_obj)
+  end
+end
+
+sig { returns(T::Boolean) }
+def validate_schema
+  puts "Validating parameter schemas" unless @options[:dry]
+  success = T.let(true, T::Boolean)
+  RuleEngine::Evaluator::REGISTERED_RULES.each do |rule_type, impl|
+    schema = impl.try(:parameter_schema)
+    if schema && !schema.empty?
+      validation_errors = validate_object(schema)
+      if validation_errors.any?
+        if @options[:dry]
+          validation_errors.each { |error| @dry_run[:errors][rule_type.to_sym] << error }
+        else
+          puts "Validation error for #{rule_type} parameter schema"
+          validation_errors.each { |error| puts error }
+        end
+        success = false
+      end
+    end
+  end
+  success
+end
+
+sig { void }
+def generate_graphql_schema
+  puts "Generating GraphQL objects" unless @options[:dry]
+  @gql_writer = GraphqlSchemaWriter.instance(@options[:dry])
+  @gql_writer.generate_graphql_schema
+end
+
+sig { params(class_name: String, class_string: String, prefix: T.nilable(String), suffix: T.nilable(String)).returns(String) }
+def write_openapi_schema_file(class_name, class_string, prefix: nil, suffix: nil)
+  file_name = "#{prefix}#{class_name.underscore.dasherize}#{suffix}.yaml"
+  file_path = "app/api/description/components/schemas/#{file_name}"
+  write_file(file_path, class_string, file_type: :openapi)
+  file_name
+end
+
+# Filter the given rules to only include those that are supported by the given GHES version.
+sig { params(rules: T::Hash[Symbol, T.untyped], version: String).returns(T::Hash[Symbol, T.untyped]) }
+def filter_for_ghes(rules, version)
+  rules.select do |_, rule_hash|
+    VersionSorter.compare(version, rule_hash[:impl]&.minimum_ghes_version) >= 0
+  end
+end
+
+# Build a version requirement string given the lower and upper bounds.
+# This only handles bounds with the same major version.
+sig { params(lower_version: String, excluded_upper_version: String).returns(String) }
+def versions_requirements_string(lower_version, excluded_upper_version)
+  lower = T.must(Gem::Version.create(lower_version))
+  upper = T.must(Gem::Version.create(excluded_upper_version))
+  raise "Script cannot handle versions that are not of the form major.minor" if lower.segments.size != 2 || upper.segments.size != 2
+  raise "Script cannot handle major version increase" if lower.segments[0] != upper.segments[0]
+
+  # This cast is necessary because Sorbet currently falsely thinks lower.segments is an array of strings.
+  segments = T.cast(lower.segments, T::Array[Integer])
+
+  s = lower_version
+  segments[1] = segments.fetch(1) + 1
+  v = segments.join(".")
+
+  while VersionSorter.compare(v, excluded_upper_version) < 0 do
+    s += " || #{v}"
+    segments[1] = segments.fetch(1) + 1
+    v = segments.join(".")
+  end
+  s
+end
+
+# Extracts the minimum GHES versions from all the rules and returns them sorted in descending order.
+sig { params(rules: T::Hash[Symbol, T.untyped]).returns(T::Array[String]) }
+def sorted_ghes_versions(rules)
+  versions = rules.map { |_, rule_hash| rule_hash[:impl]&.minimum_ghes_version }.uniq
+  VersionSorter.rsort!(versions)
+end
+
+# Generates the YAML string for the given rules and generator.
+# The generator will be called once with all rules and then for each ghes version range
+# that needs its own overlay with just the rules present in that version range.
+sig { params(rules: T::Hash[Symbol, T.untyped], generator: T.proc.params(rules: T::Hash[Symbol, T.untyped]).returns(String)).returns(String) }
+def generate_with_ghes_overlays(rules, &generator)
+  # Generate general version first
+  s = generator.call(rules)
+
+  # Rules that are published require a minimum ghes version
+  ghes_rules = rules.select { |_, rule_hash| rule_hash[:impl]&.publish_api }
+
+  # Raise if any of the ghes rules do no provide version information
+  ghes_rules.each do |rule, rule_hash|
+    raise "Non-feature-flagged rule '#{rule}' does not provide ghes version information. Override minimum_ghes_version in the rule implementation to do so." if rule_hash[:impl]&.minimum_ghes_version.nil?
+  end
+
+  # Now generate GHES overlays
+  ghes_versions = sorted_ghes_versions(ghes_rules)
+
+  # Return early if there is only a single version, meaning we do not need overlays.
+  return s if ghes_versions.size <= 1
+
+  s += "x-githubEnterpriseOverlays:\n"
+
+  # Note: We do not need to add an overlay for the greatest version that had a change
+  # (i.e. " >= #{ghes_versions[0]}") since it is no different to the dotcom one.
+
+  # Add overlays for all the versions that need both upper and lower bounds
+  ghes_versions.drop(1).zip(T.must(ghes_versions[0..-1])) do |lower, upper|
+    s += "  \"#{versions_requirements_string(lower, T.must(upper))}\":\n"
+    s += @openapi_writer.add_spaces(generator.call(filter_for_ghes(ghes_rules, lower)), 4)
+    s += "\n"
+  end
+
+  s
+end
+
+sig { params(all_rules: T::Hash[Symbol, T.untyped]).void }
+def write_repository_rule_file(all_rules)
+  initial_string = <<-REPO_RULE
+---
+# DO NOT EDIT MANUALLY
+# This is an autogenerated file of the supported rule parameter schemas
+# Please instead update this file by running `bin/dump-rules-schema`.
+
+title: Repository Rule
+type: object
+REPO_RULE
+
+  repository_rule_string = "#{initial_string}description: A repository rule.\n"
+  repository_rule_string += generate_with_ghes_overlays(all_rules) do |rules|
+    list_string = "oneOf:\n"
+    list_string += rules.map { |_, rule_hash|
+      rule_hash[:impl]&.feature_flag ? "  - #{rule_hash[:rule].chop.gsub("\n", "\n    ")}" : "  - $ref: './#{rule_hash[:rule]}'"
+    }.join("\n") + "\n"
+
+    list_string
+  end
+
+  # Write changes to file
+  write_file("app/api/description/components/schemas/repository-rule.yaml", repository_rule_string, file_type: :openapi)
+
+  repository_rule_response_string = "#{initial_string}description: A repository rule with ruleset details.\n"
+
+  # We're skipping feature flagged rules since this schema is only used on get-branch-rules, which is a GET request, and wouldn't be published anyway
+  published_rules = all_rules.filter { |_, rule_hash| rule_hash[:impl]&.feature_flag.nil? }
+  repository_rule_response_string += generate_with_ghes_overlays(published_rules) do |rules|
+    s = "oneOf:\n"
+    rules.each do |_, rule_hash|
+      s += <<-SPEC
+  - allOf:
+    - $ref: './#{rule_hash[:rule]}'
+    - $ref: './repository-rule-ruleset-info.yaml'
+SPEC
+    end
+    s
+  end
+
+  File.write("app/api/description/components/schemas/repository-rule-detailed.yaml", repository_rule_response_string)
+end
+
+sig do
+  params(
+    name: String,
+    schema: RuleEngine::ParameterSchema::Object,
+    description: String,
+    impl: RuleEngine::BaseRule
+  ).returns(String)
+end
+def generate_openapi_component(name, schema, description, impl)
+  required = []
+  fields = schema.fields.reject { |field| field.internal }
+
+  # When a rule is feature flagged
+  # instead we will directly insert the schema
+  # Otherwise, we could be referencing an unpublished schema, which violates openapi rules
+  # See https://github.com/github/github/pull/306923#issuecomment-1900461179
+  spec = if impl.feature_flag.present?
+    ""
+  else
+    <<-SPEC
+---
+# DO NOT EDIT MANUALLY
+# This is an autogenerated file of the supported rule parameter schemas
+# Please instead update this file by running `bin/dump-rules-schema`.
+
+SPEC
+  end
+
+  spec += "title: #{name}\n"
+
+  # If in beta, mention that rule may change
+  spec += if impl.beta_api_note
+    <<-DESC
+description: |-
+  > [!NOTE]
+  > `#{name}` is in beta and subject to change.
+
+  #{description}
+    DESC
+  else
+    "description: #{description}\n"
+  end
+
+  spec += "type: object\n"
+
+  spec += "x-unpublished: Unpublished until the rule is in public beta or GA\n" unless impl.publish_api
+  spec += <<-SPEC
+required:
+  - type
+properties:
+  type:
+    type: string
+    enum:
+      - #{name}
+SPEC
+  if fields.present?
+    spec += <<-SPEC
+  parameters:
+    type: object
+    properties:\n
+SPEC
+  else
+    spec += "\n"
+  end
+  spec.chomp!
+  fields.sort_by(&:name).each do |field|
+    # We can't require a feature flagged rule since we don't publish it
+    # Once the feature flag is removed, we can require it
+    required << field if field.required && field.feature_flag.nil?
+    spec += "#{openapi_property_for_field(field)}"
+  end
+
+  spec += "    required:\n" if required.size > 0
+  required.each do |field|
+    spec += "      - #{field.name}\n"
+  end
+
+  if fields.any? { _1.min_ghes_version }
+    spec += "x-githubEnterpriseOverlays:\n"
+    # Generate GHES overlays
+    ghes_parameters = fields.filter { _1.min_ghes_version }.group_by { _1.min_ghes_version }
+    ghes_versions = VersionSorter.rsort(ghes_parameters.keys)
+    ghes_versions.each do |version|
+      parameters = ghes_parameters[version]
+      spec += "  '< #{version}':\n"
+      spec += "    properties:\n"
+      spec += "      parameters:\n"
+      spec += "        properties:\n"
+      # Hide the parameters that are not supported in this version
+      parameters.each do |field|
+        spec += "          #{field.name}:\n"
+      end
+
+      # If there are any required parameters, hide the ones that are not supported in this version
+      if parameters.any? { _1.required }
+        spec += "        required:\n"
+        required.filter { _1.min_ghes_version.nil? || VersionSorter.compare(_1.min_ghes_version, version) < 0 }.each do |field|
+          spec += "          - #{field.name}\n"
+        end
+      end
+    end
+  end
+
+  spec
+end
+
+sig { params(name: String, schema: RuleEngine::ParameterSchema::Object, description: String).returns(String) }
+def generate_openapi_subtype_component(name, schema, description)
+  required = []
+  fields = schema.fields.reject { |field| field.internal }
+  spec = <<-SPEC
+---
+# DO NOT EDIT MANUALLY
+# This is an autogenerated file of the supported rule parameter schemas
+# Please instead update this file by running `bin/dump-rules-schema`.
+
+title: #{name}
+description: #{description}
+type: object
+properties:
+
+SPEC
+  spec.chomp!
+  fields.sort_by(&:name).each do |field|
+    # We can't require a feature flagged rule since we don't publish it
+    # Once the feature flag is removed, we can require it
+    if field.required && field.feature_flag.nil?
+      # When node id, use the node id object name, otherwise, use the field name
+      required << (field.is_a?(RuleEngine::ParameterSchema::NodeIdField) ? field.node_id_object.name : field.name)
+    end
+    spec += "#{openapi_property_for_field(field, leading_space: 2)}"
+  end
+
+  spec += "required:\n" if required.size > 0
+  required.each do |property|
+    spec += "- #{property}\n"
+  end
+  spec
+end
+
+sig { params(name: String, file_name: String, description: String).returns(String) }
+def generate_openapi_rule_response(name, file_name, description)
+  <<-SPEC
+---
+# DO NOT EDIT MANUALLY
+# This is an autogenerated file of the supported rule parameter schemas
+# Please instead update this file by running `bin/dump-rules-schema`.
+
+title: #{name}
+description: #{description}
+type: object
+properties:
+  allOf:
+    - $ref: './#{file_name}'
+    - $ref: './repository-rule-ruleset-info.yaml
+SPEC
+end
+
+sig { params(field: T.untyped, leading_space: Integer).returns(T.nilable(String)) }
+def openapi_property_for_field(field, leading_space: 6)
+  prefix = "repository-rule-params-"
+  case field
+  when RuleEngine::ParameterSchema::NodeIdField
+    object = field.node_id_object
+    class_name = object.name.camelize
+    subparameter_string = generate_openapi_subtype_component(class_name, object, object.description)
+    write_openapi_schema_file(class_name, subparameter_string, prefix: prefix) if subparameter_string
+    create_openapi_property(object, "object", prefix: prefix, leading_space:)
+  when RuleEngine::ParameterSchema::Field
+    create_openapi_property(field, field.type, leading_space:)
+  when RuleEngine::ParameterSchema::Array
+    if field.content_type == :object
+      object = field.content_object
+      class_name = object.name.camelize
+      subparameter_string = generate_openapi_subtype_component(class_name, object, object.description)
+      write_openapi_schema_file(class_name, subparameter_string, prefix: prefix) if subparameter_string
+    end
+    create_openapi_property(field, "array", prefix: prefix, leading_space:)
+  when RuleEngine::ParameterSchema::Object
+    class_name = field.name.camelize
+    subparameter_string = generate_openapi_subtype_component(class_name, field, field.description_api)
+    write_openapi_schema_file(class_name, subparameter_string, prefix: prefix) if subparameter_string
+    create_openapi_property(field, "object", prefix: prefix, leading_space:)
+  end
+end
+
+sig { params(field: RuleEngine::ParameterSchema::Base, type: T.any(Symbol, String), prefix: T.nilable(String), leading_space: Integer).returns(String) }
+def create_openapi_property(field, type, prefix: nil, leading_space: 6)
+  spacing = " " * leading_space
+  property = "#{spacing}#{field.name}:\n"
+  # OpenAPI does not consider node IDs to be a fundamental type like GraphQL.
+  type = :string if type == :node_id
+
+  property += "#{spacing}  x-unpublished: Unpublished until `#{field.name}` is in public beta or GA\n" unless field.publish_api
+  if field.is_a?(RuleEngine::ParameterSchema::Object)
+    property += "#{spacing}  $ref: './#{prefix}#{field.name.underscore.dasherize}.yaml'\n"
+    return property
+  end
+  property += "#{spacing}  type: #{type}\n"
+  # If field is in beta, then make note
+  description = if field.feature_flag.present? && field.beta_api_note
+    <<-DESC
+#{spacing}  description: |-
+#{spacing}    > [!NOTE]
+#{spacing}    > `#{field.name}` is in beta and subject to change.
+#{spacing}
+#{spacing}    #{field.description_api}
+    DESC
+  else
+    "#{spacing}  description: #{field.description_api}\n"
+  end
+
+  property += "#{description}"
+  if range = field.try(:allowed_range)
+    property += "#{spacing}  minimum: #{range.begin ? range.min : field.default_value}\n"
+    property += "#{spacing}  maximum: #{range.end ? range.max : field.default_value + 1}\n"
+  end
+
+  if field.is_a?(RuleEngine::ParameterSchema::Array)
+    property += "#{spacing}  items:\n"
+    if field.content_type == :object
+      property += "#{spacing}    $ref: './#{prefix}#{field.content_object.name.underscore.dasherize}.yaml'\n"
+    else
+      property += "#{spacing}    type: #{field.content_type}\n"
+    end
+
+    if field.allowed_options
+      property += "#{spacing}    enum:\n"
+      field.allowed_options&.each { |option| property += "#{spacing}      - #{option[:value]}\n" }
+    end
+  elsif allowed_values = field.try(:allowed_values)
+    property += "#{spacing}  enum:\n"
+    allowed_values.each { |value| property += "#{spacing}    - #{value}\n" }
+  end
+
+  property
+end
+
+sig { void }
+def generate_openapi_spec
+  puts "Generating openapi component" unless @options[:dry]
+  @openapi_writer = OpenapiSchemaWriter.instance(@options[:dry])
+  rules = Hash.new { |h, k| h[k] = { rule: nil, impl: nil } }
+  @openapi_writer.configurable_types.each do |rule_type, impl|
+    # Some rules don't have any configurations, so their schemas are empty
+    schema = impl.try(:parameter_schema) || RuleEngine::ParameterSchema::Object.empty_schema
+    name = rule_type.underscore
+    # currently, write out each policy/rule as a component to be used for input/output
+    description = impl.description || "Parameters to be used for the #{name} rule"
+    schema_string = generate_openapi_component(name, schema, description, impl)
+    if schema_string
+      # Directly use schema string if rule is feature flagged, otherwise, write to file
+      rules[name][:rule] = impl.feature_flag ? schema_string : write_openapi_schema_file(name, schema_string, prefix: "repository-rule-")
+      rules[name][:impl] = impl
+    end
+  end
+  write_repository_rule_file(rules)
+end
+
+## === Run ===
+
+@options = T.let({}, T::Hash[Symbol, T.any(String, T::Boolean)])
+OptionParser.new do |opts|
+  opts.banner = "Usage: dump-rules-schema [options]"
+
+  opts.on("-d", "--dry-run", FalseClass, "Run without changing files. Output what would have happened") do
+    @options[:dry] = true
+  end
+
+  opts.on("-h", "--help", "Prints this help") do
+    puts opts
+    exit
+  end
+
+end.parse!
+
+validate_schema
+
+generate_openapi_spec
+unless @options[:dry]
+  if @openapi_changed
+    puts "REST OpenAPI spec changed! Be sure to version and unpublish the docs as needed."\
+    " See https://thehub.github.com/epd/engineering/products-and-services/public-apis/rest/openapi/versioning/"\
+    " and https://thehub.github.com/epd/engineering/products-and-services/public-apis/rest/openapi/publishing/"\
+    " for more info"
+  else
+    puts "No REST OpenAPI changes"
+  end
+end
+
+generate_graphql_schema
+unless @options[:dry]
+  if @gql_writer.changed
+    puts "GraphQL objects changed! Run `bin/dump-graphql-schema` to regenerate GraphQL schema files"
+  else
+    puts "No GRAPHQL changes"
+  end
+end
+
+if @options[:dry]
+  # ci-check expects 1 output
+  puts @dry_run.deep_merge(@gql_writer.dry_run_results).to_json
+end

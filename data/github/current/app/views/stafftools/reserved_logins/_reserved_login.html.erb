@@ -1,0 +1,43 @@
+
+<% if GitHub.enterprise? %>
+  <div>
+    <span class="text-bold"><%= reserved_login %></span>
+  </div>
+<% else %>
+  <div>
+    <span class="text-bold"><%= reserved_login.login %></span>
+    <% if reserved_login.tombstoned? %>
+      <span class="text-small mr-2">tombstone <%= expiry_date_in_words reserved_login.expires_at %></span>
+    <% elsif stafftools_action_authorized?(controller: Stafftools::SearchController, action: :audit_log) %>
+      <span class="text-small mr-2"><%= link_to "#{time_ago_in_words reserved_login.created_at} ago",
+        stafftools_audit_log_path(query: GitHub.driftwood_ade_queries_enabled? ?
+        "webevents | where action startswith 'reserved_login.' and data.login == '#{reserved_login.login}'" :
+        "action:reserved_login.* data.login:#{reserved_login.login}") %> </span>
+    <% else %>
+      <span class="text-small mr-2"><%= "#{time_ago_in_words reserved_login.created_at} ago" %></span>
+    <% end %>
+  </div>
+  <% if stafftools_action_authorized?(controller: Stafftools::ReservedLoginsController, action: :destroy) %>
+    <%= form_tag stafftools_reserved_login_path(login: reserved_login.login), class: "inline-form", method: :delete do %>
+      <% if reserved_login.hardcoded? %>
+        <%= render(Primer::Beta::Button.new(
+          id: "unreserve-#{reserved_login.login}",
+          "aria-label": "Unreserve",
+          test_selector: "unreserve",
+          type: :submit,
+          scheme: :default,
+          size: :small,
+          classes: "mr-2",
+          inactive: true,
+          )) do |component| %>
+          <% component.with_tooltip(text: "Reserved in config/initializers/denylist.rb and cannot be unreserved.") %>
+          Unreserve
+        <% end %>
+      <% elsif reserved_login.staff_reserved? %>
+        <%= submit_tag "Unreserve", class: "btn btn-sm" %>
+      <% elsif reserved_login.tombstoned? %>
+        <%= submit_tag "Delete tombstone", class: "btn btn-sm", :"title" => "Login tombstoned #{time_ago_in_words reserved_login.created_at} ago" %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

@@ -1,0 +1,101 @@
+import type {Meta, StoryObj} from '@storybook/react'
+import CopilotMetricsChart, {type CopilotMetricsChartProps} from './CopilotMetricsChart'
+
+const meta = {
+  title: 'CopilotMetricsChart',
+  component: CopilotMetricsChart,
+} satisfies Meta<typeof CopilotMetricsChart>
+
+export default meta
+
+type Story = StoryObj<typeof CopilotMetricsChart>
+
+export const Example: Story = {
+  args: {
+    historicalMetrics: {
+      data: [
+        {
+          id: '1',
+          label: 'Week 52',
+          shortLabel: 'W52',
+          startDate: '2022-12-29',
+          endDate: '2023-01-04',
+          total: 100,
+          active: 80,
+          inactive: 10,
+          dormant: 10,
+        },
+        {
+          id: '2',
+          label: 'Week 1',
+          shortLabel: 'W1',
+          startDate: '2023-01-05',
+          endDate: '2023-01-11',
+          total: 100,
+          active: 80,
+          inactive: 10,
+          dormant: 10,
+        },
+        {
+          id: '3',
+          label: 'Week 2',
+          shortLabel: 'W2',
+          startDate: '2023-01-12',
+          endDate: '2023-01-18',
+          total: 100,
+          active: 80,
+          inactive: 10,
+          dormant: 10,
+        },
+        {
+          id: '4',
+          label: 'Week 3',
+          shortLabel: 'W3',
+          startDate: '2023-01-19',
+          endDate: '2023-01-25',
+          total: 100,
+          active: 80,
+          inactive: 10,
+          dormant: 10,
+        },
+        {
+          id: '5',
+          label: 'Week 4',
+          shortLabel: 'W4',
+          startDate: '2023-01-26',
+          endDate: '2023-02-01',
+          total: 100,
+          active: 80,
+          inactive: 10,
+          dormant: 10,
+        },
+        {
+          id: '6',
+          label: 'Week 5',
+          shortLabel: 'W5',
+          startDate: '2023-02-02',
+          endDate: '2023-02-08',
+          total: 100,
+          active: 80,
+          inactive: 10,
+          dormant: 10,
+        },
+        {
+          id: '7',
+          label: 'Week 6',
+          shortLabel: 'W6',
+          startDate: '2023-02-09',
+          endDate: '2023-02-15',
+          total: 100,
+          active: 80,
+          inactive: 10,
+          dormant: 10,
+        },
+      ],
+      overallStartDate: '2022-12-29',
+      overallEndDate: '2024-01-04',
+    },
+    metricsDataType: 'adoption',
+  },
+  render: (props: CopilotMetricsChartProps) => <CopilotMetricsChart {...props} />,
+}

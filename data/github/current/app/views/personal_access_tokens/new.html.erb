@@ -1,0 +1,70 @@
+<% page_info :title => "New Fine-grained Personal Access Token", :selected_link => :access_tokens %>
+<% content = capture do %>
+  <% beta_version = PersonalAccessTokensController::BETA_VERSION %>
+  <%= render Primer::Beta::Subhead.new do |component| %>
+    <% component.with_heading(tag: :h2) do %>
+      <span>New fine-grained personal access token</span>
+    <% end %>
+  <% end %>
+
+  <p>Create a fine-grained, repository-scoped token suitable for personal API use and for using Git over HTTPS.</p>
+
+  <%= form_for token, :url => settings_user_access_tokens_path, :html => {:"aria-label" => "personal access token", class: "js-integrations-install-form js-user-programmatic-access-form", data: { turbo: true, turbo_frame: "fg_pat_confirmation_dialog" }} do |f| %>
+    <%= render(Primer::Alpha::TextField.new(
+      id: "user_programmatic_access_name",
+      auto_check_src: token_check_name_path,
+      label: "Token name",
+      name: "user_programmatic_access[name]",
+      autocapitalize: :off,
+      classes: "js-prevent-default-behavior",
+      caption: "A unique name for this token. May be visible to resource owners or users with possession of the token.",
+      validation_message: error_for(token, :name),
+      required: true,
+      full_width: false,
+      style: "max-width: 580px",
+      my: 1
+    )) %>
+
+    <div class="d-flex flex-column my-2">
+      <%= f.label :description, "Description", style: "margin-bottom: 4px;" %>
+      <%= f.text_area(
+        :description,
+        style: "width: 100%; max-width: 580px;",
+        rows: 6,
+        error: error_for(token, :description)
+      ) %>
+    </div>
+
+    <%= render "personal_access_tokens/select_organizations", current_target: current_target %>
+
+    <template class="js-new-default-token-expiration-select-template">
+      <%= render partial: "oauth_tokens/expiration_date_picker", locals: { f: f, access: token } %>
+    </template>
+
+    <div class="js-new-default-token-expiration-select-container">
+      <%= render partial: "oauth_tokens/expiration_date_picker", locals: { f: f, access: token, target_expiration_limit: fine_grained_lifetime_limit_for(current_target), target_and_type_with_expiration: fine_grained_target_and_type_with_limit(current_target), target_limit_exempts_actor: fine_grained_lifetime_limit_exempted_for?(current_target, current_user) } %>
+    </div>
+
+    <div class="js-cap-resolved">
+      <% if local_assigns[:rerender] || current_target.user? %>
+        <%= render partial: "personal_access_tokens/select_access", locals: {
+          token: token, permissions_view: permissions_view, repositories_view: repositories_view,
+        } %>
+      <% elsif current_target.organization? %>
+        <%= render Primer::Alpha::IncludeFragment.new(src: user_access_token_select_access_path(target_name: current_target.display_login)) do %>
+          <%= render partial: "personal_access_tokens/loading", locals: { hidden: false } %>
+        <% end %>
+      <% end %>
+    </div>
+
+    <%= render partial: "personal_access_tokens/errors" %>
+    <%= render partial: "personal_access_tokens/loading" %>
+  <% end %>
+<% end %>
+
+<%= render layout: "settings/developer_settings" do %>
+  <%= content %>
+<% end %>
+
+<turbo-frame id="fg_pat_confirmation_dialog">
+</turbo-frame>

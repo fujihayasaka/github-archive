@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: slow-query-api
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "slow-query-api"
+        heaven.githubapp.com/image-placeholder: "dependency-graph-api"
+        heaven.githubapp.com/deploy-requirement: "true"
+        moda.github.net/canary-v2: "true"
+        moda.github.net/canary-label: "canary"
+spec:
+    replicas: 10
+    strategy:
+        type: RollingUpdate
+        rollingUpdate:
+            maxSurge: 2 # how many pods we can add at a time
+            maxUnavailable: 2 # maxUnavailable define how many pods can be unavailable
+            # during the rolling update
+    selector:
+        matchLabels:
+            app: dependency-graph-api
+            role: slow-query-api
+            canary: "api"
+    template:
+        metadata:
+            labels:
+                app: dependency-graph-api
+                role: slow-query-api
+                canary: "api"
+        spec:
+            dnsPolicy: ClusterFirst
+            volumes:
+                - name: github-metadata
+                  hostPath:
+                    path: /etc/github/metadata.json
+            containers:
+                - name: slow-query-api
+                  image: dependency-graph-api
+                  resources:
+                    requests:
+                        # See notes in the api.yaml for more context about these settings.
+                        # Slow-query behaves *very* similarly to API with the exception that it sometimes sees spikes in memory usage (guess: related to GetDependenciesForRepo enumerating large repos)
+                        cpu: 1000m
+                        memory: "2Gi"
+                    limits:
+                        # At the top end, we might see 6 processes running: 1x Puma and 5x nodejs (since 5 Puma threads might each spawn a node process for the yarn.lock v1 parser)
+                        cpu: 6000m
+                        memory: "3Gi"
+                  command: ["./script/kube-server"]
+                  ports:
+                    - name: http
+                      containerPort: 9596
+                      protocol: TCP
+                  readinessProbe:
+                    timeoutSeconds: 1
+                    httpGet:
+                        path: /_ping
+                        port: 9596
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command: ["sleep", "5"]
+                  env:
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                    # used by puma statsd plugin
+                    - name: STATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                    - name: STATSD_PORT
+                      value: "28125"
+                    - name: STATSD_METRIC_PREFIX
+                      value: "dependency_graph"
+                    - name: DG_POD_TYPE
+                      value: "slow-query-api"
+                    - name: MY_POD_NAME
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.name
+                    - name: STATSD_GROUPING
+                      value: slow-query-api
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - secretRef:
+                        name: vault-secrets
+                  volumeMounts:
+                    - mountPath: /etc/github/metadata.json
+                      name: github-metadata
+                      readOnly: true

@@ -1,0 +1,26 @@
+FROM ghcr.io/github/gh-base-image/go-builder-focal:20250317-230559-g4c9eb1518@sha256:2d7b91d8683a8adf2e93bb0ac65eae09dccd38e6d2e4f469bb2e23a401e12eac AS build
+
+ENV GOPROXY="https://goproxy.githubapp.com/mod,https://proxy.golang.org/,direct"
+ENV GONOSUMDB="github.com/github/*"
+
+WORKDIR /app
+
+COPY . .
+
+
+# We passed pkg-mirror-host as a secret to the build but it is not sensitive data.
+RUN --mount=type=secret,id=pkg-mirror-host,target=/etc/pkg_mirror_host.txt \
+    if [ -f /etc/pkg_mirror_host.txt ]; then cat /etc/pkg_mirror_host.txt >> /etc/apt/mirrorlist.txt; fi
+
+RUN --mount=type=secret,id=apt-auth-conf,target=/etc/apt/auth.conf.d/apt_auth.conf \
+    apt-get update && apt-get install -y python3-pip
+RUN pip install pre-commit
+RUN echo "machine goproxy.githubapp.com login nobody password $(cat .goproxytoken)" > $HOME/.netrc && \
+    ./script/build
+
+ENV GOPROXY=
+ENV GONOSUMDB=
+
+EXPOSE 9597
+
+ENTRYPOINT ["./script/test-cibuild"]

@@ -1,0 +1,102 @@
+#!/bin/bash
+# Usage: script/ci/vtcombo-up
+#
+set -e
+
+# VTCombo can be slow to start against large databases, so
+# if we have disabled vitess don't even start vtcombo, see
+# https://github.com/github/data-patterns-and-scaling/issues/54
+# for more information
+if [ -n "$DISABLE_VITESS" ]; then
+  echo "Not starting vtcombo as DISABLE_VITESS is set"
+  exit 0
+fi
+
+echo "SET GLOBAL max_connections = 10000;" | mysql -u root
+
+mysql_version=$(mysql -u root --batch --skip-column-names --execute "SELECT VERSION()")
+SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.."
+
+ARGS=(
+  --alsologtostderr=true
+  --log_dir $(pwd)/tmp
+  --proto_topo "$(cat db/topology)"
+  --schema_dir "$(pwd)/tmp/vtcombo"
+  --mysql_server_port 15306
+  --mysql_server_bind_address 0.0.0.0
+  --mysql_auth_server_impl none
+  --mysql_server_version "$mysql_version"
+  --db_socket /var/run/mysqld/mysqld.sock
+  --db_host localhost
+  --mycnf-file /etc/mysql/mysql.cnf
+  --db_app_user root
+  --db_allprivs_user root
+  --db_appdebug_user root
+  --db_dba_user root
+  --db_repl_user root
+  --dbddl_plugin vttest
+  --querylog-format=json
+  --queryserver-config-transaction-timeout 300s
+  --queryserver-config-transaction-cap 10
+  --queryserver-config-pool-size 10
+  --queryserver-enable-settings-pool
+  --enforce_strict_trans_tables=false
+  --port 15000
+  --grpc_port 15001
+  --service_map 'grpc-vtgateservice,grpc-vtctl,grpc-vtctld'
+  --db_charset utf8mb4_general_ci
+  --vschema_ddl_authorized_users='%'
+  --planner-version=gen4
+  --health_check_interval 1s
+  --tablet_refresh_interval 1s
+  --tablet_types_to_wait 'PRIMARY'
+  --schema_change_signal=false
+  --queryserver-config-schema-change-signal=false
+  --disable_active_reparents
+)
+
+# If mysql is below 8.0, set `--enable_set_var` to `false`
+if [[ "$mysql_version" < "8.0" ]]; then
+  ARGS+=("--enable_set_var=false")
+fi
+
+if [[ "$DX_EDGE" = true ]] && [[ "$DX_FEATURE_SUBPROJECT_CONTAINERS" = true ]]; then
+  source "$SCRIPT_DIR/dx/lib/subproject-containers"
+
+  SUBPROJECT_VERSION=$(subproject_version "vitess")
+  if ! docker ps --filter "name=vitess" --filter "status=running" | grep -q vitess; then
+    echo "script/ci/vtcombo-up: Starting vitess in a container..."
+    docker stop vitess &> /dev/null || true
+    docker rm vitess &> /dev/null || true
+
+    REMOTE_CONTAINER="ghcr.io/github/vitess-build"
+    # On Janky, the ghcr.io registry fails with "unauthorized" when running
+    # github/github tests, and Octofactory is required to be used instead.
+    # Check these environment variables to detect if we are running on Janky.
+    IS_JANKY=$([ "$CI" = "1" ] && [ -z "$GITHUB_ACTIONS" ] && echo true || echo false)
+    if [[ "$IS_JANKY" == "true" ]]; then
+      echo "Detected running on Janky, using octofactory registry instead of ghcr."
+      REMOTE_CONTAINER="octofactory.service.private-us-east-1.github.net/moda-artifacts-docker/vitess-build"
+    fi
+    echo "Running container at ${REMOTE_CONTAINER}:${SUBPROJECT_VERSION}..."
+    # Run the service.
+    docker run -d --name vitess --network host \
+      --user github \
+      --entrypoint "/vt/bin/vtcombo" \
+      -v /var/run/mysqld:/var/run/mysqld \
+      -v /etc/mysql:/etc/mysql \
+      -v "$(pwd)/tmp:$(pwd)/tmp" \
+      -v /etc/localtime:/etc/localtime:ro \
+      "${REMOTE_CONTAINER}:${SUBPROJECT_VERSION}" \
+      "${ARGS[@]}"
+  else
+    echo "script/ci/vtcombo-up: Already running vitess in a container..."
+  fi
+else
+  exec /sbin/start-stop-daemon --start \
+    --pidfile $(pwd)/tmp/vtcombo.pid \
+    --background \
+    --exec $(pwd)/vendor/vitess/current/bin/vtcombo -- \
+    --pid_file $(pwd)/tmp/vtcombo.pid \
+    "${ARGS[@]}"
+fi

@@ -1,0 +1,32 @@
+declare const styles: {
+  readonly "activate": string;
+  readonly "blink-star": string;
+  readonly "copilot": string;
+  readonly "copilotScaleAnimation": string;
+  readonly "sparkle": string;
+  readonly "sparkle-animation-1": string;
+  readonly "sparkle-animation-10": string;
+  readonly "sparkle-animation-2": string;
+  readonly "sparkle-animation-3": string;
+  readonly "sparkle-animation-4": string;
+  readonly "sparkle-animation-5": string;
+  readonly "sparkle-animation-6": string;
+  readonly "sparkle-animation-7": string;
+  readonly "sparkle-animation-8": string;
+  readonly "sparkle-animation-9": string;
+  readonly "sparkleTrail": string;
+  readonly "sparkles": string;
+  readonly "spriteAnimation": string;
+  readonly "trail-animation-1": string;
+  readonly "trail-animation-10": string;
+  readonly "trail-animation-2": string;
+  readonly "trail-animation-3": string;
+  readonly "trail-animation-4": string;
+  readonly "trail-animation-5": string;
+  readonly "trail-animation-6": string;
+  readonly "trail-animation-7": string;
+  readonly "trail-animation-8": string;
+  readonly "trail-animation-9": string;
+};
+export = styles;
+

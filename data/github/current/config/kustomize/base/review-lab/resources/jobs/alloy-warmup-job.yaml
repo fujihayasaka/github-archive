@@ -1,0 +1,101 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+    name: alloy-warmup-job
+    annotations:
+        # Transposes all matching values for `image` to refer to the image
+        # corresponding to the SHA deployed at deploy time.
+        heaven.githubapp.com/image-placeholder: github
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: alloy-warmup-job
+        moda.github.net/inject-otel-env-vars-into-containers: alloy-warmup-job
+        # opt into ConfigMap cluster preferences, which can override some parameters
+        # such as replicas if there is a ConfigMap named `cluster-preferences` in
+        # the namespace.
+        heaven.githubapp.com/allow-cluster-preferences-configmap: "true"
+spec:
+    activeDeadlineSeconds: 300
+    backoffLimit: 2
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt_sloppy
+                observability.github.com/splunk_index: alloy-warmup-job
+        spec:
+            containers:
+                - command:
+                    - /usr/bin/tools/istio-job-wrapper
+                    - script/send-warmup-request-to-alloy
+                  env:
+                    - name: ALLOY_URL
+                      value: https://alloy-staging.service.iad.github.net
+                    - name: ASSET_HOST_URL
+                      value: https://github-lab.githubassets.com
+                    - name: FAILBOT_BACKEND
+                      value: http
+                    - name: FAILBOT_CONTEXT_KUBE_POD_NAME
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.name
+                    - name: FAILBOT_CONTEXT_KUBE_POD_IP
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: status.podIP
+                    - name: FAILBOT_CONTEXT_KUBE_CLUSTER
+                      valueFrom:
+                        configMapKeyRef:
+                            key: kubernetes_cluster_name
+                            name: kube-cluster-metadata
+                    - name: GRAPHITE_DISABLED
+                      value: "1"
+                    # each kube node runs a local dd-agent - to send data to it
+                    # we need to explicitly set the node hostname rather than 127.0.0.1
+                    # (which points to the *pod*)
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                    - name: KUBE_NAMESPACE
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.namespace
+                    - name: OTEL_SERVICE_NAME
+                      value: alloy-warmup-job
+                  envFrom:
+                    - configMapRef:
+                        name: elasticsearch
+                    - secretRef:
+                        name: vault-secrets
+                    - configMapRef:
+                        name: observability-config
+                  # Replaced with a SHA-tagged image at deploy time by virtue of the
+                  # `heaven.githubapp.com/image-placeholder` annotation.
+                  image: github
+                  name: alloy-warmup-job
+                  resources:
+                    limits:
+                        memory: 1G
+                    requests:
+                        cpu: 100m
+                        memory: 100M
+                  volumeMounts:
+                    - mountPath: /etc/github/metadata.json
+                      name: github-metadata
+                      readOnly: true
+                    - mountPath: /etc/ssl/certs
+                      name: ca-certificates
+                      readOnly: true
+                    - mountPath: /dev/log
+                      name: syslog
+                      readOnly: true
+            dnsPolicy: ClusterFirst
+            restartPolicy: Never
+            volumes:
+                - hostPath:
+                    path: /etc/github/metadata.json
+                  name: github-metadata
+                - hostPath:
+                    path: /etc/ssl/certs
+                  name: ca-certificates
+                - hostPath:
+                    path: /dev/log
+                  name: syslog

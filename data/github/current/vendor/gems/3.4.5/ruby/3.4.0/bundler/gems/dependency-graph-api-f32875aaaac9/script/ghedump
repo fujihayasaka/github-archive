@@ -1,0 +1,53 @@
+#!/usr/bin/env ruby
+# Usage: script/ghedump
+# Creates a compressed json file containing our our package and package versions tables and schema
+
+require_relative "../config/environment"
+require "oj"
+
+Oj.optimize_rails
+
+def write_table(model)
+  file = "tmp/dump/#{model.table_name}_dump.json"
+  File.open(Rails.root.join(file), "w") do |f|
+    puts "starting write to #{file}"
+    writer = Oj::StreamWriter.new(f, indent: 0)
+    writer.push_array
+    counter = 1
+    model.find_in_batches(batch_size: 1000) do |batch|
+      puts "writing batch #{counter}"
+      # if counter >= 1 then break end
+      batch.each do |item|
+        writer.push_json(item.to_json)
+      end
+      counter += 1
+    end
+    writer.pop
+    puts "done writing to #{file}!"
+  end
+  system("gzip -fr #{Rails.root.join(file)}")
+end
+
+#TODO: not sure how we want to organize the schema
+def write_schema(model)
+  file = "tmp/dump/#{model.table_name}_schema_dump.json"
+  File.open(Rails.root.join(file), "w") do |f|
+    puts "writing schema to #{file}"
+    writer = Oj::StreamWriter.new(f, indent: 0)
+    writer.push_json(model.columns.map { |column| [column.name, column.sql_type] }.to_h.to_json)
+    puts "done writing to #{file}!"
+  end
+  system("gzip -fr #{Rails.root.join(file)}")
+end
+
+begin
+  write_schema(Package)
+  write_schema(PackageRelease)
+
+  write_table(Package)
+  write_table(PackageRelease)
+rescue => e
+  puts "Error! #{e.message}"
+  Failbot.report(e)
+  raise e
+end

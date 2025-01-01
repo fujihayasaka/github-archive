@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk=globalThis.webpackChunk||[]).push([["app_assets_modules_github_insights_line-chart_ts"],{80452:(s,h,a)=>{a.r(h),(0,a(96200).Wh)()}}]);
+//# sourceMappingURL=app_assets_modules_github_insights_line-chart_ts-4e361a4e5bdf.js.map

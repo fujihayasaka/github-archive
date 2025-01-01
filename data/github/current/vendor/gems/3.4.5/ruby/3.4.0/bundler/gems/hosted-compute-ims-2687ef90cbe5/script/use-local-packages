@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+
+if [ "$1" = "undo" ]; then
+  go mod edit --json | jq -r '.Replace[] | select(.Old.Path | startswith("github.com/github/hosted-compute")) | .Old.Path' | while read -r package; do
+    echo "Dropping replace for $package"
+    go mod edit -dropreplace $package
+  done
+
+  go mod tidy
+  echo "Removed local package replacement and ran go mod tidy"
+  echo "Make sure any referenced packages are merged in dependencies"
+else
+
+  go mod edit --json | jq -r '.Require[] | select(.Path | startswith("github.com/github/hosted-compute")) | .Path' | while read -r package; do
+    echo "Adding $package=/workspaces/hosted-compute${package#github.com/github/hosted-compute}"
+    go mod edit -replace $package=/workspaces/hosted-compute${package#github.com/github/hosted-compute}
+  done
+
+  echo "Run './use-local-packages undo' to remove local package replacement before merging"
+  echo "Ensure any updates to the local packages are merged in dependencies"
+fi

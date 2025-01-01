@@ -1,0 +1,35 @@
+import type {Meta} from '@storybook/react'
+import {
+  SecurityCampaignFormDialogInner,
+  type SecurityCampaignFormDialogInnerProps,
+} from '../SecurityCampaignFormDialogInner'
+import {SecurityCampaignFormStoryWrapper} from './SecurityCampaignFormStoryWrapper'
+import {SecurityCampaignFormContents} from '../SecurityCampaignFormContents'
+
+const meta = {
+  title: 'Security Campaigns/Security Campaign Form Dialog Inner',
+  component: SecurityCampaignFormDialogInner,
+  parameters: {
+    controls: {expanded: true, sort: 'alpha'},
+  },
+  argTypes: {},
+} satisfies Meta<typeof SecurityCampaignFormDialogInner>
+
+export default meta
+
+const defaultArgs: Partial<SecurityCampaignFormDialogInnerProps> = {
+  setIsOpen: () => {},
+  submitButtonText: 'Save draft',
+  cancelButtonText: 'Cancel',
+}
+
+export const SecurityCampaignFormDialogInnerExample = {
+  args: defaultArgs,
+  render: (args: SecurityCampaignFormDialogInnerProps) => (
+    <SecurityCampaignFormStoryWrapper>
+      <SecurityCampaignFormDialogInner {...args}>
+        <SecurityCampaignFormContents organizationLogin="github" maxManagers={10} />
+      </SecurityCampaignFormDialogInner>
+    </SecurityCampaignFormStoryWrapper>
+  ),
+}

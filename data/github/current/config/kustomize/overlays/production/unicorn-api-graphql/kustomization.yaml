@@ -1,0 +1,42 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+    - ../../../base/production/unicorn-api/
+    - poddisruptionbudgets/unicorn-api-graphql.yaml
+# If you're decreasing this value, make sure to also update the
+# corresponding `acl site_dead` configuration in the kube-dotcom-ingress
+# repo
+# (https://github.com/github/kube-dotcom-ingress/blob/main/config/helm/production/haproxytech-ingress-dotcom-unicorn-api-graphql.yaml)
+# and deploy that change first. Reach out to #service-mesh for guidance.
+replicas:
+    - name: unicorn-api
+      count: 98
+nameSuffix: -graphql
+patches:
+    - path: ./deployments/unicorn-api-graphql.yaml
+    - target:
+        kind: Service
+        name: unicorn-api
+      patch: |-
+        - op: replace
+          path: /metadata/annotations/kubernetes.io~1ingress.class
+          value: "haproxytech-unicorn-api-graphql"
+        - op: replace
+          path: /metadata/labels/service
+          value: unicorn-api-graphql
+        - op: replace
+          path: /spec/selector/service
+          value: unicorn-api-graphql
+        - op: remove
+          path: /spec/ports/0/nodePort
+        - op: replace
+          path: /metadata/annotations/opaque.github.net~1checks
+          value:  |
+            - http:
+                url: "https://api.github.com/graphql"
+                method: POST
+                header:
+                    authorization: "Bearer {{ .Env.GITHUB_API_TOKEN }}"
+              tags:
+                  - "api-type:unicorn-api-graphql"
+                  - "dotcom-api:true"

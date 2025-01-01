@@ -1,0 +1,33 @@
+declare const styles: {
+  readonly "actions": string;
+  readonly "actionsPlaceholder": string;
+  readonly "agentAvatar": string;
+  readonly "agentUnauthorizedAvatar": string;
+  readonly "ai": string;
+  readonly "avatar": string;
+  readonly "bing": string;
+  readonly "blink": string;
+  readonly "blinkingCursor": string;
+  readonly "chatMessage": string;
+  readonly "color-icon-link": string;
+  readonly "commit": string;
+  readonly "content": string;
+  readonly "editing": string;
+  readonly "errorFallback": string;
+  readonly "file": string;
+  readonly "fileListItem": string;
+  readonly "icon-link": string;
+  readonly "imageGrid": string;
+  readonly "imageRow": string;
+  readonly "latest": string;
+  readonly "messageArea": string;
+  readonly "messageSubthreadIndicator": string;
+  readonly "references": string;
+  readonly "sharedThreadActions": string;
+  readonly "skillExecutionText": string;
+  readonly "snippet": string;
+  readonly "user": string;
+  readonly "userMessage": string;
+};
+export = styles;
+

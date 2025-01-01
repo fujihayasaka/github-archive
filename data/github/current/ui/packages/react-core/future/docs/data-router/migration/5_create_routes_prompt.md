@@ -1,0 +1,29 @@
+# Migration Step: Create Data Router Routes
+
+- **You must always read in and follow the referenced diff file (`create_routes.diff`) as your primary source of truth for code structure, naming, and placement.**
+- For every migration, before making any changes:
+  - **Read the entire referenced diff file.**
+  - Use the diff as your step-by-step guide. **Do not deviate from the structure, naming, or placement shown in the diff.**
+  - All code changes, including file structure, exports, imports, and naming, must match the diff as closely as possible.
+  - Create a route file for each route in the app, using the same path and payload type as the corresponding jsonRoute definition, as in the diff.
+  - If the application has more than 4 routes, only attempt to perform the needed steps for up to 4 routes. Repeat the process in batches until all routes have been migrated.
+  - You do not need to create a config/routes.ts barrel file. Route files should be created per-route, and imported directly where needed, as shown in the diff.
+  - The route file must:
+    - Import `mainQuery` from `@github-ui/react-core/future/main-query`, as in the diff.
+    - Import the app builder from `../config/app-builder`, as in the diff.
+    - Use the app builder's `createQueryRouteConfig` method, passing a unique route name and a config object with the path and queries, matching the diff.
+    - The queries array must include a `mainQuery` with the correct payload type (from the type argument to `useRoutePayload` in the component), as in the diff.
+    - The route export must be named after the app and route, following the pattern in the diff (e.g. `hostedComputeImageDetailsRoute`).
+    - Do not use generic or placeholder types for the main query payload; always use the actual type from the component, as in the diff.
+    - **IMPORTANT: To prevent circular dependencies, extract all payload types to a separate file (e.g., `../types/payloads.ts`) if they are used in both components and route files. Never import components in route files.**
+    - If the payload type is not exported from the component file, you may export it to ensure the code compiles, as in the diff.
+    - **IMPORTANT: Ensure proper formatting in route files:**
+      - Each file must end with exactly one newline
+      - No multi-line queries array unless there are multiple queries
+      - Use proper indentation and consistent formatting
+      - Run the appropriate eslint command (see starting instructions) after creating each file to ensure proper formatting
+  - **Do not add extra code, comments, or examples.**
+  - Before making any changes, summarize what changes you will make, referencing the diff. If your summary includes any new files not shown in the diff, it is incorrect—try again.
+- **Every time you perform this migration step, the referenced diff must be read and used as the main driver for your changes.**
+- **After creating the routes, run the appropriate lint and type-checking commands (see starting instructions) to identify any circular dependencies or other issues:**
+  - If circular dependency errors appear, extract all payload types to a separate file immediately

@@ -1,0 +1,133 @@
+<% page_info title: [flash[:page_title_prefix], "Accessibility"].join(" ") %>
+<%= render layout: "settings/settings" do %>
+  <%= render Primer::Beta::Subhead.new do |component| %>
+    <% component.with_heading(tag: :h2) { "Accessibility" } %>
+  <% end %>
+  <% is_mac = request.user_agent.match?(/Macintosh/) %>
+  <%= render(Primer::Beta::Heading.new(tag: :h3, font_weight: :normal, mb: 3)) { "Keyboard shortcuts" } %>
+
+  <%= render(Primer::Beta::Heading.new(tag: :h4, font_weight: :normal, mb: 4)) { "General" } %>
+  <%= primer_form_with(
+    url: keyboard_settings_accessibility_preferences_path,
+    scope: :user,
+    method: :put,
+    html: { "aria-label": "Character keys" }
+  ) do |f| %>
+    <% render(
+      Settings::AccessibilityPreferences::KeyboardShortcutsForm.new(
+        f,
+        all_shortcuts_enabled: current_user.settings.get(:keyboard_shortcuts_preference) == "all"
+      )
+    ) %>
+  <% end %>
+
+  <% if current_user.command_palette_enabled? %>
+    <%= render(Primer::Beta::Heading.new(tag: :h4, font_weight: :normal, mt: 4, mb: 2)) { "Command Palette" } %>
+    <div class="f6 mb-3 color-fg-muted">
+      Modify the shortcuts to trigger the Command Palette for the default search mode and the command mode <kbd>></kbd>.
+    </div>
+    <%= primer_form_with(
+      url: keyboard_settings_accessibility_preferences_path,
+      scope: :user,
+      method: :put,
+    ) do |f| %>
+      <% render(
+        Settings::AccessibilityPreferences::CommandPaletteForm.new(
+          f,
+          current_user: current_user,
+          command_mode_options: commands_mode_options,
+          search_mode_options: search_mode_options
+        )
+      ) %>
+    <% end %>
+  <% end %>
+
+  <%= render(Primer::Beta::Heading.new(tag: :h3, font_weight: :normal, mb: 3, mt: 5)) { "Motion" } %>
+  <%= render(Primer::Beta::Heading.new(tag: :h4, font_weight: :normal)) { "Autoplay animated images" } %>
+  <div id="animated_images_label" class="f6 mb-3 color-fg-muted">
+    Select whether animated images should play automatically.
+  </div>
+  <%= primer_form_with(
+    url: motion_settings_accessibility_preferences_path,
+    scope: :user,
+    method: :put,
+  ) do |f| %>
+    <% render(Settings::AccessibilityPreferences::MotionForm.new(f, current_user: current_user)) %>
+  <% end %>
+
+  <%= render(Primer::Beta::Heading.new(tag: :h3, font_weight: :normal, mb: 3, mt: 5)) { "Content" } %>
+
+  <%= render(Primer::Beta::Heading.new(tag: :h4, font_weight: :normal)) { "Link underlines" } %>
+  <div id="link_underline_label" class="f6 mb-3 color-fg-muted">
+    Toggle the visibility of underlines on links that are adjacent to text.
+  </div>
+  <%= primer_form_with(
+    url: link_underlines_settings_accessibility_preferences_path,
+    scope: :user,
+    method: :put,
+  ) do |f| %>
+    <% render(Settings::AccessibilityPreferences::UnderlinesForm.new(f, current_user: current_user)) %>
+  <% end %>
+
+  <div class="mt-4">
+    <%= primer_form_with(
+      url: hovercards_enabled_settings_accessibility_preferences_path,
+      scope: :user,
+      method: :put,
+      html: { "aria-label": "Hovercards" }
+    ) do |f| %>
+      <% render(Settings::AccessibilityPreferences::HovercardsForm.new(f, current_user: current_user, is_mac: is_mac)) %>
+    <% end %>
+  </div>
+
+  <%= render(Primer::Beta::Heading.new(tag: :h3, font_weight: :normal, mb: 3, mt: 5)) { "Editor settings" } %>
+  <%= render(Primer::Beta::Heading.new(tag: :h4, font_weight: :normal)) { "URL paste behavior" } %>
+  <div id="url_pasting_label" class="f6 mb-3 color-fg-muted">
+    Select if URLs should be formatted on paste. You can use <span class='sr-only'><%= (is_mac ? "command" : "control") + " shift and V" %></span><kbd aria-hidden="true"><%= is_mac ? "⌘" : "Ctrl" %></kbd> <kbd aria-hidden="true">⇧</kbd> <kbd aria-hidden="true">V</kbd> to paste a link in the opposite way.
+  </div>
+  <%= primer_form_with(
+    url: paste_url_markdown_settings_accessibility_preferences_path,
+    scope: :user,
+    method: :put
+  ) do |f| %>
+    <% render(Settings::AccessibilityPreferences::PastingForm.new(f, current_user: current_user, is_mac: is_mac)) %>
+  <% end %>
+
+  <% if current_user.settings.get(:hovercards_enabled) && GitHub.flipper[:announcement_preference_hovercard].enabled?(current_user) %>
+    <%= render(Primer::Beta::Heading.new(tag: :h3, font_weight: :normal, mb: 3, mt: 5)) { "Assistive technology hints" } %>
+    <p>Add or remove instructions for how to operate complex controls.</p>
+    <div class="d-flex flex-column">
+      <%= render(Primer::Beta::Heading.new(tag: :h4, font_weight: :normal, display: :inline_flex, mr: 2, id: "hovercards")) { "Hovercards" } %>
+    </div>
+    <%= form_tag announcement_preference_hovercard_settings_accessibility_preferences_path, method: :put, :"aria-labelledby" => "announcement_preference_hovercard_label" do %>
+      <fieldset>
+        <legend>
+          <p class="note">
+            <a class="Link--inTextBlock" href="https://docs.github.com/en/get-started/using-github-docs/using-hover-cards-on-github-docs">Hovercards</a> preview information about other parts of GitHub.
+          </p>
+        </legend>
+        <div class="form-checkbox">
+          <label for="announcement_preference_hovercard_enable_radio">
+            Enable hint
+          </label>
+          <input type="radio" value="true" <%= "checked" if current_user.settings.get(:announcement_preference_hovercard) == true %> id="announcement_preference_hovercard_enable_radio" name="user[announcement_preference_hovercard]">
+        </div>
+        <div class="form-checkbox">
+          <label for="announcement_preference_hovercard_disable_radio">
+            Disable hint
+          </label>
+          <input type="radio" value="false" <%= "checked" if current_user.settings.get(:announcement_preference_hovercard) == false %> id="announcement_preference_hovercard_disable_radio" name="user[announcement_preference_hovercard]">
+        </div>
+      </fieldset>
+      <%= render Primer::Beta::Button.new(type: :submit, "aria-label": "Save assistive technology hint preferences",
+      mt: 2) do %>Save assistive technology hint preferences<% end %>
+    <% end %>
+  <% end %>
+<% end %>
+
+
+
+
+
+
+

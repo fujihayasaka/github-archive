@@ -1,0 +1,159 @@
+#!/bin/bash
+#/ Usage: build-vitess
+#/ Build an app local version of Vitess from https://github.com/github/vitess-gh
+
+# Note that the github/vitess repository is a deployment repository and that our fork is
+# located at github/vitess-gh.
+
+set -e
+
+# change into root project dir
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+ensure_ghcr_docker_login() {
+  SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
+
+  # Ensure that the user is logged into the GitHub Container Registry.
+  # If the user is already logged in, don't do anything.
+  CONF_FILENAME="${DOCKER_CONFIG:-"$HOME/.docker"}/config.json"
+  if grep -q "ghcr.io" ${CONF_FILENAME}; then
+    return 0
+  fi
+  # Attempt to use GITHUB_TOKEN if GITHUB_PACKAGES_TOKEN is unset.
+  if [[ -z "$GITHUB_PACKAGES_TOKEN" && -n "$GITHUB_TOKEN" ]]; then
+    GITHUB_PACKAGES_TOKEN="$GITHUB_TOKEN"
+  fi
+  if [ -z "$GITHUB_PACKAGES_TOKEN" ]; then
+    echo "${SCRIPT_NAME}: error: no GITHUB_PACKAGES_TOKEN or GITHUB_TOKEN set!"
+    exit 1
+  fi
+  echo "${GITHUB_PACKAGES_TOKEN}" | docker login ghcr.io --username "github" --password-stdin
+}
+
+pull_docker() {
+  # Pulls the vitess-build image from the registry.
+
+  REMOTE_CONTAINER="ghcr.io/github/vitess-build"
+  # On Janky, the ghcr.io registry fails with "unauthorized" when running
+  # github/github tests, and Octofactory is required to be used instead.
+  # Check these environment variables to detect if we are running on Janky.
+  IS_JANKY=$([ "$CI" = "1" ] && [ -z "$GITHUB_ACTIONS" ] && echo true || echo false)
+  if [[ "$IS_JANKY" == "true" ]]; then
+    echo "Detected running on Janky, using octofactory registry instead of ghcr."
+    REMOTE_CONTAINER="octofactory.service.private-us-east-1.github.net/moda-artifacts-docker/vitess-build"
+  else
+    ensure_ghcr_docker_login
+  fi
+  echo "Pulling container at ${REMOTE_CONTAINER}:${VITESS_SHA}..."
+  docker pull "${REMOTE_CONTAINER}:${VITESS_SHA}"
+
+  # Copy the client binaries for vitess out of a temporary container. This
+  # allows them to be used in the dev environment as expected.
+  mkdir -p ./vendor/vitess/bin
+  docker rm vitess_client_installation_temp &> /dev/null || true
+  docker create --name vitess_client_installation_temp "${REMOTE_CONTAINER}:${VITESS_SHA}"
+  docker cp vitess_client_installation_temp:/vt/bin/vtctlclient ./vendor/vitess/bin/vtctlclient
+  docker cp vitess_client_installation_temp:/vt/bin/vtctldclient ./vendor/vitess/bin/vtctldclient
+  docker rm vitess_client_installation_temp
+}
+
+build_on_host() {
+  RAILS_ROOT="$(pwd -P)"
+
+  if [ -n "$RUBY_NEXT" ]; then
+    VITESS_SHA=$(cat config/vitess-next-version)
+  else
+    VITESS_SHA=$(cat config/vitess-version)
+  fi
+  VITESS_SHA_ABBREV="${VITESS_SHA:0:10}"
+
+  if [ -n "$BOOTSTRAP_NUKE_FROM_ORBIT" ]; then
+    rm -rf "vendor/vitess"
+  fi
+
+  # resolve vendor/vitess symlink (if any)
+  mkdir -p "vendor/vitess"
+  cd "vendor/vitess"
+  ROOT="$(pwd -P)"
+  SRC_DIR="$ROOT/src"
+  PREFIX="$ROOT/$VITESS_SHA"
+
+  # Check if a `current` symlink exists. If it does not, delete all the files
+  # in the directory.
+  if [ ! -L "${ROOT}/current" ]; then
+    rm -rf ${ROOT}/*
+  fi
+
+  check_vitess() {
+    if [ ! -x "${PREFIX}/bin/vtcombo" ]; then
+      echo "Building Vitess $VITESS_SHA, which is missing"
+      rm -rf "${PREFIX}"
+      return 1
+    fi
+
+    return 0
+  }
+
+  build_vitess() {
+    echo "Building Vitess at $VITESS_SHA_ABBREV..."
+
+    mkdir -p "${SRC_DIR}"
+
+    (
+      cd "${SRC_DIR}"
+
+      START_TIME="$(date +%s)"
+
+      # just check if the .git dir is there, if not, get the files we want.
+      if [ ! -d .git ]; then
+        git init .
+      fi
+
+      git fetch --depth=1 https://github.com/github/vitess-gh.git $VITESS_SHA
+      git reset --hard $VITESS_SHA --
+      git clean -fdx > /dev/null
+
+      go mod download
+
+      GOTOOLCHAIN=go1.22.12 NOVTADMINBUILD=1 PREFIX=../$VITESS_SHA make install install-testing
+
+      echo "Built Vitess in $(($(date +%s) - $START_TIME)) seconds."
+    )
+  }
+
+  if check_vitess; then
+    echo "Vitess build $VITESS_SHA_ABBREV is up-to-date."
+  elif [ -n "$GITHUB_PACKAGES_SUBPROJECT_CACHE_READ" ] &&
+      [ -z "$GITHUB_PACKAGES_DISABLE_SUBPROJECT_CACHE_READ" ] &&
+      "${RAILS_ROOT}/script/subproject-prebuild" -d "${PREFIX}" -v $VITESS_SHA download vitess &&
+      check_vitess; then
+    echo "Vitess build $VITESS_SHA_ABBREV is up-to-date."
+  else
+    build_vitess
+
+    if [ -n "$GITHUB_PACKAGES_SUBPROJECT_CACHE_WRITE" ]; then
+      # Never fail the build on a failed upload.
+      "${RAILS_ROOT}/script/subproject-prebuild" -d "${PREFIX}" -v $VITESS_SHA upload vitess || true
+    fi
+  fi
+
+  ln -sfn $VITESS_SHA "current"
+
+  cd "$ROOT"
+
+  # Update the timestamp on the current Ruby to consider it most recent
+  touch -c "$VITESS_SHA"
+
+  # only keep 4 most recent vitess versions
+  ls -t | grep -Ev '^(current|src)' | tail -n +5 | xargs -r --verbose rm -rf
+}
+
+ensure_vitess() {
+  if [[ "$DX_EDGE" = true ]] && [[ "$DX_FEATURE_SUBPROJECT_CONTAINERS" = true ]]; then
+    pull_docker
+  else
+    build_on_host
+  fi
+}
+
+ensure_vitess

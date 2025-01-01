@@ -1,0 +1,44 @@
+#!/bin/bash
+
+SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+echo "SCRIPT_DIR: $SCRIPT_DIR"
+source $SCRIPT_DIR/dx/lib/subproject-containers
+
+if [ -n "$CODELOAD_BIN" ] ; then
+  # Set CODELOAD_BIN to opt out of docker flow (for Codeload developers)
+  # Set either directly to the vendored bin, ie:
+  #    CODELOAD_BIN=/workspaces/github/vendor/codeload/ng/codeload-ng ./script/server
+  # Or when cycling outside of github/github, some other path:
+  #    CODELOAD_BIN=/workspaces/codeload/ng/codeload ./script/server
+  until [ -x $CODELOAD_BIN ]; do
+    if [ "$CODELOAD_NOTICE" != "1" ]; then
+      echo "Run 'script/build-codeload' to setup codeload."
+      CODELOAD_NOTICE=1
+    fi
+    sleep 60
+  done
+
+  bin/bundle exec ruby config/dev/create-codeload-config.rb
+  ln -rnsf log vendor/codeload
+  cd vendor/codeload
+  if [ -n "$MULTI_TENANT_ENTERPRISE" ]; then
+    # hack: codeload enables multi-tenant mode depending on environment.
+    # We should use a dev-specific multi-tenant environment here, not a real env.
+    # Or ideally, not need to do this at all.
+    export GH_ENV=mtwesteu01
+  fi
+  exec ng/codeload-ng --config codeload-dev-config.json
+else
+  SUBPROJECT_VERSION=$(subproject_version "codeload")
+  echo "codeload version $SUBPROJECT_VERSION"
+
+  # create dev codeload config
+  bin/bundle exec ruby config/dev/create-codeload-config.rb
+
+  # Run the codeload service.
+  start_subproject --name codeload --env-file $SCRIPT_DIR/../tmp/.server.env \
+    -v $SCRIPT_DIR/../config/dev/codeload-dev-config.json:/.app-config/default.json \
+    --env CODELOAD_BROKERS_SSL=kafka:9092 \
+    "ghcr.io/github/codeload/codeload-focal:$SUBPROJECT_VERSION" \
+    ./codeload --config .app-config/default.json
+fi

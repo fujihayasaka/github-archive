@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package github.spokes.diffs.v2;
+
+option go_package = "github.com/github/spokes-proto/gen/go/v2/diffs";
+option ruby_package = "GitHub::Spokes::Proto::Diffs::V2";
+
+import "spokes-api/types/v1/diff_algorithm.proto";
+import "spokes-api/types/v1/object_id.proto";
+import "spokes-api/types/v1/repository.proto";
+import "spokes-api/types/v1/request_context.proto";
+
+import "spokes-api/types/selectors/v1/none_selector.proto";
+import "spokes-api/types/selectors/v1/repo_object_id_selector.proto";
+import "spokes-api/types/selectors/v1/root_selector.proto";
+
+import "spokes-api/diffs/v2/diff_summary_delta.proto";
+import "spokes-api/diffs/v2/diff_summary_stat.proto";
+
+// DiffsAPI contains APIs for diff-related Git operations.
+service DiffsAPI {
+    // ReadDiffSummary computes a summary of the changes between two commits and
+    // a merge base.
+    rpc ReadDiffSummary(ReadDiffSummaryRequest) returns (ReadDiffSummaryResponse);
+}
+
+// CheckCommitReachability checks whether the selected commits are reachablle from a branch or tag.
+message ReadDiffSummaryRequest {
+    // repository is the repository to operate on.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.RequestContext request_context = 2;
+
+    // oid1 is the first head to operate on.  If it is a RootSelector, the empty
+    // tree (from the root of the repository) will be used.
+    oneof oid1 {
+      github.spokes.types.v1.ObjectID object_id1 = 3;
+
+      github.spokes.types.selectors.v1.RepoObjectIDSelector repo_object_id1 = 4;
+
+      github.spokes.types.selectors.v1.RootSelector root_selector1 = 5;
+    }
+
+    // oid2 is the second head to operate on.  Diff information will be between
+    // the computed merge base and this commit.
+    oneof oid2 {
+      github.spokes.types.v1.ObjectID object_id2 = 6;
+
+      github.spokes.types.selectors.v1.RepoObjectIDSelector repo_object_id2 = 7;
+    }
+
+    // base_oid is the merge base to use; if it is not provided, one will
+    // be computed.
+    oneof base_oid {
+      github.spokes.types.v1.ObjectID base_object_id = 8;
+
+      github.spokes.types.selectors.v1.RepoObjectIDSelector repo_base_object_id = 9;
+
+      github.spokes.types.selectors.v1.NoneSelector none_base = 10;
+    }
+
+    // diff_algorithm is the diff algorithm to be used.
+    github.spokes.types.v1.DiffAlgorithm diff_algorithm = 11;
+
+    // ignore_whitespace indicates whether whitespace is to be ignored.
+    bool ignore_whitespace = 12;
+
+    // include_stat indicates whether to include stat information (additions,
+    // deletions, and changed files), both for individual files and for the diff
+    // as a whole, in the output.
+    bool include_stat = 13;
+}
+
+// ReadDiffSummaryResponse contains a summary of a diff.
+message ReadDiffSummaryResponse {
+    // stat is the total number of additions, deletions, and changed files in
+    // this diff.
+    DiffSummaryStat stat = 1;
+
+    // deltas are the metadata about each modified file.
+    repeated DiffSummaryDelta deltas = 2;
+}

@@ -1,0 +1,64 @@
+# typed: strict
+# frozen_string_literal: true
+
+class Stafftools::Businesses::CustomPropertiesController < Stafftools::Businesses::BusinessBaseController
+
+  depends_on_clusters \
+    ApplicationRecord::Mysql1,
+    ApplicationRecord::IamAbilities,
+    ApplicationRecord::Ballast,
+    ApplicationRecord::Collab,
+    ApplicationRecord::Mysql2,
+    ApplicationRecord::NotificationsEntries,
+    ApplicationRecord::Repositories,
+    only: [:index, :show]
+
+  sig { returns(String) }
+  def self.react_bundle_name
+    "stafftools-custom-properties"
+  end
+
+  sig { void }
+  def index
+    definitions = Repositories.domain.custom_properties.get_definitions(this_business)
+
+    definitions_payload = definitions.map do |definition|
+      {
+        name: definition.property_name,
+        required: definition.required,
+        defaultValue: definition.default_value,
+      }
+    end
+
+    render_react_app(
+      title: "Custom property definitions",
+      payload: { definitions: definitions_payload },
+      disable_ssr: true,
+    )
+  end
+
+  sig { void }
+  def show
+    definition_name = params[:id]
+
+    definition = Repositories.domain.custom_properties.get_definition(this_business, definition_name)
+
+    return render_404 unless definition
+
+    render_react_app(
+      title: "Definition for #{definition_name}",
+      payload: { definition: {
+        name: definition.property_name,
+        description: definition.description,
+        allowedValues: definition.allowed_values,
+        defaultValue: definition.default_value,
+        required: definition.required,
+        valueType: definition.value_type,
+      } },
+      page_data: {
+        selected_link: :custom_properties
+      },
+      disable_ssr: true,
+    )
+  end
+end

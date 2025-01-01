@@ -1,0 +1,190 @@
+import {GitHubAvatar} from '@github-ui/github-avatar'
+import {verifiedFetchJSON} from '@github-ui/verified-fetch'
+import {ActionList, ActionMenu, FormControl, Link, TextInput} from '@primer/react'
+import {forwardRef, useEffect, useState} from 'react'
+
+import {OwnerDropdownItemsV2} from './OwnerDropdownItemsV2'
+import {OwnerDropdownItems} from './OwnerDropdownItems'
+import {announce} from '@github-ui/aria-live'
+
+export interface OwnerItem {
+  id?: number
+  name: string
+  avatarUrl: string
+  disabled: boolean
+  isOrganization: boolean
+  customDisabledMessage?: string | null
+  businessName?: string | null
+}
+
+export interface OwnerDropdownProps {
+  initialOwnerItems?: OwnerItem[]
+  ownerItemsPath: string
+  excludedOrg?: string
+  selectedOwner?: OwnerItem
+  onOwnerChange: (newOwner: OwnerItem) => void
+  onFilterChange?: (value: string) => void
+  showLabel?: boolean
+  hideSelectOwnerCheck?: boolean
+  'aria-describedby'?: string
+  selectedOwnerOverRepositoryLimit?: boolean
+  useV2Design?: boolean
+}
+
+const defaultValidationMessageId = 'repo-owner-dropdown-error'
+
+export const OwnerDropdown = forwardRef(
+  (
+    {
+      initialOwnerItems,
+      ownerItemsPath,
+      excludedOrg,
+      selectedOwner,
+      onOwnerChange,
+      onFilterChange,
+      showLabel = true,
+      hideSelectOwnerCheck = false,
+      'aria-describedby': ariaDescribedBy,
+      selectedOwnerOverRepositoryLimit = false,
+      useV2Design = false,
+    }: OwnerDropdownProps,
+    ref: React.ForwardedRef<HTMLButtonElement>,
+  ) => {
+    const [ownerItems, setOwnerItems] = useState(initialOwnerItems)
+    const [hasLoadedOwnerSelections, setHasLoadedOwnerSelections] = useState(false)
+    const [displayOrgLoadErrorMsg, setDisplayOrgLoadErrorMsg] = useState(false)
+    const [searchTerm, setSearchTerm] = useState('')
+
+    const loadOwners = async (open: boolean) => {
+      if (open && !hasLoadedOwnerSelections && !ownerItems) {
+        setHasLoadedOwnerSelections(true)
+        setDisplayOrgLoadErrorMsg(false)
+        try {
+          const result = await verifiedFetchJSON(ownerItemsPath)
+          const data = await result.json()
+
+          const owners = data?.owners
+          if (!result.ok || !owners) {
+            handleErrorLoadingOrgs()
+            return
+          }
+
+          setDisplayOrgLoadErrorMsg(false)
+          setOwnerItems(owners)
+        } catch {
+          handleErrorLoadingOrgs()
+        }
+      }
+    }
+
+    const handleErrorLoadingOrgs = () => {
+      setHasLoadedOwnerSelections(false)
+      setOwnerItems(undefined)
+      setDisplayOrgLoadErrorMsg(true)
+    }
+
+    const headerButton = () => {
+      const displayName = selectedOwner?.name || 'Choose an owner'
+      const buttonAvatar =
+        selectedOwner && (() => <GitHubAvatar src={selectedOwner.avatarUrl} key={selectedOwner.avatarUrl} />)
+
+      return (
+        <ActionMenu.Button
+          aria-describedby={ariaDescribedBy || defaultValidationMessageId}
+          aria-label={displayName}
+          leadingVisual={buttonAvatar}
+        >
+          {displayName}
+        </ActionMenu.Button>
+      )
+    }
+
+    const itemsToDisplay = ownerItems?.filter(item => {
+      if (excludedOrg && item.name === excludedOrg) {
+        return false
+      }
+
+      return item.name.toLowerCase().includes(searchTerm.toLowerCase())
+    })
+
+    useEffect(() => {
+      const messageToAnnounce = (() => {
+        const noOwnersMessage = 'No owners found'
+
+        if (!itemsToDisplay) return noOwnersMessage
+        return itemsToDisplay.length ? `Found ${itemsToDisplay.length} owners` : noOwnersMessage
+      })()
+
+      announce(messageToAnnounce)
+    }, [itemsToDisplay])
+
+    return (
+      <FormControl required>
+        <FormControl.Label visuallyHidden={!showLabel}>Owner</FormControl.Label>
+        <ActionMenu anchorRef={ref as React.RefObject<HTMLButtonElement>} onOpenChange={loadOwners}>
+          {headerButton()}
+          <ActionMenu.Overlay width={useV2Design ? 'medium' : 'small'} maxHeight="large" sx={{overflow: 'auto'}}>
+            <ActionList showDividers>
+              <ActionList.Group>
+                {useV2Design && <ActionList.GroupHeading>Choose an owner</ActionList.GroupHeading>}
+                <TextInput
+                  sx={{mx: 2, display: 'flex'}}
+                  aria-label="Search owner"
+                  placeholder="Search owners"
+                  value={searchTerm}
+                  onChange={event => {
+                    const filterValue = event.target.value
+                    onFilterChange?.(filterValue)
+                    setSearchTerm(filterValue)
+                  }}
+                />
+              </ActionList.Group>
+              <ActionList.Group sx={{maxHeight: 350, overflow: 'auto'}}>
+                {itemsToDisplay &&
+                  (useV2Design ? (
+                    <OwnerDropdownItemsV2
+                      ownerItems={itemsToDisplay}
+                      selectedOwner={selectedOwner}
+                      onSelect={onOwnerChange}
+                      searchTerm={searchTerm}
+                    />
+                  ) : (
+                    <OwnerDropdownItems
+                      ownerItems={itemsToDisplay}
+                      selectedOwner={selectedOwner}
+                      onSelect={onOwnerChange}
+                    />
+                  ))}
+                {!itemsToDisplay && !displayOrgLoadErrorMsg && (
+                  <ActionList.Item key="fetching-owners" disabled>
+                    Fetching owners…
+                  </ActionList.Item>
+                )}
+                {displayOrgLoadErrorMsg && (
+                  <ActionList.Item key="error-fetching-owners" disabled sx={{color: 'danger.fg'}}>
+                    An error occurred while loading organizations. Please reopen the dropdown to try again.
+                  </ActionList.Item>
+                )}
+              </ActionList.Group>
+            </ActionList>
+          </ActionMenu.Overlay>
+        </ActionMenu>
+        {!hideSelectOwnerCheck && !selectedOwner && (
+          <FormControl.Validation id={defaultValidationMessageId} variant="error">
+            Please choose an owner
+          </FormControl.Validation>
+        )}
+        {selectedOwner && selectedOwnerOverRepositoryLimit && (
+          <FormControl.Validation id={defaultValidationMessageId} variant="error">
+            {selectedOwner.name} is over the repository limit and cannot create more.&nbsp;
+            <Link inline href="https://gh.io/repo-limits" target="_blank">
+              Learn more about repository limits.
+            </Link>
+          </FormControl.Validation>
+        )}
+      </FormControl>
+    )
+  },
+)
+
+OwnerDropdown.displayName = 'OwnerDropdown'

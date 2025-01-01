@@ -1,0 +1,34 @@
+#!/bin/bash -u
+#
+# Runs the specified command while holding a MySQL-based lock.
+# The initial arguments starting with '-' are flags to mysql-lock.
+#
+# Usage: run-with-lock [flag...] command [arg...]
+
+# Split prefix of lock arguments from $@ array.
+declare -a lockargs
+while [ $# -gt 0 ] && [[ "$1" =~ ^- ]]; do
+  lockargs+=("$1")
+  shift
+done
+
+# This is an attempt to prevent "host not found" errors in pods that use this script.
+# See also:
+# https://github.com/github/delivery-org/issues/4085#issuecomment-1995100166
+echo "Sleeping for 2 seconds to ensure network is awake"
+sleep 2
+
+"$(dirname $0)/../mysql-lock" \
+  -user-env="DEPENDENCYGRAPH_DB_USERNAME" \
+  -password-env="DEPENDENCYGRAPH_DB_PASSWORD" \
+  -host="$DEPENDENCYGRAPH_DB_HOST" \
+  -port="$DEPENDENCYGRAPH_DB_PORT" \
+  "${lockargs[@]}" \
+  dependency_graph dg_locks \
+  "$@"
+status=$?
+[ $status = 11 ] && { # (-wait=false only)
+  echo "Lock unavailable: this job is not the leader. Exiting."
+  exit 0
+} >&2
+exit $status

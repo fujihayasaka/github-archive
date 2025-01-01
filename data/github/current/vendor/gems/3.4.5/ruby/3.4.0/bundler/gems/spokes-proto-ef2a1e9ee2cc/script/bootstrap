@@ -1,0 +1,121 @@
+#!/bin/bash
+#/ Usage: script/bootstrap [--pristine] [--quiet]
+#/
+#/   --pristine rebuild docker containers from scratch
+#/   --quiet    suppress most output
+#/   -h/--help  display this message
+
+set -e
+set -o nounset
+
+function usage {
+    grep "^#/" "${BASH_SOURCE[0]}" | cut -c 4-
+}
+
+pristine=false
+redirect=
+while (( $# )); do
+  case $1 in
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --pristine)
+      pristine=true
+      ;;
+    --quiet)
+      redirect="> /dev/null"
+      ;;
+    *)
+      usage
+      exit 1
+      ;;
+  esac
+  shift
+done
+
+function msg {
+  eval echo '"🥾 $1"' "$redirect"
+}
+
+function die {
+  echo "❌ $1"
+  exit 2
+}
+
+function docker_running {
+  docker ps &>/dev/null
+}
+
+if ! docker_running ; then
+    die "Please make sure Docker is installed and running"
+fi
+
+if $pristine; then
+  msg "(pristine) Removing docker containers and spokes repositories..."
+  eval 'docker compose down -v' "$redirect"
+  rm -rf repositories
+fi
+
+if [ -z "${CI:-}" ]; then
+  if $pristine || [ ! -d certs ]; then
+    msg "Generating dev certs..."
+    eval "script/generate-certs" "$redirect"
+  fi
+fi
+
+msg "Starting spokes's mysql..."
+eval 'docker compose up -d mysql' "$redirect"
+
+mysql() {
+  docker compose exec -T mysql mysql "$@"
+}
+
+up=false
+for _ in $(seq 1 30); do
+  if mysql -e 'SELECT 1' github_development_spokes >&/dev/null; then
+    up=true
+    break
+  fi
+  if ! docker compose ps | grep mysql | grep -v Exit >/dev/null; then
+    up=false
+    break
+  fi
+  sleep 1
+done
+if ! $up; then
+  die "error: mysql never started. check 'docker compose logs mysql'"
+fi
+
+msg "Setting up shard roots..."
+mkdir -p repositories/{0,1,2,3,4,5,6,7,8,9,a,b,c,d,e,f}
+
+schema=config/mysql/spokes-structure.sql
+expected_table_count="$(grep "^CREATE TABLE" $schema | wc -l)"
+
+migrate=$pristine
+add_repo=$pristine
+if ! $migrate; then
+  if [ "$(mysql --skip-column-names -se 'show tables' github_development_spokes | wc -l)" -lt "$expected_table_count" ]; then
+    migrate=true
+    add_repo=true
+  fi
+fi
+if ! $add_repo; then
+  if [ "$(mysql --skip-column-names -se 'select count(*) from repository_replicas' github_development_spokes)" -lt 1 ]; then
+    add_repo=true
+  fi
+fi
+
+if $migrate; then
+  msg "Recreating github_development_spokes..."
+  docker compose exec -T mysql mysql -D github_development_spokes \
+    < $schema
+fi
+
+if $add_repo; then
+  msg "Cloning test repositories for gitrpcd..."
+  eval 'script/clone-repo https://github.com/git-tfs/git-tfs.github.com' "$redirect"
+fi
+
+msg "Success!"

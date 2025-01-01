@@ -1,0 +1,18 @@
+export const LABELS = {
+  actionListCompletedDescription: 'Done, closed, fixed, resolved',
+  actionListNotPlannedDescription: "Won't fix, can't repro, stale",
+  actionListNotPlannedNewDescription: "Won't fix, can't repro, stale",
+  actionListDuplicateDescription: 'Duplicate of another issue',
+  closeIssue: 'Close issue',
+  closeIssueWithComment: 'Close with comment',
+  closeAsCompleted: 'Close as completed',
+  closeAsNotPlanned: 'Close as not planned',
+  closeAsDuplicate: 'Close as duplicate',
+  closeAsDuplicateOf: (issueNumber: number) => `Close as duplicate of #${issueNumber}`,
+  moreOptions: 'More options',
+  reOpenIssue: 'Reopen Issue',
+  updateIssueRoleDescription: 'update issue state options menu',
+  issueActionPortalId: (issueId: string) => `issue-actions-portal-${issueId}`,
+  closedIssueSuccess: 'The issue has been closed.',
+  reopenedIssueSuccess: 'The issue has been reopened.',
+}

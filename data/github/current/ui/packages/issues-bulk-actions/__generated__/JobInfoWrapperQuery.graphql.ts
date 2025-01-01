@@ -1,0 +1,467 @@
+/**
+ * @generated SignedSource<<8c8a96d8f74bc932c100097681f563c5>>
+ * @relayHash 0f39b2dc19c823b80766c45056e4287c
+ * @lightSyntaxTransform
+ * @nogrep
+ */
+
+/* tslint:disable */
+/* eslint-disable */
+// @ts-nocheck
+
+// @relayRequestID 0f39b2dc19c823b80766c45056e4287c
+
+import type { ConcreteRequest } from 'relay-runtime';
+import type { FragmentRefs } from "relay-runtime";
+export type JobInfoWrapperQuery$variables = {
+  ids: ReadonlyArray<string>;
+};
+export type JobInfoWrapperQuery$data = {
+  readonly nodes: ReadonlyArray<{
+    readonly " $fragmentSpreads": FragmentRefs<"IssueRow">;
+  } | null | undefined>;
+};
+export type JobInfoWrapperQuery = {
+  response: JobInfoWrapperQuery$data;
+  variables: JobInfoWrapperQuery$variables;
+};
+
+const node: ConcreteRequest = (function(){
+var v0 = [
+  {
+    "defaultValue": null,
+    "kind": "LocalArgument",
+    "name": "ids"
+  }
+],
+v1 = [
+  {
+    "kind": "Variable",
+    "name": "ids",
+    "variableName": "ids"
+  }
+],
+v2 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "__typename",
+  "storageKey": null
+},
+v3 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "id",
+  "storageKey": null
+},
+v4 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "title",
+  "storageKey": null
+},
+v5 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "name",
+  "storageKey": null
+},
+v6 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "color",
+  "storageKey": null
+},
+v7 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "login",
+  "storageKey": null
+},
+v8 = {
+  "alias": null,
+  "args": [
+    {
+      "kind": "Literal",
+      "name": "first",
+      "value": 20
+    },
+    {
+      "kind": "Literal",
+      "name": "orderBy",
+      "value": {
+        "direction": "ASC",
+        "field": "NAME"
+      }
+    }
+  ],
+  "concreteType": "LabelConnection",
+  "kind": "LinkedField",
+  "name": "labels",
+  "plural": false,
+  "selections": [
+    {
+      "alias": null,
+      "args": null,
+      "concreteType": "Label",
+      "kind": "LinkedField",
+      "name": "nodes",
+      "plural": true,
+      "selections": [
+        (v3/*: any*/),
+        {
+          "alias": null,
+          "args": null,
+          "kind": "ScalarField",
+          "name": "nameHTML",
+          "storageKey": null
+        },
+        (v6/*: any*/),
+        (v5/*: any*/),
+        {
+          "alias": null,
+          "args": null,
+          "kind": "ScalarField",
+          "name": "description",
+          "storageKey": null
+        }
+      ],
+      "storageKey": null
+    }
+  ],
+  "storageKey": "labels(first:20,orderBy:{\"direction\":\"ASC\",\"field\":\"NAME\"})"
+},
+v9 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "createdAt",
+  "storageKey": null
+},
+v10 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "updatedAt",
+  "storageKey": null
+},
+v11 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "closed",
+  "storageKey": null
+},
+v12 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "closedAt",
+  "storageKey": null
+},
+v13 = {
+  "alias": null,
+  "args": null,
+  "concreteType": null,
+  "kind": "LinkedField",
+  "name": "author",
+  "plural": false,
+  "selections": [
+    (v7/*: any*/),
+    {
+      "alias": null,
+      "args": null,
+      "kind": "ScalarField",
+      "name": "resourcePath",
+      "storageKey": null
+    },
+    (v2/*: any*/),
+    {
+      "kind": "InlineFragment",
+      "selections": [
+        {
+          "alias": null,
+          "args": null,
+          "kind": "ScalarField",
+          "name": "isCopilot",
+          "storageKey": null
+        }
+      ],
+      "type": "Bot",
+      "abstractKey": null
+    },
+    (v3/*: any*/)
+  ],
+  "storageKey": null
+},
+v14 = [
+  {
+    "alias": null,
+    "args": null,
+    "concreteType": "Milestone",
+    "kind": "LinkedField",
+    "name": "milestone",
+    "plural": false,
+    "selections": [
+      (v4/*: any*/),
+      {
+        "alias": null,
+        "args": null,
+        "kind": "ScalarField",
+        "name": "url",
+        "storageKey": null
+      },
+      (v3/*: any*/)
+    ],
+    "storageKey": null
+  }
+],
+v15 = {
+  "kind": "InlineFragment",
+  "selections": [
+    {
+      "kind": "InlineFragment",
+      "selections": (v14/*: any*/),
+      "type": "Issue",
+      "abstractKey": null
+    },
+    {
+      "kind": "InlineFragment",
+      "selections": (v14/*: any*/),
+      "type": "PullRequest",
+      "abstractKey": null
+    }
+  ],
+  "type": "IssueOrPullRequest",
+  "abstractKey": "__isIssueOrPullRequest"
+};
+return {
+  "fragment": {
+    "argumentDefinitions": (v0/*: any*/),
+    "kind": "Fragment",
+    "metadata": null,
+    "name": "JobInfoWrapperQuery",
+    "selections": [
+      {
+        "alias": null,
+        "args": (v1/*: any*/),
+        "concreteType": null,
+        "kind": "LinkedField",
+        "name": "nodes",
+        "plural": true,
+        "selections": [
+          {
+            "kind": "InlineFragment",
+            "selections": [
+              {
+                "args": [
+                  {
+                    "kind": "Literal",
+                    "name": "fetchRepository",
+                    "value": true
+                  },
+                  {
+                    "kind": "Literal",
+                    "name": "labelPageSize",
+                    "value": 20
+                  }
+                ],
+                "kind": "FragmentSpread",
+                "name": "IssueRow"
+              }
+            ],
+            "type": "Issue",
+            "abstractKey": null
+          }
+        ],
+        "storageKey": null
+      }
+    ],
+    "type": "Query",
+    "abstractKey": null
+  },
+  "kind": "Request",
+  "operation": {
+    "argumentDefinitions": (v0/*: any*/),
+    "kind": "Operation",
+    "name": "JobInfoWrapperQuery",
+    "selections": [
+      {
+        "alias": null,
+        "args": (v1/*: any*/),
+        "concreteType": null,
+        "kind": "LinkedField",
+        "name": "nodes",
+        "plural": true,
+        "selections": [
+          (v2/*: any*/),
+          (v3/*: any*/),
+          {
+            "kind": "InlineFragment",
+            "selections": [
+              (v4/*: any*/),
+              {
+                "alias": "titleHtml",
+                "args": null,
+                "kind": "ScalarField",
+                "name": "titleHTML",
+                "storageKey": null
+              },
+              {
+                "alias": null,
+                "args": null,
+                "concreteType": "IssueType",
+                "kind": "LinkedField",
+                "name": "issueType",
+                "plural": false,
+                "selections": [
+                  (v3/*: any*/),
+                  (v5/*: any*/),
+                  (v6/*: any*/)
+                ],
+                "storageKey": null
+              },
+              {
+                "alias": null,
+                "args": null,
+                "kind": "ScalarField",
+                "name": "number",
+                "storageKey": null
+              },
+              {
+                "alias": null,
+                "args": null,
+                "concreteType": "Repository",
+                "kind": "LinkedField",
+                "name": "repository",
+                "plural": false,
+                "selections": [
+                  (v5/*: any*/),
+                  {
+                    "alias": null,
+                    "args": null,
+                    "concreteType": null,
+                    "kind": "LinkedField",
+                    "name": "owner",
+                    "plural": false,
+                    "selections": [
+                      (v2/*: any*/),
+                      (v7/*: any*/),
+                      (v3/*: any*/)
+                    ],
+                    "storageKey": null
+                  },
+                  (v3/*: any*/)
+                ],
+                "storageKey": null
+              },
+              {
+                "kind": "InlineFragment",
+                "selections": [
+                  {
+                    "kind": "InlineFragment",
+                    "selections": [
+                      (v8/*: any*/),
+                      (v9/*: any*/),
+                      (v10/*: any*/),
+                      (v11/*: any*/),
+                      (v12/*: any*/),
+                      (v13/*: any*/),
+                      {
+                        "alias": null,
+                        "args": [
+                          {
+                            "kind": "Literal",
+                            "name": "enableDuplicate",
+                            "value": true
+                          }
+                        ],
+                        "kind": "ScalarField",
+                        "name": "stateReason",
+                        "storageKey": "stateReason(enableDuplicate:true)"
+                      },
+                      {
+                        "alias": null,
+                        "args": null,
+                        "kind": "ScalarField",
+                        "name": "state",
+                        "storageKey": null
+                      },
+                      (v15/*: any*/)
+                    ],
+                    "type": "Issue",
+                    "abstractKey": null
+                  },
+                  {
+                    "kind": "InlineFragment",
+                    "selections": [
+                      (v8/*: any*/),
+                      (v9/*: any*/),
+                      (v10/*: any*/),
+                      (v11/*: any*/),
+                      (v12/*: any*/),
+                      (v13/*: any*/),
+                      {
+                        "alias": null,
+                        "args": null,
+                        "kind": "ScalarField",
+                        "name": "reviewDecision",
+                        "storageKey": null
+                      },
+                      {
+                        "alias": null,
+                        "args": null,
+                        "kind": "ScalarField",
+                        "name": "isDraft",
+                        "storageKey": null
+                      },
+                      {
+                        "alias": null,
+                        "args": null,
+                        "kind": "ScalarField",
+                        "name": "isInMergeQueue",
+                        "storageKey": null
+                      },
+                      {
+                        "alias": "pullRequestState",
+                        "args": null,
+                        "kind": "ScalarField",
+                        "name": "state",
+                        "storageKey": null
+                      },
+                      (v15/*: any*/)
+                    ],
+                    "type": "PullRequest",
+                    "abstractKey": null
+                  }
+                ],
+                "type": "IssueOrPullRequest",
+                "abstractKey": "__isIssueOrPullRequest"
+              }
+            ],
+            "type": "Issue",
+            "abstractKey": null
+          }
+        ],
+        "storageKey": null
+      }
+    ]
+  },
+  "params": {
+    "id": "0f39b2dc19c823b80766c45056e4287c",
+    "metadata": {},
+    "name": "JobInfoWrapperQuery",
+    "operationKind": "query",
+    "text": null
+  }
+};
+})();
+
+(node as any).hash = "7309db0a39dad5a48c29b0b0bbc14f85";
+
+export default node;

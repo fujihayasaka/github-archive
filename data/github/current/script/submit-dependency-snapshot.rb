@@ -1,0 +1,150 @@
+#!/usr/bin/env safe-ruby
+# typed: true
+# frozen_string_literal: true
+
+# This script submits a snapshot with one or more sample dependencies to
+#  dependency-snapshots-api, via dependency-graph-api. This is useful for
+#  locally testing out end-to-end snapshot workflows, and not much else.
+
+# Requirements:
+#   * dependency-graph-api must be running locally on port 9596 (codespace-compose is fine)
+#   * dependency-snapshots-api must be running and reachable by dependency-graph-api
+#   * all relevant feature flags must be enabled
+#   * not a requirement, but it's probably best to use a repository created by ./script/create_dependabot_example_vulnerable_repo.rb
+#
+# Usage:
+# ./script/create_dependabot_example_vulnerabilities.rb monalisa/vulnerable-repo-1650039814
+#    -or-
+# ./script/create_dependabot_example_vulnerabilities.rb monalisa/vulnerable-repo-1650039814 "pkg:gem/rails@1.2.3"
+
+require_relative "../config/environment"
+require_relative "create-dependabot-github-app"
+require_relative "create_dependabot_example_vulnerabilities"
+
+unless Rails.env.development?
+  abort "This can only be run in development"
+end
+
+def read_and_prepare_snapshot(repo, path)
+  snapshot = File.read(path)
+  snapshot = JSON.parse(snapshot)
+  snapshot["sha"] = repo.ref_to_sha(snapshot["ref"])
+  snapshot["ref"] = "refs/heads/#{repo.default_branch}"
+  snapshot
+rescue JSON::ParserError => e
+  puts "Failed to parse snapshot file: #{e.message}"
+  exit 1
+end
+
+def create_snapshot(repo, purls: [])
+  ref = "refs/heads/#{repo.default_branch}"
+  sha = repo.ref_to_sha(ref)
+
+  body = {
+    version: 0,
+    sha: sha,
+    ref: ref,
+    job: {
+      correlator: "script",
+      id: "0"
+    },
+    detector: {
+      name: "create-dependabot-example-repo-with-snapshot",
+      version: "0.0.1",
+      url: "http://example.com"
+    },
+    scanned: Time.now.utc,
+    manifests: {
+      "pom.xml" => {
+        name: "pom.xml",
+        file: {
+          source_location: "pom.xml"
+        },
+        resolved: {}
+      }
+    }
+  }
+
+  body[:manifests]["pom.xml"][:resolved] = {
+    "base-direct": {
+      package_url: "pkg:maven/org.apache.commons/commons-text@1.13.0",
+      relationship: "direct",
+      dependencies: ["base-indirect"]
+    },
+    "base-indirect": {
+      package_url: "pkg:maven/org.apache.commons/commons-lang3@3.17.0",
+      relationship: "indirect"
+    },
+    "base-unknown": {
+      package_url: "pkg:maven/org.apache.logging.log4j/log4j-core@2.0"
+    }
+  }
+
+  purls.each do |purl|
+    body[:manifests]["pom.xml"][:resolved][purl] = {
+      package_url: purl,
+      relationship: "direct"
+    }
+  end
+  body
+end
+
+def submit_snapshot(repo, snapshot)
+  client = DependencySnapshot::DependencySnapshotClient.new
+
+  GitHub.dependency_graph_api_url = "http://127.0.0.1:9596/query"
+  GitHub.dependency_graph_api_slow_query_url = "http://127.0.0.1:9596/query"
+
+  begin
+    client.create_dependency_snapshot(
+      repository_id: repo.id,
+      repository_nwo: repo.nwo,
+      repository_public: repo.public,
+      repository_owner_id: repo.owner.id,
+      req_body: snapshot
+    )
+  rescue StandardError => e # rubocop:todo Lint/GenericRescue
+    puts "Failed to create snapshot for #{repo.nwo}: #{e.message}"
+    puts "Perhaps the dependency-graph-api and/or dependency-snapshots-api service is not running?"
+    exit 1
+  end
+end
+
+def usage
+  puts "Usage (purls): #{File.basename(__FILE__)} nwo [package_url] [package_url] ..."
+  puts "A default set of package urls will be included even if no package_urls are supplied."
+  puts "Usage (snapshot file): #{File.basename(__FILE__)} nwo path/to/snapshot.json"
+  puts "The file must end in .json and be a valid snapshot file. The script will adjust the sha and ref."
+  exit 1
+end
+
+def main
+  nwo = ARGV[0]
+  args = ARGV[1..-1].to_a
+  path = nil
+  if args.length == 1 && args[0].end_with?(".json")
+    path = args[0]
+  end
+
+  return usage if nwo.nil?
+  unless nwo.include? "/"
+    nwo = "monalisa/#{nwo}"
+  end
+  owner, name = nwo.split("/")
+
+  repo = Repository.find_by!(name: name, owner_login: owner)
+  snapshot = nil
+  if path
+    snapshot = read_and_prepare_snapshot(repo, path)
+  else
+    snapshot = create_snapshot(repo, purls: args)
+  end
+  result = submit_snapshot(repo, snapshot)
+  puts "Snapshot created: #{result}"
+
+  exit 0
+end
+
+if __FILE__ == $0
+  main
+end

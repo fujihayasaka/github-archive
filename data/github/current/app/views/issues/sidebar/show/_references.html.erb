@@ -1,0 +1,49 @@
+<%
+  source = issue.pull_request? ? issue.pull_request : issue
+  source_type = issue.pull_request? ? "PULL_REQUEST" : "ISSUE"
+  channel = issue.pull_request? ? GitHub::WebSocket::Channels.pull_request(issue.pull_request) : GitHub::WebSocket::Channels.issue(issue)
+%>
+
+<div
+  class="js-socket-channel js-updatable-content"
+  data-channel="<%= live_update_view_channel(channel) %>"
+  data-gid="<%= source.global_relay_id %>"
+  data-url="<%= closing_issue_references_sidebar_path(:source_id => source.id , source_type: source_type) %>"
+  data-channel-event-name="issue_references_updated"
+>
+  <div class="js-discussion-sidebar-item" data-target="create-branch.sidebarContainer">
+    <div data-issue-and-pr-hovercards-enabled <%= test_selector("closing-cross-references") %>>
+      <development-menu>
+        <%= form_tag closing_issue_reference_path(source_id: source.id, source_type: source.class.name.underscore.upcase),
+              method: :put,
+              data: { target: "create-branch.developmentForm" },
+              :class => "js-issue-sidebar-form",
+                "aria-label": "Link issues" do %>
+          <%= render :partial => "issues/sidebar/references_menu", locals: { issue: issue } %>
+
+          <% if source.pull_request? %>
+            <% if source.repository&.copilot_swe_agent_enabled?(current_user) && ::CopilotSweAgent::Helpers.authored_by_agent?(source) && source.repository&.copilot_show_swe_agent_card_component?(current_user) %>
+              <%= stylesheet_link_tag 'components/copilot-swe-agent-component' %>
+              <%= render GitHub::PollIncludeFragmentComponent.new(src: repo_agent_sessions_path(pull_number: source.number, user_id: source.repository&.owner_display_login, repository: source.repository), test_selector: "copilot-async-agent-sessions") do %>
+                <div class="copilot-card fgColor-default rounded-2 no-underline mb-3 border d-flex flex-items-stretch">
+                  <div class="mr-2 d-flex flex-column flex-content-start flex-items-start circle Skeleton" style="height:16px;width:16px;">&nbsp;</div>
+                  <div class="flex-1">
+                    <p class="mb-0 Skeleton Skeleton--text">&nbsp;</p>
+                    <p class="mb-0 Skeleton Skeleton--text">&nbsp;</p>
+                  </div>
+                  <div class="ml-3 d-flex flex-column flex-justify-start">
+                    <div class="flex-self-start" style="height:16px;width:16px;">
+                    </div>
+                  </div>
+                </div>
+              <% end %>
+            <% end %>
+            <%= render partial: "pull_requests/closing_issue_references", locals: { pull_request: source, source_url: source.url } %>
+          <% else %>
+            <%= render partial: "issues/sidebar/show/pull_request_references", locals: { issue: source, source_url: source.url } %>
+          <% end %>
+        <% end %>
+      </development-menu>
+    </div>
+  </div>
+</div>

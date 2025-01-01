@@ -1,0 +1,68 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    annotations:
+        moda.github.net/cluster-preferences: |-
+            {
+              "general-3-va3-iad":  {
+                "spec": {
+                  "suspend": false
+                }
+              }
+            }
+    name: ims-telemetry-job
+spec:
+    concurrencyPolicy: Forbid
+    failedJobsHistoryLimit: 3
+    jobTemplate:
+        metadata:
+            labels:
+                app: ims-telemetry-job
+        spec:
+            activeDeadlineSeconds: 3600
+            backoffLimit: 0
+            template:
+                metadata:
+                    annotations:
+                        fluentbit.io/parser: logfmt
+                        observability.github.com/kafka_topic: launch
+                        observability.github.com/logger: fluent-bit
+                        observability.github.com/splunk_index: hosted_compute_ims
+                spec:
+                    containers:
+                        - command:
+                            - /usr/bin/tools/istio-job-wrapper
+                            - /app/bin/hosted-compute-ims-cronjobs
+                            - telemetry
+                          env:
+                            - name: GOMAXPROCS
+                              valueFrom:
+                                resourceFieldRef:
+                                    containerName: ims-telemetry-job
+                                    resource: limits.cpu
+                            - name: STATSD_ADDR
+                              value: $(KUBE_NODE_HOSTNAME):28125
+                            - name: STATS_ADDR
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: spec.nodeName
+                          envFrom:
+                            - configMapRef:
+                                name: application-config
+                            - secretRef:
+                                name: vault-secrets
+                          image: hosted-compute-ims
+                          name: ims-telemetry-job
+                          resources:
+                            limits:
+                                cpu: "2"
+                                memory: 512Mi
+                            requests:
+                                cpu: "1"
+                                memory: 256Mi
+                    restartPolicy: Never
+            ttlSecondsAfterFinished: 60
+    schedule: '*/30 * * * *'
+    successfulJobsHistoryLimit: 3
+    suspend: true

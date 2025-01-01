@@ -1,0 +1,185 @@
+# This docker compose file defines an overlay for running the blackbird-mw
+# services. See docker-compose.yml for the base compose environment.
+services:
+  blackbird-mw-admin:
+    build:
+      context: .
+      args:
+        - FRONTEND_MODE=without-frontend
+    restart: on-failure
+    environment:
+      - BLACKBIRD_MW_ENV=test
+      - BLACKBIRD_MW_LOG_LEVEL=info
+      - BLACKBIRD_MW_MYSQL_ADDR=mysql:3306
+      - BLACKBIRD_MW_ACCESSIBLE_RESOURCES_REDIS_ADDR=redis:6379
+      - SHARED_KAFKA_BROKERS=blackbird-mw-kafka:29096
+      - BLACKBIRD_KAFKA_BROKERS=blackbird-mw-kafka:29096
+      - BLACKBIRD_MW_SPOKESD_URL=${BLACKBIRD_MW_SPOKESD_URL:-http://spokesd:8080}
+      - RUST_LOG=${RUST_LOG:-warn}
+      - GITHUB_INTERNAL_API_URL=http://fake-github:11223
+    entrypoint:
+      - "/script/setup-spokes-client-keys"
+      - "/blackbird-admin"
+    expose:
+      - 8080
+    ports:
+      - 9889:8080
+    depends_on:
+      kafka:
+        condition: service_healthy
+      bootstrap-kafka:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      bootstrap-skeema:
+        condition: service_healthy
+      fake-github:
+        condition: service_healthy
+      blackbird-1:
+        condition: service_healthy
+      blackbird-2:
+        condition: service_healthy
+    networks:
+      - default
+      - spokes-proto_default
+    volumes:
+      - "./script:/script:rw"
+      - "./deps/spokes-proto/certs:/certs:rw"
+      - "./config/blackbird:/config/blackbird:ro"
+
+  blackbird-mw-ingest:
+    build:
+      context: .
+      args:
+        - FRONTEND_MODE=without-frontend
+    restart: always
+    environment:
+      - BLACKBIRD_MW_ENV=test
+      - BLACKBIRD_MW_LOG_LEVEL=info
+      - BLACKBIRD_MW_MYSQL_ADDR=mysql:3306
+      - SHARED_KAFKA_BROKERS=blackbird-mw-kafka:29096
+      - BLACKBIRD_KAFKA_BROKERS=blackbird-mw-kafka:29096
+      - BLACKBIRD_MW_OUTPUT_CORPUS=${BLACKBIRD_MW_OUTPUT_CORPUS:-Blue}
+      - BLACKBIRD_MW_SPOKESD_URL=${BLACKBIRD_MW_SPOKESD_URL:-http://spokesd:8080}
+      - BLACKBIRD_MW_DEBOUNCE_FLUSH_INTERVAL=${BLACKBIRD_MW_DEBOUNCE_FLUSH_INTERVAL:-5ms}
+      - GITHUB_INTERNAL_API_URL=http://fake-github:11223
+    entrypoint:
+      - "/script/setup-spokes-client-keys"
+      - "/blackbird-ingest"
+    ports:
+      - 9887:8080
+    depends_on:
+      kafka:
+        condition: service_healthy
+      bootstrap-kafka:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      bootstrap-skeema:
+        condition: service_healthy
+      fake-github:
+        condition: service_healthy
+    networks:
+      - default
+      - spokes-proto_default
+    extra_hosts:
+      - "github.localhost:host-gateway"
+    volumes:
+      - "./script:/script:rw"
+      - "./deps/spokes-proto/certs:/certs:rw"
+      - "./config/blackbird:/config/blackbird:ro"
+
+  blackbird-mw-query:
+    build:
+      context: .
+      args:
+        - FRONTEND_MODE=without-frontend
+    restart: on-failure
+    environment:
+      - BLACKBIRD_MW_ENV=test
+      - BLACKBIRD_MW_LOG_LEVEL=info
+      - BLACKBIRD_MW_MYSQL_ADDR=mysql:3306
+      - BLACKBIRD_MW_ACCESSIBLE_RESOURCES_REDIS_ADDR=redis:6379
+      - BLACKBIRD_MW_SPOKESD_URL=${BLACKBIRD_MW_SPOKESD_URL:-http://spokesd:8080}
+      - RUST_LOG=${RUST_LOG:-warn}
+      - GITHUB_INTERNAL_API_URL=http://fake-github:11223
+      - BLACKBIRD_MW_COPILOT_API_URL=https://api.githubcopilot.com
+      - COPILOT_API_HMAC_KEY=${COPILOT_API_HMAC_KEY}
+    entrypoint:
+      - "/script/setup-spokes-client-keys"
+      - "/blackbird-query"
+    ports:
+      - 9888:8080
+    depends_on:
+      kafka:
+        condition: service_healthy
+      bootstrap-kafka:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      bootstrap-skeema:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      fake-github:
+        condition: service_healthy
+      blackbird-1:
+        condition: service_healthy
+      blackbird-2:
+        condition: service_healthy
+    networks:
+      - default
+      - spokes-proto_default
+    volumes:
+      - "./script:/script:rw"
+      - "./deps/spokes-proto/certs:/certs:rw"
+      - "./config/blackbird:/config/blackbird:ro"
+
+  blackbird-mw-semantic:
+    image: ${BLACKBIRD_IMAGE:-ghcr.io/github/blackbird/blackbird:main}
+    command: /script/setup-spokes-client-keys blackbird-mw-semantic --disable-hmac --config /config/blackbird/test/blackbird-mw-semantic.toml --listen 0.0.0.0:4443
+    user: root
+    environment:
+      RUST_LOG: ${RUST_LOG:-info},librdkafka=warn,rdkafka::client=warn,blackbird_runtime::twirp::server=warn,blackbird_runtime::twirp::service_builder=warn
+      RUST_BACKTRACE: full
+      BLACKBIRD_ENV: test
+      COPILOT_API_HMAC_KEY: ${COPILOT_API_HMAC_KEY}
+      BLACKBIRD_SPOKESD_HMAC_KEY: ${BLACKBIRD_SPOKESD_HMAC_KEY}
+      GITHUB_INTERNAL_API_HMAC_KEY: ""
+      ACCESSIBLE_RESOURCES_REDIS_PASSWORD: ""
+      QUOTA_REDIS_PASSWORD: ""
+      EMBEDDINGS_REDIS_PASSWORD: ""
+    networks:
+      - default
+      - spokes-proto_default
+    volumes:
+      - "./script:/script:rw"
+      - "./deps/spokes-proto/certs:/certs:rw"
+      - ./config/blackbird:/config/blackbird:ro
+    expose:
+      - 4443
+    ports:
+      - 9890:4443
+    depends_on:
+      kafka:
+        condition: service_healthy
+      bootstrap-kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      fake-github:
+        condition: service_healthy
+      blackbird-1:
+        condition: service_healthy
+      blackbird-2:
+        condition: service_healthy
+    healthcheck:
+      start_period: 5s
+      interval: 5s
+      timeout: 1s
+      retries: 40
+      test: [ "CMD-SHELL", "curl --fail http://localhost:4443/_ping || exit 1" ]
+
+networks:
+  spokes-proto_default:
+    external: true

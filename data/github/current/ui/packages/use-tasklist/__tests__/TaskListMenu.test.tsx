@@ -1,0 +1,200 @@
+import {TaskListMenu} from '../components/TaskListMenu'
+import {act, fireEvent, screen} from '@testing-library/react'
+import {noop} from '@github-ui/noop'
+import {DragAndDrop} from '@github-ui/drag-and-drop'
+import {render} from '@github-ui/react-core/test-utils'
+// eslint-disable-next-line unused-imports/no-unused-imports
+import React from 'react'
+import {createItem} from '../test-utils/helpers'
+import type {TaskItem} from '../constants/types'
+import type {OnConvertToIssueCallback, OnConvertToSubIssueCallback} from '@github-ui/markdown-viewer/types'
+
+const items = [0, 1, 2].map(item => createItem(item, item))
+
+describe('TaskListMenu', () => {
+  const item = items[0] as TaskItem
+  it('renders correctly', () => {
+    render(<TaskListMenuWrapper item={item} />)
+    expect(screen.getByLabelText('Open item 1 task options')).toBeInTheDocument()
+  })
+
+  it('opens the menu correctly', () => {
+    render(<TaskListMenuWrapper item={item} onConvertToIssue={noop} onConvertToSubIssue={noop} />)
+
+    const menuButton = screen.getByLabelText('Open item 1 task options')
+    expect(menuButton).toBeInTheDocument() // eslint-disable-next-line testing-library/prefer-user-event
+    fireEvent.click(menuButton)
+
+    expect(screen.getByLabelText('Move up')).toBeInTheDocument()
+    expect(screen.getByLabelText('Move down')).toBeInTheDocument()
+    expect(screen.getByLabelText('Convert to issue')).toBeInTheDocument()
+    expect(screen.getByLabelText('Convert to sub-issue')).toBeInTheDocument()
+  })
+
+  it('can move first element down but not up', () => {
+    render(<TaskListMenuWrapper item={item} />)
+
+    const menuButton = screen.getByLabelText('Open item 1 task options')
+    expect(menuButton).toBeInTheDocument() // eslint-disable-next-line testing-library/prefer-user-event
+    fireEvent.click(menuButton)
+
+    const moveUpButton = screen.getByLabelText('Move up')
+    expect(moveUpButton).toBeInTheDocument()
+    expect(moveUpButton).toHaveAttribute('aria-disabled', 'true')
+
+    const moveDownButton = screen.getByLabelText('Move down')
+    expect(moveDownButton).toBeInTheDocument()
+    expect(moveDownButton).not.toHaveAttribute('aria-disabled', 'true')
+  })
+
+  it('can move middle element up and down', () => {
+    render(<TaskListMenuWrapper item={items[1] as TaskItem} />)
+
+    const menuButton = screen.getByLabelText('Open item 2 task options')
+    expect(menuButton).toBeInTheDocument() // eslint-disable-next-line testing-library/prefer-user-event
+    fireEvent.click(menuButton)
+
+    const moveUpButton = screen.getByLabelText('Move up')
+    expect(moveUpButton).toBeInTheDocument()
+    expect(moveUpButton).not.toHaveAttribute('aria-disabled', 'true')
+
+    const moveDownButton = screen.getByLabelText('Move down')
+    expect(moveDownButton).toBeInTheDocument()
+    expect(moveDownButton).not.toHaveAttribute('aria-disabled', 'true')
+  })
+
+  it('can move last element up but not down', () => {
+    render(<TaskListMenuWrapper item={items[2] as TaskItem} />)
+
+    const menuButton = screen.getByLabelText('Open item 3 task options')
+    expect(menuButton).toBeInTheDocument() // eslint-disable-next-line testing-library/prefer-user-event
+    fireEvent.click(menuButton)
+
+    const moveUpButton = screen.getByLabelText('Move up')
+    expect(moveUpButton).toBeInTheDocument()
+    expect(moveUpButton).not.toHaveAttribute('aria-disabled', 'true')
+
+    const moveDownButton = screen.getByLabelText('Move down')
+    expect(moveDownButton).toBeInTheDocument()
+    expect(moveDownButton).toHaveAttribute('aria-disabled', 'true')
+  })
+
+  it('can convert an item to an issue if there is an onConvertToIssue function provided', () => {
+    render(<TaskListMenuWrapper item={item} onConvertToIssue={noop} />)
+
+    const menuButton = screen.getByLabelText('Open item 1 task options')
+    expect(menuButton).toBeInTheDocument() // eslint-disable-next-line testing-library/prefer-user-event
+    fireEvent.click(menuButton)
+
+    const convertToIssueButton = screen.getByLabelText('Convert to issue')
+    expect(convertToIssueButton).toBeInTheDocument()
+  })
+
+  it('cannot convert an item to an issue if there is no onConvertToIssue function provided', () => {
+    render(<TaskListMenuWrapper item={item} />)
+
+    const menuButton = screen.getByLabelText('Open item 1 task options')
+    expect(menuButton).toBeInTheDocument() // eslint-disable-next-line testing-library/prefer-user-event
+    fireEvent.click(menuButton)
+
+    expect(screen.queryByLabelText('Convert to issue')).not.toBeInTheDocument()
+  })
+
+  it('cannot convert an item to an issue if it is an existing issue', () => {
+    render(<TaskListMenuWrapper item={item} onConvertToIssue={noop} allowIssueConversion={false} />)
+
+    const menuButton = screen.getByLabelText('Open item 1 task options')
+    expect(menuButton).toBeInTheDocument() // eslint-disable-next-line testing-library/prefer-user-event
+    fireEvent.click(menuButton)
+
+    expect(screen.queryByLabelText('Convert to issue')).not.toBeInTheDocument()
+  })
+
+  it('can convert an item to a sub-issue if there is an onConvertToIssue function provided', () => {
+    render(<TaskListMenuWrapper item={item} onConvertToSubIssue={noop} />)
+
+    const menuButton = screen.getByLabelText('Open item 1 task options')
+    expect(menuButton).toBeInTheDocument() // eslint-disable-next-line testing-library/prefer-user-event
+    fireEvent.click(menuButton)
+
+    const convertToIssueButton = screen.getByLabelText('Convert to sub-issue')
+    expect(convertToIssueButton).toBeInTheDocument()
+  })
+
+  it('cannot convert an item to a sub-issue if there is no onConvertToIssue function provided', () => {
+    render(<TaskListMenuWrapper item={item} />)
+
+    const menuButton = screen.getByLabelText('Open item 1 task options')
+    expect(menuButton).toBeInTheDocument() // eslint-disable-next-line testing-library/prefer-user-event
+    fireEvent.click(menuButton)
+
+    expect(screen.queryByLabelText('Convert to sub-issue')).not.toBeInTheDocument()
+  })
+
+  it('cannot convert an item to a sub-issue if item not allowed', () => {
+    render(<TaskListMenuWrapper item={item} onConvertToSubIssue={noop} allowSubIssueConversion={false} />)
+
+    const menuButton = screen.getByLabelText('Open item 1 task options')
+    expect(menuButton).toBeInTheDocument() // eslint-disable-next-line testing-library/prefer-user-event
+    fireEvent.click(menuButton)
+
+    expect(screen.queryByLabelText('Convert to sub-issue')).not.toBeInTheDocument()
+  })
+
+  it('returns focus to the menu button after converting to issue', async () => {
+    const mockConvertToIssue = jest.fn((task, setIsConverting, onCompletedCallback) => {
+      setIsConverting(true)
+      setIsConverting(false)
+      if (onCompletedCallback) onCompletedCallback()
+    })
+
+    const {user} = render(<TaskListMenuWrapper item={item} onConvertToIssue={mockConvertToIssue} />)
+
+    const menuButton = screen.getByLabelText('Open item 1 task options')
+    expect(menuButton).toBeInTheDocument()
+    await user.click(menuButton)
+
+    const convertToIssueButton = screen.getByLabelText('Convert to issue')
+
+    act(() => {
+      convertToIssueButton.focus()
+    })
+
+    await user.keyboard('{Enter}')
+
+    expect(mockConvertToIssue).toHaveBeenCalled()
+
+    expect(menuButton).toHaveFocus()
+  })
+})
+
+const TaskListMenuWrapper = ({
+  item,
+  onConvertToIssue,
+  onConvertToSubIssue,
+  allowIssueConversion = true,
+  allowSubIssueConversion = true,
+}: {
+  item: TaskItem
+  onConvertToIssue?: OnConvertToIssueCallback
+  onConvertToSubIssue?: OnConvertToSubIssueCallback
+  allowIssueConversion?: boolean
+  allowSubIssueConversion?: boolean
+}) => {
+  return (
+    <DragAndDrop items={[]} onDrop={noop} renderOverlay={() => <></>}>
+      <DragAndDrop.Item id={item.id} title={item.title} index={item.index}>
+        <TaskListMenu
+          allowReordering
+          totalItems={3}
+          item={item}
+          allowIssueConversion={allowIssueConversion}
+          allowSubIssueConversion={allowSubIssueConversion}
+          setIsConverting={noop}
+          onConvertToIssue={onConvertToIssue}
+          onConvertToSubIssue={onConvertToSubIssue}
+        />
+      </DragAndDrop.Item>
+    </DragAndDrop>
+  )
+}

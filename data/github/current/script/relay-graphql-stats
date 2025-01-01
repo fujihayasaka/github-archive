@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+
+# This script computes stats related to Relay and GraphQL usage.
+
+echo "Relay GraphQL Stats:"
+echo "----------------------"
+
+useless_deps_packages=() # Stores items as "pkg_name:pkg_json_path"
+with_deps_packages=() # Stores items as "pkg_name:count"
+imports_without_direct_deps_packages=() # Stores items as "pkg_name:count"
+
+# Iterate over each package in ui/packages
+while IFS= read -r pkg_dir_path; do
+  if [ ! -d "$pkg_dir_path" ]; then
+    continue # Skip if it's not a directory
+  fi
+  pkg_name=$(basename "$pkg_dir_path")
+  pkg_json_file="$pkg_dir_path/package.json"
+
+  has_relay_in_pkg_json=false
+  if [ -f "$pkg_json_file" ]; then
+    # Check for @github-ui/relay-environment, relay-runtime, or react-relay
+    if grep -q -e '"@github-ui/relay-environment":' -e '"relay-runtime":' -e '"react-relay":' "$pkg_json_file"; then
+      has_relay_in_pkg_json=true
+    fi
+  fi
+
+  # Count files importing relay.
+  # Regex: import ... from ... containing 'relay' in the module name part.
+  # This targets modules like 'react-relay', 'relay-runtime', '@github-ui/relay-environment', or other custom ones.
+  relay_import_files_count=0
+
+  # Find .ts, .tsx, .js, .jsx files and count how many import from a relay-related module.
+  # grep -lE lists files that match. wc -l counts these files.
+  # Errors from find (e.g. permission denied, though unlikely here) are sent to /dev/null.
+  # Errors from grep (e.g. binary file) are also sent to /dev/null.
+  # --no-run-if-empty ensures grep isn't run if find returns no files.
+  count_output=$(find "$pkg_dir_path" \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" \) -type f -print0 2>/dev/null | \
+    xargs -0 --no-run-if-empty grep -lE "import .*from .*['\"].*relay.*['\"]" 2>/dev/null | wc -l)
+
+  relay_import_files_count=${count_output:-0} # Default to 0 if wc -l output is empty or command fails
+
+  if $has_relay_in_pkg_json; then
+    if [ "$relay_import_files_count" -eq 0 ]; then
+      useless_deps_packages+=("${pkg_name}:${pkg_json_file}")
+    else
+      with_deps_packages+=("${pkg_name}:${relay_import_files_count}")
+    fi
+  else
+    if [ "$relay_import_files_count" -gt 0 ]; then
+      imports_without_direct_deps_packages+=("${pkg_name}:${relay_import_files_count}")
+    fi
+  fi
+
+done < <(find "/workspaces/github/ui/packages" -mindepth 1 -maxdepth 1 -type d) # Get package directories
+
+echo ""
+echo "Packages with useless dependency to relay (has '@github-ui/relay-environment', 'relay-runtime', or 'react-relay' in package.json but no files importing *relay*):"
+if [ ${#useless_deps_packages[@]} -eq 0 ]; then
+  echo "  (None)"
+else
+  for item in "${useless_deps_packages[@]}"; do
+    pkg_name=$(echo "$item" | cut -d: -f1)
+    pkg_json_path=$(echo "$item" | cut -d: -f2-)
+    echo "  - $pkg_name ($pkg_json_path)"
+  done
+fi
+
+echo ""
+echo "Packages with dependency to relay (has '@github-ui/relay-environment', 'relay-runtime', or 'react-relay' in package.json AND files importing *relay*):"
+if [ ${#with_deps_packages[@]} -eq 0 ]; then
+  echo "  (None)"
+else
+  for item in "${with_deps_packages[@]}"; do
+    pkg_name=$(echo "$item" | cut -d: -f1)
+    count=$(echo "$item" | cut -d: -f2)
+    echo "  - $pkg_name (Imports in $count files)"
+  done
+fi
+
+echo ""
+echo "Packages importing relay without direct dependency in package.json (No '@github-ui/relay-environment', 'relay-runtime', or 'react-relay' in package.json BUT files importing *relay*):"
+if [ ${#imports_without_direct_deps_packages[@]} -eq 0 ]; then
+  echo "  (None)"
+else
+  for item in "${imports_without_direct_deps_packages[@]}"; do
+    pkg_name=$(echo "$item" | cut -d: -f1)
+    count=$(echo "$item" | cut -d: -f2)
+    echo "  - $pkg_name (Imports in $count files)"
+  done
+fi
+
+echo ""
+echo "----------------------"
+echo "Script finished."

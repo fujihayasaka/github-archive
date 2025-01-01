@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+
+set -eo pipefail
+
+function usage() {
+    cat << ENDOFUSAGE
+Usage: echo '<json>' | script/twirpcurl <service> <method>
+Available services:
+    - ping              - check if the server is alive
+    - images            - customers API
+    - admin             - admin API
+    - internal          - internal API
+
+Examples:
+    script/twirpcurl ping
+    script/twirpcurl images ListCuratedImageDefinitions
+    script/twirpcurl admin ListCuratedImageDefinitions
+    script/twirpcurl internal GetImageDetails
+    echo '{ "image_definition_id": 3 }' | script/twirpcurl images GetCuratedImageDefinition
+    echo '{ "name": "myImage3", "os_type": "Linux", "architecture": "Arm64" }' | script/twirpcurl admin CreateCuratedImageDefinition
+    echo '{ "image_definition_id": 63, "version": "1.0.0", "source_vhd_url": "http://myurl" }' | script/twirpcurl admin CreateCuratedImageVersion
+    echo '{ "image_key": { "source": "Curated", "id": 1, "version": "1.0.0" } }' | script/twirpcurl internal GetImageDetails
+
+Environment variables:
+    IMS_HOST: Specify API host. Defaults to localhost.
+    IMS_HMAC: Specify HMAC secret. HMAC is disabled by default.
+
+ENDOFUSAGE
+}
+
+function curl_fail_with_body() {
+    # this function imitates behavior of "curl --fail-with-body" which was added in Curl 7.76.0
+    # dotcom codespace has outdated version of curl so we have to use this workaround
+    local url=$1
+    local payload=$2
+    local raw_output=$(curl \
+                        --request POST \
+                        --header 'Content-Type: application/json' \
+                        --header "$HMAC_HEADER" \
+                        --no-progress-meter \
+                        -w '\nstatus_code=%{http_code}\n' \
+                        --data "$payload" \
+                        $url
+    )
+    local status_code=$(echo "$raw_output" | grep status_code | awk -F"=" '{print $2}')
+    local response=$(echo "$raw_output" | sed '$d')
+    if [[ ${status_code} -ge 400 ]]; then
+        echo "Status code: $status_code"
+        (echo "$response" | jq . 2>/dev/null) || echo "$response"
+        exit 1
+    fi
+
+    echo $response | jq .
+}
+
+if [[ -z "${IMS_HOST}" ]]; then
+    IMS_HOST="$(script/helpers/kube-ip):21010"
+fi
+
+
+case "$1" in
+ping)
+    curl --no-progress-meter --request GET "$IMS_HOST/_ping"
+    echo
+    exit 0
+    ;;
+images)
+    BASE_URL=$IMS_HOST/twirp/github.ims.api.images.v1.ImageManagementService
+    ;;
+admin)
+    BASE_URL=$IMS_HOST/twirp/github.ims.api.admin.v1.ImageManagementAdminService
+    ;;
+internal)
+    BASE_URL=$IMS_HOST/twirp/github.ims.api.internal.v1.InternalImageManagementService
+    ;;
+--help)
+    usage
+    exit 0
+    ;;
+*)
+    usage
+    exit 1
+    ;;
+esac
+
+FULL_URL="${BASE_URL}/${2}"
+PAYLOAD="{}"
+if test ! -t 0; then
+    PAYLOAD="$(< /dev/stdin)"
+fi
+
+if [[ -n "${IMS_HMAC}" ]]; then
+    TIMESTAMP=$(date +%s)
+    HMAC_SIG=$(echo -n $TIMESTAMP | openssl sha256 -hmac $IMS_HMAC | sed 's/^.* //')
+    HMAC_HEADER="Request-HMAC: $TIMESTAMP.$HMAC_SIG"
+fi
+
+curl_fail_with_body "$FULL_URL" "$PAYLOAD"

@@ -1,0 +1,40 @@
+name: "Build and test"
+
+on:
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: [main]
+  pull_request: {}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5.4.0
+        with:
+          go-version: "1.22"
+
+      - name: Setup .env
+        run: make .env
+
+      - name: OIDC Setup for goproxy
+        uses: github/setup-goproxy@v1.1.0
+
+      - name: Check Go source files are properly formatted
+        run: "! go fmt ./... | grep . || { echo 'Go not formatted'; exit 1; }"
+
+      - name: Build program
+        run: make build
+
+      - name: Run tests
+        run: make test

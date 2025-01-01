@@ -1,0 +1,142 @@
+commit b6ba0529bfe70bdaed5facf2869f47d5efb6a8b0
+Author: Derrick Marcey <dmarcey@github.com>
+Date:   Thu May 15 10:15:13 2025 -0700
+
+    Extract entrypoint components for pages used by json routes.
+    These entrypoints access the payload data for the route and pass it along to the page component for rendering.
+
+diff --git a/ui/packages/hosted-compute-ims-stafftools/__tests__/ListImageVersions.test.tsx b/ui/packages/hosted-compute-ims-stafftools/__tests__/ListImageVersions.test.tsx
+index c570dcaa1c23b..9b6e4a7ab9aa4 100644
+--- a/ui/packages/hosted-compute-ims-stafftools/__tests__/ListImageVersions.test.tsx
++++ b/ui/packages/hosted-compute-ims-stafftools/__tests__/ListImageVersions.test.tsx
+@@ -1,11 +1,11 @@
+ import {screen} from '@testing-library/react'
+ import {render} from '@github-ui/react-core/test-utils'
+-import {CuratedImageDetailsPage} from '../routes/CuratedImageDetailsPage'
++import {CuratedImageDetailsPageEntrypoint} from '../routes/CuratedImageDetailsPage'
+ import {getListImageVersionsRoutePayload} from '../test-utils/mock-data'
+
+ test('Renders ListImageVersions', () => {
+   const routePayload = getListImageVersionsRoutePayload()
+-  render(<CuratedImageDetailsPage />, {
++  render(<CuratedImageDetailsPageEntrypoint />, {
+     routePayload,
+   })
+   expect(screen.getByText('test-name-1 (ID 1)')).toBeInTheDocument()
+diff --git a/ui/packages/hosted-compute-ims-stafftools/__tests__/Main.test.tsx b/ui/packages/hosted-compute-ims-stafftools/__tests__/Main.test.tsx
+index 63103401785c5..d7aa0a76c0926 100644
+--- a/ui/packages/hosted-compute-ims-stafftools/__tests__/Main.test.tsx
++++ b/ui/packages/hosted-compute-ims-stafftools/__tests__/Main.test.tsx
+@@ -1,13 +1,13 @@
+ import {screen} from '@testing-library/react'
+ import {render} from '@github-ui/react-core/test-utils'
+-import {MainPage} from '../routes/MainPage'
++import {MainPageEntrypoint} from '../routes/MainPage'
+ import {getMainRoutePayload} from '../test-utils/mock-data'
+ import {Constants} from '../helpers/constants'
+
+ test('Renders Main', () => {
+   const routePayload = getMainRoutePayload()
+   routePayload.imageDefinitions = []
+-  render(<MainPage />, {
++  render(<MainPageEntrypoint />, {
+     routePayload,
+   })
+   expect(screen.getByText(Constants.stafftoolPageTitle)).toBeInTheDocument()
+@@ -17,7 +17,7 @@ test('Renders Main', () => {
+
+ test('Renders Main With Image Table and Pointer Table', () => {
+   const routePayload = getMainRoutePayload()
+-  render(<MainPage />, {
++  render(<MainPageEntrypoint />, {
+     routePayload,
+   })
+   expect(screen.getByText(Constants.stafftoolPageTitle)).toBeInTheDocument()
+diff --git a/ui/packages/hosted-compute-ims-stafftools/hosted-compute-ims-stafftools.ts b/ui/packages/hosted-compute-ims-stafftools/hosted-compute-ims-stafftools.ts
+index 6d95f854fda64..693faca1c5265 100644
+--- a/ui/packages/hosted-compute-ims-stafftools/hosted-compute-ims-stafftools.ts
++++ b/ui/packages/hosted-compute-ims-stafftools/hosted-compute-ims-stafftools.ts
+@@ -1,21 +1,21 @@
+ import {App} from './App'
+-import {MainPage} from './routes/MainPage'
+-import {CuratedImageDetailsPage} from './routes/CuratedImageDetailsPage'
++import {MainPageEntrypoint} from './routes/MainPage'
++import {CuratedImageDetailsPageEntrypoint} from './routes/CuratedImageDetailsPage'
+ import {registerNavigatorApp} from '@github-ui/react-core/register-app'
+ import {jsonRoute} from '@github-ui/react-core/json-route'
+-import {CuratedImageVersionDetailsPage} from './routes/CuratedImageVersionDetailsPage'
++import {CuratedImageVersionDetailsPageEntrypoint} from './routes/CuratedImageVersionDetailsPage'
+
+ registerNavigatorApp('hosted-compute-ims-stafftools', () => ({
+   App,
+   routes: [
+-    jsonRoute({path: '/stafftools/hosted_compute_ims_admin', Component: MainPage}),
++    jsonRoute({path: '/stafftools/hosted_compute_ims_admin', Component: MainPageEntrypoint}),
+     jsonRoute({
+       path: '/stafftools/hosted_compute_ims_admin/curated_images/:image_definition_id',
+-      Component: CuratedImageDetailsPage,
++      Component: CuratedImageDetailsPageEntrypoint,
+     }),
+     jsonRoute({
+       path: '/stafftools/hosted_compute_ims_admin/curated_images/:image_definition_id/versions/:version',
+-      Component: CuratedImageVersionDetailsPage,
++      Component: CuratedImageVersionDetailsPageEntrypoint,
+     }),
+   ],
+ }))
+diff --git a/ui/packages/hosted-compute-ims-stafftools/routes/CuratedImageDetailsPage.tsx b/ui/packages/hosted-compute-ims-stafftools/routes/CuratedImageDetailsPage.tsx
+index 61040966a950e..adb31f2d75b44 100644
+--- a/ui/packages/hosted-compute-ims-stafftools/routes/CuratedImageDetailsPage.tsx
++++ b/ui/packages/hosted-compute-ims-stafftools/routes/CuratedImageDetailsPage.tsx
+@@ -13,9 +13,12 @@ export interface CuratedImageDetailsPagePayload {
+   imageVersions: ImageVersion[]
+ }
+
+-export function CuratedImageDetailsPage() {
++export function CuratedImageDetailsPageEntrypoint() {
+   const payload = useRoutePayload<CuratedImageDetailsPagePayload>()
++  return <CuratedImageDetailsPage payload={payload} />
++}
+
++function CuratedImageDetailsPage({payload}: {payload: CuratedImageDetailsPagePayload}) {
+   useEffect(() => {
+     window.scrollTo(0, 0)
+   }, [])
+diff --git a/ui/packages/hosted-compute-ims-stafftools/routes/CuratedImageVersionDetailsPage.tsx b/ui/packages/hosted-compute-ims-stafftools/routes/CuratedImageVersionDetailsPage.tsx
+index ff0bbabba7f40..ed5e6d8388799 100644
+--- a/ui/packages/hosted-compute-ims-stafftools/routes/CuratedImageVersionDetailsPage.tsx
++++ b/ui/packages/hosted-compute-ims-stafftools/routes/CuratedImageVersionDetailsPage.tsx
+@@ -13,9 +13,12 @@ export interface CuratedImageVersionDetailsPagePayload {
+   nonResolvedVersion: string
+ }
+
+-export function CuratedImageVersionDetailsPage() {
++export function CuratedImageVersionDetailsPageEntrypoint() {
+   const payload = useRoutePayload<CuratedImageVersionDetailsPagePayload>()
++  return <CuratedImageVersionDetailsPage payload={payload} />
++}
+
++function CuratedImageVersionDetailsPage({payload}: {payload: CuratedImageVersionDetailsPagePayload}) {
+   useEffect(() => {
+     window.scrollTo(0, 0)
+   }, [])
+diff --git a/ui/packages/hosted-compute-ims-stafftools/routes/MainPage.tsx b/ui/packages/hosted-compute-ims-stafftools/routes/MainPage.tsx
+index dab323520d7ee..a47ff2933d041 100644
+--- a/ui/packages/hosted-compute-ims-stafftools/routes/MainPage.tsx
++++ b/ui/packages/hosted-compute-ims-stafftools/routes/MainPage.tsx
+@@ -15,8 +15,12 @@ export interface MainPagePayload {
+   selectedImagesTab: SelectedImagesTab
+ }
+
+-export function MainPage() {
++export function MainPageEntrypoint() {
+   const payload = useRoutePayload<MainPagePayload>()
++  return <MainPage payload={payload} />
++}
++
++function MainPage({payload}: {payload: MainPagePayload}) {
+   const [selectedTab, setSelectedTab] = useState<SelectedImagesTab>(payload.selectedImagesTab || 'github-images')
+
+   const switchSelectedImagesTab = (imageTab: SelectedImagesTab) => {
++
+

@@ -1,0 +1,47 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: extract-nuget-packages
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "extract-nuget-packages"
+        heaven.githubapp.com/image-placeholder: "dependency-graph-api"
+spec:
+    schedule: "0 4 * * *" # Every day at 4AM
+    concurrencyPolicy: Forbid # Do not allow multiple instances of the same job to run, at the same time.
+    successfulJobsHistoryLimit: 2
+    failedJobsHistoryLimit: 2
+    jobTemplate:
+        spec:
+            template:
+                spec:
+                    dnsPolicy: ClusterFirst
+                    volumes:
+                        - name: github-metadata
+                          hostPath:
+                            path: /etc/github/metadata.json
+                    restartPolicy: Never
+                    containers:
+                        - name: extract-nuget-packages
+                          image: dependency-graph-api
+                          workingDir: "/src/app/package_manager_adapters"
+                          resources:
+                            requests:
+                                memory: "1Gi"
+                            limits:
+                                memory: "4Gi"
+                          command: ["/usr/bin/tools/istio-job-wrapper"]
+                          args: ["script/start_kube", "nuget"]
+                          envFrom:
+                            - configMapRef:
+                                name: environment
+                            - secretRef:
+                                name: vault-secrets
+                          env:
+                            - name: DOGSTATSD_HOST
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: spec.nodeName
+                          volumeMounts:
+                            - mountPath: /etc/github/metadata.json
+                              name: github-metadata
+                              readOnly: true

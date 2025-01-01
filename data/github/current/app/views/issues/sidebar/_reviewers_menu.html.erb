@@ -1,0 +1,26 @@
+<%
+  menu_attributes = "data-multiple data-menu-max-options=#{pull_request.manual_review_requests_limit}" unless pull_request.single_manual_review_request?
+  repo_inaccessible = pull_request.repository.locked? || pull_request.repository.archived?
+
+  ccr_access = PullRequests::Copilot::CodeReviewAccess.new(actor: current_user, current_repository: current_repository, pull_request: pull_request)
+  show_ccr_upsell = user_feature_enabled?(:copilot_code_review_quota_billing) && !ccr_access.has_quota_remaining?
+%>
+
+<% if show_ccr_upsell %>
+  <%= render_react_partial name: "copilot-code-review-upsell" %>
+<% end %>
+
+<%= render layout: "issues/sidebar/menu", locals: {
+      issue: pull_request.issue,
+      title: "Reviewers",
+      menu_title: "Request up to #{pluralize(pull_request.manual_review_requests_limit, "reviewer")}",
+      menu_id: "reviewers-select-menu",
+      menu_attributes: menu_attributes,
+      hotkey: "q",
+      readonly: !issue_permissions(pull_request.issue, current_user, :review_requestable) || repo_inaccessible
+  } do %>
+  <%= render "issues/sidebar/reviewers_menu_content",
+    issue: pull_request.issue,
+    single_select: pull_request.single_manual_review_request?,
+    data_source: data_source %>
+<% end %>

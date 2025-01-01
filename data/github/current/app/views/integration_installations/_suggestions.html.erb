@@ -1,0 +1,39 @@
+<% if view.use_select_panel? %>
+  <% if view.max_repositories.present? %>
+    <div class="p-2">
+      <%= render Primer::Alpha::Banner.new(scheme: :warning, mb: 1, classes: "js-integration-max-selected-repos-message", "data-max-repos": view.max_repositories, hidden: true) do %>
+        You have reached your maximum of <%= view.max_repositories %> selected repositories.
+      <% end %>
+    </div>
+  <% end %>
+  <%= render(Primer::Alpha::SelectPanel::ItemList.new(
+    aria: { label: "repositories" },
+    select_variant: :multiple,
+  )) do |list| %>
+    <% view.suggestions.each do |suggestion| %>
+      <% list.with_item(
+        content_arguments: { data: { value: suggestion.id } },
+        active: view.installed_on?(suggestion) || view.was_granted_access_to?(suggestion),
+      ) do |item|  %>
+        <% item.with_leading_visual_icon(icon: suggestion.repo_type_icon, color: :muted) %>
+        <%= suggestion.owner.display_login %>/<%= suggestion.name %>
+        <% item.with_description do %>
+          <%= suggestion.description.presence || 'no description' %>
+          <% if view.suggestion_label(suggestion) %>
+            <%= render(Primer::Beta::Label.new(scheme: :warning, title: view.label_title(view.suggestion_label(suggestion)))) { view.suggestion_label(suggestion).to_s } %>
+          <% end %>
+        <% end %>
+        <template>
+          <%= render :partial => "integration_installations/suggestion_selection", locals: {repository: suggestion, label: {text: view.suggestion_label(suggestion).to_s, title: view.label_title(view.suggestion_label(suggestion))}} %>
+        </template>
+      <% end %>
+    <% end %>
+  <% end %>
+<% else %>
+  <%# `view` is an instance of IntegrationInstallations::SuggestionsView %>
+  <%= render partial: "integration_installations/suggestion", collection: view.suggestions, as: :repository, locals: { view: view } %>
+  <div class="p-3 js-no-repository-found" hidden>No repositories found.</div>
+  <% if view.suggestions.size == IntegrationInstallations::SuggestionsView::MAX_SUGGESTIONS %>
+    <div class="d-flex flex-justify-center p-2">Displaying maximum <%= IntegrationInstallations::SuggestionsView::MAX_SUGGESTIONS %> suggestions</div>
+  <% end %>
+<% end %>

@@ -1,0 +1,272 @@
+syntax = "proto3";
+
+package github.spokes.references.v1;
+
+option go_package = "github.com/github/spokes-proto/gen/go/v1/references";
+option ruby_package = "GitHub::Spokes::Proto::References::V1";
+
+import "spokes-api/extensions/v1/field_options.proto";
+
+import "spokes-api/types/v1/cursor.proto";
+import "spokes-api/types/v1/object_id.proto";
+import "spokes-api/types/v1/reference.proto";
+import "spokes-api/types/v1/repository.proto";
+import "spokes-api/types/v1/request_context.proto";
+import "spokes-api/types/v1/sockstat.proto";
+import "spokes-api/types/v1/update_references_priority.proto";
+
+import "spokes-api/types/selectors/v1/universal_selector.proto";
+import "spokes-api/types/selectors/v1/prefix_selector.proto";
+import "spokes-api/types/selectors/v1/ref_glob_selector.proto";
+
+import "spokes-api/references/v1/reference_item.proto";
+import "spokes-api/references/v1/transaction.proto";
+import "spokes-api/references/v1/ref_status.proto";
+import "spokes-api/references/v1/ref_with_commit_time.proto";
+
+// ReferencesAPI contains APIs for reference-related Git operations.
+service ReferencesAPI {
+    // ResolveReferences resolves each of the given fully-qualified reference
+    // names to their corresponding referenced object ID. Limited to a maximum
+    // of 1000 references per request.
+    rpc ResolveReferences(ResolveReferencesRequest) returns (ResolveReferencesResponse);
+
+    // ListReferences returns a list of references. Note that this endpoint will
+    // include references in the internal namespaces such as refs/__gh__ and
+    // refs/pull. These will need to be filtered out, either with a selector or
+    // explicitly before returning data to customers.
+    rpc ListReferences(ListReferencesRequest) returns (ListReferencesResponse);
+
+    // GetDefaultBranch returns the name of the default branch for a repository.
+    rpc GetDefaultBranch(GetDefaultBranchRequest) returns (GetDefaultBranchResponse);
+
+    // ListReferencesWithDetails returns a list of references which match a
+    // given glob pattern. The list of references includes the creation time for
+    // each reference: tagger date for tags, committer date for commits. If a
+    // tag does not have tagger information, the committer date is returned
+    // instead.
+    rpc ListReferencesWithDetails(ListReferencesWithDetailsRequest) returns (ListReferencesWithDetailsResponse);
+
+    // Update updates references for a repository
+    //
+    // This is a low-level interface that interacts directly with a repository.
+    // It does not respect application-level restrictions such as branch
+    // protections or run hooks.
+    rpc Update(UpdateRequest) returns (UpdateResponse);
+
+    // UpdateDefaultBranch updates the HEAD reference for a repository
+    //
+    // This is a low-level interface that interacts directly with a repository.
+    rpc UpdateDefaultBranch(UpdateDefaultBranchRequest) returns (UpdateDefaultBranchResponse);
+
+    // ReferencesExist returns a boolean indicating if the repository has refs.
+    // Additionally specifies whether those refs are branches or tags.
+    rpc ReferencesExist(ReferencesExistRequest) returns (ReferencesExistResponse);
+}
+
+message ResolveReferencesRequest {
+    // repository is the repository to scope the reference lookup to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.RequestContext request_context = 2;
+
+    // references are the refs to resolve to their respective OIDs.
+    //
+    // Reference names passed here must be valid fully-qualified reference names
+    // and follow the rules in
+    // https://git-scm.com/docs/git-check-ref-format#_description. For example,
+    // "refs/heads/main", "refs/tags/v1.0", and "HEAD" are valid qualified ref
+    // names, but "main", "REBASE_HEAD", and "tags/v1.0" are not. Note that this
+    // differs from the validation of the ObjectSelector type, which allows for
+    // looser reference specifications.
+    //
+    // A maximum of 10000 references are allowed per request.
+    repeated github.spokes.types.v1.Reference references = 3 [(github.spokes.extensions.v1.limit) = 10000];
+}
+
+message ResolveReferencesResponse {
+    // items is the list resolved references.
+    repeated ResolvedReference items = 1;
+
+    message ResolvedReference {
+        // reference is the name of the resolved reference.
+        github.spokes.types.v1.Reference reference = 1;
+
+        // oid is the resolved object id if the reference exists in the
+        // repository.
+        github.spokes.types.v1.ObjectID oid = 2;
+
+        // error is the specific error message, if any, indicating why the
+        // reference could not be resolved (e.g. the validation error message).
+        string error = 3;
+    }
+}
+
+message ListReferencesRequest {
+    // repository is the repository to scope the object lookup to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.Cursor cursor = 2;
+
+    github.spokes.types.v1.RequestContext request_context = 5;
+
+    oneof selector {
+        // universal_selector selects all references in the repository.
+        github.spokes.types.selectors.v1.UniversalSelector universal_selector = 3;
+
+        // prefix_selector selects references based on matching prefixes.
+        github.spokes.types.selectors.v1.PrefixSelector prefix_selector = 4;
+    }
+}
+
+message ListReferencesResponse {
+    // references is the list of references.
+    repeated github.spokes.references.v1.ReferenceItem reference_items = 1;
+
+    github.spokes.types.v1.Cursor next_cursor = 2;
+}
+
+message GetDefaultBranchRequest {
+    // repository is the repository to scope the object lookup to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.RequestContext request_context = 2;
+}
+
+message GetDefaultBranchResponse {
+    // reference is the default branch reference for the repository.
+    github.spokes.types.v1.Reference reference = 1;
+}
+
+message UpdateRequest {
+    // repository is the repository for which refs are updated.
+    github.spokes.types.v1.Repository repository = 1;
+
+    // nwo is the NWO for the repository for which refs are updated.
+    string nwo = 2;
+
+    // priority is the priority for the ref update.
+    github.spokes.types.v1.UpdateReferencesPriority priority = 3;
+
+    // txn is the transaction to perform for the ref update.
+    Transaction txn = 4;
+
+    // sockstat is the sockstat data to be used for this ref update.
+    github.spokes.types.v1.Sockstat sockstat = 5;
+
+    // fileservers, if not empty, is the list of file servers to use.
+    // This is used only during gist creation.
+    repeated string fileservers = 6;
+}
+
+message UpdateResponse {
+    enum ErrorReason {
+        ERROR_REASON_INVALID = 0;
+        ERROR_REASON_FAILED_TO_LOCK = 1;
+        ERROR_REASON_THREEPC = 2;
+        ERROR_REASON_TOO_BUSY = 3;
+        ERROR_REASON_TIMEOUT = 4;
+        ERROR_REASON_DATABASE = 5;
+    }
+
+    // error_reason is a machine-readable 3PC error code.
+    ErrorReason error_reason = 1;
+
+    // error_message is a human-readable error message.
+    string error_message = 2;
+
+    // checksum provides the Spokes checksum after the operation completed
+    string checksum = 3;
+
+    // committed_at provides a time value, formatted as a unixtime stamp, for
+    // when the commit was applied.
+    uint64 committed_at = 4;
+
+    // refs_status represents the failures for each ref update operation
+    repeated RefStatus refs_status = 5;
+}
+
+message UpdateDefaultBranchRequest {
+    // repository is the repository for which refs are updated. (required)
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.RequestContext request_context = 2;
+
+    // nwo is the NWO for the repository for which refs are updated.
+    string nwo = 3;
+
+    // priority is the priority for the ref update. (required)
+    github.spokes.types.v1.UpdateReferencesPriority priority = 4;
+
+    // new_value is the value to set the symbolic reference to. (required)
+    github.spokes.types.v1.Reference new_value = 5;
+
+    // sockstat is the sockstat data to be used for this ref update.
+    github.spokes.types.v1.Sockstat sockstat = 6;
+}
+
+message UpdateDefaultBranchResponse {
+    enum ErrorReason {
+        ERROR_REASON_INVALID = 0;
+        ERROR_REASON_FAILED_TO_LOCK = 1;
+        ERROR_REASON_THREEPC = 2;
+        ERROR_REASON_TOO_BUSY = 3;
+        ERROR_REASON_TIMEOUT = 4;
+        ERROR_REASON_DATABASE = 5;
+    }
+
+    // error_reason is a machine-readable 3PC error code.
+    ErrorReason error_reason = 1;
+
+    // error_message is a human-readable error message.
+    string error_message = 2;
+
+    // checksum provides the Spokes checksum after the operation completed
+    string checksum = 3;
+
+    // committed_at provides a time value, formatted as a unixtime stamp, for
+    // when the commit was applied.
+    uint64 committed_at = 4;
+}
+
+message ListReferencesWithDetailsRequest {
+    // repository is the repository for which tags are retrieved
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.RequestContext request_context = 2;
+
+    github.spokes.types.v1.Cursor cursor = 5;
+
+    oneof selector {
+        // universal_selector selects all references in the repository, including our hidden bookkeeping references.
+        github.spokes.types.selectors.v1.UniversalSelector universal_selector = 3;
+
+        // ref glob selector selects all references matching a given glob pattern, including our hidden bookkeeping references.
+        github.spokes.types.selectors.v1.RefGlobSelector ref_glob_selector = 4;
+    }
+}
+
+message ListReferencesWithDetailsResponse {
+    // tag refs returned with creation time information
+    repeated RefWithCommitTime refs = 1;
+
+    github.spokes.types.v1.Cursor next_cursor = 2;
+}
+
+message ReferencesExistRequest {
+    // repository is the repository to scope the reference lookup to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.RequestContext request_context = 2;
+}
+
+message ReferencesExistResponse {
+    // any indicates whether any references exist in the repository
+    bool any = 1;
+
+    // branches indicates whether any branches exist
+    bool branches = 2;
+
+    // tags indicates whether any tags exist
+    bool tags = 3;
+}

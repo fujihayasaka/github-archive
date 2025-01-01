@@ -1,0 +1,73 @@
+import type {DashboardPullRequest} from './types'
+import type {RepositoryNWO} from '@github-ui/current-repository'
+
+export const mockDashboardPullRequests: DashboardPullRequest[] = [
+  {
+    id: 'pr-1',
+    number: 1,
+    title: 'Add filter functionality to dashboard lists',
+    permalink: 'https://github.com/github/github/pull/1',
+    commentCount: 7,
+    updatedAt: '2025-05-04T10:20:00Z',
+    suggestedAction: 'Review requested',
+    headSha: 'abc123def456',
+    repoNameWithOwner: {
+      ownerLogin: 'github',
+      name: 'github',
+    } as RepositoryNWO,
+    isDraft: false,
+    inMergeQueue: false,
+    author: 'fauxnalisa',
+  },
+  {
+    id: 'pr-2',
+    number: 2,
+    title: 'Implement sorting options for lists',
+    permalink: 'https://github.com/github/github/pull/2',
+    commentCount: 4,
+    updatedAt: '2025-05-03T11:45:00Z',
+    suggestedAction: 'Ready to merge',
+    headSha: 'def456ghi789',
+    repoNameWithOwner: {
+      ownerLogin: 'github',
+      name: 'github',
+    } as RepositoryNWO,
+    isDraft: false,
+    inMergeQueue: true,
+    author: 'fauxnalisa',
+  },
+  {
+    id: 'pr-3',
+    number: 3,
+    title: 'Refactor dashboard component structure',
+    permalink: 'https://github.com/github/github/pull/3',
+    commentCount: 2,
+    updatedAt: '2025-05-02T14:30:00Z',
+    suggestedAction: 'Changes requested',
+    headSha: 'ghi789jkl012',
+    repoNameWithOwner: {
+      ownerLogin: 'github',
+      name: 'github',
+    } as RepositoryNWO,
+    isDraft: true,
+    inMergeQueue: false,
+    author: 'fauxnalisa',
+  },
+  {
+    id: 'pr-4',
+    number: 4,
+    title: 'Add keyboard shortcuts for common actions',
+    permalink: 'https://github.com/github/github/pull/4',
+    commentCount: 0,
+    updatedAt: '2025-05-01T16:50:00Z',
+    suggestedAction: 'Needs review',
+    headSha: 'jkl012mno345',
+    repoNameWithOwner: {
+      ownerLogin: 'github',
+      name: 'github',
+    } as RepositoryNWO,
+    isDraft: false,
+    inMergeQueue: false,
+    author: 'fauxnalisa',
+  },
+]

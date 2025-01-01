@@ -1,0 +1,39 @@
+import {IssueDraftIcon, LockIcon} from '@primer/octicons-react'
+import {Octicon} from '@primer/react/deprecated'
+import {memo} from 'react'
+
+import type {TitleValueWithContentType} from '../../api/columns/contracts/title'
+import {ItemType} from '../../api/memex-items/item-type'
+import {assertNever} from '../../helpers/assert-never'
+import {type ColumnValue, hasValue} from '../../models/column-value'
+import {ItemStateForTitle} from '../item-state'
+
+type MemexItemIconProps = {
+  /** Wrapped title value to detect and handle empty state */
+  titleColumn: ColumnValue<TitleValueWithContentType>
+  /** Whether or not this item should be rendered as blocked */
+  isBlocked: boolean
+}
+
+export const MemexItemIcon = memo(function MemexItemIcon({titleColumn, isBlocked}: MemexItemIconProps) {
+  if (!hasValue(titleColumn)) {
+    return null
+  }
+
+  if (!titleColumn) {
+    return null
+  }
+
+  switch (titleColumn.value.contentType) {
+    case ItemType.RedactedItem:
+      return <LockIcon aria-label="Redacted item" />
+    case ItemType.DraftIssue:
+      return <Octicon icon={IssueDraftIcon} sx={{color: 'fg.muted'}} aria-label="Draft issue" />
+    case ItemType.Issue:
+    case ItemType.PullRequest: {
+      return <ItemStateForTitle title={titleColumn.value} isBlocked={isBlocked} />
+    }
+    default:
+      assertNever(titleColumn.value)
+  }
+})

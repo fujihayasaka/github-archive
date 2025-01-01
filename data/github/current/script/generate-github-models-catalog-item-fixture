@@ -1,0 +1,42 @@
+#!/bin/sh
+
+set -e
+
+# Function to print help message
+help() {
+  echo "Generates a test fixture file for a GitHub Models catalog item based on data in the Azure API."
+  echo
+  echo "Usage: script/generate-github-models-catalog-item-fixture [registry] [original_name] [model_version]"
+  echo "  Example: script/generate-github-models-catalog-item-fixture azure-openai gpt-4o 2024-11-20"
+}
+
+if [ "$1" = "--help" ]; then
+  help
+  exit 0
+fi
+
+registry=$1
+if [ -z "$registry" ]; then
+  echo "Error: registry is required"
+  help
+  exit 1
+fi
+
+original_name=$2
+if [ -z "$original_name" ]; then
+  echo "Error: model original name is required"
+  help
+  exit 1
+fi
+
+version=$3
+if [ -z "$version" ]; then
+  echo "Error: model version is required"
+  help
+  exit 1
+fi
+
+file_name=$(echo "$original_name.json" | tr '-' '_') # convert hyphens to underscores
+output_path="test/fixtures/github_models/$file_name"
+
+bin/safe-ruby -e "require_relative 'config/environment'; puts 'Loading model ' + ARGV.slice(0..2).join('/') + '...'; data=GitHubModels.domain.models.fetch_from_api(registry: ARGV[0], model_name: ARGV[1], version: ARGV[2]); path=Rails.root.join(ARGV[3]).to_s; puts 'Saving to ' + path + '...'; File.write(path, JSON.pretty_generate(data) + %Q(\n))" $registry $original_name $version $output_path

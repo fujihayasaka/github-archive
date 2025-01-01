@@ -1,0 +1,179 @@
+#!/bin/bash
+
+#/ Usage: script/authnd-server <option>
+#/
+#/ Runs the authnd server.
+#/
+#/ Options:
+#/ --dev      Run the authnd server in Development mode
+#/ --test     Run the authnd server in Test mode
+
+# we need to duplicate this from "environment.sh" for the time being, since that script is
+# not executed before authnd starts up in development mode. In test it does.
+#
+# note that at this point $RAILS_ROOT might not have been yet defined. If so, we default
+# to the current directory.
+#
+# Detect if the current runtime is ENTERPRISE
+RAILS_ROOT_PATH=$([[ "$RAILS_ROOT" != "" ]] && echo "$RAILS_ROOT" || echo "$(pwd)")
+
+SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+AUTHND_VENDOR_PATH="${SCRIPT_DIR}/../vendor/authnd"
+TOKEN_EXCHANGE_SIGNING_KEY_PATH="${SCRIPT_DIR}/../test/fixtures/authnd/ta-signing-key.pem"
+
+if [ ! -f "${AUTHND_VENDOR_PATH}/bin/authnd" ]; then
+  echo "Rebuilding authnd..."
+  cd ${AUTHND_VENDOR_PATH} && make api > /dev/null
+fi
+
+source $SCRIPT_DIR/dx/lib/subproject-containers
+
+if [[ "$(cat ${RAILS_ROOT_PATH}/tmp/runtime/current 2>/dev/null)" == "enterprise" ]]
+then
+  export ENTERPRISE=1
+fi
+
+NAME=authnd
+DEFAULT_AUTHND_PORT="8092"
+
+# decides which database to use: dev or test
+case "$1" in
+  --test)
+    echo "authnd will use dotcom test databases"
+    ENV="test"
+    GITHUB_DATABASE="github_test"
+    AUTHND_DATABASE="github_test_authnd"
+    DEFAULT_AUTHND_PORT="8082"
+
+    shift ;;
+
+  *)
+    ENV="development"
+    if [ "$ENTERPRISE" == "1" ]; then
+      echo "authnd will use enterprise development databases"
+      GITHUB_DATABASE="github_enterprise"
+      AUTHND_DATABASE="github_enterprise_authnd"
+    else
+      echo "authnd will use dotcom development databases"
+      GITHUB_DATABASE="github_development"
+      AUTHND_DATABASE="github_development_authnd"
+    fi
+esac
+AUTHND_PORT="${AUTHND_PORT:=$DEFAULT_AUTHND_PORT}"
+HTTP_ADDR="127.0.0.1:${AUTHND_PORT}"
+
+SKIP_AUTHND="${SKIP_AUTHND:=false}"
+if [ "$SKIP_AUTHND" != "true" ] && [ "$SKIP_AUTHND" != "1" ]; then
+  if [ ! -f "${AUTHND_VENDOR_PATH}/dev/gh-mobile-dev.pem" ]; then
+    echo "GH Mobile development keypair is missing, please run 'script/build-subproject authnd' to generate them"
+    exit 1
+  fi
+  if [ ! -f "${AUTHND_VENDOR_PATH}/dev/rsa256-priv-key.pem" ]; then
+    echo "Identity provider development keypair is missing, please run 'script/build-subproject authnd' to generate them"
+    exit 1
+  fi
+fi
+
+start_authnd(){
+  cd ${AUTHND_VENDOR_PATH} || exit 1
+  echo "starting service on $HTTP_ADDR"
+  SERVER_OPTS=(
+    "--dotcom-path /workspaces/github"
+    "--mysql-port 3306"
+  )
+
+  # in test mode we can't require dotcom to be running since that's
+  # not a requirement of running tests
+  if [ "$ENV" == "test" ]; then
+    SERVER_OPTS=(
+      --no-build
+      --no-dotcom
+      "${SERVER_OPTS[@]}")
+  fi
+
+  if [ "$ENV" == "development" ]; then
+    if [ ! -f $AUTHND_VENDOR_PATH/.setup ]; then
+      echo "running authnd setup..."
+      $AUTHND_VENDOR_PATH/script/db-migrate development-default-port --ignore_table="authentication_key_values|ar_internal_metadata"
+      touch $AUTHND_VENDOR_PATH/.setup
+    else
+      echo "skipping authnd setup"
+    fi
+  fi
+
+  AUTHND_PORT=${AUTHND_PORT} HEAVEN_DEPLOYED_ENV=${ENV} TOKEN_EXCHANGE_SIGNING_KEY_PATH=${TOKEN_EXCHANGE_SIGNING_KEY_PATH} exec script/server ${SERVER_OPTS[@]}
+}
+
+start_authnd_docker(){
+  CONTAINER_NAME="${NAME}-${AUTHND_PORT}"
+  SUBPROJECT_VERSION=$(subproject_version "authnd")
+  MYSQL_ADDR="localhost:3306"
+  echo "starting service on in \"$CONTAINER_NAME\" container"
+  DATABASE_CONFIG_PATH=${DATABASE_CONFIG_PATH:="/app/config/databases.yml"}
+
+  # Pull out any AUTHND_* environment variables that are set and create an environment file
+  # This is because test/test_helpers/test_services.rb sets a bunch of AUTHND_* environment
+  # variables and we need to pass these through to the container.
+  AUTHND_ENV_FILE=$(env_file "^AUTHND_.*")
+
+  # Run the service.
+  # We need to expose all the variables required in CI too
+  echo "starting subproject"
+  set -x
+  start_subproject --name ${CONTAINER_NAME} \
+    -e HTTP_ADDR=${HTTP_ADDR} \
+    -e AUTHND_PORT=${AUTHND_PORT} \
+    -e CODESPACES=true \
+    -e MYSQL_AUTHND_RO_HOST=$MYSQL_ADDR \
+    -e MYSQL_AUTHND_RW_HOST=$MYSQL_ADDR \
+    -e MYSQL_AUTHND_STATS_HOST=$MYSQL_ADDR \
+    -e IDENTITY_PRIVATE_KEY="$(cat ${AUTHND_VENDOR_PATH}/dev/rsa256-priv-key.pem)" \
+    -e IDENTITY_PUBLIC_KEY="$(cat ${AUTHND_VENDOR_PATH}/dev/rsa256-key.pub)" \
+    -e IDENTITY_CERTIFICATE="$(cat ${AUTHND_VENDOR_PATH}/dev/rsa256-priv-key.crt)" \
+    -e GITHUB_DATABASE="${GITHUB_DATABASE}" \
+    -e AUTHND_DATABASE="${AUTHND_DATABASE}" \
+    -e HEAVEN_DEPLOYED_ENV=${ENV} \
+    -e DOTCOM_CI_MODE=${CI} \
+    -e DATABASE_CONFIG_PATH=${DATABASE_CONFIG_PATH} \
+    -v ${AUTHND_VENDOR_PATH}/config:/app/config \
+    -v ${AUTHND_VENDOR_PATH}/dev:/app/dev \
+    -v ${SCRIPT_DIR}/../test/fixtures/authnd/ta-signing-key.pem:/app/dev/ta-signing-key.pem \
+    -v ${SCRIPT_DIR}/../test/fixtures/authnd/ta-signing-key.pub:/app/dev/ta-signing-key.pub \
+    --env-file $AUTHND_ENV_FILE \
+    --entrypoint /app/bin/authnd \
+    "ghcr.io/github/authnd/authnd-focal:${SUBPROJECT_VERSION}"
+}
+
+# prevent authnd from breaking dev for users w/o docker installed
+if [[ "$DX_EDGE" = true ]] && [[ "$DX_FEATURE_SUBPROJECT_CONTAINERS" = true ]]; then
+  start_authnd_docker
+elif [ "$GITHUB_CI" = "1" ] || [ "$GITHUB_USE_DOCKER" = "1" ]; then
+  if [[ "$DX_FEATURE_SUBPROJECT_CONTAINERS" = true ]]; then
+    start_authnd_docker
+  else
+    start_authnd
+  fi
+elif [ "$SKIP_AUTHND" = "true" ] || [ "$SKIP_AUTHND" = "1" ]; then
+  echo "authnd has been disabled"
+  while true; do sleep 10000; done
+else
+  if [ ! -x ${AUTHND_VENDOR_PATH}/bin/authnd ]; then
+  cat << EOF
+The authnd server is not built and could not be started, this could lead to:
+ - requests not working as expected in dotcom
+
+In order to address the above problems:
+ - install and start docker - this only used to build authnd, can be stopped afterwards
+ - build authnd: run script/build-subproject authnd
+   - if the above command returns "authnd build <SHA> is up-to-date", then run rm vendor/authnd/.built
+   - feel free to stop docker after this if it's killing your CPU in your machine
+ - test authnd works: run script/authnd-server to check the server is working as expected. If you see a long log message and you don't see this message anymore, then you are done!
+
+This script will block indefinitely in order to avoid breaking bin/server
+
+If you keep seeing this message, please contact #authentication
+EOF
+  fi
+  until [ -x ${AUTHND_VENDOR_PATH}/bin/authnd ]; do sleep 60; done
+  start_authnd
+fi

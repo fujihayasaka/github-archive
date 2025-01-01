@@ -1,0 +1,126 @@
+<% page_info title: "GitHub Models · Stafftools", selected_link: :github_models %>
+
+<%= render layout: "stafftools/stafftools" do %>
+  <%= render Primer::Beta::Subhead.new do |component| %>
+    <% component.with_heading(tag: :h1) do %>
+      GitHub Models
+    <% end %>
+  <% end %>
+  <%= render(Primer::Beta::BorderBox.new(padding: :condensed, mt: 4)) do |component| %>
+    <% component.with_row(display: :flex, align_items: :center) do %>
+      <div class="flex-auto">
+        <h2 class="h5">
+          Catalog data
+          <span class="d-inline-block mx-1 fgColor-muted h6">&middot;</span>
+          <span class="fgColor-muted text-normal h6">
+            <%= link_to "Check last successful update in datadog", "https://gh.io/models-catalog-sync", class: "Link--inTextBlock" %>.
+          </span>
+        </h2>
+        <div class="note">Enqueue the background job to update catalog data for GitHub Models.</div>
+        <% unless catalog_sync_job_enabled %>
+          <div class="note fgColor-attention">
+            The job is currently turned off and will not run. To turn it on, enable
+            <%= link_to "the feature flag", "https://devportal.githubapp.com/feature-flags/project_neutron_fetch_catalog_items_job/overview", class: "Link--inTextBlock"  %>.
+          </div>
+        <% end %>
+      </div>
+
+      <%= render(Primer::Alpha::Dialog.new(
+        title: "Update GitHub Models catalog data",
+        id: "models-dialog",
+        test_selector: "models-dialog-form",
+      )) do |d| %>
+        <% d.with_show_button { "Sync catalog" } %>
+        <% d.with_header(show_divider: true) %>
+        <%= form_tag stafftools_models_update_path, method: :put do %>
+          <%= render Primer::Alpha::Dialog::Body.new(pt: 3, px: 3, pb: 0) do %>
+            <% unless catalog_sync_job_enabled %>
+              <%= render Primer::Alpha::Banner.new(
+                scheme: :warning,
+                mb: 0,
+              ).with_content("The job is currently turned off and will not run.") %>
+            <% end %>
+            <p>This will fetch the latest GitHub Models catalog data from Azure. It may take a few minutes to complete.</p>
+          <% end %>
+          <%= render Primer::Alpha::Dialog::Footer.new(p: 3) do %>
+            <%= render Primer::Beta::Button.new(scheme: :primary, type: :submit).with_content("Run catalog sync job") %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <% component.with_row(display: :flex, align_items: :center) do %>
+      <div class="flex-auto">
+        <h2 class="h5">Block users</h2>
+        <div class="note">Restrict many GitHub accounts at once from using Models.</div>
+      </div>
+      <%= render(Stafftools::Models::BulkBlocksComponent.new) %>
+    <% end %>
+  <% end %>
+
+  <div class="mt-4 d-flex flex-justify-between flex-items-center">
+    <h2 class="h3">Model list</h2>
+    <%= render(Primer::Alpha::ActionMenu.new) do |menu| %>
+      <% menu.with_show_button do %>
+        <span class="color-fg-muted">Group by:</span>
+        <%= group_by.humanize %>
+      <% end %>
+      <% group_options.each do |option| %>
+        <% menu.with_item(
+          label: option.humanize,
+          active: option == group_by,
+          href: stafftools_models_path(group_by: option),
+        ) %>
+      <% end %>
+    <% end %>
+  </div>
+
+  <% groups.each do |group| %>
+    <%= render(Primer::Beta::BorderBox.new(mt: 3, padding: :condensed)) do |component| %>
+      <% component.with_header do %>
+        <h2 class="h5"><%= group %></h2>
+      <% end %>
+
+      <% models.select { |model| (group_by == "publisher" ? model.publisher : model.visibility) == group }.each do |model| %>
+        <% component.with_row do %>
+          <div class="d-flex flex-justify-between flex-items-center">
+            <%= link_to model.details_path, class: "Link--primary d-flex flex-items-center gap-2" do %>
+              <%= render Stafftools::Models::LogoComponent.new(model: model, flex_shrink: 0, vertical_align: :middle) %>
+              <span class="text-bold"><%= model.friendly_name %></span>
+            <% end %>
+            <%= render Primer::Alpha::ActionMenu.new(
+              select_variant: :single,
+              menu_id: "catalog-item-#{model.id}-visibility",
+            ) do |menu| %>
+              <% menu.with_show_button do %>
+                <span class="color-fg-muted">
+                  <span class="sr-only"><%= model.name %></span>
+                  Visibility:
+                </span>
+                <%= model.visibility.humanize %>
+              <% end %>
+              <% visibilities.each do |visibility| %>
+                <% menu.with_item(
+                  label: visibility.humanize,
+                  active: model.visibility == visibility,
+                  href: stafftools_models_update_visibility_path(model.id),
+                  form_arguments: {
+                    method: :put,
+                    name: "visibility",
+                    value: visibility
+                  }
+                ) %>
+              <% end %>
+            <% end %>
+          </div>
+        <% end%>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if models.total_pages > 1 %>
+    <div class="paginate-container">
+      <%= will_paginate models %>
+    </div>
+  <% end %>
+<% end %>

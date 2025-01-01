@@ -1,0 +1,465 @@
+<%# erblint:counter DeprecatedComponentsCounter 2 %>
+<%
+  page_info(title: "#{ this_user } / copilot", selected_link: :stafftools_user_copilot)
+
+  organization_cancellation_date = this_user.next_metered_billing_cycle_starts_at.to_date - 1.day
+  cloud_trial                    = Billing::EnterpriseCloudTrial.new(this_user)
+  enabled_str = "Enabled"
+  disabled_str = "Disabled"
+  copilot_dotcom_enablement = copilot_organization.copilot_for_dotcom_enabled? ? enabled_str : disabled_str
+  dotcom_chat_enablement = copilot_organization.dotcom_chat_enabled? ? enabled_str : disabled_str
+  pr_summarizations_enablement = copilot_organization.pr_summarizations_enabled? ? enabled_str : disabled_str
+  bing_chat_enablement = copilot_organization.bing_github_chat_enabled? ? enabled_str : disabled_str
+  beta_features_enablement = copilot_organization.beta_features_github_chat_enabled?  ? enabled_str : disabled_str
+%>
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+  <% component.with_header do |h| %>
+    <% h.with_title(tag: :h2) do %>
+      Copilot Access
+    <% end %>
+  <% end %>
+
+  <% component.with_row do %>
+   <%= render(Primer::Beta::Flash.new) do %>
+    <% if copilot_organization.copilot_business.present? %>
+      Copilot Access for <strong>Enterprise Linked Organizations</strong> happens one of two ways:<br>
+      &nbsp;&nbsp;1. Enterprise admin enables Copilot for this organization<br>
+      &nbsp;&nbsp;2. Staff enables <%= Copilot.business_product_name %>/Enterprise Trial
+    <% else %>
+      Copilot Access for <strong>Standalone Organizations</strong> happens one of two ways:<br>
+      &nbsp;&nbsp;1. Organization admin enables Copilot<br>
+      &nbsp;&nbsp;2. Staff enables a <%= Copilot.business_product_name %> Trial
+    <% end %>
+   <% end %>
+  <% end %>
+
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Copilot Access",
+      copilot_organization.copilot_enablement_setting,
+      "Does this organization have the ability to use Copilot?",
+      label_scheme: :accent,
+    ) %>
+  <% end %>
+
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Enterprise Linked?",
+      copilot_organization.copilot_business.present?,
+      "Is this organization linked to an Enterprise?",
+    ) %>
+  <% end %>
+
+  <% if copilot_organization.copilot_business.present? %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "Linked Enterprise",
+        link_to(
+          copilot_organization.copilot_business.slug,
+          stafftools_copilot_path(copilot_organization.copilot_business),
+          target: "_blank",
+        ),
+        "The Enterprise in the feature flag that this organization is part of.",
+      ) %>
+    <% end %>
+
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "Linked Enterprise On GHEC Trial?",
+        copilot_organization.business.trial?,
+        copilot_organization.business.trial? ? "#{copilot_organization.business.trial_days_remaining} days remaining" : "",
+      ) %>
+    <% end %>
+
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "GHEC for Copilot Only?",
+        copilot_organization.business.seats_plan_basic?,
+        "These enterprises have no SDLC functionality and can only manage #{Copilot.business_product_name} seats",
+      ) %>
+    <% end %>
+
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "Copilot Enabled",
+        copilot_organization.copilot_enabled?,
+        "Did the Enterprise admin enable Copilot for this organization?",
+      ) %>
+    <% end %>
+
+  <% else %>
+
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "Organization On Business Plus (GHEC) Trial?",
+        cloud_trial.active?,
+        cloud_trial.description,
+      ) %>
+    <% end %>
+
+  <% end %>
+<% end %>
+
+<% if copilot_organization.copilot_enabled? %>
+  <%= render(Stafftools::Copilot::PlanComponent.new(copilot_organization)) %>
+<% end %>
+
+<br>
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+  <% component.with_header do |h| %>
+    <% h.with_title(tag: :h2) do %>
+      Copilot Billing
+    <% end %>
+  <% end %>
+  <% if copilot_organization.shares_payment_method_with_blocked_user? %>
+    <% component.with_row do %>
+      <%= render(Primer::Beta::Flash.new(scheme: :danger, full_when_narrow: true, icon: :"alert-fill")) do %>
+      This organizations shares a payment method with a blocked account.
+      <a target="_blank" href="<%= lookup_stafftools_reused_card_fingerprints_path(card_fingerprint: copilot_organization.organization_object.payment_method.card_fingerprint) %>" <%= test_selector("lookup-card-fingerprint-link") %>>Lookup card fingerprint</a>
+      <% end %>
+    <% end %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Copilot Billing Type",
+      copilot_organization.copilot_billing_type,
+      "This is used in instrumentation",
+      label_scheme: :accent,
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Copilot Metered Services Billable? (Billing Check)",
+      copilot_organization.billable_object.metered_services_billable?[:billable],
+      "Reason: <strong>#{copilot_organization.billable_object.metered_services_billable?[:reason]}</strong>".html_safe, # rubocop:disable Rails/OutputSafety
+    ) %>
+  <% end %>
+
+  <% if copilot_organization.can_emit_usage? %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "Emitting Usage?",
+        true,
+        "This organization is emitting usage to Meuse",
+      ) %>
+    <% end %>
+  <% else %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "Emitting Usage?",
+        false,
+        "This organization is not emitting usage to Meuse",
+      ) %>
+    <% end %>
+
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "In Free Feature Flag?",
+        copilot_organization.copilot_for_business_free?,
+        "Is this organization or linked enterprise in the free feature flag?",
+      ) %>
+    <% end %>
+  <% end %>
+<% end %>
+<br>
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+  <% component.with_header do |h| %>
+    <% h.with_title(tag: :h2) do %>
+      Copilot Settings
+    <% end %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Seat Management Setting",
+      copilot_organization.friendly_seat_management_setting,
+      "How this organization has configured Copilot access",
+      label_scheme: copilot_organization.seat_management_setting == "disabled" ? :danger : :success
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_IN_DOTCOM,
+      copilot_organization.copilot_for_dotcom_setting == "unconfigured" ? "Unconfigured (Blocked)" : copilot_dotcom_enablement,
+      "Whether this organization has enabled or disabled #{Copilot::COPILOT_IN_DOTCOM}",
+      label_scheme: copilot_dotcom_enablement == enabled_str ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_CHAT_IN_IDE,
+      copilot_organization.chat_setting == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.chat_setting.capitalize,
+      "Whether this organization has setup chat",
+      label_scheme: copilot_organization.chat_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::DOTCOM_PREVIEW_FEATURES,
+      beta_features_enablement,
+      "Whether this organization has enabled or disabled the use of preview Copilot features in github.com (part of #{Copilot::ENTERPRISE_PRODUCT_NAME})",
+      label_scheme: beta_features_enablement == enabled_str ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::EDITOR_PREVIEW_FEATURES,
+      copilot_organization.editor_preview_features_setting == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.editor_preview_features_setting.capitalize,
+      "Whether this organization has enabled or disabled editor preview features",
+      label_scheme: copilot_organization.editor_preview_features_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_CHAT_IN_MOBILE,
+      copilot_organization.mobile_chat_setting == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.mobile_chat_setting.capitalize,
+      "Whether this organization has enabled or disabled Copilot Chat in GitHub Mobile",
+      label_scheme: copilot_organization.mobile_chat_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_PUBLIC_CODE_SUGGESTIONS,
+      !copilot_organization.public_code_suggestions_configured? ? "Unconfigured" : copilot_organization.allow_public_code_suggestions? ? "Allow" : "Block",
+      "Whether this organization has allowed or blocked public code suggestions",
+      label_scheme: copilot_organization.allow_public_code_suggestions? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::CLI_UI_NAME,
+      copilot_organization.cli_setting == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.cli_setting.capitalize,
+      "Whether this organization has enabled or disabled Copilot in the CLI",
+      label_scheme: copilot_organization.cli_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_DESKTOP,
+      copilot_organization.desktop_setting == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.desktop_setting.capitalize,
+      "Whether this organization has enabled or disabled #{Copilot::COPILOT_DESKTOP}",
+      label_scheme: copilot_organization.desktop_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+    <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_EXTENSION,
+      copilot_organization.copilot_extensions_setting == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.copilot_extensions_setting.capitalize,
+      "Whether this organization has enabled or disabled Copilot Extensions",
+      label_scheme: copilot_organization.copilot_extensions_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "#{Copilot::COPILOT_IN_DOTCOM} Chat",
+      copilot_organization.dotcom_chat_setting == "unconfigured" ? "Unconfigured (Blocked)" : dotcom_chat_enablement,
+      "Whether this organization has enabled or disabled Copilot Chat for github.com (part of #{Copilot::ENTERPRISE_PRODUCT_NAME})",
+      label_scheme: dotcom_chat_enablement == enabled_str ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_BING_ACCESS,
+      bing_chat_enablement,
+      "Whether this organization has enabled or disabled the use of Bing Search in Copilot Chat for github.com (part of #{Copilot::ENTERPRISE_PRODUCT_NAME})",
+      label_scheme: bing_chat_enablement == enabled_str ? :success : :danger
+    ) %>
+  <% end %>
+
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_PR_SUMMARIZATIONS,
+      copilot_organization.pr_summarizations_setting == "unconfigured" ? "Unconfigured (Blocked)" : pr_summarizations_enablement,
+      "Whether this organization has enabled or disabled Copilot PR Summarizations (part of #{Copilot::ENTERPRISE_PRODUCT_NAME})",
+      label_scheme: pr_summarizations_enablement == enabled_str ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_FINETUNING,
+      copilot_organization.custom_models_setting == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.custom_models_setting.capitalize,
+      "Whether this organization has enabled or disabled Copilot fine-tuning",
+      label_scheme: copilot_organization.custom_models_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Private Docs",
+      copilot_organization.private_docs_setting == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.private_docs_setting.capitalize,
+      "Whether this organization has enabled or disabled Copilot for Private Docs",
+      label_scheme: copilot_organization.private_docs_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_O1,
+      copilot_organization.o1_setting == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.o1_setting.capitalize,
+      "Whether this organization has enabled or disabled OpenAI o1 models",
+      label_scheme: copilot_organization.o1_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_O3,
+      copilot_organization.o3_setting == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.o3_setting.capitalize,
+      "Whether this organization has enabled or disabled OpenAI o3 models",
+      label_scheme: copilot_organization.o3_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_O_FF,
+      copilot_organization.o_ff_setting == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.o_ff_setting.capitalize,
+      "Whether this organization has enabled or disabled OpenAI GPT-4.5 model",
+      label_scheme: copilot_organization.o_ff_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_O_FM,
+      copilot_organization.o_fm == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.o_fm.capitalize,
+      "Whether this organization has enabled or disabled #{Copilot::COPILOT_O_FM} model",
+      label_scheme: copilot_organization.o_fm_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_O_T,
+      copilot_organization.o_t == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.o_t.capitalize,
+      "Whether this organization has enabled or disabled #{Copilot::COPILOT_O_T} model",
+      label_scheme: copilot_organization.o_t_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_OFO,
+      copilot_organization.ofo == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.ofo.capitalize,
+      "Whether this organization has enabled or disabled #{Copilot::COPILOT_OFO} model",
+      label_scheme: copilot_organization.ofo_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_A_CHAT,
+      copilot_organization.a_chat_setting == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.a_chat_setting.capitalize,
+      "Whether this organization has enabled or disabled Anthropic Claude 3.5 model",
+      label_scheme: copilot_organization.a_chat_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_A_F,
+      copilot_organization.a_f_setting == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.a_f_setting.capitalize,
+      "Whether this organization has enabled or disabled Anthropic Claude 3.7 model",
+      label_scheme: copilot_organization.a_f_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_AFOS,
+      copilot_organization.afos == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.afos.capitalize,
+      "Whether this organization has enabled or disabled #{Copilot::COPILOT_AFOS} model",
+      label_scheme: copilot_organization.afos_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_AL,
+      copilot_organization.al == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.al.capitalize,
+      "Whether this organization has enabled or disabled #{Copilot::COPILOT_AL} model",
+      label_scheme: copilot_organization.al_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% if current_user.feature_enabled?(:copilot_o_f) %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_O_F,
+        copilot_organization.o_f_setting == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.o_f_setting.capitalize,
+        "Whether this organization has enabled or disabled O_F",
+        label_scheme: copilot_organization.o_f_enabled? ? :success : :danger
+      ) %>
+    <% end %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_G_CHAT,
+      copilot_organization.g_chat_setting == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.g_chat_setting.capitalize,
+      "Whether this organization has enabled or disabled Google Gemeni model",
+      label_scheme: copilot_organization.g_chat_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_G_TF,
+      copilot_organization.g_tf_setting == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.g_tf_setting.capitalize,
+      "Whether this organization has enabled or disabled #{Copilot::COPILOT_G_TF} model",
+      label_scheme: copilot_organization.g_tf_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_GTFF,
+      copilot_organization.gtff == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.gtff.capitalize,
+      "Whether this organization has enabled or disabled #{Copilot::COPILOT_GTFF} model",
+      label_scheme: copilot_organization.gtff_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% if current_user.feature_enabled?(:copilot_overages) %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "Additional Copilot premium requests",
+        copilot_organization.overages == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.overages.capitalize,
+        "Whether this organization has enabled or disabled overages",
+        label_scheme: copilot_organization.overages_enabled? ? :success : :danger
+      ) %>
+    <% end %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_SWE_AGENT,
+      copilot_organization.swe_agent == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.swe_agent.capitalize,
+      "Whether this organization has enabled or disabled #{Copilot::COPILOT_SWE_AGENT}",
+      label_scheme: copilot_organization.swe_agent_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_MCP_SERVERS,
+      copilot_organization.mcp == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.mcp.capitalize,
+      "Whether this organization has enabled or disabled #{Copilot::COPILOT_MCP_SERVERS}",
+      label_scheme: copilot_organization.mcp_enabled? ? :success : :danger
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Seat Management Setting",
+      copilot_organization.friendly_seat_management_setting,
+      "How this organization has configured Copilot access",
+      label_scheme: copilot_organization.seat_management_setting == "disabled" ? :danger : :success
+    ) %>
+  <% end %>
+<% end %>
+
+<%= render(Stafftools::Copilot::WaitlistsComponent.new(copilot_organization.organization_object)) %>
+
+<%= render Stafftools::Copilot::MetricsComponent.new(copilot_organization) %>
+
+<%= render Stafftools::Copilot::SettingsCacheComponent.new(copilot_organization) %>
+
+<%= render(Stafftools::Copilot::BusinessTrialComponent.new(
+  this_user,
+  business_trial,
+)) %>
+
+<%= render Stafftools::Copilot::EmailOptInOutComponent.new(
+  entity: this_user,
+  submit_path: stafftools_user_copilot_toggle_email_notifications_path(this_user.display_login),
+  notifications: params[:notifications]
+) %>
+
+<%= render Stafftools::Copilot::AuthAndCaptureComponent.new(entity: this_user) %>
+
+<%= render Stafftools::Copilot::BlockOrganizationComponent.new(organization: this_user) %>
+
+<%= render Stafftools::Copilot::SeatEmissionsComponent.new(copilot_seat_emissions) %>
+
+<%= render Stafftools::Copilot::SeatHistoryComponent.new(this_user) %>

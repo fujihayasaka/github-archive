@@ -1,0 +1,36 @@
+declare const styles: {
+  readonly "activityCaption": string;
+  readonly "activityItem": string;
+  readonly "activityItemActive": string;
+  readonly "activityLogContainer": string;
+  readonly "agentActivityContainer": string;
+  readonly "agentActivityItem": string;
+  readonly "agentActivityItemRow": string;
+  readonly "agentActivityItemStatus": string;
+  readonly "alertBanner": string;
+  readonly "attachment": string;
+  readonly "attachmentToolbar": string;
+  readonly "attachmentsContainer": string;
+  readonly "buttonNaked": string;
+  readonly "captionWithFade": string;
+  readonly "chevron": string;
+  readonly "container": string;
+  readonly "contentArea": string;
+  readonly "firstTimelineItem": string;
+  readonly "form": string;
+  readonly "inputActions": string;
+  readonly "inputContainer": string;
+  readonly "inputError": string;
+  readonly "inputFooter": string;
+  readonly "lastTimelineItem": string;
+  readonly "refinement": string;
+  readonly "refinementActive": string;
+  readonly "skippedActivityContainer": string;
+  readonly "skippedCaption": string;
+  readonly "skippedContainer": string;
+  readonly "stopButton": string;
+  readonly "textarea": string;
+  readonly "timelineBadge": string;
+};
+export = styles;
+

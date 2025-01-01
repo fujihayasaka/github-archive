@@ -1,0 +1,126 @@
+syntax = "proto3";
+
+package github.secretscanning.v1;
+
+option go_package = "github.com/github/secret-scanning-proto/gen/go/v1/api";
+option ruby_package = "GitHub::Proto::SecretScanning::Api::V1";
+
+import "api/v1/shared.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+
+service DryRunsAPI {
+    rpc CancelDryRunsForCustomPattern(CancelDryRunsForCustomPatternRequest) returns (google.protobuf.Empty);
+
+    rpc DryRunMetadataForPattern(DryRunMetadataForPatternRequest) returns (DryRunMetadataForPatternResponse);
+
+    rpc DryRunResultsForPattern(DryRunResultsRequest) returns (DryRunResultsResponse);
+}
+
+message DryRunScope {
+    // custom pattern ID, callers should prefer using the selector
+    uint64 custom_pattern_id = 1 [deprecated = true];
+
+    // owner and scope at which the dry run is stored. 
+    uint64 owner_id = 2;
+    github.secretscanning.v1.OwnerScope owner_scope = 3;
+    // if present, guard any queries against a specific version of a custom pattern to guard against race conditions.
+    string row_version = 4;
+    oneof selector {
+        uint64 pattern_id = 5;
+        uint64 job_group_id = 6;
+    }
+}
+
+message CancelDryRunsForCustomPatternRequest {
+    DryRunScope dry_run_scope = 1;
+    repeated uint64 scan_ids = 2; // legacy v1 dry runs only, not yet deprecated;
+}
+
+message DryRunScanResult {
+    uint64 id = 1;
+    uint64 custom_pattern_id = 2;
+    uint64 repository_id = 3;
+    uint64 scan_id = 4;
+    string token_signature = 5;
+    repeated DryRunScanResultLocation locations = 6;
+    google.protobuf.Timestamp created_at = 7;
+    google.protobuf.Timestamp updated_at = 8;
+}
+
+message DryRunScanResultLocation {
+    string commit_oid = 1;
+    string blob_oid = 2;
+    bytes path = 3;
+    uint64 start_line = 4;
+    uint64 end_line = 5;
+    uint64 start_column = 6;
+    uint64 end_column = 7;
+}
+
+enum DryRunScanStatus {
+    UNKNOWN_SCAN_STATUS = 0;
+    QUEUED = 1;
+    // The user or system cancelled the dry run
+    CANCELLED = 2;
+    COMPLETED = 3;
+    INPROGRESS = 4;
+    FAILED = 5;
+    // NOT_DRY_RUN status is returned when the scan or job group ID on the custom pattern is not a dry run scan.
+    NOT_DRY_RUN = 6;
+    // CANCELLED_TOO_MANY_RESULTS is returned if the dry run exceeded the maximum number of results across all scans.
+    CANCELLED_TOO_MANY_RESULTS = 7;
+}
+
+message DryRunMetadataForPatternRequest {
+    DryRunScope dry_run_scope = 1;
+}
+
+// DryRunStatusScanCount represents a single DryRunScanStatus, and the number of scans currently in that status.
+message DryRunScanStatusCount {
+    DryRunScanStatus status = 1;
+    uint32 count = 2;
+}
+
+message DryRunMetadataForPatternResponse {
+    uint64 custom_pattern_id = 1;
+    oneof job {
+        uint64 scan_id = 2;
+        uint64 job_group_id = 3;
+    }
+    // group_status returns the current status of the overall dry run
+    DryRunScanStatus status = 4;
+
+    // repository_status_counts contains a list of DryRunScanStatus and their current counts.
+    // For repository-scoped patterns, this will have one entry, with the status above.
+    // For job-group each DryRunScanStatus will only appear once.
+    // Note: Ideally we would use a map, but proto does not allow enums to be map keys, and since string representations
+    // of the enum may be different across languages, it's probably not safe to use something like map<string, uint32>
+    // with the String() method on the generated code.
+    repeated DryRunScanStatusCount scan_status_counts = 5;
+
+    // started_at represents the time that scan or job group was started
+    google.protobuf.Timestamp started_at = 6;
+    // finished_at represents the time that the last dry run scan either completed, failed, or was cancelled.
+    google.protobuf.Timestamp finished_at = 7;
+
+    uint32 total_result_count = 8;
+}
+
+message DryRunResultsRequest {
+    DryRunScope dry_run_scope = 1;
+    // the maximum number of results to request; default is 5
+    uint32 limit = 2;
+    // cursor is an opaque set of bytes for fetch for the next set of results; if empty, the first page is fetched.
+    bytes cursor = 3;
+}
+
+message DryRunResultsResponse {
+    // results is a list of results discovered in id order.
+    repeated DryRunScanResult results = 1;
+    // next_cursor represents an opaque object to be used to identify where to continue on a stream of dry run results.
+    bytes next_cursor = 2;
+    // previous_cursor represents an opaque object to be used to identify the preceding stream of dry run results.
+    bytes previous_cursor = 3;
+}

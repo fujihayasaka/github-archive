@@ -1,0 +1,86 @@
+<% dialog_action = params[:bulk_action] %>
+<% dialog_term = dialog_action == "add" ? "to" : "from" %>
+
+<%= form_tag enterprise_people_bulk_actions_path(view.business) do %>
+  <%= render(Primer::Alpha::Dialog::Body.new(mt: 3)) do %>
+    <% if dialog_action == "remove" && BusinessTeam.enabled_for_enterprise?(business: view.business) %>
+      <%= render(Primer::Alpha::Banner.new(scheme: :warning, mb: 4, test_selector: "business-teams-warning-banner")) { 
+        "Only users with direct organization membership will be removed. Users with organization membership through an enterprise team will need to be removed from the team instead."
+      } %>
+    <% end %>
+
+    <p>
+      Users to be <%= dialog_action %><%= "e" unless dialog_action == "remove" %>d <%= dialog_term %> selected organizations:
+    </p>
+
+    <div class="mb-0">
+      <% view.selected_users.each do |user| %>
+        <div class="d-inline-block bgColor-muted borderColor-muted border mr-3 mb-3 circle pl-1 pr-2 pb-1">
+          <%= linked_avatar_for(user, 16, img_class: "avatar mr-1") %>
+          <%= profile_link(user) %>
+        </div>
+      <% end %>
+    </div>
+
+    <% if dialog_action == "remove" && view.all_organizations_team_users.any? %>
+      <p class="mt-4">
+        Users with team access to all organizations:
+      </p>
+      <div class="mb-0">
+        <% view.all_organizations_team_users.each do |user| %>
+          <div class="d-inline-block bgColor-muted borderColor-muted border mr-3 mb-3 circle pl-1 pr-2 pb-1">
+            <%= linked_avatar_for(user, 16, img_class: "avatar mr-1") %>
+            <%= profile_link(user) %>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
+
+    <input type="hidden" name="bulk_action" value="<%= dialog_action %>">
+    <p class="mt-2">Please select organizations to <%= dialog_action %> the selected users <%= dialog_term %>.</p>
+
+    <div class="mb-0">
+      <ul class="list-style-none border rounded-2">
+        <% first = true %>
+        <% view.business.organizations.each do |org| %>
+          <% if org.adminable_by?(current_user) && (view.business.enterprise_managed_user_enabled? || !org.saml_sso_enforced?) %>
+            <li class="d-flex flex-items-start flex-1 pb-1 pt-1 <%= "border-top" if !first %>">
+              <div class="table-list-cell-checkbox py-1 v-align-middle pr-3 pl-2">
+                <input type="checkbox" name="organization_ids[]"
+                  value="<%= org.id %>" aria-labelledby="org-<%= org.id %>"
+                  <%= test_selector "actions-dialog-org-checkbox" %>>
+              </div>
+              <div class="d-flex flex-items-center">
+                <div>
+                  <%= link_to user_path(org) do %>
+                    <%= render GitHub::AvatarComponent.new actor: org, size: 16, mr: 2 %>
+                    <%= org.safe_profile_name %>
+                  <% end %>
+                </div>
+              </div>
+            </li>
+            <% if first %>
+              <% first = false %>
+            <% end %>
+          <% end %>
+        <% end %>
+      </ul>
+    </div>
+
+    <p class="note">Only organizations where you are an owner and without SAML SSO enforced can be selected.</p>
+  <% end %>
+
+  <%= render(Primer::Alpha::Dialog::Footer.new) do %>
+    <% users_count = view.selected_users.size %>
+    <% view.selected_users.each do |user| %>
+      <input type="hidden" name="user_ids[]" value="<%= user.id %>" <%= test_selector "actions-dialog-selected-user" %>>
+    <% end %>
+    <%= render Primer::Beta::Button.new(
+      type: :submit,
+      scheme: :danger,
+      data: { disable_with: "" }
+    ) do %>
+      <%= dialog_action.capitalize %> <%= "user".pluralize(users_count) %>
+    <% end %>
+  <% end %>
+<% end %>

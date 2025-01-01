@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+# This script is intended to inject dynamic environment variables into local Kube deployment
+# How it works:
+# - "script/setup" creates "ims-env-dynamic" configmap with default values
+# - this script updates content of "ims-env-dynamic" configmap. It is called from "script/server", "script/test-e2e", etc
+# - dev and test environments import variables from "ims-env-dynamic" configmap"
+
+# Usage:
+#   script/helpers/kube-set-dynamic-env "GITHUB_USER=$GITHUB_USER" "AQUEDUCT_APP=my-app"
+
+set -e
+
+KUBE_CONFIG_NAME="configmap/ims-env-dynamic"
+KUBE_NAMESPACE="hosted-compute-ims"
+
+PATCH="data:"
+for KEY_VALUE_RAW in "$@"; do
+    KEY_VALUE=(${KEY_VALUE_RAW//=/ })
+    PATCH="$PATCH"$'\n'" ${KEY_VALUE[0]}: \"${KEY_VALUE[1]}\""
+done
+
+echo 'Injecting environment variables into "ims-env-dynamic" configmap'
+kubectl patch $KUBE_CONFIG_NAME --namespace $KUBE_NAMESPACE --type merge --patch "$PATCH"

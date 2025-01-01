@@ -1,0 +1,66 @@
+<%# erblint:counter DeprecatedComponentsCounter 2 %>
+<% page_info \
+  :title => "Upgrade data plan",
+  responsive: false,
+  :selected_link => :"#{params[:target] || "user"}_billing_settings" %>
+
+<% content = capture do %>
+  <% if target.invoiced? %>
+     <%= render(Primer::Beta::Flash.new(scheme: :warning, mb: 4)) do %>
+      Please contact your sales representatives or <a class="Link--inTextBlock" href="https://github.com/enterprise/contact" target="_blank" rel="noreferrer">our sales team</a> to add more data packs to your plan.
+    <% end %>
+  <% elsif target.in_a_sales_managed_business? %>
+    <% if GitHub.flipper[:banner_migration].enabled?(current_user) %>
+      <%= render(Primer::Alpha::Banner.new(scheme: :warning, mb: 4)) do %>
+        Please contact your GitHub Enterprise administrator to add more data packs to your plan.
+      <% end %>
+    <% else %>
+      <%= render(Primer::Beta::Flash.new(scheme: :warning, mb: 4)) do %>
+        Please contact your GitHub Enterprise administrator to add more data packs to your plan.
+      <% end %>
+    <% end %>
+  <% else %>
+
+    <%= render Primer::Beta::Subhead.new do |component| %>
+      <% component.with_heading(tag: :h2) do %>
+        <%= link_to "Billing", target_billing_path(target), "data-pjax" => true, class: "Link--inTextBlock" %>
+         / Upgrade data plan
+      <% end %>
+    <% end %>
+
+    <p>A data plan is only necessary if you are using
+    <%= link_to "Git Large File Storage (Git LFS)", "https://git-lfs.github.com?utm_source=github_site&utm_medium=billing_upgrade_link&utm_campaign=gitlfs", class: "Link--inTextBlock" %>.</p>
+
+    <% if allowed_to_purchace_data_packs? %>
+      <%= form_for data_pack_change.asset_status,
+        :method => :put,
+        :url => target_billing_data_plan_path(target),
+        :html => {"aria-label": "Upgrade data plan"} do |f| %>
+
+        <%= render "asset_status/upgrade_form_fields",
+          f: f,
+          data_pack_change: data_pack_change,
+          target: target
+        %>
+      <% end %>
+    <% else %>
+      <div class="border-top py-3">
+        <%= render(TradeCompliance::TradeScreeningRestrictionNoticeComponent.new(
+          target:,
+          feature_type: :cost_management,
+          title: "You can't proceed at this time",
+        )) %>
+      </div>
+    <% end %>
+  <% end %>
+<% end %>
+
+<% if current_context.is_a?(Organization) %>
+  <%= render layout: "orgs/settings/layout" do %>
+    <%= content %>
+  <% end %>
+<% else %>
+  <%= render layout: "settings/settings" do %>
+    <%= content %>
+  <% end %>
+<% end %>

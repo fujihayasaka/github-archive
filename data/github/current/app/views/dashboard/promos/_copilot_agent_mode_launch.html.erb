@@ -1,0 +1,177 @@
+<%
+    nudge_html_element       = "a"
+    nudge_category           = "dashboard_copilot_agent_mode_launch_nudge"
+    nudge_location           = "dashboard_right_sidebar"
+    nudge_id                 = :dashboard_copilot_agent_mode_launch_nudge
+    nudge_group              = :discover
+    variant_count            = 3
+
+    experiment_id = "dashboard_copilot_agent_mode_launch_nudge"
+
+    # Get initial variant from experiment (0, 1, or 2)
+    initial_variant = hawaii_experiment_variant(
+      experiment_id: experiment_id,
+      user_id: current_user.id,
+      variant_count: variant_count
+    )
+
+    # Multivariate (A|B...|Z) experiment overrides
+    # For basic A|B tests the logic would need to be adjusted
+
+    # Control group can be disabled via feature flag but only utilized
+    # if a preference has been set via one of the following feature flags
+    # This is short-lived code that only the author of this commit will use
+    is_control_disabled = user_feature_enabled?(:dashboard_copilot_agent_mode_launch_nudge_disable_control)
+
+    # Override variant based on feature flags
+    variant = initial_variant
+    if user_feature_enabled?(:dashboard_copilot_agent_mode_launch_nudge_variant_1_preference)
+      # Force variant 1 if not control group or if control is disabled
+      variant = 1 if variant != 0 || is_control_disabled
+    end
+
+    if user_feature_enabled?(:dashboard_copilot_agent_mode_launch_nudge_variant_2_preference)
+      # Force variant 2 if not control group or if control is disabled
+      variant = 2 if variant != 0 || is_control_disabled
+    end
+%>
+
+<div class="js-notice marketing-banner" <%= test_selector(nudge_category) %>>
+  <% case variant %>
+  <% when 0 %>
+    <%# This is for the purposes of an A|B test where B is "no experience" so we are intentionally displaying nothing %>
+    <span <%= test_selector("#{nudge_category}_#{variant}") %>></span>
+    <%= content_tag(
+      :span,
+      data: {
+        **analytics_visible_attributes(
+          category: "#{nudge_category}_#{variant}"
+        )
+      }
+    ) do %>
+    <% end %>
+  <% when 1 %>
+    <%  current_user.track_nudge_impression(id: nudge_id, group: nudge_group) %>
+    <%= form_tag(
+      dismiss_notice_path(nudge_id, { nudge: true, group: nudge_group }),
+      class: "Box position-relative rounded-2 mb-4 p-3 js-notice-dismiss overflow-hidden",
+      style: "background: linear-gradient(90deg, #060628 0%, #080535 100%); z-index: 1; padding-top: 8px !important; padding-bottom: 13px !important; width: 356px;",
+      data: analytics_visible_attributes(category: "#{nudge_category}_#{variant}", group: nudge_group)
+    ) do %>
+      <span <%= test_selector("#{nudge_category}_#{variant}") %>></span>
+      <img src="<%= image_path('modules/dashboard/promos/general/gradient-bg-copilot-1746115964.retina.jpg') %>" alt="" width="355" height="215" class="position-absolute events-none" style="z-index: -1; object-fit: cover; bottom: -1px; right: 0px; width: 100%; height: 102% !important;">
+
+      <div class="position-absolute p-2" style="top: 4px; right: 6px; z-index: 1;">
+        <%= render(Primer::Beta::CloseButton.new(
+          type: :submit,
+          color: :on_emphasis,
+          style: "color: #ffffff !important",
+          data: analytics_click_attributes(
+            category: "#{nudge_category}_1",
+            tag: nudge_html_element,
+            action: "dismiss",
+            location: nudge_location,
+            group: nudge_group,
+          ))) %>
+      </div>
+
+      <div class="position-relative z-1">
+        <h3 class="col-11" style="color: #ffffff !important; letter-spacing: -0.02em; margin-bottom:17px;">
+          Agent mode: run and done
+        </h3>
+
+        <div style="max-width: 220px;">
+          <span style="margin-bottom: 5px; font-size: 12px; display: block; color: #ffffff !important; background: url(<%= image_path("modules/dashboard/promos/general/green-check-1744981421.svg") %>) no-repeat left top 2px; padding-left: 19px; line-height: 120%;">Edits across files, runs tests, validates changes</span>
+          <span style="margin-bottom: 5px; font-size: 12px; display: block; color: #ffffff !important; background: url(<%= image_path("modules/dashboard/promos/general/green-check-1744981421.svg") %>) no-repeat left top 2px; padding-left: 19px; line-height: 120%;">Supports Claude 3.5/3.7 Sonnet, o1, and more</span>
+          <span style="margin-bottom: 5px; font-size: 12px; display: block; color: #ffffff !important; background: url(<%= image_path("modules/dashboard/promos/general/green-check-1744981421.svg") %>) no-repeat left top 2px; padding-left: 19px; line-height: 120%;">Integrates with MCP servers</span>
+        </div>
+
+        <%= render Primer::Beta::Button.new(
+          size: :medium,
+          tag: :a,
+          href: "/in-product-messaging/dismiss-and-redirect?group=#{nudge_group}&notice=#{nudge_id}&destination_key=#{nudge_category}",
+          block: true,
+          classes: "dash-promo-dark-btn",
+          data: analytics_click_attributes(
+            category: "#{nudge_category}_#{variant}",
+            tag: nudge_html_element,
+            action: "open_in_vs_code",
+            location: nudge_location,
+            group: nudge_group,
+          )
+        ) do %>
+          <span style="font-size: 14px; display: block; background: url(<%= image_path("modules/dashboard/promos/general/vs-logo-1746017362.svg") %>) no-repeat left center; padding-left: 25px;">Open in VS Code</span>
+        <% end %>
+      </div>
+    <% end %>
+  <% when 2 %>
+    <%  current_user.track_nudge_impression(id: nudge_id, group: nudge_group) %>
+    <%= form_tag(
+      dismiss_notice_path(nudge_id, { nudge: true, group: nudge_group }),
+      class: "Box position-relative rounded-2 mb-4 p-3 js-notice-dismiss overflow-hidden",
+      style: "background: linear-gradient(90deg, #060628 0%, #080535 100%); z-index: 1; padding-top: 13px !important; padding-bottom: 13px !important; width: 356px;",
+      data: analytics_visible_attributes(category: "#{nudge_category}_#{variant}", group: nudge_group)
+    ) do %>
+      <span <%= test_selector("#{nudge_category}_#{variant}") %>></span>
+      <img src="<%= image_path('modules/dashboard/promos/copilot-agent-mode-launch/bg-1.retina.jpg') %>" alt="" width="355" height="215" class="position-absolute events-none" style="z-index: -1; object-fit: cover; bottom: -1px; right: 0px; width: 100%; height: 102% !important;">
+
+      <div class="position-absolute p-2" style="top: 4px; right: 6px; z-index: 1;">
+        <%= render(Primer::Beta::CloseButton.new(
+          type: :submit,
+          color: :on_emphasis,
+          style: "color: #ffffff !important",
+          data: analytics_click_attributes(
+            category: "#{nudge_category}_#{variant}",
+            tag: nudge_html_element,
+            action: "dismiss",
+            location: nudge_location,
+            group: nudge_group,
+          ))) %>
+      </div>
+
+      <div class="position-relative z-1">
+        <%= render Primer::Beta::Button.new(
+          size: :medium,
+          tag: :a,
+          href: "/in-product-messaging/dismiss-and-redirect?group=#{nudge_group}&notice=#{nudge_id}&destination_key=#{nudge_category}",
+          block: true,
+          classes: "dash-promo-dark-btn",
+          style: "margin-top: 160px;",
+          data: analytics_click_attributes(
+            category: "#{nudge_category}_#{variant}",
+            tag: nudge_html_element,
+            action: "open_in_vs_code",
+            location: nudge_location,
+            group: nudge_group,
+          )
+        ) do %>
+          <span style="font-size: 14px; display: block; background: url(<%= image_path("modules/dashboard/promos/general/vs-logo-1746017362.svg") %>) no-repeat left center; padding-left: 25px;">Open in VS Code</span>
+        <% end %>
+      </div>
+
+    <% end %>
+  <% end %>
+</div>
+
+<style>
+  .dash-promo-dark-btn {
+    margin-top: 24px;
+    min-height: 36px;
+    border-radius: 8px;
+    font-weight: 600;
+    color: #000000 !important;
+    background: #ffffff !important;
+    letter-spacing: -0.02em;
+    border: 1px solid #6e7781 !important;
+  }
+
+  .dash-promo-dark-btn:hover {
+    background: #f5f5f5 !important;
+  }
+
+  @media (max-width: 1450px) {
+    .marketing-banner {
+      display: none !important;
+    }
+  }
+</style>

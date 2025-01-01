@@ -1,0 +1,76 @@
+#!/bin/bash
+set -e
+
+echo "Getting local codespace details"
+raw_response=$(gh api "/user/codespaces/$CODESPACE_NAME?internal=true")
+gh_exit_status=$?
+
+if [[ $gh_exit_status -ne 0 ]]; then
+    echo "Error: 'gh api' command failed with exit status $gh_exit_status."
+    echo "Response: $raw_response"
+    exit 1
+fi
+
+if [[ -z "$raw_response" ]]; then
+    echo "Error: Received empty response from 'gh api'."
+    exit 1
+fi
+
+# format JSON structure needed by dotcom
+formatted_json=$(echo "$raw_response" | jq --compact-output \
+  '{
+     cloud_environment: {
+       guid: .environment_id
+     },
+     environment_data: {
+       state: .state,
+       connection: .connection,
+       friendlyName: .name,
+       skuDisplayName: .machine.display_name,
+       skuName: .machine.name,
+       location: .location,
+       features: .feature_flags,
+       devcontainer_path: .devcontainer_path
+     }
+   }')
+jq_exit_status=$?
+
+if [[ $jq_exit_status -ne 0 ]]; then
+    echo "Error: 'jq' command failed to format JSON with exit status $jq_exit_status."
+    exit 1
+fi
+
+if [[ -z "$formatted_json" ]]; then
+    echo "Error: Failed to format JSON using jq (result is empty)."
+    exit 1
+fi
+
+echo "writing codespace info to /workspaces/github/tmp/codespace_info.json"
+echo "$formatted_json" > /workspaces/github/tmp/codespace_info.json
+
+echo "setting spark preview port to public..."
+GITHUB_API_URL=https://api.github.com gh codespace -c $CODESPACE_NAME ports visibility 5000:public
+
+echo "Running Spark services..."
+
+export NODE_ENV=development
+export CAPI_URL=http://localhost:2206
+export GITHUB_API_URL=http://api.github.localhost
+export SPARK_DIR=/workspaces/spark
+export PROJECT_ROOT=/workspaces/spark
+export USE_DESIGNER=true
+export USE_SPARK_AGENT=true
+
+# Use localhost PAT https://github.com/github/thehub/blob/94c7113a6242e3cf9a08eebfa487673446397d5a/docs/epd/engineering/products-and-services/dotcom/development-environment/index.md?plain=1#L54
+# This is so the spark agent can persist the iteration via the API.
+# Without this, it would default to the hubber's production token from their dotcom codespace,
+# which wouldn't work against the local API.
+export GITHUB_TOKEN=ghp_MonalisaTheOctoPatMonalisaTheOctoPat
+
+
+cd /workspaces/spark
+npm i -f
+nohup npm run dev >> /tmp/.spark.log 2>&1 &
+
+cd /workspaces/workbench-sdk
+./build/start-local-dev.sh

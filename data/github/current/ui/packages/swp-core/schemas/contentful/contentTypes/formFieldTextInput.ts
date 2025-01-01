@@ -1,0 +1,19 @@
+import {z} from 'zod/v4'
+
+import {buildEntrySchemaFor} from '../entry'
+import {FormFieldValidationSchema} from './formFieldValidation'
+
+export const FormFieldTextInputSchema = buildEntrySchemaFor('formFieldTextInput', {
+  fields: z.object({
+    htmlName: z.string(),
+    label: z.string(),
+    placeholder: z.string().optional(),
+    validations: z.array(FormFieldValidationSchema).optional(),
+  }),
+})
+
+export type FormFieldTextInput = z.infer<typeof FormFieldTextInputSchema>
+
+export const isFormFieldTextInput = (value: unknown): value is FormFieldTextInput => {
+  return FormFieldTextInputSchema.safeParse(value).success
+}

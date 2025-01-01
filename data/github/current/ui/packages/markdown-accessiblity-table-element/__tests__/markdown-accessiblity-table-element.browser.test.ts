@@ -1,0 +1,120 @@
+import {describe, it} from '@github-ui/tests'
+import {assert, fixture, html, waitUntil} from '@github-ui/tests/browser'
+import {MarkdownAccessiblityTableElement} from '../markdown-accessiblity-table-element'
+import {makeTablesTabbable} from '../utils'
+
+describe('markdown-accessiblity-table-element', () => {
+  let container: HTMLElement
+
+  it('isConnected', async () => {
+    container = await fixture(html`<markdown-accessiblity-table></markdown-accessiblity-table>`)
+    assert.isTrue(container.isConnected)
+    assert.instanceOf(container, MarkdownAccessiblityTableElement)
+  })
+
+  it('component does not make unoverflowed tables tabbable', async () => {
+    const nestedTable = html`<table id="nested-table">
+      <tr>
+        <td>foo</td>
+      </tr>
+    </table>`
+    const parentTable = html`<table id="parent-table">
+      <tr>
+        <td>${nestedTable}</td>
+      </tr>
+    </table>`
+
+    container = await fixture(html`<markdown-accessiblity-table> ${parentTable} </markdown-accessiblity-table>`)
+    const parent = container.querySelector('#parent-table')
+    const nested = container.querySelector('#nested-table')
+    assert.isNull(parent?.getAttribute('tabindex'))
+    assert.isNull(nested?.getAttribute('tabindex'))
+  })
+
+  it('component should not overwrite previously set tabindex', async () => {
+    container = await fixture(
+      html`<markdown-accessiblity-table>
+        <table id="table" tabindex="-1">
+          <tr>
+            <td>foo</td>
+          </tr>
+        </table>
+      </markdown-accessiblity-table>`,
+    )
+    const parent = container.querySelector('#table')
+    assert.equal(parent?.getAttribute('tabindex'), '-1')
+  })
+
+  it('component makes overflowing tables tabbable', async () => {
+    const overflowStyle = html`<style>
+      #parent-table {
+        width: 500px; /* Ensure this width causes overflow */
+      }
+      div {
+        display: block;
+        width: 300px; /* Smaller than the table to cause overflow */
+        max-width: 300px;
+        overflow: auto; /* Allows scrolling */
+      }
+    </style>`
+
+    const headers = Array.from(new Array(40)).map(() => html`<th>foo</th>`)
+    const rows = Array.from(new Array(40)).map(() => html`<td>foo</td>`)
+
+    const nestedTable = html`<table id="nested-table">
+      <tbody>
+        <tr>
+          ${rows}
+        </tr>
+      </tbody>
+    </table>`
+
+    const parentTable = html`<table id="parent-table">
+      <thead>
+        <tr>
+          ${headers}
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          ${rows}
+        </tr>
+        <tr>
+          <td>${nestedTable}</td>
+        </tr>
+      </tbody>
+    </table>`
+
+    container = await fixture(
+      html`<div>${overflowStyle}<markdown-accessiblity-table> ${parentTable} </markdown-accessiblity-table></div>`,
+    )
+
+    const parent = container.querySelector('#parent-table')
+    const nested = container.querySelector('#nested-table')
+
+    // mock client overflow
+    Object.defineProperty(parent, 'clientWidth', {
+      value: 300,
+      writable: true, // Allows the property to be rewritten in future, if needed
+      configurable: true,
+    })
+
+    // Also mock scrollWidth to ensure it's greater than clientWidth
+    Object.defineProperty(parent, 'scrollWidth', {
+      value: 600,
+      writable: true,
+      configurable: true,
+    })
+
+    container.style.width = '501px'
+
+    if (parent) {
+      makeTablesTabbable(parent)
+    }
+
+    await waitUntil(() => parent?.getAttribute('tabindex') === '0', 'tab index not applied correctly')
+    assert.equal(parent?.getAttribute('tabindex'), '0')
+    // should not apply to nested tables
+    assert.isNull(nested?.getAttribute('tabindex'))
+  })
+})

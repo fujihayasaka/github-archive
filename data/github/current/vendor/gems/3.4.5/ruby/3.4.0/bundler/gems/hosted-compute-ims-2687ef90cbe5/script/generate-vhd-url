@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+
+set -e -o pipefail
+
+STORAGE_ACCOUNT_NAME="imstestimagesprem"
+STORAGE_CONTAINER_NAME="vhds"
+STORAGE_CONTAINER_URL="https://$STORAGE_ACCOUNT_NAME.blob.core.windows.net/$STORAGE_CONTAINER_NAME"
+IMAGE="centos"
+SCRIPT_DIR=$(dirname "${BASH_SOURCE[0]}")
+DAYS_VALID=1
+
+function usage() {
+    cat <<EOF
+Usage: script/generate-vhd-url [--image] [--generate-container-sas] [--list-images] [--days-valid <days_count>]
+  Generates read-only SAS URL for VHD image or container: $STORAGE_CONTAINER_URL
+
+  One of the following parameters must be passed:
+    --image                         Generates direct SAS URI for vhd image from $STORAGE_CONTAINER_URL
+    --generate-container-sas        Generates generic SAS Token which will give read-only access to container $STORAGE_CONTAINER_URL
+    --list-images                   Lists all images which are available in storage container
+
+  Optional parameters:
+    --days-valid                    Specify how many days SAS URI should be valid. Defaults to 1 day
+
+Examples:
+  script/generate-vhd-url --image centos
+  script/generate-vhd-url --image ubuntu
+  script/generate-vhd-url --image windows
+  script/generate-vhd-url --image <image_name.vhd>
+  script/generate-vhd-url --image <image_name.vhd> --days-valid 5
+  script/generate-vhd-url --generate-container-sas --days-valid 365
+  script/generate-vhd-url --list-images
+EOF
+}
+
+function map_known_images() {
+  case $1 in
+    centos)
+      echo "Centos-30gb.vhd"
+      ;;
+    ubuntu)
+      echo "Ubuntu-86gb.vhd"
+      ;;
+    windows)
+      echo "Windows-256gb.vhd"
+      ;;
+    *)
+      echo $1
+      ;;
+  esac
+}
+
+function generate_container_sas() {
+    local expiry_date="$(date -u -d "+$DAYS_VALID days" '+%Y-%m-%dT%H:%MZ' || date -u -v+$DAYS_VALID'd' '+%Y-%m-%dT%H:%M:%SZ')"
+    local sas=$(az storage container generate-sas \
+        --as-user \
+        --auth-mode login \
+        --account-name $STORAGE_ACCOUNT_NAME \
+        --name $STORAGE_CONTAINER_NAME \
+        --expiry "$expiry_date" \
+        --permissions r \
+        --output tsv \
+        --only-show-errors )
+    if [ $? -ne 0 ]; then
+        echo "Failed to generate SAS token"
+        exit 1
+    fi
+    echo $sas
+}
+
+function list_available_images() {
+    az storage blob list \
+      --auth-mode login \
+      --account-name $STORAGE_ACCOUNT_NAME \
+      --container-name $STORAGE_CONTAINER_NAME \
+      --query "[].{Name:name, Size:properties.contentLength}" \
+      --output table
+}
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --generate-container-sas)
+      $SCRIPT_DIR/helpers/ensure-azure-auth 1> /dev/null
+      generate_container_sas
+      exit 0
+      ;;
+    --list-images)
+      $SCRIPT_DIR/helpers/ensure-azure-auth 1> /dev/null
+      list_available_images
+      exit 0
+      ;;
+    --days-valid)
+      DAYS_VALID=$2
+      shift
+      shift
+      ;;
+    --image)
+      IMAGE=$2
+      shift
+      shift
+      ;;
+    --help)
+      usage
+      exit 0
+      ;;
+    *)
+        echo "Unknown option: $1"
+        usage
+        exit 1
+        ;;
+  esac
+done
+
+IMAGE=$(map_known_images $IMAGE)
+
+if [[ -z "${STORAGE_CONTAINER_SAS_TOKEN}" ]]; then
+  $SCRIPT_DIR/helpers/ensure-azure-auth 1> /dev/null
+  STORAGE_CONTAINER_SAS_TOKEN=$(generate_container_sas)
+fi
+echo "$STORAGE_CONTAINER_URL/$IMAGE?$STORAGE_CONTAINER_SAS_TOKEN"

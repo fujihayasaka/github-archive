@@ -1,0 +1,96 @@
+
+syntax = "proto3";
+package github.actions.run_service.contracts.v1;
+option ruby_package = "GitHub::ActionsRunService::Contracts::V1";
+
+import "run-service/contracts/v1/scope_hierarchy.proto";
+import "run-service/api/twirp/v1/abuse_info.proto";
+import "run-service/api/twirp/v1/tenant_info.proto";
+
+// A Job queued by run-service (or ADN), waiting to be assigned to a runner.
+// JobMessages are what we read from the Redis Stream.
+message JobMessage {
+    // The unique identifier (GUID) of the plan that owns the job represented by this JobMessage.
+    // When an Actions workflow executes, a plan is generated to represent the flow of jobs defined by the workflow.
+    // A plan essentially captures the workflow definition at that moment in time.
+    // Recall that an Actions workflow can define multiple jobs.  Likewise, there may be multiple JobMessages associated with a plan.
+    string plan_id = 100;
+
+    // The unique identifier (GUID) of the job represented by this JobMessage.
+    string job_id = 200;
+
+    // Identifying information about enterprise/org/repo that defines the job.
+    ScopeHierarchy repo_hierarchy = 300;
+
+    // labels that runners must match against. corresponds to `runs_on` in the workflow's yaml file
+    repeated string labels = 400;
+
+    // (Optional) The named group demanded by the Workflow.
+    // (May refer to org-level or enterprise-level group.  There's no guarantee the specified group will accept this job, permissions-wise.
+    //     Example:  the specified group may be configured to only accept jobs from some other repo)
+    // The group_demand can be one of the following format:
+    //    - runner_group_name
+    //    - org/runner_group_name or organization/runner_group_name (explicit target org level runner group)
+    //    - ent/runner_group_name or enterprise/runner_group_name (explicit target enterprise level runner group)
+    string group_demand = 500;
+
+    // True if the workflow's repo is a public repo.
+    bool public_repo = 600;
+
+    // Use `job_workflow_ref`
+    string workflow_url = 700 [deprecated = true];
+
+    // `github.workflow_ref` of the job, https://docs.github.com/en/actions/learn-github-actions/contexts#github-context
+    // Example:  octocat/hello-world/.github/workflows/my-workflow.yml@refs/heads/my_branch
+    string job_workflow_ref = 701;
+
+    // address from which to fetch the complete job
+    string run_service_url = 800;
+
+    // features enabled/disabled for this job
+    map<string, bool> features = 900;
+
+    // Metadata needed by MMS for provisioning hosted runners.
+    // Contains data about the user/repo/org related to spamminess and abuse detection.
+    // Note that this data is somewhat sensitive and should never be sent to a runner, just MMS.
+    github.actions.run_service.api.twirp.v1.AbuseInfo abuse_info = 1000;
+
+    // True when the job is defined in a workflow owned by the same user or organization as the triggering repo.
+    // False when the job is defined in a reusable workflow not owned by the same user or organization as the triggering repo.
+    bool is_trusted = 1100;
+
+    // Optional repository tenant info for interacting with actions-dotnet services.
+    // Used only during 3-nines -> 4-nines migration phase in case broker needs info from the C# Actions service
+    github.actions.run_service.api.twirp.v1.TenantInfo repository_tenant_info = 1200;
+
+    // Optional organization tenant info for interacting with actions-dotnet services.
+    // Used only during 3-nines -> 4-nines migration phase in case broker needs info from the C# Actions service
+    github.actions.run_service.api.twirp.v1.TenantInfo organization_tenant_info = 1300;
+
+    // Optional enterprise tenant info for interacting with actions-dotnet services.
+    // Used only during 3-nines -> 4-nines migration phase in case broker needs info from the C# Actions service
+    github.actions.run_service.api.twirp.v1.TenantInfo enterprise_tenant_info = 1400;
+
+    // customer label we applied to the repository, ex: none, github, top100
+    string customer_label = 1500;
+
+    // The orchestration ID of the job represented by this JobMessage.
+    // Orchestration ID are in the format like: ccc56d7d-9041-43a4-8810-005d2c7ecace.unit_tests.__default
+    // It's used to correlate telemetry across multiple micro-services within Actions.
+    string orchestration_id = 1600;
+
+    // The attempt number, run-service does retry at the job-level, this captures the attempt number.
+    // Default is 0, which means this is the first attempt.
+    int32 attempt_number = 1700;
+
+    // ID of the check run created by run-service through result service.
+    uint64 check_run_id = 1800;
+
+    // Optional Snapshot name added by customer, used for Runner Group matching
+    // See this issue for more details: https://github.com/github/actions-larger-runners/issues/3259
+    string snapshot_name = 1900;
+
+    // a property bucket that allows consumers to store additional context, if desired
+    map<string, string> properties = 900000;
+}
+

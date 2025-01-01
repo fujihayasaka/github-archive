@@ -1,0 +1,420 @@
+syntax = "proto3";
+
+package github.actions.runner_admin.api.v1;
+
+import "runner-admin/api/v1/runner_group.proto";
+import "runner-admin/api/v1/runner.proto";
+import "runner-admin/api/v1/runner_label.proto";
+import "runner-admin/api/v1/runner_scale_set.proto";
+import "runner-admin/api/v1/runner_scale_set_label.proto";
+import "runner-admin/entities/v1/github_entity.proto";
+import "runner-admin/entities/v1/identity.proto";
+
+option ruby_package = "GitHub::ActionsRunnerAdmin::Api::V1";
+
+service RunnerResourceService {
+    // Runner group management endpoints
+    rpc AddRunnerGroup(AddRunnerGroupRequest) returns (AddRunnerGroupResponse);
+    rpc DeleteRunnerGroup(DeleteRunnerGroupRequest) returns (DeleteRunnerGroupResponse);
+    rpc GetRunnerGroup(GetRunnerGroupRequest) returns (GetRunnerGroupResponse);
+    rpc ListRunnerGroups(ListRunnerGroupsRequest) returns (ListRunnerGroupsResponse);
+    rpc UpdateRunnerGroup(UpdateRunnerGroupRequest) returns (UpdateRunnerGroupResponse);
+
+    // Runner group permissions endpoints
+    rpc AddRunnerGroupPermissions(AddRunnerGroupPermissionsRequest) returns (AddRunnerGroupPermissionsResponse);
+    rpc DeleteRunnerGroupPermissions(DeleteRunnerGroupPermissionsRequest) returns (DeleteRunnerGroupPermissionsResponse);
+    rpc SetRunnerGroupPermissions(SetRunnerGroupPermissionsRequest) returns (SetRunnerGroupPermissionsResponse);
+
+    // Runner group runner endpoints
+    rpc ListRunnersForGroup(ListRunnersForGroupRequest) returns (ListRunnersForGroupResponse);
+    rpc SetRunnersForGroup(SetRunnersForGroupRequest) returns (SetRunnersForGroupResponse);
+
+    // Runner management endpoints
+    rpc AddRunner(AddRunnerRequest) returns (AddRunnerResponse);
+    rpc DeleteRunner(DeleteRunnerRequest) returns (DeleteRunnerResponse);
+    rpc GetRunner(GetRunnerRequest) returns (GetRunnerResponse);
+    rpc ListRunners(ListRunnersRequest) returns (ListRunnersResponse);
+    rpc UpdateRunner(UpdateRunnerRequest) returns (UpdateRunnerResponse);
+
+    // Runner label endpoints
+    rpc ListLabels(ListLabelsRequest) returns (ListLabelsResponse);
+    rpc UpdateLabels(UpdateLabelsRequest) returns (UpdateLabelsResponse);
+    rpc SetLabels(SetLabelsRequest) returns (SetLabelsResponse);
+
+    // Runner scale set endpoints
+    rpc AddRunnerScaleSet(AddRunnerScaleSetRequest) returns (AddRunnerScaleSetResponse);
+    rpc DeleteRunnerScaleSet(DeleteRunnerScaleSetRequest) returns (DeleteRunnerScaleSetResponse);
+    rpc GetRunnerScaleSet(GetRunnerScaleSetRequest) returns (GetRunnerScaleSetResponse);
+    rpc ListRunnerScaleSets(ListRunnerScaleSetsRequest) returns (ListRunnerScaleSetsResponse);
+    rpc UpdateRunnerScaleSet(UpdateRunnerScaleSetRequest) returns (UpdateRunnerScaleSetResponse);
+
+    // Other endpoints
+    rpc GenerateJitRunnerConfig(GenerateJitRunnerConfigRequest) returns (GenerateJitRunnerConfigResponse);
+    rpc ListRunnerDownloads(ListRunnerDownloadsRequest) returns (ListRunnerDownloadsResponse);
+
+    rpc CreateRunnerScaleSetSession(CreateRunnerScaleSetSessionRequest) returns (CreateRunnerScaleSetSessionResponse);
+    rpc RefreshRunnerScaleSetSession(RefreshRunnerScaleSetSessionRequest) returns (RefreshRunnerScaleSetSessionResponse);
+    rpc DeleteRunnerScaleSetSession(DeleteRunnerScaleSetSessionRequest) returns (DeleteRunnerScaleSetSessionResponse);
+}
+
+message ListRunnerGroupsRequest {
+    entities.v1.GitHubEntity entity = 1;
+    bool is_lab = 2;
+    bool include_runners = 3;
+    bool include_runner_scale_sets = 4;
+}
+
+message ListRunnerGroupsResponse {
+    repeated RunnerGroup runner_groups = 1;
+}
+
+message AddRunnerGroupRequest {
+    entities.v1.GitHubEntity entity = 1;
+    string name = 2;
+    repeated int64 runner_ids = 3;
+    Visibility visibility = 4;
+    repeated entities.v1.Identity selected_targets = 5; // selected repos
+    bool allow_public = 6;
+    repeated string selected_workflow_refs = 7;
+    bool restricted_to_workflows = 8; // must be nonempty when restricted_to_workflows=true
+    repeated entities.v1.Identity selected_orgs = 9;
+    bool is_default = 10;
+}
+
+message AddRunnerGroupResponse {
+    RunnerGroup runner_group = 1;
+}
+
+message GetRunnerGroupRequest {
+    entities.v1.GitHubEntity entity = 1;
+    int64 group_id = 2;
+    bool include_runners = 3;
+    bool include_hosted_runner_groups = 4;
+    bool exclude_elastic_runners = 5;
+    bool include_runner_scale_sets = 6;
+}
+
+message GetRunnerGroupResponse {
+    RunnerGroup runner_group = 1;
+}
+
+message UpdateRunnerGroupRequest {
+    reserved 5;
+
+    entities.v1.GitHubEntity entity = 1;
+    int64 group_id = 2;
+    string name = 3;
+    repeated int64 runner_ids = 4;
+    repeated entities.v1.Identity selected_targets = 6; // selected repos
+    UpdateVisibility update_visibility = 8;
+    UpdateAllowPublic allow_public = 9;
+    repeated string selected_workflow_refs = 10;
+    UpdateRestrictedToWorkflows restricted_to_workflows = 11;
+    repeated entities.v1.Identity selected_entities = 12;
+    bool is_default = 14;
+}
+
+message UpdateRunnerGroupResponse {
+    RunnerGroup runner_group = 1;
+}
+
+message SetRunnersForGroupRequest {
+    entities.v1.GitHubEntity entity = 1;
+    int64 group_id = 2;
+    repeated int64 runner_ids = 3;
+    bool replace_runners = 4;
+}
+
+message SetRunnersForGroupResponse {
+    RunnerGroup runner_group = 1;
+}
+
+message AddRunnerGroupPermissionsRequest {
+    entities.v1.GitHubEntity entity = 1; // required
+    int64 group_id = 2; // required
+    repeated entities.v1.Identity allowed_entities_to_add = 3;
+}
+
+message AddRunnerGroupPermissionsResponse {
+    repeated entities.v1.Identity allowed_entities = 1;
+}
+
+message DeleteRunnerGroupPermissionsRequest {
+    entities.v1.GitHubEntity entity = 1; // required
+    int64 group_id = 2; // required
+    repeated entities.v1.Identity allowed_entities_to_delete = 3;
+}
+
+message DeleteRunnerGroupPermissionsResponse {
+    repeated entities.v1.Identity allowed_entities = 1;
+}
+
+message SetRunnerGroupPermissionsRequest {
+    entities.v1.GitHubEntity entity = 1; // required
+    int64 group_id = 2; // required
+    repeated entities.v1.Identity allowed_entities = 3;
+}
+
+message SetRunnerGroupPermissionsResponse {
+    repeated entities.v1.Identity allowed_entities = 1;
+}
+
+message DeleteRunnerGroupRequest {
+    entities.v1.GitHubEntity entity = 1;
+    int64 group_id = 3;
+}
+
+message DeleteRunnerGroupResponse {
+    string status = 1;
+}
+
+message GetRunnerRequest {
+    entities.v1.GitHubEntity entity = 1;
+    int64 id = 2;
+}
+
+message GetRunnerResponse {
+    Runner runner = 1;
+}
+
+message ListRunnersRequest {
+    entities.v1.GitHubEntity entity = 1;
+    string name = 2;
+    int64 per_page = 3;
+    int64 page = 4;
+}
+
+message ListRunnersResponse {
+    repeated Runner runners = 1;
+}
+
+message ListRunnersForGroupRequest {
+    entities.v1.GitHubEntity entity = 1;
+    int64 group_id = 2;
+    int64 per_page = 3;
+    int64 page = 4;
+}
+
+message ListRunnersForGroupResponse {
+    repeated Runner runners = 1;
+}
+
+message AddRunnerRequest {
+    entities.v1.GitHubEntity entity = 1;
+    int64 group_id = 2;
+    string name = 3;
+    string version = 4;
+    bool updates_disabled = 5;
+    repeated AddLabelRequest labels = 6;
+    bool ephemeral = 7;
+    string os = 8;
+    string arch = 9;
+    string public_key = 10;
+}
+
+message RunnerAuthorization {
+    string authorization_url = 1;
+    string client_id = 2;
+    string server_url = 3;
+}
+
+message AddRunnerResponse {
+    Runner runner = 1;
+    RunnerAuthorization authorization = 2;
+}
+
+message AddLabelRequest {
+    string name = 1;
+    string type = 2;
+}
+
+message UpdateRunnerRequest {
+    entities.v1.GitHubEntity entity = 1;
+    int64 id = 2;
+    int64 group_id = 3;
+    string name = 4;
+    string version = 5;
+    bool updates_disabled = 6;
+    repeated AddLabelRequest labels = 7;
+    bool ephemeral = 8;
+    string os = 9;
+    string arch = 10;
+    string public_key = 11;
+    bool replace_labels = 12; // used during runner replacement during registration
+}
+
+message UpdateRunnerResponse {
+    Runner runner = 1;
+    RunnerAuthorization authorization = 2;
+}
+
+message DeleteRunnerRequest {
+    entities.v1.GitHubEntity entity = 1;
+    int64 runner_id = 2;
+}
+
+message DeleteRunnerResponse {
+    string status = 1;
+}
+
+message ListRunnerDownloadsRequest {
+    entities.v1.GitHubEntity entity = 1;
+}
+
+message ListRunnerDownloadsResponse {
+    repeated Download downloads = 1;
+}
+
+message Download {
+    string os = 1;
+    string architecture = 2;
+    string download_url = 3;
+    string filename = 4;
+    string download_token = 5;
+    string sha256_hash = 6;
+}
+
+message ListLabelsRequest {
+    entities.v1.GitHubEntity entity = 1;
+    int64 runner_id = 2;
+}
+
+message ListLabelsResponse {
+    repeated Label labels = 1;
+}
+
+message UpdateLabelsRequest {
+    entities.v1.GitHubEntity entity = 1; // required
+    int64 runner_id = 2;
+    repeated string labels_to_add = 3;
+    repeated string labels_to_remove = 4; // read-only labels cannot be removed
+}
+
+message UpdateLabelsResponse {
+    Runner runner = 1;
+}
+
+message SetLabelsRequest {
+    entities.v1.GitHubEntity entity = 1; // required
+    int64 runner_id = 2;
+    repeated string labels = 3;          // read-only labels cannot be removed
+}
+
+message SetLabelsResponse {
+    Runner runner = 1;
+}
+
+message ListRunnerScaleSetsRequest {
+    entities.v1.GitHubEntity entity = 1;
+    int64 per_page = 2;
+    int64 page = 3;
+    int64 group_id = 4; // optional filter
+    string name = 5; // optional filter
+}
+
+message ListRunnerScaleSetsResponse {
+    repeated RunnerScaleSet runner_scale_sets = 1;
+    int64 count = 2; // total number of runner scale sets, not just the ones returned for this page
+}
+
+message AddRunnerScaleSetRequest {
+    entities.v1.GitHubEntity entity = 1;
+    string name = 2;
+    int64 group_id = 3;
+    repeated RunnerScaleSetLabel labels = 5;
+    RunnerSetting runner_setting = 6;
+}
+
+message AddRunnerScaleSetResponse {
+    RunnerScaleSet runner_scale_set = 1;
+}
+
+message GetRunnerScaleSetRequest {
+    entities.v1.GitHubEntity entity = 1;
+    int64 id = 2;
+}
+
+message GetRunnerScaleSetResponse {
+    RunnerScaleSet runner_scale_set = 1;
+}
+
+message UpdateRunnerScaleSetRequest {
+    entities.v1.GitHubEntity entity = 1;
+    int64 id = 2;
+    string name = 3;
+    int64 group_id = 4;
+    repeated RunnerScaleSetLabel labels = 5;
+    RunnerSetting runner_setting = 6;
+}
+
+message UpdateRunnerScaleSetResponse {
+    RunnerScaleSet runner_scale_set = 1;
+}
+
+message DeleteRunnerScaleSetRequest {
+    entities.v1.GitHubEntity entity = 1;
+    int64 id = 2;
+}
+
+message DeleteRunnerScaleSetResponse {
+
+}
+
+message GenerateJitRunnerConfigRequest {
+    entities.v1.GitHubEntity entity = 1;
+    string name = 2;
+    int64 runner_group_id = 3;
+    repeated string labels = 4;
+    string work_folder = 5;
+
+    // the url of the github entity the runner will be configured to run
+    // against, e.g. https://github.com/ORG/REPO
+    string git_hub_url = 6;
+
+    int64 scale_set_id = 7; // optional
+}
+
+message GenerateJitRunnerConfigResponse {
+    Runner runner = 1;
+    string encoded_jit_config = 2;
+}
+
+
+message CreateRunnerScaleSetSessionRequest {
+    entities.v1.GitHubEntity entity = 1;
+    int64 scale_set_id = 2;
+    string owner_name = 3;
+}
+
+message CreateRunnerScaleSetSessionResponse {
+    string token = 1;
+    string session_id = 2;
+    string owner_name = 3;
+    RunnerScaleSet runner_scale_set = 4;
+    string message_url = 5;
+    RunnerScaleSetStatistics statistics = 6;
+}
+
+message RefreshRunnerScaleSetSessionRequest {
+    entities.v1.GitHubEntity entity = 1;
+    int64 scale_set_id = 2;
+    string session_id = 3;
+}
+
+message RefreshRunnerScaleSetSessionResponse {
+    string token = 1;
+    string session_id = 2;
+    string owner_name = 3;
+    RunnerScaleSet runner_scale_set = 4;
+    string message_url = 5;
+    RunnerScaleSetStatistics statistics = 6;
+}
+
+message DeleteRunnerScaleSetSessionRequest {
+    entities.v1.GitHubEntity entity = 1;
+    int64 scale_set_id = 2;
+}
+
+message DeleteRunnerScaleSetSessionResponse {
+    
+}

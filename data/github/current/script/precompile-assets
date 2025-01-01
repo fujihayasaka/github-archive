@@ -1,0 +1,71 @@
+#!/bin/bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+export DESTINATION="${ASSETS_PATH:-public/assets}"
+export NODE_ENV="${NODE_ENV:-${RAILS_ENV:-development}}"
+export ENTERPRISE="${ENTERPRISE:-false}"
+PIDS=()
+
+rm -rf "$DESTINATION"
+
+echo "Compiling assets for $NODE_ENV in $DESTINATION with ENTERPRISE=$ENTERPRISE"
+
+# Runs an npm command in the background and adds its PID to the PIDS array
+run_npm_command() {
+  local command=$1
+  local bundler_flag=${2:-""}
+  echo "Running npm command: $command $bundler_flag"
+
+  BUNDLER_FLAG=$bundler_flag SKIP_RELAY=true npm run "$command" &
+  PIDS+=($!)
+}
+
+precompile_assets() {
+  [ ! -d tmp ] && mkdir tmp
+  date +%s > tmp/assets-precompiled-at
+  # Prepare for builds
+  PREP_PIDS=()
+  npm run fingerprint-static-assets & PREP_PIDS+=($!) # Static Assets
+  npm run compile-relay & PREP_PIDS+=($!) # Compile Relay
+  wait "${PREP_PIDS[@]}" # Wait for all the prep processes to complete
+
+  # Run webpack builds in parallel
+  run_npm_command "webpack"
+  run_npm_command "webpack:css"
+  run_npm_command "webpack:alloy"
+
+  # Also run webpack builds for each bundler flag in parallel
+  if [ "$NODE_ENV" == "production" ]; then
+    BUNDLER_FLAGS=($(jq -r 'keys[] as $k | "\(.[$k] | .flag)"' ui/packages/client-build-tools/bundler-flags.json))
+    echo "Compiling assets for each active bundler flags:" "${BUNDLER_FLAGS[@]}"
+
+    for flag in "${BUNDLER_FLAGS[@]}"; do
+      run_npm_command "webpack" "$flag"
+    done
+  else
+    echo "Skipping assets compilation for additional bundler flags in development"
+  fi
+
+  # Wait for all webpack processes to complete since they are running in parallel in the background
+  wait "${PIDS[@]}"
+
+  # remove dev-only .css.js files
+  if [ "$NODE_ENV" != "development" ]; then
+    rm -f "$DESTINATION"/*.css.js
+  fi
+
+  # Build and validate the UI manifest
+  export ASSETS_BASE_PATH="$DESTINATION"
+  npm run build -w @github-ui/ui-manifest
+  npm run validate -w @github-ui/ui-manifest
+
+  echo "Finished compiling UI assets for $NODE_ENV in $DESTINATION"
+
+  # Delete intermediate manifests which should not be used in production
+  npm run clean -w @github-ui/ui-manifest
+  echo "Finished cleaning up UI manifests"
+}
+
+precompile_assets

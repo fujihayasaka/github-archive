@@ -1,0 +1,196 @@
+commit f1085d62dcfbf3b1e89b3072c07f65c6948501b4
+Author: Derrick Marcey <dmarcey@github.com>
+Date:   Thu May 8 05:19:04 2025 -0700
+
+    Introduce FF to toggle data router vs non-data router server logic for hosted compute ims controller
+
+diff --git a/app/controllers/stafftools/hosted_compute_ims_admin_controller.rb b/app/controllers/stafftools/hosted_compute_ims_admin_controller.rb
+index dde180120b870..d73377c63ae96 100644
+--- a/app/controllers/stafftools/hosted_compute_ims_admin_controller.rb
++++ b/app/controllers/stafftools/hosted_compute_ims_admin_controller.rb
+@@ -55,14 +55,26 @@ class Stafftools::HostedComputeImsAdminController < StafftoolsController
+       return render_404
+     end
+
+-    render_react_app(
+-      payload: {
+-        imageDefinitions: image_definitions.map(&method(:convert_image_definition_to_react_payload)),
+-        selectedImagesTab: selected_images_tab
+-      },
+-      title: "Hosted Compute IMS",
+-      layout: "layouts/stafftools/react_stafftools",
+-    )
++    if data_router_feature_flag_enabled?
++      payload = IndexRoutePayload.new(
++        image_definitions: image_definitions.map(&method(:convert_image_definition_to_react_payload)),
++        selected_images_tab: selected_images_tab
++      )
++      respond_with_react(
++        payload: payload,
++        title: "Hosted Compute IMS",
++        layout: "layouts/stafftools/react_stafftools"
++      )
++    else
++      render_react_app(
++        payload: {
++          imageDefinitions: image_definitions.map(&method(:convert_image_definition_to_react_payload)),
++          selectedImagesTab: selected_images_tab
++        },
++        title: "Hosted Compute IMS",
++        layout: "layouts/stafftools/react_stafftools",
++      )
++    end
+   end
+
+   def curated_image_details # rubocop:todo GitHub/UseRestfulActions
+@@ -103,15 +115,28 @@ class Stafftools::HostedComputeImsAdminController < StafftoolsController
+       end
+     end
+
+-    render_react_app(
+-      payload: {
+-        imageDefinition: convert_image_definition_to_react_payload(image_definition),
+-        referencedImageDefinition: referenced_image_definition.present? ? convert_image_definition_to_react_payload(referenced_image_definition) : nil,
+-        imageVersions: image_versions.map(&method(:convert_image_version_to_react_payload)),
+-      },
+-      title: "Hosted Compute IMS",
+-      layout: "layouts/stafftools/react_stafftools",
+-    )
++    if data_router_feature_flag_enabled?
++      payload = ImageDetailsRoutePayload.new(
++        image_definition: convert_image_definition_to_react_payload(image_definition),
++        referenced_image_definition: referenced_image_definition.present? ? convert_image_definition_to_react_payload(referenced_image_definition) : nil,
++        image_versions: image_versions.map(&method(:convert_image_version_to_react_payload))
++      )
++      respond_with_react(
++        payload: payload,
++        title: "Hosted Compute IMS",
++        layout: "layouts/stafftools/react_stafftools"
++      )
++    else
++      render_react_app(
++        payload: {
++          imageDefinition: convert_image_definition_to_react_payload(image_definition),
++          referencedImageDefinition: referenced_image_definition.present? ? convert_image_definition_to_react_payload(referenced_image_definition) : nil,
++          imageVersions: image_versions.map(&method(:convert_image_version_to_react_payload)),
++        },
++        title: "Hosted Compute IMS",
++        layout: "layouts/stafftools/react_stafftools",
++      )
++    end
+   end
+
+   def curated_image_version_details # rubocop:todo GitHub/UseRestfulActions
+@@ -151,14 +176,26 @@ class Stafftools::HostedComputeImsAdminController < StafftoolsController
+
+     image_version = get_image_version_resp.value&.image_version
+
+-    render_react_app(
+-      payload: {
+-        imageDefinition: convert_image_definition_to_react_payload(image_definition),
+-        imageVersion: convert_image_version_to_react_payload(image_version),
+-      },
+-      title: "Hosted Compute IMS",
+-      layout: "layouts/stafftools/react_stafftools",
+-    )
++    if data_router_feature_flag_enabled?
++      payload = ImageVersionDetailsRoutePayload.new(
++        image_definition: convert_image_definition_to_react_payload(image_definition),
++        image_version: convert_image_version_to_react_payload(image_version)
++      )
++      respond_with_react(
++        payload: payload,
++        title: "Hosted Compute IMS",
++        layout: "layouts/stafftools/react_stafftools"
++      )
++    else
++      render_react_app(
++        payload: {
++          imageDefinition: convert_image_definition_to_react_payload(image_definition),
++          imageVersion: convert_image_version_to_react_payload(image_version),
++        },
++        title: "Hosted Compute IMS",
++        layout: "layouts/stafftools/react_stafftools",
++      )
++    end
+   end
+
+   def create_curated_pointer # rubocop:todo GitHub/UseRestfulActions
+@@ -412,6 +449,65 @@ class Stafftools::HostedComputeImsAdminController < StafftoolsController
+
+   private
+
++  class IndexRoutePayload < ReactPayload::Base
++    def route_id
++      "hostedComputeImsAdminRoute"
++    end
++
++   def initialize(**kwargs)
++     kwargs.each do |k, v|
++       instance_variable_set("@#{k}", v)
++     end
++   end
++
++    def payload
++      {
++        imageDefinitions: @image_definitions,
++        selectedImagesTab: @selected_images_tab,
++      }
++    end
++  end
++
++  class ImageDetailsRoutePayload < ReactPayload::Base
++    def route_id
++      "hostedComputeImageDetailsRoute"
++    end
++
++   def initialize(**kwargs)
++     kwargs.each do |k, v|
++       instance_variable_set("@#{k}", v)
++     end
++   end
++
++    def payload
++      {
++        imageDefinition: @image_definition,
++        referencedImageDefinition: @referenced_image_definition,
++        imageVersions: @image_versions,
++      }
++    end
++  end
++
++  class ImageVersionDetailsRoutePayload < ReactPayload::Base
++    def route_id
++      "hostedComputeImageVersionDetailsRoute"
++    end
++
++   def initialize(**kwargs)
++     kwargs.each do |k, v|
++       instance_variable_set("@#{k}", v)
++     end
++   end
++
++    def payload
++      {
++        imageDefinition: @image_definition,
++        imageVersion: @image_version,
++      }
++    end
++  end
++
+   def convert_image_definition_to_react_payload(object)
+     {
+       id: object.id,
+@@ -455,4 +551,8 @@ class Stafftools::HostedComputeImsAdminController < StafftoolsController
+   def ims_stafftools_enabled
+     render_404 unless GitHub.flipper[:hosted_compute_ims_stafftools].enabled?(current_user)
+   end
++
++  memoize def data_router_feature_flag_enabled?
++    result = check_app_type_header
++    return result unless result.nil?
++    feature_enabled_globally_or_for_user?(feature_name: :react_data_router_hosted_compute_ims, subject: current_user)
++  end
+ end
++
+

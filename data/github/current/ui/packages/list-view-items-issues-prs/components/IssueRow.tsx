@@ -1,0 +1,189 @@
+import {issueUrl} from '@github-ui/issue-viewer/Urls'
+
+import type {AnalyticsEvent} from '@github-ui/use-analytics'
+import React, {type ForwardedRef, forwardRef, type ReactElement, useCallback} from 'react'
+import {graphql, useFragment, type PreloadedQuery} from 'react-relay/hooks'
+import type {NavigateOptions, To} from 'react-router-dom'
+
+import type {IssueItem$key} from './__generated__/IssueItem.graphql'
+import {IssueItem, IssueItemQuery} from './IssueItem'
+import type {IssueRow$key} from './__generated__/IssueRow.graphql'
+import type {QUERY_FIELDS} from '../constants/queries'
+import {useIssueRowSubscription} from './IssueRowSubscription'
+import type {IssueRowSecondaryQuery} from './__generated__/IssueRowSecondaryQuery.graphql'
+import {ScopedCommands} from '@github-ui/ui-commands'
+import styles from './IssueRow.module.css'
+import {isLoggedIn} from '@github-ui/client-env'
+import type {ItemIdentifier} from '@github-ui/issue-viewer/Types'
+
+export const IssuesIndexSecondaryGraphqlQuery = graphql`
+  query IssueRowSecondaryQuery($nodes: [ID!]!, $assigneePageSize: Int = 10, $includeReactions: Boolean = false) {
+    nodes(ids: $nodes) {
+      id
+      __typename
+      ... on Issue {
+        # eslint-disable-next-line relay/must-colocate-fragment-spreads
+        ...IssueOrPullRequestUnreadIndicator @dangerously_unaliased_fixme
+        ...IssueItemMetadata
+          @dangerously_unaliased_fixme
+          @arguments(assigneePageSize: $assigneePageSize, includeReactions: $includeReactions)
+        ...IssueItemSubIssuesSummary @dangerously_unaliased_fixme
+        ...IssueItemBlockedBy
+      }
+      ... on PullRequest {
+        # eslint-disable-next-line relay/must-colocate-fragment-spreads
+        ...IssueOrPullRequestUnreadIndicator @dangerously_unaliased_fixme
+        # eslint-disable-next-line relay/must-colocate-fragment-spreads
+        ...PullRequestItemMetadata
+          @dangerously_unaliased_fixme
+          @arguments(assigneePageSize: $assigneePageSize, includeReactions: $includeReactions)
+        # eslint-disable-next-line relay/must-colocate-fragment-spreads
+        ...PullRequestRowSecondary @dangerously_unaliased_fixme
+        # eslint-disable-next-line relay/must-colocate-fragment-spreads
+        ...PullRequestItemHeadCommit @dangerously_unaliased_fixme
+        # eslint-disable-next-line relay/must-colocate-fragment-spreads
+        ...CheckRunStatusFromPullRequest @dangerously_unaliased_fixme
+      }
+    }
+  }
+`
+
+interface Props {
+  issueKey: IssueRow$key
+  metadataRef?: PreloadedQuery<IssueRowSecondaryQuery> | null
+  // this is passed as an object and it comes from the app payload
+  scopedRepository?: {id: string; name: string; owner: string; is_archived: boolean}
+  /**
+   * Href getter for the metadata badge links
+   * @param type - metadata type
+   * @param name - name of the metadata
+   * @returns URL to the metadata
+   */
+  getMetadataHref: (type: keyof typeof QUERY_FIELDS, name: string) => string
+  onSelect?: (selected: boolean) => void
+  onNavigate: (to: To, options?: NavigateOptions) => void
+  onSidePanelNavigate?: (issue: ItemIdentifier) => void
+  onSelectRow: (payload?: {[key: string]: unknown} | AnalyticsEvent | undefined) => void
+  isActive: boolean
+  isSelected?: boolean
+  reactionEmojiToDisplay?: {reaction: string; reactionEmoji: string}
+  sortingItemSelected: string
+  as?: React.ElementType
+  role?: string
+}
+
+const IssueRowInternal = forwardRef(
+  (
+    {
+      isActive,
+      isSelected,
+      issueKey,
+      scopedRepository,
+      getMetadataHref,
+      onSelect,
+      onNavigate,
+      onSidePanelNavigate,
+      onSelectRow,
+      reactionEmojiToDisplay,
+      sortingItemSelected,
+      metadataRef,
+      ...props
+    }: Props,
+    ref: ForwardedRef<HTMLAnchorElement>,
+  ): ReactElement => {
+    const data = useFragment(
+      graphql`
+        fragment IssueRow on Issue
+        @argumentDefinitions(
+          labelPageSize: {type: "Int!"}
+          fetchRepository: {type: "Boolean!"}
+          includeMilestone: {type: "Boolean!", defaultValue: true}
+        ) {
+          ...IssueItem @arguments(labelPageSize: $labelPageSize, includeMilestone: $includeMilestone)
+          number
+          repository @include(if: $fetchRepository) {
+            name
+            owner {
+              login
+            }
+          }
+        }
+      `,
+      issueKey,
+    )
+    const issueItemKey = data as IssueItem$key
+    const issueItemData = useFragment(IssueItemQuery, issueItemKey)
+
+    if (isLoggedIn()) {
+      // eslint-disable-next-line react-hooks/react-compiler
+      // eslint-disable-next-line react-hooks/rules-of-hooks
+      useIssueRowSubscription(issueItemData.id)
+    }
+
+    // This is a fallback in case the repository is not passed
+    const repositoryOwner = scopedRepository ? scopedRepository.owner : data.repository?.owner.login || ''
+    const repositoryName = scopedRepository ? scopedRepository.name : data.repository?.name || ''
+
+    const url = issueUrl({owner: repositoryOwner, repo: repositoryName, number: data.number})
+
+    const navigateToIssue = useCallback(() => {
+      if (onSidePanelNavigate) {
+        onSidePanelNavigate({number: data.number, repo: repositoryName, owner: repositoryOwner, type: 'Issue'})
+      } else {
+        onNavigate(url)
+      }
+    }, [onSidePanelNavigate, data.number, repositoryName, repositoryOwner, onNavigate, url])
+
+    const handleNavigation = useCallback(
+      (event: React.MouseEvent | React.KeyboardEvent) => {
+        onSelectRow({type: issueItemData.__typename})
+
+        // eslint-disable-next-line @github-ui/ui-commands/no-manual-shortcut-logic
+        if (event.ctrlKey || event.metaKey) return
+        event.stopPropagation()
+        event.preventDefault()
+        navigateToIssue()
+      },
+      [issueItemData.__typename, navigateToIssue, onSelectRow],
+    )
+
+    const toggleSelection = useCallback(() => {
+      onSelect?.(!isSelected)
+    }, [onSelect, isSelected])
+
+    return (
+      <ScopedCommands
+        commands={{
+          'list-view-items-issues-prs:open-focused-item': navigateToIssue,
+          'list-view-items-issues-prs:toggle-focused-item-selection': toggleSelection,
+        }}
+        className={styles.row}
+      >
+        <IssueItem
+          isActive={isActive}
+          itemKey={issueItemKey}
+          metadataRef={metadataRef}
+          isSelected={isSelected}
+          reactionEmojiToDisplay={reactionEmojiToDisplay}
+          showCommentCount
+          showRepository={!scopedRepository}
+          repositoryOwner={repositoryOwner}
+          repositoryName={repositoryName}
+          showAssignees
+          showLeadingRightSideContent={false}
+          sortingItemSelected={sortingItemSelected}
+          getMetadataHref={getMetadataHref}
+          onSelect={onSelect}
+          onClick={handleNavigation}
+          href={url}
+          ref={ref}
+          {...props}
+        />
+      </ScopedCommands>
+    )
+  },
+)
+
+IssueRowInternal.displayName = 'IssueRowInternal'
+
+export const IssueRow = React.memo(IssueRowInternal)

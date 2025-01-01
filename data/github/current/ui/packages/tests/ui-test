@@ -1,0 +1,40 @@
+#!/bin/bash
+set -e
+
+# Determine the full config path relative to this file
+# This file is symlinked so we need the original source dir
+DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+CONFIG_PATH="$(cd "$DIR/../vite" && pwd)/vitest.config.js"
+
+# Initialize flags
+headed_mode=false
+debugging_mode=false
+
+# Process arguments
+vitest_args=()
+for arg in "$@"; do
+  case "$arg" in
+    "--runInBand") # Skip this arg - not supported by Vitest
+      ;;
+    "--headed") # Custom flag for headed browser mode
+      headed_mode=true
+      ;;
+    "--debug") # Custom flag for debug browser mode
+      debugging_mode=true
+      ;;
+    *) # Pass through other arguments to vitest
+      vitest_args+=("$arg")
+      ;;
+  esac
+done
+
+if [[ "$headed_mode" == true ]]; then
+  # Run in headed mode with xvfb and appropriate flags
+  HEADED_BROWSER_ENABLED=true xvfb-run vitest --config "$CONFIG_PATH" "${vitest_args[@]}" --watch --project browser
+elif [[ "$debugging_mode" == true ]]; then
+  # Run with browser debugging options
+  vitest --config "$CONFIG_PATH" "${vitest_args[@]}" --inspect-brk --no-file-parallelism --test-timeout=0 --project browser
+else
+  # Run normally, forwarding all args
+  vitest --config "$CONFIG_PATH" "${vitest_args[@]}"
+fi

@@ -1,0 +1,63 @@
+# This container grabs the protoc compiler and the various protobuf
+# dependencies
+# /protobuf will contain the extracted protoc
+# /googleapis will contain the googleapis proto imports
+# /sigstore will contain the sigstore/protobuf-specs imports
+FROM debian:bookworm-slim@sha256:1209d8fd77def86ceb6663deef7956481cc6c14a25e1e64daec12c0ceffcc19d AS protoc-builder
+
+# Create output directories
+RUN mkdir /protobuf /googleapis /sigstore
+# Install needed utilities
+RUN apt-get update && apt-get install -y unzip git
+
+# Set up user and group to match host we're building the container on
+ARG UID
+
+RUN adduser --uid ${UID} --disabled-password myuser
+
+# Set permissions on the output directories so the user can write to them
+RUN chown myuser /protobuf /googleapis /sigstore
+
+# Switch to user to execute the remaining commands
+USER myuser
+
+# Download specific release of protoc
+ARG PROTOC_VERSION
+ARG PROTOC_CHECKSUM
+
+ADD --chown=myuser --checksum=${PROTOC_CHECKSUM} https://github.com/protocolbuffers/protobuf/releases/download/${PROTOC_VERSION}/protoc-${PROTOC_VERSION#v}-linux-x86_64.zip /tmp/protoc.zip
+RUN unzip -d /protobuf /tmp/protoc.zip
+RUN chmod 755 /protobuf/bin/protoc
+
+# fetch specific commit of googleapis
+ARG GOOGLEAPIS_COMMIT
+RUN git clone --filter=tree:0 https://github.com/googleapis/googleapis.git /googleapis && \
+    cd /googleapis && git checkout ${GOOGLEAPIS_COMMIT}
+
+# fetch specific commit of sigstore
+ARG SIGSTORE_COMMIT
+RUN git clone --filter=tree:0 https://github.com/sigstore/protobuf-specs.git /sigstore && \
+    cd /sigstore && git checkout ${SIGSTORE_COMMIT}
+
+# This container installs the twirp codegen binaries
+FROM golang:1.22 AS twirp-builder
+
+ARG PROTOC_TWIRP_VERSION
+RUN go install github.com/twitchtv/twirp/protoc-gen-twirp@${PROTOC_TWIRP_VERSION}
+
+ARG PROTOC_TWIRP_RUBY_VERSION
+RUN go install github.com/github/twirp-ruby/protoc-gen-twirp_ruby@${PROTOC_TWIRP_RUBY_VERSION}
+
+ARG PROTOC_GO_VERSION
+RUN go install github.com/golang/protobuf/protoc-gen-go@${PROTOC_GO_VERSION}
+
+# Final container with all the required tools
+FROM debian:bookworm-slim@sha256:1209d8fd77def86ceb6663deef7956481cc6c14a25e1e64daec12c0ceffcc19d
+
+COPY --from=twirp-builder /go/bin/* /usr/local/bin/
+COPY --from=protoc-builder /protobuf/bin/protoc /usr/local/bin/
+COPY --from=protoc-builder /protobuf/include/google /opt/include/google
+COPY --from=protoc-builder /googleapis /googleapis
+COPY --from=protoc-builder /sigstore/protos /sigstore
+
+ENTRYPOINT [ "/usr/local/bin/protoc", "-I/opt/include", "-I/googleapis", "-I/sigstore", "--experimental_allow_proto3_optional" ]

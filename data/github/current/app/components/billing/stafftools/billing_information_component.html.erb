@@ -1,0 +1,59 @@
+<%= render(Primer::Beta::BorderBox.new(mb: 5)) do |component| %>
+  <% component.with_header(font_weight: font_weight_header) do %>
+    Billing Information
+  <% end %>
+  <% component.with_body do %>
+    <%= render(Primer::Box.new(**styling)) do %>
+      <% if billing_contact.country_code.present? %>
+        <div class="d-flex">
+          <div class="col-4 float-left">Bill To Country (invoice delivery)</div>
+          <div class="col-2"><%= billing_contact.country_code %></div>
+        </div>
+        <div class="d-flex">
+          <div class="col-4 float-left">Sold To Country (taxation)</div>
+          <div class="col-2"><%= shipping_contact.country_code %></div>
+        </div>
+        <br>
+        <p> The country data here may differ from the payment information country. However, this represents the data that is synched with Zuora.</p>
+      <% end %>
+      <% invoice_vat_code = billing_contact&.vat_code %>
+      <% receipt_vat_code = customer&.vat_code %>
+      <hr class="bleed-flush">
+      <div class="d-flex">
+        <div class="col-3 float-left">Invoice VAT ID</div>
+        <div class="col-2"><%= invoice_vat_code.present? ? invoice_vat_code : "-" %></div>
+      </div>
+      <div class="d-flex mb-2">
+        <div class="col-3 float-left">Receipt VAT ID</div>
+        <div class="col-2"><%= receipt_vat_code.present? ? receipt_vat_code : "-" %></div>
+      </div>
+      <p>Accounts can update the VAT ID on their invoices by editing their billing information, which will then sync and overwrite the value on Customer. In case the value is out of sync, their VAT ID might need to be modified via StaffTools.</p>
+      <%= form_tag update_vat_codes_form_path, method: :put do %>
+        <%= render(Primer::Alpha::Dialog.new(title: "Edit VAT ID", id: "edit-vat-id", size: :medium)) do |dialog| %>
+          <% dialog.with_header(show_divider: true) %>
+          <% dialog.with_show_button(tag: :button, type: :button, scheme: :danger) do %>
+            Update account VAT ID
+          <% end %>
+          <% dialog.with_body do %>
+            <%= render(Primer::Alpha::TextField.new(name: "vat_id", id: "vat-id", label: "VAT ID", placeholder: receipt_vat_code, full_width: true, mb: 2)) %>
+            <%= render(Primer::Alpha::CheckBox.new(name: "delete_vat_id", label: "Delete VAT ID")) %>
+            <%= render(Primer::Beta::Text.new(tag: :p, color: :danger, font_size: :normal, block: true)) { "WARNING: Customers may be re-screened when their VAT ID is updated" } %>
+          <% end %>
+          <% dialog.with_footer do %>
+            <%= render(Primer::Beta::Button.new(scheme: :danger, type: :submit, block: true).with_content("Update")) %>
+          <% end %>
+        <% end %>
+      <% end %>
+      <hr class="bleed-flush">
+      <p> The button below syncs the billing information on file with Zuora. This can be run to ensure that Zuora's Bill-To and Sold-To contacts, the former of which appears on the invoice, reflects GitHub's desired state.</p>
+      <%= form_tag sync_contact_information_with_zuora_form_path, class: "js-setting-toggle d-flex flex-items-center", method: :put do %>
+        <%= hidden_field_tag :contact_id, billing_contact.id %>
+        <%= render Primer::Beta::Button.new(
+          scheme: :danger,
+          "data-disable-with": "Syncing billing contact information",
+          type: :submit
+        ).with_content("Sync billing contact information") %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

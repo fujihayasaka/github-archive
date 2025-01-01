@@ -1,0 +1,126 @@
+import {ColorPicker} from '@github-ui/color-picker'
+import {testIdProps} from '@github-ui/test-id-props'
+import type {Icon} from '@primer/octicons-react'
+import {ActionList, ActionMenu, Checkbox, FormControl, Heading} from '@primer/react'
+import {useRef} from 'react'
+
+import type {ProgressConfiguration} from '../../../api/columns/contracts/progress'
+import {AutosaveMessage} from '../../../components/fields/autosave-message'
+import {ProgressBar, ProgressBarVariants} from '../../../components/fields/progress-bar'
+import type {SubIssuesProgressColumnModel} from '../../../models/column-model/system/sub-issues-progress'
+import {useUpdateProgressConfiguration} from '../../../state-providers/columns/use-update-progress-configuration'
+import {Resources} from '../../../strings'
+import {CONTENT_WIDTH} from '../constants'
+import {BarIcon, RingIcon, SegmentedBarIcon} from './icons'
+import styles from './progress-configuration-view.module.css'
+
+type Variant = ProgressConfiguration['variant']
+
+const variantOptions: Array<{id: Variant; leadingVisual: Icon; label: string}> = [
+  {id: ProgressBarVariants.SOLID, leadingVisual: BarIcon, label: 'Bar'},
+  {id: ProgressBarVariants.SEGMENTED, leadingVisual: SegmentedBarIcon, label: 'Segmented bar'},
+  {id: ProgressBarVariants.RING, leadingVisual: RingIcon, label: 'Ring'},
+]
+
+const VariantSelect = ({value, onSelect}: {value: Variant; onSelect: (value: Variant) => void}) => {
+  const selectedIndicatorOption = variantOptions.find(option => option.id === value)
+
+  return (
+    <ActionMenu>
+      <ActionMenu.Button
+        aria-label="Progress visualization variant"
+        sx={{width: CONTENT_WIDTH}}
+        leadingVisual={selectedIndicatorOption?.leadingVisual}
+        block
+        alignContent="start"
+      >
+        {selectedIndicatorOption?.label}
+      </ActionMenu.Button>
+      <ActionMenu.Overlay width="auto">
+        <ActionList>
+          {variantOptions.map(({id, leadingVisual: LeadingVisualComponent, label}) => (
+            <ActionList.Item key={id} onSelect={() => onSelect(id)}>
+              {label}
+              <ActionList.LeadingVisual>{<LeadingVisualComponent />}</ActionList.LeadingVisual>
+            </ActionList.Item>
+          ))}
+        </ActionList>
+      </ActionMenu.Overlay>
+    </ActionMenu>
+  )
+}
+
+const HideNumeralsCheckboxField = (props: {
+  checked: boolean
+  disabled: boolean
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void
+}) => {
+  return (
+    <form {...testIdProps('hide-numerals-checkbox-field')}>
+      <FormControl disabled={props.disabled}>
+        <Checkbox {...props} />
+        <FormControl.Label>Show numerical value</FormControl.Label>
+      </FormControl>
+    </form>
+  )
+}
+
+export const ProgressConfigurationView = ({column}: {column: SubIssuesProgressColumnModel}) => {
+  const {updateProgressConfiguration, commitState} = useUpdateProgressConfiguration()
+  const variant = column.settings?.progressConfiguration?.variant || ProgressBarVariants.SEGMENTED
+  const hideNumerals = column.settings?.progressConfiguration?.hideNumerals || false
+  const color = column.settings?.progressConfiguration?.color || 'PURPLE'
+  const configuration = {
+    color,
+    hideNumerals,
+    variant,
+  }
+
+  const errorMessage = useRef(Resources.genericErrorMessage)
+
+  return (
+    <>
+      <Heading as="h3" aria-label={`${column.name} options`} className={styles.Heading}>
+        Options
+      </Heading>
+      <div
+        style={{
+          width: CONTENT_WIDTH,
+        }}
+        className={styles.Box}
+      >
+        <ProgressBar
+          completed={2}
+          percentCompleted={40}
+          total={5}
+          variant={variant}
+          hideNumerals={hideNumerals}
+          color={color}
+        />
+      </div>
+      <div className={styles.Box_1}>
+        <VariantSelect
+          value={variant}
+          onSelect={value => {
+            updateProgressConfiguration(column, {...configuration, variant: value})
+          }}
+        />
+        <HideNumeralsCheckboxField
+          checked={!hideNumerals || variant === ProgressBarVariants.RING}
+          disabled={variant === ProgressBarVariants.RING}
+          onChange={e => {
+            updateProgressConfiguration(column, {...configuration, hideNumerals: !e.target.checked})
+          }}
+        />
+      </div>
+      <ColorPicker
+        value={color}
+        onChange={value => {
+          updateProgressConfiguration(column, {...configuration, color: value})
+        }}
+        label="Color"
+      />
+      <AutosaveMessage commitState={commitState} errorMessage={errorMessage} />
+    </>
+  )
+}

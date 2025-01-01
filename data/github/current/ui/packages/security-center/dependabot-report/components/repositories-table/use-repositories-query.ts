@@ -1,0 +1,48 @@
+import type {UseQueryResult} from '@github-ui/react-query'
+
+import {usePaths} from '../../../common/contexts/Paths'
+import {useQuery} from '../../../common/hooks/use-config-query'
+import {fetchJson} from '../../../common/utils/fetch-json'
+import type {Sort} from './SortHeader'
+
+export interface RepositoryRow {
+  id: string
+  displayName: string
+  href: string
+  countOpen: number
+  countEPSS: number
+  countCritical: number
+  countHigh: number
+  countMedium: number
+  countLow: number
+}
+
+interface RepositoriesResult {
+  items: RepositoryRow[]
+  previous?: string
+  next?: string
+}
+
+interface UseRepositoriesQueryParams {
+  query: string
+  cursor?: string
+  sort?: Sort<RepositoryRow>
+}
+export default function useRepositoriesQuery({
+  query,
+  cursor,
+  sort,
+}: UseRepositoriesQueryParams): UseQueryResult<RepositoriesResult> {
+  const paths = usePaths()
+  const path = paths.dependabotRepositoriesPath({
+    query,
+    cursor,
+    sortField: sort?.field,
+    sortDirection: sort?.direction,
+  })
+
+  return useQuery({
+    queryKey: [path],
+    queryFn: () => fetchJson(path),
+  })
+}

@@ -1,0 +1,68 @@
+import {act, fireEvent, screen} from '@testing-library/react'
+import {render} from '@github-ui/react-core/test-utils'
+import {BranchActionMenu} from '../components/BranchActionMenu'
+import {getBranches, getRepository} from '../test-utils/mock-data'
+import {useState} from 'react'
+// eslint-disable-next-line no-restricted-imports
+import {mockFetch} from '@github-ui/mock-fetch'
+import {branchesPath} from '@github-ui/paths'
+
+const repo = getRepository()
+const branch = getBranches()[0]!
+
+const BranchActionMenuWrapper = () => {
+  const [_, setDeletedBranches] = useState<string[]>([])
+  return (
+    <BranchActionMenu
+      repo={repo}
+      branch={branch}
+      oid="000"
+      deletedAt={branch.deletedAt}
+      onDelete={() => {
+        branch.deleted = true
+        branch.deletedAt = new Date().toISOString()
+        setDeletedBranches([branch.name])
+      }}
+      onRestore={() => {
+        branch.deleted = false
+        branch.deletedAt = undefined
+        setDeletedBranches([])
+      }}
+    />
+  )
+}
+
+test('renders BranchActionMenu', async () => {
+  render(<BranchActionMenuWrapper />)
+
+  const menuButton = screen.getByRole('button', {name: 'Branch menu'})
+  expect(menuButton).toBeVisible()
+  // eslint-disable-next-line testing-library/prefer-user-event
+  fireEvent.click(menuButton)
+
+  expect(screen.getByRole('menuitem', {name: 'Rename branch'})).toBeVisible()
+
+  const deleteButton = screen.getByRole('button', {name: 'Delete branch'})
+  expect(deleteButton).toBeVisible()
+  // eslint-disable-next-line testing-library/prefer-user-event
+  fireEvent.click(deleteButton)
+
+  await act(async () => {
+    mockFetch.resolvePendingRequest(`${branchesPath({repo})}/${encodeURIComponent(branch.name)}`, {})
+  })
+  const restoreButton = screen.getByRole('button', {name: 'Restore'})
+  expect(restoreButton).toBeVisible()
+})
+
+test('renders BranchActionMenu for non-collaborator', () => {
+  repo.currentUserCanPush = false
+
+  render(<BranchActionMenu repo={repo} branch={branch} onDelete={() => {}} onRestore={() => {}} />)
+
+  const menuButton = screen.getByRole('button', {name: 'Branch menu'})
+  expect(menuButton).toBeVisible()
+  // eslint-disable-next-line testing-library/prefer-user-event
+  fireEvent.click(menuButton)
+
+  expect(screen.queryByRole('menuitem', {name: 'Rename branch'})).not.toBeInTheDocument()
+})

@@ -1,0 +1,62 @@
+# Kubernetes configuration for Go package-manager adapter job.
+# Moda runs this job when a PR that changes it is deployed to workers.
+# See ../../../../docs/kube.MD for overview.
+#
+# It runs 'package_manager_adapters/script/start_kube go'.
+# We use kind Deployment, not CronJob, because the gopma process can poll the
+# Go index server more frequently than it is reasonable to run a cron job,
+# thereby increasing the rate at which we can backfill historic packages,
+# and reducing the latency of our ingestion pipeline on new packages.
+#
+# Across clusters, the start_kube script implements locking
+# to ensure that only an arbitrarily chosen leader actually does any work.
+#
+# See https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/
+# for documentation on Kubernetes spec (YAML) files for CronJob objects.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: extract-go-packages
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "extract-go-packages"
+        heaven.githubapp.com/image-placeholder: "dependency-graph-api"
+        heaven.githubapp.com/deploy-requirement: "true"
+spec:
+    replicas: 1
+    strategy:
+        type: RollingUpdate
+    selector:
+        matchLabels:
+            app: dependency-graph-api
+            role: extract-go-packages
+    template:
+        metadata:
+            labels:
+                app: dependency-graph-api
+                role: extract-go-packages
+        spec:
+            dnsPolicy: ClusterFirst
+            containers:
+                - name: extract-go-packages
+                  image: dependency-graph-api
+                  resources:
+                    requests:
+                        memory: "1000Mi"
+                    limits:
+                        memory: "1000Mi"
+                  workingDir: "/src/app/package_manager_adapters"
+                  # Moda reports "OOMKilled" with 250Mi. Why does it use so much??
+                  # TODO(adonovan): investigate memory usage over time.
+                  command: ["script/start_kube"]
+                  args: ["go"]
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName

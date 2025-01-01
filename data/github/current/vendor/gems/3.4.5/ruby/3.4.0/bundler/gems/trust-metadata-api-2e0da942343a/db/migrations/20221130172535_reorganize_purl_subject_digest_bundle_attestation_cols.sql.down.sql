@@ -1,0 +1,2 @@
+-- only the ordering of the cols was changed, so I don't think we have to undo
+-- anything here. re-applying the up migration should be a NOP

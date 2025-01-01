@@ -1,0 +1,101 @@
+commit 7ea199956bd239bbc8f23b15770ac645629ffad7
+Author: GitHub Developer
+Date:   Thu Jan 1 00:00:00 1970 +0000
+
+    Add tests for admin routes with data router
+
+diff --git a/ui/packages/example-app/__tests__/AdminRoutesSSR.test.tsx b/ui/packages/example-app/__tests__/AdminRoutesSSR.test.tsx
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/ui/packages/example-app/__tests__/AdminRoutesSSR.test.tsx
+@@ -0,0 +1,25 @@
++/** @jest-environment node */
++import {serverRenderReact} from '@github-ui/ssr-test-utils/server-render'
++
++// Register with react-core before attempting to render
++import '../ssr-entry'
++import {getAdminMockPayload} from '../test-utils/mock-data'
++
++describe('Admin routes', () => {
++  it('renders admin page with SSR', async () => {
++    const payload = {admin: getAdminMockPayload()}
++
++    const view = await serverRenderReact({
++      name: 'example-app',
++      path: '/admin',
++      data: {payload},
++      data_router_enabled: true,
++    })
++
++    // Verify SSR was able to render key content from the payload
++    expect(view).toMatch('Admin Dashboard')
++    expect(view).toMatch('Users: 125')
++    expect(view).toMatch('Settings')
++  })
++})
++
+diff --git a/ui/packages/example-app/__tests__/AdminRoutes.test.tsx b/ui/packages/example-app/__tests__/AdminRoutes.test.tsx
+new file mode 100644
+index 0000000..2222222
+--- /dev/null
++++ b/ui/packages/example-app/__tests__/AdminRoutes.test.tsx
+@@ -0,0 +1,45 @@
++import {getAdminMockPayload} from '../test-utils/mock-data'
++import {render} from '@github-ui/react-core/future/test-utils/render'
++import {exampleApp} from '../example-app'
++import {screen} from '@testing-library/react'
++
++describe('Admin routes', () => {
++  it('renders admin page with CSR from embedded data', async () => {
++    const payload = {admin: getAdminMockPayload()}
++    render(exampleApp, '/admin', {
++      embeddedData: {
++        payload,
++        meta: {
++          title: 'Admin Dashboard',
++        },
++      },
++    })
++
++    expect(await screen.findByText('Admin Dashboard')).toBeInTheDocument()
++    expect(screen.getByText('Users: 125')).toBeInTheDocument()
++    expect(screen.getByText('Settings')).toBeInTheDocument()
++  })
++
++  it('renders admin settings page with CSR from embedded data', async () => {
++    const payload = {admin: getAdminMockPayload({showSettings: true})}
++    render(exampleApp, '/admin/settings', {
++      embeddedData: {
++        payload,
++        meta: {
++          title: 'Admin Settings',
++        },
++      },
++    })
++
++    expect(await screen.findByText('Admin Settings')).toBeInTheDocument()
++    expect(screen.getByLabelText('Enable feature flag')).toBeInTheDocument()
++  })
++})
++
+diff --git a/ui/packages/example-app/test-utils/mock-data.ts b/ui/packages/example-app/test-utils/mock-data.ts
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/ui/packages/example-app/test-utils/mock-data.ts
+@@ -0,0 +1,14 @@
++import type {AdminPayload} from '../routes/AdminRoute'
++
++export function getAdminMockPayload(options = {}): AdminPayload {
++  const defaultOptions = {
++    showSettings: false,
++  }
++  
++  const mergedOptions = {...defaultOptions, ...options}
++  
++  return {
++    userCount: 125,
++    showSettingsPage: mergedOptions.showSettings
++  }
++}

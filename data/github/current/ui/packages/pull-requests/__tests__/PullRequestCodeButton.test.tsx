@@ -1,0 +1,72 @@
+import {screen, render, within} from '@testing-library/react'
+import {PullRequestCodeButton} from '../components/PullRequestCodeButton'
+import {getHeaderPageData} from '../test-utils/header-mock-data'
+import {createRepository} from '@github-ui/current-repository/test-helpers'
+import {renderWithClient} from '@github-ui/pull-request-page-data-tooling/render-with-query-client'
+
+describe('Pull Request Code Button', () => {
+  test('renders a button with a dropdown', () => {
+    const {pullRequest, repository} = getHeaderPageData()
+
+    render(
+      <PullRequestCodeButton
+        codespacesEnabled={repository.codespacesEnabled}
+        isEnterprise={repository.isEnterprise}
+        headBranch={pullRequest.headBranch}
+        pullRequestNumber={pullRequest.number}
+        repository={createRepository(repository)}
+      />,
+    )
+
+    const codeButtonElement = screen.getByRole('button', {name: /Code/i})
+    expect(codeButtonElement).toBeInTheDocument()
+  })
+
+  test('when menu is open, renders local menu (no tabs)', async () => {
+    const {pullRequest, repository} = getHeaderPageData()
+
+    const {user} = renderWithClient(
+      <PullRequestCodeButton
+        codespacesEnabled={false}
+        isEnterprise={repository.isEnterprise}
+        headBranch={pullRequest.headBranch}
+        pullRequestNumber={pullRequest.number}
+        repository={createRepository(repository)}
+      />,
+    )
+
+    const codeButtonElement = screen.getByRole('button', {name: /Code/})
+    await user.click(codeButtonElement)
+
+    expect(screen.getByRole('textbox', {name: 'Checkout with GitHub CLI command'})).toBeInTheDocument()
+    expect(screen.getByRole('button', {name: 'Copy command to clipboard'})).toBeInTheDocument()
+    expect(screen.getByRole('link', {name: 'Learn more about the GitHub CLI'})).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', {name: 'Checkout with GitHub Desktop'})).toBeInTheDocument()
+
+    // If Codespaces and Copilot are disabled, then we render the Local section alone without any tabs
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', {name: /Local/})).not.toBeInTheDocument()
+  })
+
+  test('when menu is open and codespaces feature is enabled, renders a Codespaces tab', async () => {
+    const {pullRequest, repository} = getHeaderPageData()
+
+    const {user} = renderWithClient(
+      <PullRequestCodeButton
+        codespacesEnabled
+        isEnterprise={repository.isEnterprise}
+        headBranch={pullRequest.headBranch}
+        pullRequestNumber={pullRequest.number}
+        repository={createRepository(repository)}
+      />,
+    )
+
+    const codeButtonElement = screen.getByRole('button', {name: /Code/i})
+    await user.click(codeButtonElement)
+
+    const tabList = screen.getByRole('tablist')
+    expect(within(tabList).getByRole('tab', {name: /Local/})).toBeInTheDocument()
+    expect(within(tabList).getByRole('tab', {name: /Codespaces/})).toBeInTheDocument()
+    expect(within(tabList).queryByRole('tab', {name: /Copilot/})).not.toBeInTheDocument()
+  })
+})

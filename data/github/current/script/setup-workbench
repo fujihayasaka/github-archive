@@ -1,0 +1,105 @@
+#!/bin/bash
+set -e
+
+# Get local Copilot ready
+script/setup-codespaces-copilot-api || true
+script/enable-copilot-chat || true
+
+# Get local Codespaces ready
+script/setup-codespaces
+
+# Get workbench configuration into dotcom
+# NOTE: this needs to run after `script/enable-copilot-chat`
+bin/seed workbench
+
+echo "Creating GitHub Spark App"
+./bin/rails runner 'Apps::Privileged::Spark.seed_database!'
+
+# We depend on the gh-runtime-cli repository when creating local
+# spark codespaces, so go grab it.
+echo "Updating from https://github.com/github/gh-runtime-cli"
+cd /workspaces
+if [ ! -d gh-runtime-cli ]; then
+  git clone https://github.com/github/gh-runtime-cli || true
+fi
+
+cd /workspaces/gh-runtime-cli
+git pull origin main
+
+echo "Updating from https://github.com/github/workbench-sdk"
+cd /workspaces
+# Clone if necessary
+if [ ! -d workbench-sdk ]; then
+  git clone https://github.com/github/workbench-sdk || true
+fi
+
+cd /workspaces/workbench-sdk
+git pull --no-edit origin main
+npm i
+
+# Setup the 'spark-tools aka @github/spark' package, which as of now needs to be on this special dir inside the template
+./build/build-package.sh
+tar -xzf github-spark-0.0.1.tgz
+mkdir -p /workspaces/spark/packages/spark-tools
+cp -r ./package/* /workspaces/spark/packages/spark-tools/
+
+
+# We're also supporting the spark-template repository
+echo "Updating from https://github.com/github/spark-template"
+cd /workspaces
+# Clone if necessary
+if [ ! -d spark-template ]; then
+  git clone https://github.com/github/spark-template || true
+fi
+cd /workspaces/spark-template
+git pull --no-edit origin main
+
+# Usage of the gh-runtime-cli is a bit tricky due to how it's a private tool,
+# the way extensions are installed, and because we'll be running a local codespace.
+# So we need to build the tool and copy it into the template repositories
+# and then commit it into the local template repositories. It will then be
+# available in the local codespace for the spark.
+echo "Building the gh-runtime-cli tool"
+cd /workspaces/gh-runtime-cli
+go build .
+
+gh extension install . || true
+gh alias set spark-cli runtime-cli --clobber
+
+# Set up spark-template
+echo "Copying the gh-runtime-cli tool into the spark-template repository"
+cd /workspaces/spark-template
+if ! git diff --cached --quiet; then
+  git commit -m "create artifact"
+fi
+set -e
+echo "Pushing the spark-template repository to the local github"
+git push -f -u http://monalisa:$MONALISA_PAT@github.localhost/github/spark-template main
+
+# Bail if the --skip-local flag is set
+if [[ "$1" == "--skip-local" ]]; then
+  echo "Skipping local spark setup as requested."
+  exit 0
+fi
+
+# Configure dotcom codespace to run all spark services
+if [[ -z "${CODESPACE_NAME:-}" ]]; then
+  echo "Error: CODESPACE_NAME environment variable not set. Are you running inside a Codespace?"
+  exit 1
+fi
+
+# make a copy of the spark-template repository to use as the user Spark
+# this lets us work on the services without affecting user/ai generated app
+echo "Copying the spark-template repository to the user Spark"
+cp -r /workspaces/spark-template/* /workspaces/spark
+
+cd /workspaces/spark
+echo "Removing existing .git directory from /workspaces/spark"
+rm -rf .git
+
+echo "Initializing a new, empty Git repository..."
+git init -b main
+git add .
+git commit -m "Initial commit"
+
+echo "Done! Run 'script/start-workbench' to start the workbench services."

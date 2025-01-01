@@ -1,0 +1,376 @@
+<%
+  refresh_feature_enabled = this_business.feature_enabled?(:enterprise_copilot_policies_refresh)
+  use_general_form = current_user.feature_enabled?(:copilot_policy_form_refactor)
+%>
+
+<% if !copilot_business.copilot_enabled? %>
+  <%= render(Primer::Beta::BorderBox.new) do |component| %>
+    <% component.with_header { "There are no policies to manage at the moment." } %>
+    <% component.with_body do %>
+      <%= render(Primer::Beta::Text.new(tag: :p, mt: 3, font_size: 3, font_weight: :bold, text_align: :center)) { "GitHub Copilot policies" } %>
+      <%= render(Primer::Beta::Text.new(tag: :p, mb: 3, text_align: :center, pr: 6, pl: 6, ml: 6, mr: 6)) { "Once you enable access to Copilot you'll have the ability to manage policies and feature access for GitHub Copilot inside your enterprise account." } %>
+      <p class="mb-3 text-center">
+        <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_LEARN_MORE_PAGE, classes: "Link--inTextBlock")) { "Explore Copilot features" } %>
+      </p>
+    <% end %>
+  <% end %>
+<% else %>
+  <% unless refresh_feature_enabled %>
+    <%= render(Primer::Beta::Text.new(tag: :h2, font_size: 4, classes: "text-normal pb-2 mb-0")) do %>
+      Copilot policies
+    <% end %>
+    <%= render(Primer::Beta::Text.new(tag: :p, mb: 3, color: :muted)) do %>
+      You can manage policies and grant access to Copilot features for all organizations with access.<br>
+      If preview features are enabled, you agree to
+      <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_CHAT_TERMS, classes: "Link--inTextBlock")) { "pre-release terms" } %>.
+    <% end %>
+  <% end %>
+  <%# ============== START OF BILLING POLICIES SECTION ============== %>
+  <%# today, overages is the only billing policy %>
+  <%# if more billing policies are added in the future, the conditions need to be modified/removed %>
+  <% if business.feature_enabled?(:copilot_overages) %>
+    <%= render(Primer::Box.new(display: :flex, justify_content: :space_between, direction: :row, align_items: :center, mb: 3)) do %>
+      <%= render(Primer::Beta::Text.new(tag: :h2, font_size: 4, font_weight: :bold)) { "Billing" } %>
+    <% end %>
+
+    <%= render(Primer::Beta::BorderBox.new(padding: :default, mb: 3)) do |component| %>
+      <%= component.with_row(scheme: :default) do %>
+        <% if use_general_form %>
+          <%= render(Copilot::Policies::GeneralFormComponent.new(
+            display_name: "#{Copilot::COPILOT_OVERAGES}",
+            configurable: business,
+            policy_name: "overages",
+            current_value: copilot_business.overages,
+            preview: false,
+          )) do |component| %>
+            <%= component.with_description do %>
+              If enabled, additional premium requests beyond the included amount for each license will be billed.
+              <%= render(Primer::Beta::Link.new(href: "", classes: "Link--inTextBlock")) { "Learn more." } %>
+            <% end %>
+          <% end %>
+        <% else %>
+          <%= render(Copilot::Policies::OveragesFormComponent.new(configurable: business)) %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+  <%# ============== END OF BILLING POLICIES SECTION ============== %>
+
+  <%# ============== START OF FEATURES POLICIES SECTION ============== %>
+  <%= render(Primer::Box.new(display: :flex, justify_content: :space_between, direction: :row, align_items: :center, mb: 3)) do %>
+    <%= render(Primer::Beta::Text.new(tag: :h2, font_size: 4, font_weight: :bold)) { "Features" } %>
+  <% end %>
+
+  <%= render(Primer::Beta::BorderBox.new(padding: :default, mb: 3)) do |component| %>
+    <%= component.with_row(scheme: :default) do %>
+      <% if use_general_form %>
+        <%= render(Copilot::Policies::GeneralFormComponent.new(
+          display_name: "#{Copilot::COPILOT_IN_DOTCOM}",
+          configurable: business,
+          policy_name: "for_dotcom", # the name is prefixed with "copilot_" so this one looks a bit weird
+          current_value: copilot_business.copilot_for_dotcom,
+          preview: false,
+        )) do |component| %>
+          <%= component.with_description do %>
+            If enabled, the organizations can use
+            <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_DOTCOM_CHAT_DOCUMENTATION, classes: "Link--inTextBlock")) { "Copilot Chat in GitHub.com" } %>,
+            <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_FOR_PRS_DOCUMENTATION, classes: "Link--inTextBlock")) { "Copilot for pull requests" } %>,
+            <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_CODE_REVIEW_DOCUMENTATION, classes: "Link--inTextBlock")) { "Copilot code review" } %>, and
+            <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_DOCSET_MANAGEMENT, classes: "Link--inTextBlock")) { "knowledge base search" } %>.
+          <% end %>
+          <%= component.with_note do %>
+            Note that knowledge base search is available only for organizations on Copilot Enterprise plan (<%= pluralize(copilot_business.number_of_enterprise_organizations, "organization") %>).
+          <% end %>
+        <% end %>
+      <% else %>
+        <%= render(Copilot::Policies::CopilotForDotcomFormComponent.new(configurable: business)) %>
+      <% end %>
+    <% end %>
+
+    <% if render_copilot_feedback_opt_in_settings %>
+      <%= component.with_row(scheme: :default, ml: 5) do %>
+        <%= render(Copilot::Policies::UserFeedbackOptInFormComponent.new(configurable: business)) %>
+      <% end %>
+    <% end %>
+
+    <% if render_copilot_beta_features_opt_in_settings %>
+      <%= component.with_row(scheme: :default, ml: 5) do %>
+        <%= render(Copilot::Policies::BetaFeaturesOptInFormComponent.new(configurable: business)) %>
+      <% end %>
+    <% end %>
+
+    <%= component.with_row(scheme: :default) do %>
+      <% if use_general_form %>
+        <%= render(Copilot::Policies::GeneralFormComponent.new(
+          display_name: "#{Copilot::CLI_UI_NAME}",
+          configurable: business,
+          policy_name: "cli",
+          policy_prefix: nil,
+          current_value: copilot_business.cli,
+          preview: false,
+        )) do |component| %>
+          <%= component.with_description do %>
+            If enabled, organizations can use GitHub Copilot for assistance in terminal.
+            <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_FOR_CLI_USAGE_DOCUMENTATION, classes: "Link--inTextBlock")) { "Learn more about #{Copilot::CLI_UI_NAME}" } %>.
+          <% end %>
+        <% end %>
+      <% else %>
+        <%= render(Copilot::Policies::CliFormComponent.new(configurable: business)) %>
+      <% end %>
+    <% end %>
+
+    <% if business.feature_enabled?(:copilot_desktop) %>
+      <%= component.with_row(scheme: :default) do %>
+        <% if use_general_form %>
+          <%= render(Copilot::Policies::GeneralFormComponent.new(
+            display_name: "#{Copilot::COPILOT_DESKTOP}",
+            configurable: business,
+            policy_name: "desktop",
+            policy_prefix: nil,
+            current_value: copilot_business.desktop,
+            preview: !business.feature_enabled?(:copilot_desktop_no_preview_badge),
+          )) do |component| %>
+            <%= component.with_description do %>
+              If enabled, organizations can use GitHub Copilot for assistance in GitHub Desktop.
+              <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_IN_DESKTOP_DOCUMENTATION, classes: "Link--inTextBlock")) { "Learn more about #{Copilot::COPILOT_DESKTOP}" } %>.
+            <% end %>
+          <% end %>
+        <% else %>
+          <%= render(Copilot::Policies::DesktopFormComponent.new(configurable: business)) %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <%= component.with_row(scheme: :default) do %>
+      <% if use_general_form %>
+        <%= render(Copilot::Policies::GeneralFormComponent.new(
+          display_name: "#{Copilot::COPILOT_CHAT_IN_IDE}",
+          configurable: business,
+          policy_name: "editor_chat_enabled",
+          current_value: copilot_business.copilot_chat_setting,
+          preview: false,
+        )) do |component| %>
+          <%= component.with_description do %>
+            If enabled, organizations can use
+            <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_CHAT_EDITOR_DOCS, classes: "Link--inTextBlock")) { "Copilot Chat for code editors" } %>.
+          <% end %>
+        <% end %>
+      <% else %>
+        <%= render(Copilot::Policies::EditorChatFormComponent.new(configurable: business)) %>
+      <% end %>
+    <% end %>
+
+    <% if business.feature_enabled?(:copilot_next_edit_suggestions) %>
+      <%= component.with_row(scheme: :default) do %>
+        <% if use_general_form %>
+          <%= render(Copilot::Policies::GeneralFormComponent.new(
+            display_name: "#{Copilot::EDITOR_PREVIEW_FEATURES}",
+            configurable: business,
+            policy_name: "editor_preview_features",
+            current_value: copilot_business.editor_preview_features,
+            preview: true,
+          )) do |component| %>
+            <%= component.with_description do %>
+              If enabled, organization members will have access to editor preview features.
+            <% end %>
+          <% end %>
+        <% else %>
+          <%= render(Copilot::Policies::EditorPreviewFeaturesFormComponent.new(configurable: business)) %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <%= component.with_row(scheme: :default) do %>
+      <% if use_general_form %>
+        <%= render(Copilot::Policies::GeneralFormComponent.new(
+          display_name: "#{Copilot::COPILOT_CHAT_IN_MOBILE}",
+          configurable: business,
+          policy_name: "mobile_chat",
+          current_value: copilot_business.mobile_chat,
+          preview: false,
+        )) do |component| %>
+          <%= component.with_description do %>
+            If enabled, organizations can use
+            <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_CHAT_MOBILE_DOCS, classes: "Link--inTextBlock")) { "Copilot Chat in GitHub Mobile" } %> personalized to a codebase.
+          <% end %>
+        <% end %>
+      <% else %>
+        <%= render(Copilot::Policies::MobileChatFormComponent.new(configurable: business)) %>
+      <% end %>
+    <% end %>
+
+    <% if copilot_custom_models %>
+      <%= component.with_row(scheme: :default) do %>
+        <% if use_general_form %>
+          <%= render(Copilot::Policies::GeneralFormComponent.new(
+            display_name: "#{Copilot::COPILOT_FINETUNING}",
+            configurable: business,
+            policy_name: "custom_models",
+            current_value: copilot_business.custom_models,
+            preview: true,
+          )) do |component| %>
+            <%= component.with_description do %>
+              If enabled, organizations can create and fine-tune custom models.
+              <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_CUSTOM_MODELS_DOCS, classes: "Link--inTextBlock")) { "Learn more about Copilot fine-tuning" } %>.
+            <% end %>
+          <% end %>
+        <% else %>
+          <%= render(Copilot::Policies::CustomModelsFormComponent.new(configurable: business)) %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <% if business.feature_enabled?(:copilot_extension_access) %>
+      <%= component.with_row(scheme: :default) do %>
+        <% if use_general_form %>
+          <%= render(Copilot::Policies::GeneralFormComponent.new(
+            display_name: "#{Copilot::COPILOT_EXTENSION}",
+            configurable: business,
+            policy_name: "extensions",
+            current_value: copilot_business.copilot_extensions,
+            preview: true,
+          )) do |component| %>
+            <%= component.with_description do %>
+              If enabled, extensions can access organization data per granted permissions. Data use is subject to extension provider's terms and privacy policy. The Duplication Detection Filter does not apply to extension responses.
+            <% end %>
+          <% end %>
+        <% else %>
+          <%= render(Copilot::Policies::CopilotExtensionsFormComponent.new(configurable: business)) %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <%= component.with_row(scheme: :default) do %>
+      <% if use_general_form %>
+        <%= render(Copilot::Policies::GeneralFormComponent.new(
+          display_name: "#{Copilot::COPILOT_BING_ACCESS}",
+          configurable: business,
+          policy_name: "bing_github_chat",
+          policy_prefix: nil,
+          current_value: copilot_business.bing_github_chat,
+          preview: false,
+        )) do |component| %>
+          <%= component.with_description do %>
+            Copilot can answer questions about new trends and give improved answers, via Bing. See
+            <%= render(Primer::Beta::Link.new(href: Copilot::MICROSOFT_PRIVACY_STATEMENT_URL, classes: "Link--inTextBlock")) { "Microsoft Privacy Statement" } %>.
+          <% end %>
+        <% end %>
+      <% else %>
+        <%= render(Copilot::Policies::BingForGitHubFormComponent.new(configurable: business)) %>
+      <% end %>
+    <% end %>
+
+    <% if !GitHub.multi_tenant_enterprise? %>
+      <%= component.with_row(scheme: :default) do %>
+        <% if use_general_form %>
+          <%= render(Copilot::Policies::GeneralFormComponent.new(
+            display_name: "#{Copilot::COPILOT_METRICS_API_NAME}",
+            configurable: business,
+            policy_name: "telemetry_aggregation",
+            current_value: copilot_business.usage_telemetry_api,
+            preview: false,
+          )) do |component| %>
+            <%= component.with_description do %>
+              If enabled, enterprise and organization administrators can query the <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_USAGE_METRICS_API_DOCS, classes: "Link--inTextBlock")) { Copilot::COPILOT_METRICS_API_NAME } %> for insights into Copilot usage.
+            <% end %>
+          <% end %>
+        <% else %>
+          <%= render(Copilot::Policies::UsageMetricsFormComponent.new(configurable: business)) %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <% if business.enterprise_managed? && !GitHub.multi_tenant_enterprise? %>
+      <%= component.with_row(scheme: :default) do %>
+        <% if use_general_form %>
+          <%= render(Copilot::Policies::GeneralFormComponent.new(
+            display_name: "#{Copilot::COPILOT_WORKSPACE_FOR_EMU}",
+            configurable: business,
+            policy_name: "workspace_for_emu",
+            current_value: copilot_business.workspace_for_emu,
+            preview: true,
+          )) do |component| %>
+            <%= component.with_description do %>
+              If enabled, organizations can access Copilot Workspace. By enabling this feature you agree to
+              <%= render(Primer::Beta::Link.new(href: Copilot::GITHUB_NEXT_TERMS, classes: "Link--inTextBlock")) { "GitHub Next's Terms of Service" } %>
+            <% end %>
+          <% end %>
+        <% else %>
+          <%= render(Copilot::Policies::WorkspaceFormComponent.new(configurable: business)) %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <% if render_copilot_swe_agent_settings %>
+      <%= component.with_row(scheme: :default) do %>
+        <%= render(Copilot::Policies::GeneralFormComponent.new(
+          display_name: Copilot::COPILOT_SWE_AGENT,
+          configurable: business,
+          policy_name: "swe_agent",
+          current_value: copilot_business.swe_agent,
+          tab: "policies",
+          preview: true,
+          )) do |component| %>
+            <%= component.with_description do %>
+              If enabled, users assigned a Copilot license from this enterprise will have access to <%= Copilot::COPILOT_SWE_AGENT %>
+          in repositories where it is enabled. This feature may use models which are not enabled on your "Models" settings page.
+              <%= render(Primer::Beta::Link.new(href: "https://gh.io/assigncopilot", classes: "Link--inTextBlock")) { "Learn more." } %>
+            <% end %>
+        <% end %>
+      <% end %>
+
+      <%= component.with_row(scheme: :default) do %>
+        <%= render(Copilot::Policies::GeneralFormComponent.new(
+          display_name: Copilot::COPILOT_MCP_SERVERS,
+          configurable: business,
+          policy_name: "mcp",
+          current_value: copilot_business.mcp,
+          tab: "policies",
+          preview: true,
+          )) do |component| %>
+            <%= component.with_description do %>
+              If enabled, users can configure and use third-party Model Context Protocols (MCPs) for use on GitHub.com.
+              <%= render(Primer::Beta::Link.new(href: "https://gh.io/copilotmcp", classes: "Link--inTextBlock")) { "Learn more." } %>
+            <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+  <%# ============== END OF FEATURES POLICIES SECTION ============== %>
+
+  <%# ============== START OF PRIVACY POLICIES SECTION ============== %>
+  <%= render(Primer::Box.new(display: :flex, justify_content: :space_between, direction: :row, align_items: :center, mb: 3)) do %>
+    <%= render(Primer::Beta::Text.new(tag: :h2, font_size: 4, font_weight: :bold)) { "Privacy" } %>
+  <% end %>
+
+  <%= render(Primer::Beta::BorderBox.new(padding: :default, mb: 3)) do |component| %>
+    <%= component.with_row(scheme: :default) do %>
+      <% if use_general_form %>
+        <%= render(Copilot::Policies::GeneralFormComponent.new(
+          display_name: Copilot::COPILOT_PUBLIC_CODE_SUGGESTIONS_UI,
+          configurable: business,
+          policy_name: "public_code_suggestions",
+          current_value: copilot_business.public_code_suggestions,
+          preview: false,
+          menu_items: Copilot::Policies::Menus::ALLOW_OR_BLOCK,
+          disabled: !(copilot_business.copilot_billable? || copilot_business.has_trial_organization?),
+        )) do |component| %>
+          <%= component.with_description do %>
+            GitHub Copilot can allow or block suggestions matching public code. Learn more about
+            <%= render(Primer::Beta::Link.new(href: Copilot::CFB_PUBLIC_CODE_SUGGESTIONS_DOCS, classes: "Link--inTextBlock")) { "code suggestions" } %>.
+          <% end %>
+        <% end %>
+      <% else %>
+        <%= render(Copilot::Policies::PublicSuggestionsFormComponent.new(configurable: this_business)) %>
+      <% end %>
+    <% end %>
+  <% end %>
+  <%# ============== END OF PRIVACY POLICIES SECTION ============== %>
+
+  <%= render(Primer::Beta::Text.new(tag: :p, mt: 3, color: :muted, font_size: :small)) do %>
+    <% unless features_for_data_retention.empty? %>
+      <%= features_for_data_retention %> and updated <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_SPECIFIC_TERMS, classes: "Link--inTextBlock")) { "Product Terms" } %> apply.
+    <% end %>
+    For more information about the data your enterprise receives regarding your use of GitHub Copilot, please review <%= render(Primer::Beta::Link.new(href: Copilot::github_general_privacy_statement_url, classes: "Link--inTextBlock")) { "GitHub's Privacy Statement" } %>.
+  <% end %>
+<% end %>

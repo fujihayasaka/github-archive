@@ -1,0 +1,58 @@
+import {controller, target} from '@github/catalyst'
+import {showGlobalError} from '../../assets/modules/github/behaviors/ajax-error'
+import {getBaseFetchHeaders} from '@github-ui/fetch-headers'
+
+@controller
+class ConduitProfileFeedVisibilityElement extends HTMLElement {
+  @target declare token: HTMLInputElement
+  @target declare everyone: HTMLElement
+  @target declare onlyMe: HTMLElement
+  @target declare dropdown: HTMLDetailsElement
+  @target declare url: HTMLInputElement
+
+  setToPublic() {
+    this.#submitVisibility('true')
+    this.#toggleToEveryone()
+  }
+
+  setToPrivate() {
+    this.#submitVisibility('false')
+    this.#toggleToOnlyMe()
+  }
+
+  async #submitVisibility(visible: string) {
+    const url = this.url.value
+    const formData = new FormData()
+    formData.append('profile_feed_visible', visible)
+    let response
+    try {
+      response = await fetch(url, {
+        method: 'PUT',
+        body: formData,
+        headers: {
+          Accept: 'application/json',
+          ...getBaseFetchHeaders(),
+          'Scoped-CSRF-Token': this.token.value,
+        },
+      })
+    } catch {
+      showGlobalError()
+    }
+
+    if (response && !response.ok) {
+      showGlobalError()
+    } else {
+      this.dropdown.removeAttribute('open')
+    }
+  }
+
+  #toggleToOnlyMe() {
+    this.everyone.hidden = true
+    this.onlyMe.hidden = false
+  }
+
+  #toggleToEveryone() {
+    this.onlyMe.hidden = true
+    this.everyone.hidden = false
+  }
+}

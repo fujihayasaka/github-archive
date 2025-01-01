@@ -1,0 +1,258 @@
+/**
+ * @generated SignedSource<<41c713ae2e9fc9706ddecf0cf8c5ba03>>
+ * @relayHash 8f5647a155f052834b94500763e0fe23
+ * @lightSyntaxTransform
+ * @nogrep
+ */
+
+/* tslint:disable */
+/* eslint-disable */
+// @ts-nocheck
+
+// @relayRequestID 8f5647a155f052834b94500763e0fe23
+
+import type { ConcreteRequest } from 'relay-runtime';
+import type { FragmentRefs } from "relay-runtime";
+export type OrganizationIssueTypesSettingsQuery$variables = {
+  organization_id: string;
+  pageSize: number;
+};
+export type OrganizationIssueTypesSettingsQuery$data = {
+  readonly organization: {
+    readonly login: string;
+    readonly " $fragmentSpreads": FragmentRefs<"OrganizationIssueTypesList">;
+  } | null | undefined;
+};
+export type OrganizationIssueTypesSettingsQuery = {
+  response: OrganizationIssueTypesSettingsQuery$data;
+  variables: OrganizationIssueTypesSettingsQuery$variables;
+};
+
+const node: ConcreteRequest = (function(){
+var v0 = [
+  {
+    "defaultValue": null,
+    "kind": "LocalArgument",
+    "name": "organization_id"
+  },
+  {
+    "defaultValue": null,
+    "kind": "LocalArgument",
+    "name": "pageSize"
+  }
+],
+v1 = [
+  {
+    "kind": "Variable",
+    "name": "login",
+    "variableName": "organization_id"
+  }
+],
+v2 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "login",
+  "storageKey": null
+},
+v3 = [
+  {
+    "kind": "Variable",
+    "name": "first",
+    "variableName": "pageSize"
+  }
+],
+v4 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "id",
+  "storageKey": null
+},
+v5 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "__typename",
+  "storageKey": null
+};
+return {
+  "fragment": {
+    "argumentDefinitions": (v0/*: any*/),
+    "kind": "Fragment",
+    "metadata": null,
+    "name": "OrganizationIssueTypesSettingsQuery",
+    "selections": [
+      {
+        "alias": null,
+        "args": (v1/*: any*/),
+        "concreteType": "Organization",
+        "kind": "LinkedField",
+        "name": "organization",
+        "plural": false,
+        "selections": [
+          (v2/*: any*/),
+          {
+            "args": [
+              {
+                "kind": "Variable",
+                "name": "issueTypesListPageSize",
+                "variableName": "pageSize"
+              }
+            ],
+            "kind": "FragmentSpread",
+            "name": "OrganizationIssueTypesList"
+          }
+        ],
+        "storageKey": null
+      }
+    ],
+    "type": "Query",
+    "abstractKey": null
+  },
+  "kind": "Request",
+  "operation": {
+    "argumentDefinitions": (v0/*: any*/),
+    "kind": "Operation",
+    "name": "OrganizationIssueTypesSettingsQuery",
+    "selections": [
+      {
+        "alias": null,
+        "args": (v1/*: any*/),
+        "concreteType": "Organization",
+        "kind": "LinkedField",
+        "name": "organization",
+        "plural": false,
+        "selections": [
+          (v2/*: any*/),
+          {
+            "alias": null,
+            "args": (v3/*: any*/),
+            "concreteType": "IssueTypeConnection",
+            "kind": "LinkedField",
+            "name": "issueTypes",
+            "plural": false,
+            "selections": [
+              {
+                "alias": null,
+                "args": null,
+                "kind": "ScalarField",
+                "name": "totalCount",
+                "storageKey": null
+              },
+              {
+                "alias": null,
+                "args": null,
+                "concreteType": "IssueTypeEdge",
+                "kind": "LinkedField",
+                "name": "edges",
+                "plural": true,
+                "selections": [
+                  {
+                    "alias": null,
+                    "args": null,
+                    "concreteType": "IssueType",
+                    "kind": "LinkedField",
+                    "name": "node",
+                    "plural": false,
+                    "selections": [
+                      (v4/*: any*/),
+                      {
+                        "alias": null,
+                        "args": null,
+                        "kind": "ScalarField",
+                        "name": "name",
+                        "storageKey": null
+                      },
+                      {
+                        "alias": null,
+                        "args": null,
+                        "kind": "ScalarField",
+                        "name": "isEnabled",
+                        "storageKey": null
+                      },
+                      {
+                        "alias": null,
+                        "args": null,
+                        "kind": "ScalarField",
+                        "name": "description",
+                        "storageKey": null
+                      },
+                      {
+                        "alias": null,
+                        "args": null,
+                        "kind": "ScalarField",
+                        "name": "color",
+                        "storageKey": null
+                      },
+                      (v5/*: any*/)
+                    ],
+                    "storageKey": null
+                  },
+                  (v5/*: any*/),
+                  {
+                    "alias": null,
+                    "args": null,
+                    "kind": "ScalarField",
+                    "name": "cursor",
+                    "storageKey": null
+                  }
+                ],
+                "storageKey": null
+              },
+              {
+                "alias": null,
+                "args": null,
+                "concreteType": "PageInfo",
+                "kind": "LinkedField",
+                "name": "pageInfo",
+                "plural": false,
+                "selections": [
+                  {
+                    "alias": null,
+                    "args": null,
+                    "kind": "ScalarField",
+                    "name": "endCursor",
+                    "storageKey": null
+                  },
+                  {
+                    "alias": null,
+                    "args": null,
+                    "kind": "ScalarField",
+                    "name": "hasNextPage",
+                    "storageKey": null
+                  }
+                ],
+                "storageKey": null
+              }
+            ],
+            "storageKey": null
+          },
+          {
+            "alias": null,
+            "args": (v3/*: any*/),
+            "filters": null,
+            "handle": "connection",
+            "key": "Organization_issueTypes",
+            "kind": "LinkedHandle",
+            "name": "issueTypes"
+          },
+          (v4/*: any*/)
+        ],
+        "storageKey": null
+      }
+    ]
+  },
+  "params": {
+    "id": "8f5647a155f052834b94500763e0fe23",
+    "metadata": {},
+    "name": "OrganizationIssueTypesSettingsQuery",
+    "operationKind": "query",
+    "text": null
+  }
+};
+})();
+
+(node as any).hash = "93497708b9ca12a535da21258ab1f855";
+
+export default node;

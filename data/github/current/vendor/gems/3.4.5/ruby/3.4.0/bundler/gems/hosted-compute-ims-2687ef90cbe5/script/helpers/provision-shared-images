@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+
+# The script is intended to seed IMS database with shared curated images
+# Shared curated images are read-only curated images for quick testing of Runner service
+# During shared curated images provisioning, script truncates all data from database
+
+set -e
+
+function provision-curated-image() {
+    local image_raw=$1
+
+    local image_id=$(echo "$image_raw" | yq ".id")
+    local image_name=$(echo "$image_raw" | yq ".name")
+    local image_owner=$(echo "$image_raw" | yq ".owner")
+    local gallery_image_name=$(echo "$image_raw" | yq ".galleryImageName")
+
+    echo "  image '$image_name'"
+
+    local azure_image_definition_raw=$(az sig image-definition show \
+        --subscription $SHAREDGALLERY_SUBSCRIPTION_ID \
+        --resource-group $SHAREDGALLERY_RESOURCE_GROUP \
+        --gallery-name $SHAREDGALLERY_GALLERY_NAME \
+        --gallery-image-definition $gallery_image_name \
+        --output yaml
+    )
+
+    local image_ostype=$(echo "$azure_image_definition_raw" | yq '.osType')
+    local image_osstate=$(echo "$azure_image_definition_raw" | yq '.osState')
+    local image_arch=$(echo "$azure_image_definition_raw" | yq '.architecture')
+    local image_vmgen=$(echo "$azure_image_definition_raw" | yq '.hyperVGeneration | sub("V", "Gen")')
+
+    script/db-shell --execute "INSERT INTO image_definition (id, owner_id, name, image_type, os_type, architecture, azure_subscription_id) VALUES ($image_id, '$image_owner', '$image_name', 'Curated', '$image_ostype', '$image_arch', $SHARED_SUBSCRIPTION_IMS_ID)"
+
+    local azure_image_versions_raw=$(az sig image-version list \
+        --subscription $SHAREDGALLERY_SUBSCRIPTION_ID \
+        --resource-group $SHAREDGALLERY_RESOURCE_GROUP \
+        --gallery-name $SHAREDGALLERY_GALLERY_NAME \
+        --gallery-image-definition $gallery_image_name \
+         --output yaml
+    )
+    local azure_image_versions_count=$(echo "$azure_image_versions_raw" | yq ". | length")
+
+    for ((version_index=0; version_index<$azure_image_versions_count; version_index++)) do
+        local image_version=$(echo "$azure_image_versions_raw" | yq ".[$version_index].name")
+        local image_version_size=$(echo "$azure_image_versions_raw" | yq ".[$version_index].storageProfile.osDiskImage.sizeInGB")
+        local image_version_resource_id=$(echo "$azure_image_versions_raw" | yq ".[$version_index].id")
+
+        echo "    image version '$image_version'"
+        script/db-shell --execute "INSERT INTO image_version (version, image_definition_id, state, vm_generation, os_state, size_gb, resource_id, azure_subscription_id) VALUES ('$image_version', $image_id, 'Ready', '$image_vmgen', '$image_osstate', $image_version_size, '$image_version_resource_id', $SHARED_SUBSCRIPTION_IMS_ID)"
+    done
+}
+
+function provision-curated-image-pointer() {
+    local image_raw=$1
+
+    local image_id=$(echo "$image_raw" | yq ".id")
+    local image_name=$(echo "$image_raw" | yq ".name")
+    local image_owner=$(echo "$image_raw" | yq ".owner")
+    local image_points_to=$(echo "$image_raw" | yq ".pointsToImageId")
+
+    echo "  pointer '$image_name'"
+    script/db-shell --execute "INSERT INTO image_definition (id, owner_id, name, image_type, os_type, architecture, points_to_image_definition_id) SELECT $image_id, '$image_owner', '$image_name', 'Curated', os_type, architecture, $image_points_to FROM image_definition WHERE id = $image_points_to"
+}
+
+SHARED_IMAGES_CONFIG="config/kustomize/devoverlays/shared-images.yml"
+
+echo "Reading config"
+SHAREDGALLERY_SUBSCRIPTION_ID=$(yq '.sharedGallery.subscriptionId' $SHARED_IMAGES_CONFIG) # 'GitHub - NonProd - Compute Products - Actions Platform'
+SHAREDGALLERY_RESOURCE_GROUP=$(yq '.sharedGallery.resourceGroup' $SHARED_IMAGES_CONFIG)
+SHAREDGALLERY_GALLERY_NAME=$(yq '.sharedGallery.galleryName' $SHARED_IMAGES_CONFIG)
+SHARED_SUBSCRIPTION_IMS_ID=1
+
+echo "Cleaning up existing images and azure subscriptions from database"
+script/db-shell --execute "TRUNCATE TABLE azure_subscription; TRUNCATE TABLE image_definition; TRUNCATE TABLE image_version;"
+
+echo "Adding azure subscriptions to DB"
+script/db-shell --execute "INSERT INTO azure_subscription (id, subscription_id, image_type, resources_prefix, image_count, image_versions_count, image_versions_limit) VALUES
+        ($SHARED_SUBSCRIPTION_IMS_ID, '$SHAREDGALLERY_SUBSCRIPTION_ID', 'Curated', '', 1000000, 0, 0);
+"
+
+echo "Provisioning curated images"
+CURATED_IMAGES_COUNT=$(yq ".curatedImages | length" $SHARED_IMAGES_CONFIG)
+for ((image_index=0; image_index<$CURATED_IMAGES_COUNT; image_index++)) do
+    IMAGE_RAW=$(yq ".curatedImages[$image_index]" $SHARED_IMAGES_CONFIG)
+
+    provision-curated-image "$IMAGE_RAW"
+done
+
+echo "Provisioning curated image pointers"
+CURATED_POINTERS_COUNT=$(yq ".curatedImagePointers | length" $SHARED_IMAGES_CONFIG)
+for ((image_index=0; image_index<$CURATED_POINTERS_COUNT; image_index++)) do
+    IMAGE_RAW=$(yq ".curatedImagePointers[$image_index]" $SHARED_IMAGES_CONFIG)
+
+    provision-curated-image-pointer "$IMAGE_RAW"
+done

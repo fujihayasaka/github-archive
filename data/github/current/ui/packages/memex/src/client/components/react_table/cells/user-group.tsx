@@ -1,0 +1,90 @@
+import {GitHubAvatar} from '@github-ui/github-avatar'
+import {AvatarStack} from '@primer/react'
+
+import type {IAssignee, Review} from '../../../api/common-contracts'
+import {joinOxford} from '../../../helpers/join-oxford'
+import {TextCell} from './text-cell'
+import styles from './user-group.module.css'
+
+export function itemFromReview(review: Review): UserGroupItem {
+  return {
+    ...review.reviewer,
+    hovercardUrl:
+      review.reviewer.type === 'User'
+        ? `/hovercards?user_id=${review.reviewer.id}`
+        : `${review.reviewer.url}/hovercard`,
+  }
+}
+
+export function itemFromAssignee(assignee: IAssignee): UserGroupItem {
+  return {...assignee, name: assignee.login}
+}
+
+export type UserGroupItem = {
+  id: number
+  avatarUrl: string
+  name: string
+  hovercardUrl?: string
+}
+
+interface AvatarWithLoginProps {
+  user: UserGroupItem
+  isDisabled?: boolean
+}
+
+const AvatarWithLogin: React.FC<AvatarWithLoginProps> = ({user, isDisabled}) => {
+  return (
+    <div className={styles.Box}>
+      <GitHubAvatar
+        loading="lazy"
+        alt={user.name}
+        src={user.avatarUrl}
+        data-hovercard-url={user.hovercardUrl}
+        className={styles.GitHubAvatar}
+      />
+      <TextCell isDisabled={isDisabled} className={styles.TextCell}>
+        {user.name}
+      </TextCell>
+    </div>
+  )
+}
+
+interface UserGroupProps {
+  users: Array<UserGroupItem> | undefined
+  isDisabled?: boolean
+}
+
+export const UserGroup: React.FC<UserGroupProps> = ({users, isDisabled}) => {
+  if (!users) {
+    return null
+  }
+
+  if (users.length > 1) {
+    return (
+      <>
+        <AvatarStack className={styles.AvatarStack}>
+          {users.map(user => (
+            <GitHubAvatar
+              loading="lazy"
+              key={user.id}
+              alt={user.name}
+              src={user.avatarUrl}
+              data-hovercard-url={user.hovercardUrl}
+            />
+          ))}
+        </AvatarStack>
+        <TextCell isDisabled={isDisabled} className={styles.TextCell_1}>
+          {joinOxford(users.map(user => user.name))}
+        </TextCell>
+      </>
+    )
+  }
+
+  return (
+    <>
+      {users.map(user => (
+        <AvatarWithLogin key={user.id} user={user} isDisabled={isDisabled} />
+      ))}
+    </>
+  )
+}

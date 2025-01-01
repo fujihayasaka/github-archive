@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk=globalThis.webpackChunk||[]).push([["app_assets_modules_github_insights_hero-stat_ts"],{36714:(s,h,t)=>{t.r(h),(0,t(96200).cM)()}}]);
+//# sourceMappingURL=app_assets_modules_github_insights_hero-stat_ts-61836e0c4d75.js.map

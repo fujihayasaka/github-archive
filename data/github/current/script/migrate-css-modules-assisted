@@ -1,0 +1,532 @@
+#!/bin/bash
+set -e # Exit immediately if a command exits with a non-zero status.
+set -o pipefail # The return value of a pipeline is the status of the last command to exit with a non-zero status.
+
+# --- Configuration ---
+echo "--------------------------------------------------------------------------"
+echo "🚀 CSS Modules Assisted Migration Script 🚀"
+echo "--------------------------------------------------------------------------"
+
+# Try to get GitHub username as default using gh CLI
+DEFAULT_GITHUB_USER=$(gh api user --jq .login 2>/dev/null || echo "")
+if [[ -n "$DEFAULT_GITHUB_USER" ]]; then
+    read -p "Enter the NAME_OF_DEV (e.g., your-github-username) [${DEFAULT_GITHUB_USER}]: " NAME_OF_DEV
+    NAME_OF_DEV="${NAME_OF_DEV:-$DEFAULT_GITHUB_USER}"
+else
+    read -p "Enter the NAME_OF_DEV (e.g., your-github-username): " NAME_OF_DEV
+fi
+
+read -p "Enter the NAME_OF_PACKAGE (e.g., timeline-items): " NAME_OF_PACKAGE
+while [[ -z "$NAME_OF_PACKAGE" ]]; do
+  echo "NAME_OF_PACKAGE cannot be empty."
+  read -p "Enter the NAME_OF_PACKAGE (e.g., timeline-items): " NAME_OF_PACKAGE
+done
+
+while [[ -z "$NAME_OF_DEV" ]]; do
+    echo "NAME_OF_DEV cannot be empty."
+    if [[ -n "$DEFAULT_GITHUB_USER" ]]; then
+        read -p "Enter the NAME_OF_DEV (e.g., your-github-username) [${DEFAULT_GITHUB_USER}]: " NAME_OF_DEV
+        NAME_OF_DEV="${NAME_OF_DEV:-$DEFAULT_GITHUB_USER}"
+    else
+        read -p "Enter the NAME_OF_DEV (e.g., your-github-username): " NAME_OF_DEV
+    fi
+done
+
+read -p "Enter the SUB_DIRECTORY within the package (leave blank for root, e.g., components/ or src/): " SUB_DIRECTORY
+# Normalize: remove leading/trailing slashes
+SUB_DIRECTORY=$(echo "$SUB_DIRECTORY" | sed 's#^/*##;s#/*$##')
+
+
+# --- Derived Constants ---
+if [[ -n "$SUB_DIRECTORY" ]]; then
+    NAME_OF_MODULE_PATH="ui/packages/${NAME_OF_PACKAGE}/${SUB_DIRECTORY}"
+else
+    NAME_OF_MODULE_PATH="ui/packages/${NAME_OF_PACKAGE}/"
+fi
+BRANCH_NAME="${NAME_OF_DEV}/css-modules-${NAME_OF_PACKAGE}$( [[ -n "$SUB_DIRECTORY" ]] && echo "-${SUB_DIRECTORY//\//-}" )" # Replace slashes with dashes for branch name
+WORKSPACE_TARGET="@github-ui/${NAME_OF_PACKAGE}"
+
+echo ""
+echo "Derived constants:"
+echo "  NAME_OF_MODULE_PATH: ${NAME_OF_MODULE_PATH}"
+echo "  BRANCH_NAME:         ${BRANCH_NAME}"
+echo "  WORKSPACE_TARGET:    ${WORKSPACE_TARGET}"
+echo "  NAME_OF_DEV:         ${NAME_OF_DEV}"
+echo "--------------------------------------------------------------------------"
+echo ""
+
+# --- Helper Functions for Prompts ---
+print_step_header() {
+    echo ""
+    echo "--------------------------------------------------------------------------"
+    echo "✨ $1"
+    echo "--------------------------------------------------------------------------"
+}
+
+print_manual_lint_prompt() {
+    # Note: Variables like ${WORKSPACE_TARGET} are expanded here
+    MANUAL_LINT_PROMPT_MD="
+**Manually Fix Remaining Lint Errors (or HALT):**
+    a.  Run the command \`npm run lint -w ${WORKSPACE_TARGET} -- --max-warnings 0\` in your terminal to identify any unfixed lint errors. Review its output.
+    b.  **If unfixed errors exist:**
+        i.  Manually fix these errors in your code editor, guided by Primer Primitives. Focus on the reported errors; minimal, necessary refactoring of surrounding code is allowed if necessary.
+        ii. After making changes, you can re-run \`npm run lint -w ${WORKSPACE_TARGET} -- --max-warnings 0\` to verify your fixes (or use the 'validate' option in the script).
+        iii. **If verification passes (all targeted errors fixed, no new errors introduced):** Finish.
+        iv. **Else (errors persist or new ones introduced):** HALT. Report full lint output and fixes attempted. Do not confirm completion to the script.
+    c.  **If the initial run of \`npm run lint -w ${WORKSPACE_TARGET} -- --max-warnings 0\` shows no errors:** No manual changes are needed.
+"
+    echo "${MANUAL_LINT_PROMPT_MD}"
+}
+
+print_manual_stylelint_prompt() {
+    MANUAL_STYLELINT_PROMPT_MD="
+**Manually Fix Remaining Stylelint Errors (or HALT):**
+
+    Use the Primer Primitives documentation to guide your manual fixes:
+    Highest priority is given to the following resources:
+    #fetch https://primer.style/product/primitives/migrating/#migrating-from-sx-props-primer-react
+    Then, use also the following resources as needed:
+    #fetch https://primer.style/product/primitives/color/
+    #fetch https://primer.style/product/primitives/typography/
+    #fetch https://primer.style/product/primitives/size/
+
+    a.  Run the command \`npm run stylelint -w ${WORKSPACE_TARGET} -- --max-warnings 0\` in your terminal to identify any unfixed stylelint errors. Review its output.
+    b.  **If unfixed errors exist:**
+        i.  Manually fix these errors in your code editor, guided by Primer Primitives. (Same guidance as in the manual lint fixing instructions).
+        ii. After making changes, you can re-run \`npm run stylelint -w ${WORKSPACE_TARGET} -- --max-warnings 0\` to verify your fixes (or use the 'validate' option in the script).
+        iii. **If verification passes (all targeted errors fixed, no new errors introduced):** Finish.
+        iv. **Else (errors persist or new ones introduced):** HALT. Report full stylelint output and fixes attempted. Do not confirm completion to the script.
+    c.  **If the initial run of \`npm run stylelint -w ${WORKSPACE_TARGET} -- --max-warnings 0\` shows no errors:** No manual changes are needed.
+"
+    echo "${MANUAL_STYLELINT_PROMPT_MD}"
+}
+
+print_manual_rename_prompt() {
+    local files_list_for_prompt="$1"
+    local files_to_display="${files_list_for_prompt:-No .module.css files found requiring changes in the 'Run script' commit for ${NAME_OF_MODULE_PATH}.}"
+
+    # Using cat with a heredoc for the multi-line Markdown string
+    # The heredoc end marker (EOF_PROMPT) must not be indented.
+    MANUAL_RENAME_PROMPT_MD=$(cat <<EOF_PROMPT
+## Copilot Agent Task: Refactor CSS Module Class Names
+
+**Objective**:
+For each provided CSS module file, identify non-descriptive class names, rename them to be semantic, and update their references in the corresponding TSX files.
+
+**Workflow**:
+The following process must be performed **sequentially for each file path** provided in the **Input** list. Complete all steps and generate the output for one file before starting the process for the next file.
+
+---
+
+**Input**:
+\`\`\`
+${files_to_display}
+\`\`\`
+
+---
+
+**Steps for Each Individual File**:
+
+**1. Read Files**:
+    * Read the content of the current \`.module.css\` file (as identified in the **Input** list for the current iteration). The base name of this file (e.g., \`CreateIssue\` from \`CreateIssue.module.css\`) is considered the "React component name" for naming convention purposes.
+    * Identify and read the content of its corresponding \`.tsx\` file. Assume the \`.tsx\` file has the same base name and is located in the same directory (e.g., for \`CreateIssue.module.css\`, the TSX file is \`CreateIssue.tsx\`). Do not read other files or use anything else for context for this specific file.
+
+**2. Identify Classes for Renaming**:
+    Iterate through each class name in the *current* \`.module.css\` file. A class name **must be renamed** if it is non-descriptive. A class is considered **non-descriptive** if it meets any of the following criteria:
+    * **Generic HTML Tag Names**: Primarily describes its HTML tag (e.g., \`Div\`, \`Span\`, \`ButtonWrapper\`).
+    * **Generic Structural Terms**: Uses vague layout terms without context (e.g., \`Box\`, \`Wrapper\`, \`Container\`, \`Item\`, \`Element\`, \`GridItem\`).
+    * **Generic Content Categories**: Uses general content type names without specifying their role or content (e.g., \`Text\`, \`Title\`, \`Header\`, \`Content\`, \`Section\`, \`Main\`, \`Sidebar\`). *Exception*: \`Header\` might be acceptable if it's the single, primary header of a clearly defined component.
+    * **Numbered Variants**: Is a numbered iteration of a generic name (e.g., \`Text_1\`, \`Box2\`, \`Item_A\`).
+    * **Lacks Specificity**: Does not clearly indicate the element's specific functional or thematic purpose *within the component it belongs to*.
+
+    **Do not rename** classes that are already descriptive and clearly convey their specific purpose.
+
+**3. Determine New Descriptive Class Names**:
+    For each class identified for renaming in the *current* \`.module.css\` file:
+    * **Contextual Analysis**:
+        * Examine the CSS rules applied to this class in the \`.module.css\` file for styling clues.
+        * Examine its usage in the corresponding \`.tsx\` file:
+            * What is the surrounding JSX structure?
+            * What content does it wrap or represent?
+            * What is its apparent purpose and functionality within the component's UI?
+    * **Formulate the New Name**: Based on the analysis, create a new, descriptive class name that clearly indicates the element's specific purpose or style within that component.
+        * **Example 1 (Purpose & Content)**: If a \`div\` with class \`Box\` (in \`UserProfile.module.css\`) contains a user's avatar and name, a better name might be \`userProfileCard\` or \`userInfoContainer\`.
+        * **Example 2 (Specific Role)**: If \`Text_1\` is used for an error message, a better name is \`errorMessageText\` or \`inputValidationError\`.
+        * **Example 3 (Contextual Specificity)**: Instead of \`Title\` in \`UserSettings.module.css\`, if it's the title of a "User Settings" section, \`userSettingsTitle\` is better.
+        * **Example 4 (Action Specificity)**: Instead of \`ButtonContainer\`, if it holds "Save" and "Cancel" buttons for a form, \`formActionButtons\` or \`submissionControlsContainer\` is more specific.
+    * **Naming Convention**:
+        * The React component name (e.g., \`CreateIssue\` from \`CreateIssue.module.css\`) is key here.
+        * **If the formulated descriptive class name logically starts with the React component's name**, then the entire class name **should use \`PascalCase\`**.
+            * Example for \`CreateIssue.module.css\`: If a class represents the main form, it could be named \`CreateIssueForm\`. A header section specific to \`CreateIssue\` could be \`CreateIssueHeader\`.
+            * Example for \`TemplatePickerButton.module.css\`: A wrapper for the button could be \`TemplatePickerButtonWrapper\`.
+        * **Otherwise, new class names must be \`camelCase\`**.
+            * Example for \`CreateIssue.module.css\`: A general submit button within the form could be \`submitButton\`; an error message text could be \`errorMessageText\`.
+    * **Uniqueness**: Ensure the new class name does not conflict with other existing class names within the *same* \`.module.css\` file. If a generated name conflicts, adjust it to ensure uniqueness (e.g., by adding more context like \`userProfileCardDetailedView\` or \`CreateIssueFormSubmitButton\`).
+
+**4. Perform Renaming**:
+    * In the *current* \`.module.css\` file, replace the old non-descriptive class name with the new descriptive class name (respecting the \`PascalCase\` or \`camelCase\` convention determined in Step 3).
+        * Example (camelCase): \`.Box { ... }\` becomes \`.userProfileCard { ... }\`
+        * Example (PascalCase for \`MyComponent.module.css\`): \`.Wrapper { ... }\` becomes \`.MyComponentWrapper { ... }\`
+    * In the *corresponding* \`.tsx\` file, update all references to the old class name to use the new descriptive class name. These are typically accessed via the imported styles object.
+        * Example: \`styles.Box\` becomes \`styles.userProfileCard\` or \`styles['Box']\` becomes \`styles['userProfileCard']\`.
+        * Example: \`styles.Wrapper\` (in \`MyComponent.tsx\`) becomes \`styles.MyComponentWrapper\`.
+    * Ensure that only instances related to the specific CSS module being processed are changed.
+
+---
+
+**Core Principle**: The goal is to significantly improve code clarity and maintainability by making CSS class names self-explanatory regarding their specific role and context within their respective components. Use \`PascalCase\` for component-prefixed names to clearly associate them with the component itself, and \`camelCase\` for other descriptive names.
+EOF_PROMPT
+)
+    echo "${MANUAL_RENAME_PROMPT_MD}"
+}
+
+
+# --- Setup Branch ---
+print_step_header "Setup Branch"
+echo "Checking out master and creating/resetting branch ${BRANCH_NAME}..."
+git checkout master
+git branch -D "${BRANCH_NAME}" || true # Delete branch if it exists, ignore error if it doesn't
+git checkout -b "${BRANCH_NAME}"
+echo "Branch ${BRANCH_NAME} is set up."
+
+# --- Run Migration Script & Commit ---
+print_step_header "Run Migration Script & Commit"
+echo "Executing migration script: script/migrate-css-modules --skip-warning --skip-lint -f ${NAME_OF_MODULE_PATH}"
+echo "Expect a 'Terminated' message if successful, script will continue."
+script/migrate-css-modules --skip-warning --skip-lint -f "${NAME_OF_MODULE_PATH}" || true
+
+echo "Committing script-generated changes..."
+git add -A
+if ! git diff --staged --quiet; then
+    git commit -m 'Run script'
+    echo "Committed: Run script"
+else
+    echo "No changes from migration script to commit."
+fi
+
+
+# --- Run Lint Fix, Handle clsx (if needed), & Commit ---
+print_step_header "Run Lint Fix, Handle clsx, & Commit"
+echo "Running lint fix for ${WORKSPACE_TARGET}..."
+LINT_OUTPUT_FILE=$(mktemp) # Temporary file to store lint output
+LINT_SECOND_ATTEMPT_OUTPUT_FILE=$(mktemp) # Temporary file for second lint attempt
+
+lint_failed=false
+# Note: We use --max-warnings 0 here to ensure that auto-fix attempts consider warnings as failures too.
+if ! npm run lint -w "${WORKSPACE_TARGET}" -- --fix --max-warnings 0 2>&1 | tee "${LINT_OUTPUT_FILE}"; then
+    lint_failed=true
+    echo "Initial lint --fix command failed or had warnings. Checking for clsx dependency error..."
+    if grep -q -e "Cannot find module 'clsx'" -e "Could not resolve 'clsx'" "${LINT_OUTPUT_FILE}"; then
+        echo "Missing clsx dependency detected. Installing clsx for ${WORKSPACE_TARGET}..."
+        if npm install clsx -w "${WORKSPACE_TARGET}"; then
+            echo "clsx installed successfully."
+            echo "Committing package.json and package-lock.json changes for clsx..."
+            git add "*/package.json" "package-lock.json" || true # Add specific files related to package changes
+            if ! git diff --staged --quiet; then
+                git commit -m 'Install clsx dependency'
+                echo "Committed: Install clsx dependency"
+            else
+                echo "No package.json or package-lock.json changes to commit for clsx."
+            fi
+
+            echo "Re-running lint fix after installing clsx..."
+            if ! npm run lint -w "${WORKSPACE_TARGET}" -- --fix --max-warnings 0 2>&1 | tee "${LINT_SECOND_ATTEMPT_OUTPUT_FILE}"; then
+                echo "Lint fix still failed or had warnings after installing clsx. Please check the output above."
+            else
+                echo "Lint fix successful after installing clsx."
+                lint_failed=false # Reset flag as it's now successful
+            fi
+        else
+            echo "ERROR: Failed to install clsx. Please check npm output. Exiting."
+            rm -f "${LINT_OUTPUT_FILE}" "${LINT_SECOND_ATTEMPT_OUTPUT_FILE}"
+            exit 1
+        fi
+    else
+        echo "Lint --fix command failed or had warnings for a reason other than missing clsx. Full output:"
+        cat "${LINT_OUTPUT_FILE}"
+        echo "Proceeding to commit any auto-fixes made by lint..."
+    fi
+else
+    echo "Lint fix command executed successfully (no errors or warnings)."
+fi
+
+echo "Committing lint-fix changes..."
+git add -A # Add all changes, as lint --fix might have modified files
+if ! git diff --staged --quiet; then
+    git commit -m 'Lint fix'
+    echo "Committed: Lint fix"
+else
+    echo "No further lint-fix changes to commit."
+fi
+
+rm -f "${LINT_OUTPUT_FILE}" "${LINT_SECOND_ATTEMPT_OUTPUT_FILE}"
+
+# --- Manual Lint Fixes ---
+print_step_header "Manual Lint Fixes (User Action Required)"
+echo "Checking for initial lint errors/warnings before prompting for manual fixes..."
+LINT_CHECK_OUTPUT_FILE=$(mktemp)
+lint_issues_found=false
+
+# Run lint to check for errors/warnings (without --fix, but with --max-warnings 0 to ensure non-zero exit for warnings)
+if npm run lint -w "${WORKSPACE_TARGET}" -- --max-warnings 0 2>&1 | tee "${LINT_CHECK_OUTPUT_FILE}"; then
+    echo "Initial lint check passed: No lint errors or warnings found."
+    lint_issues_found=false
+else
+    echo "Initial lint check found errors or warnings."
+    lint_issues_found=true
+fi
+
+if ! ${lint_issues_found}; then
+    echo "Skipping manual lint fixes as no errors or warnings were found by the initial check."
+    rm -f "${LINT_CHECK_OUTPUT_FILE}"
+else
+    echo -e "\n✋ Initial lint check found issues (see output above). Please perform manual fixes. ✋\n"
+    echo "Current lint issues are detailed above. Please use the following instructions to guide your fixes:"
+    echo "--------------------------------------------------------"
+    print_manual_lint_prompt
+    echo "--------------------------------------------------------"
+    # LINT_CHECK_OUTPUT_FILE content was already tee'd to stdout, so no need to cat it again.
+    rm -f "${LINT_CHECK_OUTPUT_FILE}" # Clean up initial check file
+
+    while true; do
+        read -p "Have you completed the manual lint fixes? (yes/no/validate or y/n/v): " MANUAL_LINT_CONFIRMATION
+        MANUAL_LINT_CONFIRMATION_LOWER=$(echo "${MANUAL_LINT_CONFIRMATION}" | tr '[:upper:]' '[:lower:]')
+
+        case "${MANUAL_LINT_CONFIRMATION_LOWER}" in
+            "yes"|"y")
+                echo "Proceeding to commit manual lint fixes..."
+                break
+                ;;
+            "no"|"n")
+                echo "User chose not to proceed with manual lint fixes. Exiting."
+                exit 1
+                ;;
+            "validate"|"v")
+                echo "Validating manual lint fixes..."
+                VALIDATION_LINT_OUTPUT_FILE=$(mktemp)
+                if npm run lint -w "${WORKSPACE_TARGET}" -- --max-warnings 0 2>&1 | tee "${VALIDATION_LINT_OUTPUT_FILE}"; then
+                    echo "Validation successful: No lint errors or warnings found!"
+                    echo "You can now answer 'yes' to proceed with committing."
+                else
+                    echo "Validation found lint errors or warnings. Please review the output above and continue fixing."
+                fi
+                rm -f "${VALIDATION_LINT_OUTPUT_FILE}"
+                echo "Please continue fixing or confirm completion (yes/no/validate)."
+                ;;
+            *)
+                echo "Invalid input. Please enter 'yes', 'no', or 'validate'."
+                ;;
+        esac
+    done
+
+    echo ""
+    echo "Attempting to commit manual lint fixes..."
+    git add -A
+    if ! git diff --staged --quiet; then
+        git commit -m 'Lint manual fix'
+        echo "Committed: Lint manual fix"
+    else
+        echo "No manual lint fixes were staged to commit."
+    fi
+fi
+
+
+# --- Run Stylelint Fix & Commit ---
+print_step_header "Run Stylelint Fix & Commit"
+echo "Running stylelint fix for ${WORKSPACE_TARGET}..."
+# Use --max-warnings 0 for stylelint fix command
+npm run stylelint -w "${WORKSPACE_TARGET}" -- --fix --max-warnings 0 || true
+echo "Committing stylelint auto-fixes..."
+git add -A
+if ! git diff --staged --quiet; then
+    git commit -m 'Stylelint fix'
+    echo "Committed: Stylelint fix"
+else
+    echo "No stylelint auto-fixes to commit."
+fi
+
+# --- Manual Stylelint Fixes ---
+print_step_header "Manual Stylelint Fixes (User Action Required)"
+echo "Checking for initial stylelint errors/warnings before prompting for manual fixes..."
+STYLELINT_CHECK_OUTPUT_FILE=$(mktemp)
+stylelint_issues_found=false
+
+# Run stylelint to check for errors/warnings (without --fix, but with --max-warnings 0)
+if npm run stylelint -w "${WORKSPACE_TARGET}" -- --max-warnings 0 2>&1 | tee "${STYLELINT_CHECK_OUTPUT_FILE}"; then
+    echo "Initial stylelint check passed: No stylelint errors or warnings found."
+    stylelint_issues_found=false
+else
+    echo "Initial stylelint check found errors or warnings."
+    stylelint_issues_found=true
+fi
+
+if ! ${stylelint_issues_found}; then
+    echo "Skipping manual stylelint fixes as no errors or warnings were found by the initial check."
+    rm -f "${STYLELINT_CHECK_OUTPUT_FILE}"
+else
+    echo -e "\n✋ Initial stylelint check found issues (see output above). Please perform manual fixes. ✋\n"
+    echo "Current stylelint issues are detailed above. Please use the following instructions to guide your fixes:"
+    echo "--------------------------------------------------------"
+    print_manual_stylelint_prompt
+    echo "--------------------------------------------------------"
+    rm -f "${STYLELINT_CHECK_OUTPUT_FILE}" # Clean up initial check file
+
+    while true; do
+        read -p "Have you completed the manual stylelint fixes? (yes/no/validate or y/n/v): " MANUAL_STYLELINT_CONFIRMATION
+        MANUAL_STYLELINT_CONFIRMATION_LOWER=$(echo "${MANUAL_STYLELINT_CONFIRMATION}" | tr '[:upper:]' '[:lower:]')
+
+        case "${MANUAL_STYLELINT_CONFIRMATION_LOWER}" in
+            "yes"|"y")
+                echo "Proceeding to commit manual stylelint fixes..."
+                break
+                ;;
+            "no"|"n")
+                echo "User chose not to proceed with manual stylelint fixes. Exiting."
+                exit 1
+                ;;
+            "validate"|"v")
+                echo "Validating manual stylelint fixes..."
+                VALIDATION_STYLELINT_OUTPUT_FILE=$(mktemp)
+                if npm run stylelint -w "${WORKSPACE_TARGET}" -- --max-warnings 0 2>&1 | tee "${VALIDATION_STYLELINT_OUTPUT_FILE}"; then
+                    echo "Validation successful: No stylelint errors or warnings found!"
+                    echo "You can now answer 'yes' to proceed with committing."
+                else
+                    echo "Validation found stylelint errors or warnings. Please review the output above and continue fixing."
+                fi
+                rm -f "${VALIDATION_STYLELINT_OUTPUT_FILE}"
+                echo "Please continue fixing or confirm completion (yes/no/validate)."
+                ;;
+            *)
+                echo "Invalid input. Please enter 'yes', 'no', or 'validate'."
+                ;;
+        esac
+    done
+
+    echo ""
+    echo "Attempting to commit manual stylelint fixes..."
+    git add -A
+    if ! git diff --staged --quiet; then
+        git commit -m 'Stylelint manual fix'
+        echo "Committed: Stylelint manual fix"
+    else
+        echo "No manual stylelint fixes were staged to commit."
+    fi
+fi
+
+
+# --- Rename CSS Module Class Names & Update TSX (Manual) ---
+print_step_header "Rename CSS Module Class Names & Update .tsx References (User Action Required)"
+echo "Identifying target .module.css files from the 'Run script' commit..."
+SCRIPT_COMMIT_SHA_VAL=$(git log --grep='^Run script$' --format='%H' -n 1)
+
+if [ -z "${SCRIPT_COMMIT_SHA_VAL}" ]; then
+    echo "HALT: Could not find commit with message 'Run script'. This is needed for the class renaming stage."
+    echo "You may need to manually identify files if you proceed. Exiting script for safety."
+    exit 1
+fi
+
+# Get files changed in the 'Run script' commit, filter for .module.css within the target path
+TARGET_MODULE_CSS_FILES_OUTPUT=$(git diff-tree --no-commit-id --name-only -r "${SCRIPT_COMMIT_SHA_VAL}" | grep "^${NAME_OF_MODULE_PATH}" | grep -E '\.module\.css$' || true)
+
+echo -e "\n✋ PLEASE PAUSE THE SCRIPT AND PERFORM THE FOLLOWING MANUAL ACTIONS FOR THE CLASS RENAMING STAGE ✋\n"
+echo "Run the following prompt in Copilot, or follow the instructions manually:"
+echo "--------------------------------------------------------"
+print_manual_rename_prompt "${TARGET_MODULE_CSS_FILES_OUTPUT}"
+echo "--------------------------------------------------------"
+read -p "Have you completed the manual class renaming, TSX updates, and any necessary validation as per the instructions provided for the class renaming stage? (yes/no/y/n): " MANUAL_RENAME_CONFIRMATION
+MANUAL_RENAME_CONFIRMATION_LOWER=$(echo "${MANUAL_RENAME_CONFIRMATION}" | tr '[:upper:]' '[:lower:]')
+if [[ "${MANUAL_RENAME_CONFIRMATION_LOWER}" != "yes" && "${MANUAL_RENAME_CONFIRMATION_LOWER}" != "y" ]]; then
+    echo "User did not confirm completion of the class renaming stage. Exiting."
+    exit 1
+fi
+
+# --- Commit Renaming & Validation Fixes ---
+print_step_header "Commit Renaming & Validation Fixes"
+echo "Committing cumulative changes from the class renaming and validation process..."
+git add -A
+if ! git diff --staged --quiet; then
+    git commit -m 'Update CSS module class names to be more descriptive'
+    echo "Committed: Update CSS module class names to be more descriptive"
+else
+    echo "No changes from the class renaming/validation process to commit."
+fi
+
+# --- Push Branch ---
+print_step_header "Push Branch"
+echo "Pushing branch ${BRANCH_NAME} to origin..."
+git push --set-upstream origin "${BRANCH_NAME}"
+echo "Branch pushed."
+
+# --- Create Pull Request ---
+print_step_header "Create Pull Request"
+
+
+if [[ -n "$SUB_DIRECTORY" ]]; then
+    PR_TITLE="Convert ${NAME_OF_PACKAGE}/${SUB_DIRECTORY} owned files to CSS modules using the script/migrate-css-modules"
+else
+    PR_TITLE="Convert ${NAME_OF_PACKAGE} owned files to CSS modules using the script/migrate-css-modules"
+fi
+
+# Using a variable for the PR body template for clarity
+PR_BODY_TEMPLATE='''This pull request converts SUBSTITUTE_NAME_OF_PACKAGE_HERE owned files to CSS modules. We are doing this to improve rendering times on React product pages in dotcom. Information on the epic is here [https://github.com/github/primer/issues/4858](https://github.com/github/primer/issues/4858).
+
+### What approach did you choose and why?
+
+This pull request was generated [using the instructions in css-modules-migration doc](https://github.com/github/primer/blob/main/using-primer/css-modules-migration.md) and is in accordance with the [Styling in React document](https://thehub.github.com/epd/engineering/dev-practicals/frontend/react/styling/).
+
+<pre>
+script/migrate-css-modules --skip-warning -f ui/packages/SUBSTITUTE_NAME_OF_PACKAGE_HERE/SUBSTITUTE_SUB_DIRECTORY
+</pre>
+
+### Which environments does this change target?
+
+- Production: dotcom
+
+### Risk assessment
+
+- **High risk:** Changes are not fully under feature flag(s), have limited visibility and/or cannot be tested outside of production.
+
+### How did/will you validate this change?
+
+We are asking owning teams to visually review these changes in dotcom review lab for style regressions, as owning teams are best positioned to notice a regression in their most critical UI areas. You do not need to manually review the code in the PR unless you would like to. You may ship when ready after reviewing. Note that there are methods to feature flag these changes but doing so would require a more complex PR; if you feel like we should work on adding one, reach out to the [Slack channel](https://github-grid.enterprise.slack.com/archives/C07GRK24PDL).
+
+- **Review-lab deploy** - This change will be tested on review-lab before being queued to deploy.
+- **Local server** - I ran \`script/server\` with these changes and executed the changed functionality.
+- **Tests** - I am depending on test coverage.
+
+### If something goes wrong, what are the mitigation and rollback strategies?
+
+- **Rollback** - Change can only be disabled by [rolling back](https://ops.githubapp.com/docs/playbooks/github_deployments.md) the merge group, or by deploying a revert commit.
+---
+
+_**Reviewers:** Please read carefully. By approving, you support the deployment and mitigation plans as well as the code change. If anything is unclear or missing, please ask for updates._
+'''
+
+PR_BODY=$(echo "${PR_BODY_TEMPLATE}" | sed "s/SUBSTITUTE_NAME_OF_PACKAGE_HERE/${NAME_OF_PACKAGE}/g")
+PR_BODY=$(echo "${PR_BODY}" | sed "s/SUBSTITUTE_SUB_DIRECTORY/${SUB_DIRECTORY}/g")
+
+
+echo "Creating pull request..."
+echo "Title: ${PR_TITLE}"
+# echo "Body will be:" # Optionally uncomment to preview body if gh cli fails
+# echo "${PR_BODY}"   # Optionally uncomment
+
+if gh pr create \
+  --draft \
+  --assignee @me \
+  --base master \
+  --head "${BRANCH_NAME}" \
+  --title "${PR_TITLE}" \
+  --body "${PR_BODY}"; then
+    echo "Pull request created successfully!"
+else
+    echo "ERROR: Failed to create pull request. Please check \`gh\` CLI output and create it manually if needed."
+    echo "Title: ${PR_TITLE}"
+    echo "Branch: ${BRANCH_NAME}"
+    echo "Body:"
+    echo "${PR_BODY}"
+fi
+
+echo "--------------------------------------------------------------------------"
+echo "✅ Script finished!"
+echo "--------------------------------------------------------------------------"

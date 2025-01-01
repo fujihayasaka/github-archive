@@ -1,0 +1,1 @@
+Business logic level service interfaces live here (e.g. what the transport layers talk to, so "twirp's" diagnostic service calling "business logic" diagnostic service). Currently named "interfaces" as a placeholder, the package could use a better name.

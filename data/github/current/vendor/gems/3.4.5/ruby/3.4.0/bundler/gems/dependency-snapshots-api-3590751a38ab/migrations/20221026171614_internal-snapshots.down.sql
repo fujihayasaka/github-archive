@@ -1,0 +1,1 @@
+ALTER TABLE ds_snapshots DROP COLUMN internal;

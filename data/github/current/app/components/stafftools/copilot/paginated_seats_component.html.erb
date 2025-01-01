@@ -1,0 +1,127 @@
+<% if copilot_seats.total_entries > 0 %>
+  <table class="site-admin-table" style="white-space:nowrap; overflow:hidden;">
+    <tr>
+      <th>Assigned User</th>
+      <th>Assignable Type</th>
+      <th>Assignable Slug</th>
+      <th>Created At</th>
+      <th>Last Activity At</th>
+      <th>Pending Cancellation At</th>
+      <th>Access Revoked At</th>
+      <th>Actions</th>
+    </tr>
+    <% copilot_seats.each do |copilot_seat| %>
+      <%
+        user = copilot_seat.assigned_user
+        blocks = user.present? ? administrative_blocks[user.id] : []
+        blocked = blocks.present? && blocks.any? { |block| block.active? }
+        warned = blocks.present? && blocks.any? { |block| block.warned? }
+        revoked = blocks.present? && blocks.any? { |block| block.revoked? }
+        suspended = user.present? && user.suspended?
+        non_member = user.present? && if entity.is_a?(::Organization)
+          !user.organization_ids.include?(entity.id)
+        else
+          !user.business_ids(include_unaffiliated: true).include?(entity.id)
+        end
+      %>
+      <tr>
+        <td>
+          <% if user.present? %>
+            <%= user&.display_login %>
+          <% else %>
+            <%= render(Primer::Beta::Octicon.new(:alert, color: :danger)) %>&nbsp;<%= "nil (id was: #{copilot_seat.assigned_user_id})" %>
+          <% end %>
+
+          <% if blocks.present? %>
+            <% if blocked %>
+              <%= render Primer::Beta::Label.new(scheme: :severe, title: "Blocked") do %>
+                B
+              <% end %>
+            <% elsif warned %>
+              <%= render Primer::Beta::Label.new(scheme: :danger, title: "Warned") do %>
+                W
+              <% end %>
+            <% elsif revoked %>
+              <%= render Primer::Beta::Label.new(scheme: :done, title: "Revoked") do %>
+                R
+              <% end %>
+            <% end %>
+          <% end %>
+          <% if suspended %>
+            &nbsp;
+            <%= render Primer::Beta::Label.new(scheme: :attention, title: "Suspended") do %>
+              S
+            <% end %>
+          <% end %>
+          <% if non_member %>
+            &nbsp;
+            <%= render(Primer::Beta::Octicon.new(:"no-entry", color: :muted)) %>
+          <% end %>
+        </td>
+        <td>
+          <%= copilot_seat.seat_assignment&.assignable_type %>
+        </td>
+        <td>
+          <%= copilot_seat.seat_assignment&.assignable.slug if copilot_seat.seat_assignment&.assignable.respond_to?(:slug) %>
+          <% if copilot_seat.seat_assignment.assignable.nil? %>
+            <%= render(Primer::Beta::Octicon.new(:alert, color: :danger)) %>&nbsp;<%= "nil (id was #{copilot_seat.seat_assignment.assignable_id})" %>
+          <% end %>
+        </td>
+        <td><%= copilot_seat.created_at.to_date %></td>
+        <td><%= copilot_seat.latest_activity_at %></td>
+        <td><%= copilot_seat.pending_cancellation_date %></td>
+        <td>
+          <%=copilot_seat.access_revoked_at&.strftime('%Y-%m-%d') %>
+        </td>
+        <td>
+          <% if user.present? %>
+            <%= render(Primer::Beta::Link.new(href: stafftools_user_copilot_settings_path(user.display_login), target: "_blank", title: "View User", muted: true, id: "user-link-#{user.id}")) do |component| %>
+              <% component.with_tooltip(text: "Copilot page for #{user.display_login}") %>
+              <%= render(Primer::Beta::Octicon.new(:"link-external")) %>
+            <% end %>
+          <% end %>
+          &nbsp;
+          <%# TODO: make this work for standalone enterprises %>
+          <% if entity.is_a?(Organization) && copilot_seat.seat_assignment.assignable_type == "User" %>
+            <%= render Stafftools::Copilot::UncancelSeatComponent.new(
+              copilot_seat,
+              copilot_seat.seat_assignment,
+              copilot_seat.seat_assignment&.owner&.next_metered_billing_cycle_starts_at.to_date - 1.day,
+              user.present? && !non_member,
+              user.present? && suspended
+            ) %>
+            <%= render Stafftools::Copilot::CancelSeatComponent.new(
+              copilot_seat,
+              copilot_seat.seat_assignment,
+              copilot_seat.seat_assignment&.owner&.next_metered_billing_cycle_starts_at.to_date - 1.day,
+            ) %>
+          <% end %>
+        </td>
+      </tr>
+    <% end %>
+  </table>
+  <div class="paginate-container">
+    <%= helpers.will_paginate copilot_seats %>
+  </div>
+  <br>
+  <%= render Primer::Beta::Label.new(scheme: :severe, title: "Blocked") do %>
+    B
+  <% end %> = Administrative Blocked&nbsp;
+
+  <%= render Primer::Beta::Label.new(scheme: :danger, title: "Warned") do %>
+    W
+  <% end %> = Warned&nbsp;
+
+  <%= render Primer::Beta::Label.new(scheme: :done, title: "Revoked") do %>
+    R
+  <% end %> = Administrative Block Revoked&nbsp;
+
+  <%= render Primer::Beta::Label.new(scheme: :attention, title: "Suspended") do %>
+    S
+  <% end %> = User Suspended&nbsp;
+
+  <%= render(Primer::Beta::Octicon.new(:"no-entry", color: :muted)) %> = User is not a member
+
+<% else %>
+  No assigned seats
+<% end %>

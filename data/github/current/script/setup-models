@@ -1,0 +1,58 @@
+#!/usr/bin/env safe-ruby
+# frozen_string_literal: true
+
+require_relative "#{Rails.root}/config/environment"
+require_relative "#{Rails.root}/script/seeds/objects"
+require_relative "#{Rails.root}/script/seeds/runner"
+require_relative "#{Rails.root}/script/seeds/runners/github_models"
+
+unless Rails.env.development?
+  raise "This is a dev-only script"
+end
+
+class SetupModels
+  def call
+    puts("Starting Models setup")
+
+    # Temporary workaround for a local development issue when sorting models. For more context, see:
+    # https://github.com/github/models/blob/ed4fedc06a391fadf3f50953da461a73ceff5bf6/docs/local-development.md#working-in-stafftools
+    system("bin/dbconsole development -e \"SET GLOBAL sort_buffer_size = 2560000000000000000;\"") || raise("Failed to increase sort buffer size")
+
+    enable_feature_flags
+    create_models
+
+    puts "Models setup completed."
+  end
+
+  private
+
+  def enable_feature_flags
+    flags = [
+      :github_models_normalize_records,
+      :github_models_org_access_policies,
+      :project_neutron_allow_all_integrations,
+      :project_neutron_fetch_catalog_items_job,
+      :project_neutron_o1_models,
+      :github_models_o3_streaming,
+      :github_models_fetch_catalog_items_job_no_content_filter,
+      :github_models_repo_tab_on_public_repos,
+      :github_models_repo_playground,
+      :github_models_repo_comparisons,
+      :github_models_yaml_editor,
+      :github_models_toggle_for_non_emu_enterprises,
+    ] + GitHubModels::RenderDependency::MODELS_CLIENT_SIDE_FEATURE_FLAGS
+    puts "Enabling feature flags"
+
+    flags.each do |flag|
+      puts "Enabling #{flag} feature..."
+      GitHub.flipper[flag].enable
+    end
+  end
+
+  def create_models
+    puts "Running seeds..."
+    Seeds::Runner::GitHubModels.execute({})
+  end
+end
+
+SetupModels.new.call

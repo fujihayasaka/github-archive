@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+
+set -e
+
+function ensure-azure-login() {
+
+    # Check if azure cli has valid non-expired session
+    # (azure cli token is valid for 12 hours)
+    # And force user to re-authenticate if not
+    if az account get-access-token &>/dev/null; then
+        echo "You are already logged in to Azure CLI"
+    elif code --status | grep "is not yet supported in browsers" &>/dev/null; then
+        # "az login" is not supported when running Codespace in browser
+        az login --use-device-code --output none
+    else
+        az login --output none
+    fi
+}
+
+function ensure-jit-group() {
+    IMS_DEV_CONTRIBUTOR_JIT_GROUP="azure-hosted-compute-ims-dev-contributor-jit"
+    LARGER_RUNNERS_CONTRIBUTOR_JIT_GROUP="azure-code-to-cloud-actions-platform-contributor-jit"
+
+    echo "Verifying user belongs to JIT group"
+    id=$(az ad signed-in-user show --query id --output tsv)
+    if [[ $(az ad group member check --group $LARGER_RUNNERS_CONTRIBUTOR_JIT_GROUP --member-id $id --query value --output tsv) == "true" ]]; then
+        return
+    elif [[ $(az ad group member check --group $IMS_DEV_CONTRIBUTOR_JIT_GROUP --member-id $id --query value --output tsv) == "true" ]]; then
+        return
+    else
+        >&2 echo "You must request JIT access to one of the following JIT groups:"
+        >&2 echo "  - Azure - Code To Cloud Actions Platform - Contributor"
+        >&2 echo "  - Azure - Hosted-Compute-IMS-Dev - Contributor"
+        >&2 echo "Please visit https://jit-okta-bouncer.githubapp.com/azure"
+        >&2 echo "Or run chatop '.jit me to code-to-cloud-actions-platform-contributor in azure for 8h because developing with codespace'"
+        exit 1
+    fi
+}
+
+function update-azurecli-settings() {
+    # Disable telemetry to prevent random failures in "ensure-azure-folder-permissions" 
+    az config set core.collect_telemetry=off 2> /dev/null
+
+    # Disable interactive subscription selection
+    az config set core.login_experience_v2=off 2> /dev/null
+}
+
+function ensure-azure-folder-permissions() {
+    # Make sure that $HOME/.azure folder has write permissions for "group"
+    # Because it is mounted into Kube pods to share Azure auth with IMS app
+    if [ -d $HOME/.azure ]; then
+        find $HOME/.azure ! -name "*.log" -exec sudo chmod -f g+rw {} \; || true
+    fi
+}
+
+# If we are running in CI environment, we should have already been authenticated via OIDC login
+if [[ ! ($GITHUB_ACTIONS || $CI) ]]; then
+    update-azurecli-settings
+    ensure-azure-login
+    ensure-jit-group
+fi
+
+ensure-azure-folder-permissions
+
+echo "Successfully logged in to Azure CLI! Happy coding!"

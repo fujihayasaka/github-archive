@@ -1,0 +1,64 @@
+<%
+  accessible_organizations = current_user.organizations.preload(:configuration_entries, business_membership: { business: [:configuration_entries] }).select { |org| org.patsv2_enabled? && org.personal_access_tokens_allowed? }
+  actors = [current_user, accessible_organizations.to_a].flatten
+  builder = ActionView::Helpers::FormBuilder.new(
+    nil,
+    nil,
+    self,
+    {}
+  )
+%>
+
+<div class="form-group my-2">
+  <div class="form-group-header">
+    <label id="access-target-label" for="target_type_selector">Resource owner</label>
+  </div>
+  <div class="form-group-body">
+    <%= render(Primer::Alpha::SelectPanel.new(
+      id: "resource-owner-select-panel",
+      title: "Select resource owner",
+      use_experimental_non_local_form: user_feature_enabled?(:primer_select_panel_use_experimental_non_local_form),
+      form_arguments: { builder: builder, name: "target_name" },
+      select_variant: :single,
+      fetch_strategy: :local,
+      dynamic_aria_label_prefix: "Selected resource owner",
+      classes: "js-target-container",
+      mb: 1
+    )) do |panel| %>
+      <% panel.with_show_button do |button| %>
+        <%= render(GitHub::AvatarComponent.new(id: "resource-owner-select-panel-show-button-icon", actor: current_target, mr: 1)) %>
+        <%= current_target.display_login %>
+        <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+      <% end %>
+      <% panel.with_subtitle { "You may only select resource owners with fine-grained PATs enabled." } %>
+      <% actors.each do |actor| %>
+        <% fg_limit = fine_grained_lifetime_limit_for(actor) %>
+        <% panel.with_item(
+          active: current_target == actor,
+          label: actor.display_login,
+          aria: { selected: current_target == actor },
+          content_arguments: {
+            data: { value: actor.display_login },
+            aria: { selected: current_target == actor },
+          },
+          data: {
+            "actor-is-organization": actor.is_a?(Organization),
+            "fg-limit": fg_limit,
+            "fg-limit-label": lifetime_limit_label(fg_limit, show_expiration_date: true),
+            "fg-limit-target": fine_grained_target_and_type_with_limit(actor),
+            "fg-limit-exempt": fine_grained_lifetime_limit_exempted_for?(actor, current_user),
+            "src": user_access_token_select_access_path(id: current_access&.id, target_name: actor.display_login),
+          }
+        ) do |item| %>
+          <% item.with_leading_visual_content do %>
+            <%= render(GitHub::AvatarComponent.new(id: "resource-owner-select-panel-item-icon", actor: actor, mr: 1)) %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <p id="resource-owner-message" class="f6 color-fg-muted">
+      The token will only be able to make changes to resources owned by the selected resource owner. Tokens can always read all public repositories.
+    </p>
+  </div>
+</div>

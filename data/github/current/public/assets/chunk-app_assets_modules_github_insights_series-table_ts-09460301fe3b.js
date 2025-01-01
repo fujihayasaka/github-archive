@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk=globalThis.webpackChunk||[]).push([["app_assets_modules_github_insights_series-table_ts"],{61987:(s,e,a)=>{a.r(e),(0,a(96200).Te)()}}]);
+//# sourceMappingURL=app_assets_modules_github_insights_series-table_ts-8bc739f2deb1.js.map

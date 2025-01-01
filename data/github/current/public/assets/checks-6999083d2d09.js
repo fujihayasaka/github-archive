@@ -1,0 +1,2 @@
+(globalThis.webpackChunk=globalThis.webpackChunk||[]).push([["checks"],{86656:()=>{let e=document.querySelector(".js-check-suites-sidebar");function t(){if(!e)return;e.style.height=`${window.innerHeight-e.getBoundingClientRect().top}px`;let t=e.parentElement;t&&t.getBoundingClientRect().height>e.getBoundingClientRect().height&&(e.style.height=`${t.getBoundingClientRect().height}px`)}t(),window.addEventListener("resize",t)}},e=>{e(e.s=86656)}]);
+//# sourceMappingURL=checks-7e762ac8864b.js.map

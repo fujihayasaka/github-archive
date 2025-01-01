@@ -1,0 +1,36 @@
+#!/bin/bash
+
+# script/server: Launch the application and any extra required processes
+#                locally.
+
+set -e
+
+cd "$(dirname "$0")/.."
+source script/_env
+
+test -z "$RACK_ENV" &&
+  RACK_ENV='development'
+
+# Set the HMAC key for development server
+export DEPENDENCY_GRAPH_API_HMAC_KEYS="DEPENDENCY_GRAPH_DEV_HMAC_SECRET_KEY"
+export DEPENDENCY_GRAPH_PLATFORM_HMAC_KEYS="DEPENDENCY_GRAPH_DEV_HMAC_SECRET_KEY"
+
+# Set Aqueduct URL for development
+export AQUEDUCT_URL="http://localhost:18081/twirp"
+
+if github_github_codespace; then
+  # Prevent overmind socket from conflicting with gh/gh overmind socket
+  export OVERMIND_SOCKET=/tmp/overmind.dgapi.sock
+  echo -e "\n*****\nUse overmind connect -s $OVERMIND_SOCKET to connect to dg-api Overmind.\n*****\n"
+fi
+
+script/poll-for-db 127.0.0.1 3306 root
+
+# boot the app and any other necessary processes.
+# We specifically CAN_DIE on statsd because the processes seems to linger due to some interesting Spring loader behavior.
+#  That should be fixed, but until then we're gonna ignore it.
+# We also CAN_DIE processor_*, because it has a dependency that isn't fully automated by script/server yet.
+#  Instead of surprising existing devs with a requirement to change their dev flow here, we just let it start up ungracefully.
+#  This should be temporary (< 1 week).
+OVERMIND_CAN_DIE=package_metadata,monolith_api_stub,statsd,processor_repo_manifest_file_changes,processor_repo_manifest_file_deleted,processor_repo_archived_status_changes,processor_repo_visibility_changes,processor_repositories_deleted,processor_ingest_packages,processor_ingest_snapshot_requests \
+  overmind start -f Procfile

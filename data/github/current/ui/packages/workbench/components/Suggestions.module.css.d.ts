@@ -1,0 +1,30 @@
+declare const styles: {
+  readonly "actionList": string;
+  readonly "actionListItem": string;
+  readonly "chevron": string;
+  readonly "collapsed": string;
+  readonly "container": string;
+  readonly "dialogFooter": string;
+  readonly "dialogHeader": string;
+  readonly "dialogHeaderText": string;
+  readonly "errorContainer": string;
+  readonly "errorContent": string;
+  readonly "errorContentContainer": string;
+  readonly "errorExpanded": string;
+  readonly "errorMessage": string;
+  readonly "errorShrunk": string;
+  readonly "expanded": string;
+  readonly "floatingErrorButton": string;
+  readonly "header": string;
+  readonly "headerSummary": string;
+  readonly "headerText": string;
+  readonly "headerTextError": string;
+  readonly "headerTrigger": string;
+  readonly "suggestionIcon": string;
+  readonly "suggestionItem": string;
+  readonly "suggestionsContainer": string;
+  readonly "suggestionsLabel": string;
+  readonly "suggestionsList": string;
+};
+export = styles;
+

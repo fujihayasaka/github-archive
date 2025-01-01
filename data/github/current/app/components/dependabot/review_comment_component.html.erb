@@ -1,0 +1,216 @@
+<%= content_tag(:div, alive_attrs) do %>
+<%= annotation_wrapper do %>
+  <div <%= test_selector "dependabot-review-comment-component" %> class="js-comment">
+    <%= render Dependabot::AnnotationComponent.new(
+      dependabot_annotation_result: dependabot_annotation,
+      inline: true,
+      annotation_id: dependabot_review_comment.id,
+      fallback_warning_level: dependabot_review_comment.warning_level,
+      fallback_annotation_title: dependabot_review_comment.fallback_annotation_title,
+      fallback_annotation_message: dependabot_review_comment.fallback_annotation_message,
+      autofix_job_id: dependabot_review_comment.autofix_job_id,
+      pull_request_review_thread: thread,
+      repository: repository
+    ) %>
+  </div>
+<% end %>
+
+  <% suggested_fix_comment_header = capture do %>
+    <%= render Primer::Box.new(ml: -2, m: 1, display: :flex, justify_items: :start, "data-morpheus-enabled": false) do %>
+      <%= render Primer::Box.new(
+        m: 1,
+        display: :flex,
+        justify_items: :center,
+        justify_content: :center,
+        bg: :subtle,
+        border: true,
+        classes: "circle",
+        "data-morpheus-enabled": false
+      ) do %>
+        <%= render Primer::Beta::Octicon.new(:copilot, color: :muted, m: 1) %>
+      <% end %>
+      <%= render Primer::Beta::Text.new(tag: :p, m: 1, flex: 1) do %>
+        <strong>Copilot Autofix</strong>
+        <%= render(Primer::Beta::Label.new(scheme: :secondary)) { "AI" } %>
+        <span class="color-fg-muted">
+          <% if state_updated_at %>
+            <%= time_ago_in_words(state_updated_at) %> ago
+          <% end %>
+        </span>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if show_suggested_fix? %>
+    <%= render Primer::Beta::Details.new(
+      border: :top,
+      classes: "Details-element",
+      reset: true, # This hiddes the default marker
+      open: !collapse_suggested_fix?,
+    ) do |component|%>
+      <% component.with_summary(
+        hidden: hide_suggested_fix_summary?,
+        button: false,
+        py: 3,
+        px: 3,
+      ) do %>
+        <div class="d-flex flex-items-center" <%= test_selector("ai-suggested-fix-collapsed-summary") %>>
+          <span class="flex-auto mr-3 d-flex flex-items-center">
+            <div class="d-lg-inline d-block px-md-0 px-3 pb-md-0 pb-3">
+              <i><%= collapsed_suggested_fix_message %></i>
+            </div>
+          </span>
+
+          <span class="btn-link color-fg-muted f6 Details-content--closed"><%= primer_octicon(icon: :unfold, mr: 1) %>Show autofix suggestion</span>
+          <span class="btn-link color-fg-muted f6 Details-content--open"><%= primer_octicon(icon: :fold, mr: 1) %>Hide autofix suggestion</span>
+        </div>
+      <% end %>
+      <% component.with_body do %>
+        <div class="review-comment js-dependabot-apply-autofix-container" <%= test_selector("ai-suggested-fix") %>>
+          <%= suggested_fix_comment_header %>
+
+          <div class="ml-5">
+            <div class="comment-body markdown-body soft-wrap css-overflow-wrap-anywhere user-select-contain d-block" <%= test_selector("ai-suggested-fix-description") %>>
+              <%= suggested_fix_description %>
+            </div>
+          </div>
+
+          <div class="ml-5 mt-4">
+
+            <div class="soft-wrap<% unless show_suggested_fix_actions? %> rounded overflow-hidden<% end %>">
+              <%= render Suggestions::MultiFileDiffComponent.new(
+                diff_entries: suggested_fix_diff_entries,
+                file_highlighting: suggested_fix_file_highlighting,
+                current_path: pull_request_review_comment.path,
+                hydro_click_tracking_payload: {
+                  repository_id: repository.id,
+                  autofix_job_id: dependabot_review_comment.autofix_job_id,
+                  pull_request_id: pull_request.id,
+                  pull_request_number: pull_request.number,
+                }
+              ) %>
+            </div>
+
+            <% if suggested_fix_dependency_metadata? %>
+              <%= render Dependabot::SuggestedFixDependencyMetadataComponent.new(dependency_metadata: suggested_fix_dependency_metadata) %>
+            <% end %>
+
+            <%= render Primer::Box.new(display: :flex, classes: "flex-lg-row flex-column gap-2") do %>
+              <div class="d-flex flex-auto f6 color-fg-muted flex-column flex-justify-center soft-wrap css-overflow-wrap-anywhere user-select-contain" <%= test_selector("ai-suggested-fix-footnote") %>>
+                Copilot is powered by AI and may make mistakes. Always verify output.
+              </div>
+              <% if show_suggested_fix_actions? %>
+                <div class="d-flex flex-sm-row flex-column flex-shrink-0 flex-md-row flex-md-justify-end flex-justify-between gap-1" <%= test_selector("ai-suggested-fix-actions") %>>
+                  <% if suggested_fix_diff_entries.length == 1 %>
+                    <%= render Primer::Beta::Button.new(tag: :a, size: :small, test_selector: "ai-suggested-fix-edit-button-changeset", href: file_edit_path(repository.owner, repository, pull_request.head_ref_name, suggested_fix_diff_entries[0].path, dependabot_autofix_job_id: dependabot_review_comment.autofix_job_id, pull_request_number: pull_request.number, pr: "/#{repository.name_with_display_owner}/pull/#{pull_request.number}")) do |component| %>
+                      <% component.with_leading_visual_icon(icon: :pencil) %>
+                      Edit
+                    <% end %>
+                  <% end %>
+                  <details class="details-reset details-overlay position-relative flex-auto" id="<%= commit_suggestion_modal_id %>">
+                    <%= render Primer::Beta::Button.new(tag: :summary, scheme: :primary, size: :small, w: [:full, :auto], ml: [0, 2], mb: [2, 0]) do |component| %>
+                      <% component.with_trailing_action_icon(icon: "triangle-down") %>
+                      Commit fix
+                    <% end %>
+                    <div class="pt-1 SelectMenu right-0">
+                      <div class="SelectMenu-modal" style="max-width: calc(100vw - 32px); width: 420px; height: auto;">
+                        <header class="SelectMenu-header p-2">
+                          <span class="SelectMenu-title">Commit fix</span>
+
+                          <%= render Primer::Beta::IconButton.new(
+                            icon: :x,
+                            type: :button,
+                            scheme: :invisible,
+                            classes: "SelectMenu-closeButton",
+                            "aria-label": "Close commit suggestion dialog",
+                            show_tooltip: false,
+                            data: {
+                              toggle_for: commit_suggestion_modal_id
+                            }
+                          ) %>
+                        </header>
+
+                        <%= form_tag(pull_request_dependabot_autofix_path(repository.owner, repository, pull_request), method: :post, class: "js-dependabot-apply-autofix-form p-2") do %>
+                          <input type="hidden" name="autofix_job_id" value="<%= dependabot_review_comment.autofix_job_id %>">
+                          <input type="hidden" name="current_oid" value="<%= current_head_oid %>">
+                          <input type="hidden" name="pull_request_review_thread_id" value="<%= thread.id %>">
+
+                          <input type="text" name="commit_title" class="form-control input-block input-contrast mb-2" aria-label="Commit title" value="<%= autofix_suggestion_commit_title %>" placeholder="Commit title">
+
+                          <textarea rows="2" aria-label="Commit message" autocomplete="off" class="js-suggestion-commit-message js-quick-submit form-control input-block mb-2" type="text" name="commit_message" placeholder="Add an optional extended description…" style="resize: vertical"></textarea>
+
+                          <%= render Repositories::DcoLabelComponent.new(repo: repository) %>
+
+                          <div class="form-actions">
+                            <%= render Primer::Beta::Button.new(type: :submit, size: :small, classes: "js-dependabot-apply-autofix-submit", data: { disable_invalid: true, disable_with: "Applying commit..." }).with_content("Commit changes") %>
+                          </div>
+                        <% end %>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+              <% end %>
+            <% end %>
+
+            <% if show_suggested_fix_actioned_message? %>
+              <% if state_updated_by.present? %>
+                <div class="f6 color-fg-muted mt-3 text-semibold" <%= test_selector("ai-suggested-fix-actioned") %>>
+                  <%= render GitHub::AvatarComponent.new(actor: state_updated_by, display: [:inline_block], size: 24) %>
+
+                  <strong>
+                    <%= render Comments::CommentActorComponent.new(actor: state_updated_by, show_full_name: false) %>
+                  </strong>
+
+                  <%= suggested_fix_actioned_message %> <%= time_ago_in_words(state_updated_at) %> ago.
+                </div>
+              <% else %>
+                <div class="f6 color-fg-muted mt-2 text-semibold" <%= test_selector("ai-suggested-fix-actioned") %>>
+                  <%= suggested_fix_actioned_by_unknown_user_message %> <%= time_ago_in_words(state_updated_at) %> ago.
+                </div>
+              <% end %>
+            <% elsif outdated_suggested_fix? %>
+              <div class="f6 color-fg-muted mt-2 text-semibold" <%= test_selector("ai-suggested-fix-outdated-note") %>>
+                Unable to commit as this autofix suggestion is now outdated
+              </div>
+            <% end %>
+
+            <div class="mt-2" <%= test_selector("copilot-feedback-actions") %>>
+              <%= render PullRequests::Copilot::FeedbackComponent.new(
+                comment_id: pull_request_review_comment.id,
+                feedback_options: copilot_feedback_options,
+                feedback_path: pull_request_dependabot_autofix_feedback_path(repository.owner, repository, pull_request, dependabot_review_comment.autofix_job_id)) %>
+            </div>
+
+            <div class="form-group flex-auto warn m-0 mt-2 color-fg-attention js-error-message-placeholder" hidden>
+              <div class="position-relative warning m-0" style="max-width: inherit;">
+                <span class="js-error-message"></span>
+                <span class="text-bold btn-link js-refresh-after-suggestion">Refresh and try again.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      <% end %>
+    <% end %>
+
+  <% elsif suggested_fix_error? %>
+     <div class="review-comment border-top" <%= test_selector("ai-suggested-fix-error") %>>
+      <%= suggested_fix_comment_header %>
+
+      <div class="mx-5 mt-5 f4 d-flex flex-column flex-items-center">
+        <%= render(Primer::Beta::Octicon.new(:alert, size: :medium, color: :muted)) %>
+        <p class="my-1 f6">
+          <strong>Copilot could not generate an autofix suggestion</strong>
+        </p>
+        <p class="my-1 f6 text-center color-fg-muted">
+          Copilot could not generate an autofix suggestion for this breaking change.
+          <%= render Primer::Beta::Link.new(
+            classes: "Link--inTextBlock",
+            muted: false,
+            scheme: :default,
+            href: GitHub.support_url,
+          ).with_content("contact support") %>.
+        </p>
+      </div>
+    </div>
+  <% end %>
+<% end %>

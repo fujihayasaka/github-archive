@@ -1,0 +1,109 @@
+<% page_info title: "Cycle Change", selected_link: :business_billing_settings,
+  stafftools: stafftools_enterprise_path(this_business) %>
+
+<div class="container-lg p-responsive mt-4">
+  <%= render partial: "settings/header", locals: {
+    current_context: this_business,
+    hide_profile_link: true,
+    hide_context_switcher: true,
+  } %>
+</div>
+
+<div class="my-5" <%= test_selector("upgrade") %>>
+  <div class="container-lg p-responsive">
+    <div class="border-bottom pb-3 mb-5">
+      <h1 class="d-inline-block f1 text-normal" <%= test_selector("billing-upgrade-header") %>>
+        Change how often your account is billed.
+      </h1>
+    </div>
+
+    <% if this_business.eligible_for_self_serve_payment? %>
+      <%= render(Primer::Alpha::Banner.new(mb: 4, mt: 5)) do |component| %>
+        If you require invoices, or are interested in Enterprise Managed Users, <%= link_to "contact our sales team", ent_contact_url, class: "Link--inTextBlock" %>.
+      <% end %>
+    <% end %>
+
+    <% completed_billing_information = this_business.has_saved_trade_screening_record_with_information? %>
+    <% completed_payment_method = this_business.has_credit_card? || this_business.has_paypal_account? %>
+    <% can_complete_purchase = completed_billing_information && completed_payment_method %>
+    <% total_consumed_licenses = [this_business.total_consumed_licenses, 1].max %>
+    <% default_seats = this_business.seats %>
+
+    <div class="d-md-flex gutter-md">
+      <div class="col-md-7" <%= test_selector("duration-summary") %>>
+        <%= render(Billing::Settings::Upgrade::SectionComponent.new(title: "How often do you want to be billed?", icon: :clock)) do |component| %>
+          <% component.with_body do %>
+            <%= render partial: "billing_settings/billing_cycle", locals: { account: this_business, selected_duration: selected_duration } %>
+          <% end %>
+        <% end %>
+        <%= render(Billing::Settings::Upgrade::SectionComponent.new(title: "How many seats do you want to include?", icon: :people)) do |component| %>
+          <% component.with_body do %>
+            <%= render(Billing::Settings::Upgrade::StepperComponent.new(
+              type: :plan_upgrade,
+              seats: params[:seats] || default_seats,
+              min: total_consumed_licenses,
+              max: this_business.seat_limit_for_upgrades,
+              form: "upgrade-business",
+              current_url: billing_cycle_duration_change_enterprise_path(this_business, selected_duration),
+              min_error_message: "You need at least #{pluralize(total_consumed_licenses, 'seat')} to support your #{pluralize(total_consumed_licenses, 'existing member')}",
+              max_error_message: "Please contact us at https://github.com/enterprise/contact for pricing and purchasing information.")
+              ) do |stepper| %>
+              <% stepper.with_remove_seat_control(data: analytics_click_attributes(category: "Account Upgrade", action: "click to decrease seats number", label: "ref_page:#{request.fullpath};ref_cta:decrease seats number;ref_loc:account_upgrade")) %>
+              <% stepper.with_input(data: analytics_click_attributes(
+                category: "Business Account Upgrade",
+                action: "click on seats input",
+                label: "ref_page:#{request.fullpath};ref_cta:seats input;ref_loc:account_upgrade" )) %>
+              <% stepper.with_add_seat_control(data: analytics_click_attributes(category: "Account Upgrade", action: "click to increase seats number", label: "ref_page:#{request.fullpath};ref_cta:increase seats number;ref_loc:account_upgrade")) %>
+            <% end %>
+            <%= render Businesses::Billing::SeatsUsedComponent.new(business: this_business, plan_duration: selected_duration )%>
+          <% end %>
+        <% end %>
+
+      </div>
+      <div class='col-md-5'>
+        <%= render Primer::Box.new(classes: "js-stepper-show-with-value", p: 3, mb: 3, border: true, border_radius: 2) do %>
+          <%= form_tag billing_cycle_duration_change_enterprise_path(this_business, selected_duration), method: :post, id: 'upgrade-business' do %>
+            <%= render Businesses::OrderPreviewComponent.new(
+              business: this_business,
+              duration: selected_duration,
+              form_field: true,
+              seats: default_seats
+            ) %>
+            <% unless can_complete_purchase %>
+              <p class="mt-2">
+                You have added the
+                <% if completed_billing_information %>
+                  payment method
+                <% else %>
+                  billing information and payment method
+                <% end %>
+                for your account.
+              </p>
+            <% end %>
+            <%= render Primer::Beta::Button.new(
+              scheme: :primary,
+              block: true,
+              type: :submit,
+              size: :large,
+              disabled: !can_complete_purchase || this_business.has_trade_screening_restriction? || current_user.has_trade_screening_restriction?,
+              test_selector: "complete-purchase-button",
+            ) do %>
+              Change your account's billing cycle
+            <% end %>
+            <%= render Primer::Beta::Button.new(
+              href: enterprise_path(this_business), block: true, tag: :a, mt: 2,
+              data: {
+                **analytics_click_attributes(
+                  category: "enterprise_trial_account",
+                  action: "cancel_github_enterprise_purchase",
+                  label: "enterprise_id:#{this_business.id}"),
+              }
+            ) do %>
+              Cancel purchase
+            <% end %>
+          <% end %>
+        <% end %>
+      </div>
+    </div>
+  </div>
+</div>

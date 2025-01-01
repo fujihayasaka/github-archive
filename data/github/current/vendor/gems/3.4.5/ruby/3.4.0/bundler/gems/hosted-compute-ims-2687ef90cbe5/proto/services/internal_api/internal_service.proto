@@ -1,0 +1,129 @@
+syntax = "proto3";
+
+// Defines the application top level name used as the REST API prefix
+package github.ims.api.internal.v1;
+
+import "buf/validate/validate.proto";
+import "shared/actor.proto";
+import "shared/enums.proto";
+
+option go_package = "github.com/github/hosted-compute-ims/gen/twirp/go/services/internal_api";
+option ruby_package = "GitHub::HostedComputeIms::InternalApi";
+
+service InternalImageManagementService {
+  // CREATE
+  rpc StartImageVersionGeneration(StartImageVersionGenerationRequest) returns (StartImageVersionGenerationResponse) {}
+
+  // READ
+  rpc GetImageDetails(GetImageDetailsRequest) returns (GetImageDetailsResponse) {}
+  rpc GetImageReference(GetImageReferenceRequest) returns (GetImageReferenceResponse) {}
+
+  // UPDATE
+  rpc UpdateImageVersionGenerationStatus(UpdateImageVersionGenerationStatusRequest) returns (UpdateImageVersionGenerationStatusResponse) {}
+  rpc FinishImageVersionGeneration(FinishImageVersionGenerationRequest) returns (FinishImageVersionGenerationResponse) {}
+}
+
+message ImageDetails {
+  uint64 id = 1;
+  string source = 2;
+  string name = 3;
+  shared.v1.OsType os_type = 4;
+  shared.v1.Architecture architecture = 5;
+  bool enabled = 6;
+  int32 size_gb = 7;
+}
+
+message ImageReference {
+  string resource_id = 1;
+  string exact_image_version = 2;
+  shared.v1.OsState os_state = 3;
+  string agent_user = 4;
+  string azure_purchase_plan = 5;
+}
+
+message GetImageDetailsRequest {
+  shared.v1.Actor owner = 2 [(buf.validate.field).required = true];
+  string image_source = 3 [(buf.validate.field).required = true];
+  uint64 image_id = 4 [(buf.validate.field).required = true];
+  string image_version = 5 [(buf.validate.field).required = true];
+
+  reserved 1;
+}
+
+message GetImageDetailsResponse {
+  ImageDetails image_details = 1;
+}
+
+message GetImageReferenceRequest {
+  string image_source = 2 [(buf.validate.field).required = true];
+  uint64 image_id = 3 [(buf.validate.field).required = true];
+  string image_version = 4 [(buf.validate.field).required = true];
+
+  reserved 1;
+}
+
+message GetImageReferenceResponse {
+  string exact_image_version = 2 [deprecated = true];
+  string resource_id = 3 [deprecated = true];
+  string agent_user = 4 [deprecated = true];
+  string azure_purchase_plan = 5 [deprecated = true];
+  shared.v1.OsState os_state = 6 [deprecated = true];
+
+  ImageReference image_reference = 7;
+
+  reserved 1;
+}
+
+message StartImageVersionGenerationRequest {
+  shared.v1.Actor owner = 1 [(buf.validate.field).required = true];
+  string image_source = 2 [(buf.validate.field).required = true];
+  uint64 image_id = 3 [(buf.validate.field).required = true];
+  string image_version = 4 [
+    // false for required allows passing an empty string to automatically bump the version
+    (buf.validate.field).required = false,
+    (buf.validate.field).string.pattern = "^(\\d+\\.(\\d+|\\*)(|\\.(\\d+|\\*)))?$"
+  ];
+  shared.v1.VmGeneration vm_generation = 5 [(buf.validate.field).enum.defined_only = true];
+  string agent_user = 6;
+  string azure_purchase_plan = 7 [
+    (buf.validate.field).required = false,
+    (buf.validate.field).string.pattern = "^([a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+)?$"
+  ];
+  shared.v1.OsState os_state = 8 [(buf.validate.field).enum.defined_only = true];
+}
+
+message StartImageVersionGenerationResponse {
+  string created_image_version = 1;
+}
+
+message UpdateImageVersionGenerationStatusRequest {
+  shared.v1.Actor owner = 1 [(buf.validate.field).required = true];
+  string image_source = 2 [(buf.validate.field).required = true];
+  uint64 image_id = 3 [(buf.validate.field).required = true];
+  string image_version = 4 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.pattern = "^\\d+\\.\\d+\\.\\d+$"
+  ];
+  string state_details = 5 [(buf.validate.field).required = true];
+}
+
+message UpdateImageVersionGenerationStatusResponse {}
+
+message FinishImageVersionGenerationRequest {
+  shared.v1.Actor owner = 1 [(buf.validate.field).required = true];
+  string image_source = 2 [(buf.validate.field).required = true];
+  uint64 image_id = 3 [(buf.validate.field).required = true];
+  string image_version = 4 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.pattern = "^\\d+\\.\\d+\\.\\d+$"
+  ];
+  bool success = 5 [(buf.validate.field).required = false];
+  string source_vhd_url = 6 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uri = true
+  ];
+  string state_details = 7 [(buf.validate.field).required = false];
+  string workflow_owner_id = 8 [(buf.validate.field).required = false];
+}
+
+message FinishImageVersionGenerationResponse {}

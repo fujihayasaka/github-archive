@@ -1,0 +1,53 @@
+#!/usr/bin/env safe-ruby
+# frozen_string_literal: true
+
+require_relative "../script/seeds/runners/issues_react"
+require_relative "../config/environment"
+
+unless Rails.env.development?
+  raise "This is a dev-only script"
+end
+
+disable_ssr = ARGV.include?("--disable-ssr")
+generate_seed_data = !ARGV.include?("--skip-seed-data")
+
+puts "Setting up feature flags..."
+
+# Issues React
+GitHub.flipper[:issues_react_global_add].enable
+GitHub.flipper[:issues_react_label_index].enable
+
+# SSR
+if disable_ssr
+  GitHub.flipper[:disable_issues_react_ssr].enable
+end
+
+# Live Updates
+GitHub.flipper[:pull_request_sub_triggers].enable
+GitHub.flipper[:pull_request_single_subscription].enable
+GitHub.flipper[:use_pull_request_subscriptions_enabled].enable
+
+# Pull request dashboard
+GitHub.flipper[:new_pulls_dashboard].enable
+
+monalisa = User.find_by_login("monalisa")
+
+puts "Creating issues semantic search feature preview..."
+ff = FlipperFeature.find_by_name("elasticsearch_semantic_indexing_issues_semantic_search")
+Feature.create(public_name: "Issues semantic search", slug: "elasticsearch_semantic_indexing_issues_semantic_search", flipper_feature: ff, feedback_link: "https://github.com")
+
+# Dismisses the initial notice about the Projects feature so we don't have to guess
+# if we need to dismiss it or not in the E2E tests.
+monalisa.dismiss_notice("projects_beta_splash")
+
+if generate_seed_data
+  puts "Seeding issues react..."
+  Seeds::Runner::IssuesReact.execute({ minimal: true })
+
+  puts "Repairing Elastometer indexes..."
+  Elastomer::App.run ["repair"]
+else
+  puts "Skipping issues react seed data..."
+end
+
+puts "Issues React is setup!"

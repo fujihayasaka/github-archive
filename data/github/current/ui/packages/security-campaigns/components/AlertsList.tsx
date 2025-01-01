@@ -1,0 +1,126 @@
+import type React from 'react'
+import {useCallback} from 'react'
+import pluralize from 'pluralize'
+import {ListView} from '@github-ui/list-view'
+import {ListViewMetadata} from '@github-ui/list-view/ListViewMetadata'
+import {ListViewSectionFilterLink} from '@github-ui/list-view/ListViewSectionFilterLink'
+import type {ActionBarProps} from '@github-ui/action-bar'
+import {number as formatNumber} from '@github-ui/formatters'
+
+import type {Cursor} from '@github-ui/code-scanning-shared/types/cursor'
+import {PrevNextPagination} from '@github-ui/code-scanning-shared/components/PrevNextPagination'
+import {closedAlertsQuery, openAlertsQuery} from '../hooks/use-alerts-params'
+import {InfoIcon} from '@primer/octicons-react'
+
+export type AlertsListProps = {
+  onToggleSelectAll?: (isSelectAllChecked: boolean) => void
+  openCount: number | undefined
+  closedCount: number | undefined
+  prevCursor: string | undefined
+  nextCursor: string | undefined
+  isLoading: boolean
+  isError: boolean
+
+  showLimitedAlertsWarning: boolean
+
+  query: string
+  onStateFilterChange: (state: 'open' | 'closed') => void
+  showStateFilters: boolean
+
+  onCursorChange: (newCursor: Cursor | null) => void
+
+  setSelectedItems?: React.Dispatch<React.SetStateAction<Set<number>>>
+
+  actions?: ActionBarProps['actions']
+  isSelectable?: boolean
+
+  children: React.ReactNode
+}
+
+export function AlertsList({
+  onToggleSelectAll,
+  actions,
+  children,
+  closedCount,
+  isLoading,
+  showLimitedAlertsWarning,
+  isSelectable,
+  nextCursor,
+  onCursorChange,
+  onStateFilterChange,
+  showStateFilters,
+  openCount,
+  prevCursor,
+  query,
+  setSelectedItems,
+}: AlertsListProps) {
+  const onSectionFilterClicked = useCallback(
+    (event: React.MouseEvent, state: 'open' | 'closed') => {
+      event.preventDefault()
+
+      // Changing the filter also resets the cursor
+      onStateFilterChange(state)
+      setSelectedItems?.(new Set())
+    },
+    [setSelectedItems, onStateFilterChange],
+  )
+
+  const totalCount = (openCount ?? 0) + (closedCount ?? 0)
+  const title = `${formatNumber(totalCount)} ${pluralize('alert', totalCount)}`
+
+  const filters = showStateFilters
+    ? [
+        <ListViewSectionFilterLink
+          key="open"
+          title="Open"
+          href="#"
+          count={formatNumber(openCount ?? 0)}
+          onClick={e => onSectionFilterClicked(e, 'open')}
+          isSelected={query.includes(openAlertsQuery)}
+          isLoading={isLoading}
+        />,
+        <ListViewSectionFilterLink
+          key="closed"
+          title="Closed"
+          href="#"
+          count={formatNumber(closedCount ?? 0)}
+          onClick={e => onSectionFilterClicked(e, 'closed')}
+          isSelected={query.includes(closedAlertsQuery)}
+          isLoading={isLoading}
+        />,
+      ]
+    : []
+
+  return (
+    <div>
+      <div className="border rounded-2 mb-3">
+        <ListView
+          metadata={
+            <ListViewMetadata
+              onToggleSelectAll={onToggleSelectAll}
+              actionsLabel="Actions"
+              sectionFilters={filters}
+              actions={actions}
+            />
+          }
+          title={title}
+          titleHeaderTag="h3"
+          isSelectable={isSelectable}
+          totalCount={totalCount}
+          data-testid="alerts-list"
+        >
+          {children}
+        </ListView>
+      </div>
+
+      {showLimitedAlertsWarning && (
+        <div className="text-small fgColor-muted v-align-middle">
+          <InfoIcon size={16} className="mr-1" />
+          You can only see data from repositories for which you have permission to view code scanning alerts.
+        </div>
+      )}
+
+      <PrevNextPagination onCursorChange={onCursorChange} prevCursor={prevCursor} nextCursor={nextCursor} />
+    </div>
+  )
+}
