@@ -247,7 +247,9 @@ export function WebCommitDialog({
     >
       <FlashError
         prefix="There was an error committing your changes:"
-        errorMessageUsingPrefix={errorMessage}
+        errorMessageUsingPrefix={
+          errorDetails?.ruleViolations ? 'Please address the rule violations and try again.' : errorMessage
+        }
         ruleErrors={errorDetails?.ruleViolations}
         helpUrl={helpUrl}
         flashRef={flashErrorRef}

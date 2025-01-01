@@ -260,13 +260,17 @@ module GitHub
 
       def advisory_db_stats
         cached("advisory_db_stats", ttl: CACHE_TTL) do
+          latest_updated_at = Vulnerability.maximum(:updated_at)&.to_time&.utc
+
+          advisory_stats = {
+            vulnerability_sync_enabled: GitHub.ghe_content_analysis_enabled?,
+            synced_vulnerability_count: Vulnerability.count
+          }
+
+          advisory_stats[:latest_updated_at] = latest_updated_at if latest_updated_at
+
           {
-            advisory_db_stats: {
-              vulnerability_sync_enabled: GitHub.ghe_content_analysis_enabled?,
-              synced_vulnerability_count: Vulnerability.count,
-              # Covered by KEY `index_vulnerabilities_on_updated_at` (`updated_at`),
-              latest_updated_at: Vulnerability.maximum(:updated_at),
-            }.deep_symbolize_keys
+            advisory_db_stats: advisory_stats.deep_symbolize_keys
           }
         end
       end

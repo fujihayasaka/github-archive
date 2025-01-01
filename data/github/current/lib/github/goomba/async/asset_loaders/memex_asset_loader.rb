@@ -5,7 +5,7 @@ module GitHub::Goomba::Async::AssetLoaders
   class MemexAssetLoader < AssetLoader
     def initialize(memex_project, current_user)
       super(current_user)
-      @node_asset = {}
+      @node_src_asset = {}
       @memex_project = memex_project
     end
 
@@ -52,8 +52,8 @@ module GitHub::Goomba::Async::AssetLoaders
           next nil unless asset.upload_container.owner_display_name == owner_display_name
         end
 
-        @node_asset[node] = asset
-        next @node_asset
+        @node_src_asset[node["src"]] = asset
+        next @node_src_asset
       end
     end
 

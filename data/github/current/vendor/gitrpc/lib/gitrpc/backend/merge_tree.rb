@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 # typed: true
 
+require "fileutils"
 require "gitrpc/merge_tree_conflicts_parser"
 
 # Functions used by other backend RPCs related to merge-tree.
@@ -20,6 +21,8 @@ module GitRPC
     #  When conflicts encountered, returns [nil, Rugged::Index, err] with the
     #  conflicted index.
     def merge_tree(base:, head:, merge_options:, resolutions:)
+      tmpdir = create_custom_tmpdir(self.path, "objects/tmp_objdir-merge-tree-")
+
       extra_git_options = []
       extra_git_options.push("-c", "pack.tmpObjDir.showStats=true") if merge_options[:dogstats]
       extra_git_options.push("-c", "pack.tmpObjDir.keepUnpackedThreshold=#{merge_options[:keep_unpacked_threshold]}") if merge_options[:keep_unpacked_threshold]
@@ -31,6 +34,7 @@ module GitRPC
         extra_options.push("--find-closest-merge-base")
       end
       extra_options.push("--use-tmp-objdir=#{merge_options[:use_tmp_objdir_mode]}") if merge_options[:use_tmp_objdir_mode]
+      extra_options.push("--tmp-objdir-location=#{tmpdir}")
 
       base_oid = base.oid
       head_oid = head.oid
@@ -95,6 +99,8 @@ module GitRPC
         end
         [nil, sort(conflicts), nil, dogstats]
       end
+    ensure
+      FileUtils.rm_rf(tmpdir) if tmpdir && File.exist?(tmpdir)
     end
 
     private

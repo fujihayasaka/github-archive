@@ -47,8 +47,12 @@ module GitHub
       "application/protobuf"
     end
 
+    def self.new_client(connection:)
+      ::Turboghas::Proto::AdvancedSecurityAPIClient.new(connection, { content_type: content_type })
+    end
+
     def self.client
-      @client ||= ::Turboghas::AdvancedSecurityAPI.new(::GitHub::Turboghas.connection, { content_type: content_type })
+      @client ||= new_client(connection: connection)
     end
 
     def self.connection(timeout: 5, open_timeout: 1)

@@ -160,15 +160,6 @@ class UpdateSecuritySettingsUserTest < GitHub::TestCase
         assert_enqueued_jobs(1, only: SecurityAnalysisSettingsUpdateJob)
         assert_nil(err_msg)
       end
-
-      test "it does not enqueue an update job with the feature flag turned off" do
-        GitHub.flipper[:dependabot_grouped_security_updates].disable
-        params = { vulnerability_updates_grouping: "enable_all" }
-        err_msg = UpdateSecuritySettings.perform(@admin, params).try(:fetch, :error, nil)
-
-        assert_no_enqueued_jobs(only: SecurityAnalysisSettingsUpdateJob)
-        assert_nil(err_msg)
-      end
     end
 
     context "when grouped security updates is being disabled on all repositories" do
@@ -178,15 +169,6 @@ class UpdateSecuritySettingsUserTest < GitHub::TestCase
         err_msg = UpdateSecuritySettings.perform(@admin, params).try(:fetch, :error, nil)
 
         assert_enqueued_jobs(1, only: SecurityAnalysisSettingsUpdateJob)
-        assert_nil(err_msg)
-      end
-
-      test "it does not enqueue an update job with the feature flag turned off" do
-        GitHub.flipper[:dependabot_grouped_security_updates].disable
-        params = { vulnerability_updates_grouping: "disable_all" }
-        err_msg = UpdateSecuritySettings.perform(@admin, params).try(:fetch, :error, nil)
-
-        assert_no_enqueued_jobs(only: SecurityAnalysisSettingsUpdateJob)
         assert_nil(err_msg)
       end
     end
@@ -200,29 +182,11 @@ class UpdateSecuritySettingsUserTest < GitHub::TestCase
         assert(@admin.vulnerability_updates_grouping_enabled_for_new_repos?)
         assert_nil(err_msg)
       end
-
-      test "it does not configure the organization with the feature flag turned off" do
-        GitHub.flipper[:dependabot_grouped_security_updates].disable
-        params = { vulnerability_updates_grouping_new_repos: "enabled" }
-        err_msg = UpdateSecuritySettings.perform(@admin, params).try(:fetch, :error, nil)
-
-        refute(@admin.vulnerability_updates_grouping_enabled_for_new_repos?)
-        assert_nil(err_msg)
-      end
     end
 
     context "when grouped security updates is being disabled on new repositories" do
       test "it configures the organization and returns nil with the feature flag turned on" do
         GitHub.flipper[:dependabot_grouped_security_updates].enable
-        params = { vulnerability_updates_grouping_new_repos: "disabled" }
-        err_msg = UpdateSecuritySettings.perform(@admin, params).try(:fetch, :error, nil)
-
-        refute(@admin.vulnerability_updates_grouping_enabled_for_new_repos?)
-        assert_nil(err_msg)
-      end
-
-      test "it does not configure the organization with the feature flag turned off" do
-        GitHub.flipper[:dependabot_grouped_security_updates].disable
         params = { vulnerability_updates_grouping_new_repos: "disabled" }
         err_msg = UpdateSecuritySettings.perform(@admin, params).try(:fetch, :error, nil)
 

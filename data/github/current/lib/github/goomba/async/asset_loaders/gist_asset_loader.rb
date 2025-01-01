@@ -5,7 +5,7 @@ module GitHub::Goomba::Async::AssetLoaders
   class GistAssetLoader < AssetLoader
     def initialize(current_user)
       super(current_user)
-      @node_asset = {}
+      @node_src_asset = {}
     end
 
     def load_node_asset(node)
@@ -39,8 +39,8 @@ module GitHub::Goomba::Async::AssetLoaders
         next nil if asset.upload_container_type != Gist.name
         next nil unless new_url || asset.user_id == asset_user_id
 
-        @node_asset[node] = asset
-        next @node_asset
+        @node_src_asset[node["src"]] = asset
+        next @node_src_asset
       end
     end
 

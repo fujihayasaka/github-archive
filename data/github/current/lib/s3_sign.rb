@@ -102,7 +102,7 @@ class S3Sign
   end
 
   def s3_host
-    @endpoint_provider.s3_host(@credentials[:bucket])
+    @endpoint_provider.s3_host(@credentials[:bucket], @region)
   end
 
   def s3_url
@@ -222,9 +222,14 @@ class S3Sign
       "https"
     end
 
-    def self.s3_host(bucket_with_path)
+    def self.s3_host(bucket_with_path, region = AWS_REGION)
       parts = bucket_with_path.split("/")
-      "%s.s3.amazonaws.com" % [parts[0]]
+      # any region that includes "gov" is not supporting global s3 endpoints
+      if region.include?("gov")
+        "%s.s3.%s.amazonaws.com" % [parts[0], region]
+      else
+        "%s.s3.amazonaws.com" % [parts[0]]
+      end
     end
 
     def self.s3_path(bucket, key)
@@ -243,7 +248,7 @@ class S3Sign
       GitHub.memory_alpha_scheme
     end
 
-    def self.s3_host(bucket_with_path)
+    def self.s3_host(bucket_with_path, region = AWS_REGION)
       GitHub.memory_alpha_host
     end
 
@@ -258,7 +263,7 @@ class S3Sign
       GitHub.lfs_storage_host_protocol
     end
 
-    def self.s3_host(bucket_with_path)
+    def self.s3_host(bucket_with_path, region = AWS_REGION)
       GitHub.lfs_storage_host
     end
   end

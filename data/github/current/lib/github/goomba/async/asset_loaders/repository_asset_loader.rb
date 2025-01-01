@@ -5,7 +5,7 @@ module GitHub::Goomba::Async::AssetLoaders
   class RepositoryAssetLoader < AssetLoader
     def initialize(entity, current_user)
       super(current_user)
-      @node_asset = {}
+      @node_src_asset = {}
       @entity = entity
     end
 
@@ -50,15 +50,15 @@ module GitHub::Goomba::Async::AssetLoaders
         next nil unless new_url || asset.user_id == asset_user_id
         next nil unless asset.repository.present?
         if new_url || asset_nwo_url == T.must(asset.repository).name_with_display_owner
-          @node_asset[node] = asset
-          next @node_asset
+          @node_src_asset[node["src"]] = asset
+          next @node_src_asset
         end
 
         # use a loader to check if the repo has been renamed
         Platform::Loaders::RedirectedRepositoryByNwo.load(asset_nwo_url).then do |renamed_repo|
           next nil unless renamed_repo.present? && renamed_repo.id == asset.repository_id
-          @node_asset[node] = asset
-          next @node_asset
+          @node_src_asset[node["src"]] = asset
+          next @node_src_asset
         end
       end
     end

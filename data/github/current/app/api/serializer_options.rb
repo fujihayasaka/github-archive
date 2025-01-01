@@ -118,6 +118,7 @@ module Api
           # each key within object represents a different hash, to allow for more flexibility without duplicating
           # a new key each time
           :object_cache,
+          :available_records, # For prefilling associations
         ) do
           include SerializerOptionsMimeTypes
         end

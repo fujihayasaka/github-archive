@@ -95,10 +95,13 @@ module Business::AdvancedSecurityCommittersGenerator
   def self.get_committers_paginated(entity, limit: nil, cursor: nil, committer_type: :ACTIVE_COMMITTERS, repository_ids: nil)
     return [] if entity.nil?
 
+    # support overriding the timeout in Stafftools when downloading very large CSVs
+    patient_client = GitHub::Turboghas.new_client(connection: GitHub::Turboghas.connection(timeout: 10))
+
     if entity.is_a?(User)
-      response = GitHub::Turboghas.client.get_committers_for_owner(owner_id: entity.id, limit:, cursor:, committer_type:, repository_ids:)
+      response = patient_client.get_committers_for_owner(owner_id: entity.id, limit:, cursor:, committer_type:, repository_ids:)
     else
-      response = GitHub::Turboghas.client.get_committers_for_business(business_id: entity.id, limit:, cursor:, committer_type:, repository_ids:)
+      response = patient_client.get_committers_for_business(business_id: entity.id, limit:, cursor:, committer_type:, repository_ids:)
     end
 
     unless response&.error.nil?

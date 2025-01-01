@@ -523,15 +523,15 @@ class VerifiableDomainTest < GitHub::TestCase
     end
 
     test "does not allow duplicate domain (case insensitive)" do
-      message = "has already been claimed by your organization"
+      message = "has already been claimed"
 
       org_domain = VerifiableDomain.new(domain: @domain_name, owner: @organization)
-      org_domain.valid?
-      org_domain.errors[:domain].include? message
+      refute_predicate org_domain, :valid?
+      assert org_domain.errors[:domain].include? message
 
       org_domain = VerifiableDomain.new(domain: @domain_name.upcase, owner: @organization)
-      org_domain.valid?
-      org_domain.errors[:domain].include? message
+      refute_predicate org_domain, :valid?
+      assert org_domain.errors[:domain].include? message
     end
   end
 
@@ -1085,6 +1085,27 @@ class VerifiableDomainTest < GitHub::TestCase
 
       refute @domain.async_verification_token_found?.sync
       refute @domain.verification_token_found?
+    end
+  end
+
+  context "#async_dns_records" do
+    test "does not peform multiple DNS queries" do
+      mock_dns_setup
+      Resolv::DNS.any_instance.expects(:getresources).once.with(
+        @domain.dns_host_name, Resolv::DNS::Resource::IN::TXT,
+      ).returns([])
+
+      2.times { @domain.send(:async_dns_records).sync }
+    end
+
+    test "does not perform multiple DNS queries for #host_name_found? and #verification_token_found? for same domain" do
+      mock_dns_setup
+      Resolv::DNS.any_instance.expects(:getresources).once.with(
+        @domain.dns_host_name, Resolv::DNS::Resource::IN::TXT,
+      ).returns([])
+
+      @domain.async_host_name_found?.sync
+      @domain.async_verification_token_found?.sync
     end
   end
 

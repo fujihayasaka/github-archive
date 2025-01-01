@@ -16,14 +16,14 @@ module SecurityOverviewAnalytics
     end
 
     setup do
-      TenantValidationHelper.stubs(:is_owner_in_scope?).returns(true)
+      TenantValidationHelper.stubs(:should_handle_secret_scanning_alert_events?).returns(true)
       @now = Time.current
       @date_id = ::SecurityOverviewAnalytics::Date.id_from_time(@now.utc)
     end
 
     context "#perform" do
       test "does nothing if repository fails tenant validation" do
-        TenantValidationHelper.stubs(:is_owner_in_scope?).returns(false)
+        TenantValidationHelper.stubs(:should_handle_secret_scanning_alert_events?).returns(false)
         SecretScanningAlertRevision.expects(:upsert_revision).never
         SecretScanningAlertRevision.expects(:delete_alert_revisions).never
 
@@ -40,45 +40,6 @@ module SecurityOverviewAnalytics
 
         assert_empty SecretScanningAlertRevision.all
         assert_dogstats_increment 1, "security_overview_analytics.secret_scanning_alert_revision_ingestion.skipped", tags: ["reason:tenant_not_in_scope"]
-      end
-
-      test "does nothing if repository owned by a non-emu but properly handles emu" do
-        user = create(:user)
-        repo = create(:repository, owner: user, force_user_owned: true)
-        if TestEnv.test_with_all_emus?
-          assert_empty SecretScanningAlertRevision.all
-
-          SecretScanningAlertRevision.expects(:delete_alert_revisions).never
-          perform_enqueued_jobs only: SecretScanningAlertRevisionIngestionJob do
-            assert_nothing_raised do
-              SecretScanningAlertRevisionIngestionJob.perform_later(
-                alert: alert_payload(repository_id: repo.id, alert_number: 1),
-                date_id: @date_id,
-                event_time: @now,
-                source_event: "security_overview_analytics.test",
-              )
-            end
-          end
-
-          assert SecretScanningAlertRevision.where(repository_id: repo.id, alert_number: 1).first
-        else
-          SecretScanningAlertRevision.expects(:upsert_revision).never
-          SecretScanningAlertRevision.expects(:delete_alert_revisions).never
-
-          perform_enqueued_jobs only: SecretScanningAlertRevisionIngestionJob do
-            assert_nothing_raised do
-              SecretScanningAlertRevisionIngestionJob.perform_later(
-                alert: alert_payload(repository_id: repo.id, alert_number: 1),
-                date_id: @date_id,
-                event_time: @now,
-                source_event: "security_overview_analytics.test",
-              )
-            end
-          end
-
-          assert_empty SecretScanningAlertRevision.all
-          assert_dogstats_increment 1, "security_overview_analytics.secret_scanning_alert_revision_ingestion.skipped", tags: ["reason:not_org_or_emu_owned_repo"]
-        end
       end
 
       test "does nothing if repository is soft-deleted" do

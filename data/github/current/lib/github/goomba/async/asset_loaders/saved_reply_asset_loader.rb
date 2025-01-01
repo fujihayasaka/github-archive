@@ -5,7 +5,7 @@ module GitHub::Goomba::Async::AssetLoaders
   class SavedReplyAssetLoader < AssetLoader
     def initialize(current_user)
       super(current_user)
-      @node_asset = {}
+      @node_src_asset = {}
     end
 
     def load_node_asset(node)
@@ -46,8 +46,8 @@ module GitHub::Goomba::Async::AssetLoaders
           next nil unless asset.upload_container.id == asset_user_id
         end
 
-        @node_asset[node] = asset
-        next @node_asset
+        @node_src_asset[node["src"]] = asset
+        next @node_src_asset
       end
     end
 

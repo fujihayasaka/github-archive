@@ -109,12 +109,10 @@ module GitHub
 
           discussion_ids = repository.discussions.pluck(:id)
           add_discussions(discussion_ids)
+          add_discussion_comments(discussion_ids)
 
           discussion_category_ids = repository.discussion_categories.pluck(:id)
           add_discussion_categories(discussion_category_ids)
-
-          discussion_comment_ids = repository.discussion_comments.pluck(:id)
-          add_discussion_comments(discussion_comment_ids)
         end
 
         # Finalize
@@ -412,9 +410,9 @@ module GitHub
         end
       end
 
-      def add_discussion_comments(discussion_comment_ids)
-        discussion_comment_ids.each_slice(BATCH_SIZE) do |discussion_comment_batch_ids|
-          DiscussionComment.where(id: discussion_comment_batch_ids).find_each do |discussion_comment|
+      def add_discussion_comments(discussion_ids)
+        discussion_ids.each_slice(BATCH_SIZE) do |discussion_batch_ids|
+          DiscussionComment.where(discussion_id: discussion_batch_ids).find_each do |discussion_comment|
             export_builder.add(discussion_comment)
             export_builder.add(user_id: discussion_comment.user_id)
             attachment_migrator.push(discussion_comment)

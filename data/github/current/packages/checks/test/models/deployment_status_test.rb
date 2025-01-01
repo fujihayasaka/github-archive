@@ -59,30 +59,12 @@ class DeploymentStatusTest < GitHub::TestCase
     assert_equal "unknown", DeploymentStatus.new.state
   end
 
-  test "notifies websockets for pull requests when deployment succeeds", feature_disabled: :pr_channel_event_payload_builder do
-    freeze_time do
-      expects_pull_request_notification(pull: @pull).once
-      expects_pull_request_deployed_notification(pull: @pull).once
-
-      create(:deployment_status, :success, deployment: @deployment)
-    end
-  end
-
-  test "notifies websockets for pull requests when deployment succeeds with event_updates", feature_enabled: :pr_channel_event_payload_builder do
+  test "notifies websockets for pull requests when deployment succeeds with event_updates" do
     freeze_time do
       event_updates = GitHub.flipper[:sidebar_event_updates].enabled? ? { timeline_updated: true, sidebar_updated: true, git_updated: false } : { timeline_updated: true, git_updated: false }
       expects_pull_request_notification(pull: @pull, extra_payload: { event_updates: event_updates }).once
       expects_pull_request_deployed_notification(pull: @pull).once
       create(:deployment_status, :success, deployment: @deployment)
-    end
-  end
-
-  test "does not notify deployment_success channel when deployment fails", feature_disabled: :pr_channel_event_payload_builder do
-    freeze_time do
-      expects_pull_request_notification(pull: @pull).once
-      expects_pull_request_deployed_notification(pull: @pull).never
-
-      create(:deployment_status, :failure, deployment: @deployment)
     end
   end
 
@@ -252,21 +234,7 @@ class DeploymentStatusTest < GitHub::TestCase
       assert_equal @deployment.latest_status_state, status.state
     end
 
-    test "updates latest deployment status then notifies sockets of successful deployment", feature_disabled: :pr_channel_event_payload_builder do
-      @deployment.update_attribute(:latest_status_state, "failure")
-      refute_predicate @deployment.reload, :succeeded?
-
-      freeze_time do
-        expects_pull_request_notification(pull: @pull).once
-        expects_pull_request_deployed_notification(pull: @pull).once
-
-        create(:deployment_status, :success, deployment: @deployment)
-
-        assert_predicate @deployment.reload, :succeeded?
-      end
-    end
-
-    test "updates latest deployment status then notifies sockets of successful deployment with event_updates and timeline_updated", feature_enabled: :pr_channel_event_payload_builder do
+    test "updates latest deployment status then notifies sockets of successful deployment with event_updates and timeline_updated" do
       @deployment.update_attribute(:latest_status_state, "failure")
       refute_predicate @deployment.reload, :succeeded?
 

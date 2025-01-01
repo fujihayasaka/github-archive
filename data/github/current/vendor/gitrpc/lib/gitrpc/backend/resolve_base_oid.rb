@@ -31,6 +31,8 @@ module GitRPC
       attr_reader :backend, :results
 
       def resolve!(commit1_oid, commit2_oid, base_commit_oid)
+        tmpdir = nil
+
         # Resolve commit OIDs
         oids = Hash.new
         input = [commit1_oid, commit2_oid, base_commit_oid].compact
@@ -79,6 +81,8 @@ module GitRPC
 
         return commit2_base if commit1_base.nil? && commit1.nil?
 
+        tmpdir = @backend.create_custom_tmpdir(@backend.path, "objects/tmp_objdir-resolve-")
+
         # Create a proxy tree
         res = backend.spawn_git(
           "merge-tree", [
@@ -90,6 +94,7 @@ module GitRPC
             "-Xfind-renames=50",
             "-z",
             "--use-tmp-objdir=migrate-on-success",
+            "--tmp-objdir-location=#{tmpdir}",
             commit1,
             commit2_base
           ],
@@ -107,6 +112,8 @@ module GitRPC
         return commit1 if !res["ok"]
 
         res["out"].chomp.sub(/\0+$/, "")
+      ensure
+        FileUtils.rm_rf(tmpdir) if tmpdir && File.exist?(tmpdir)
       end
     end
 

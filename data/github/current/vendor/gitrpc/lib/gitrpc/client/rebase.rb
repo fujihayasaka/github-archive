@@ -66,6 +66,7 @@ module GitRPC
       options = symbolize_keys(options)
 
       options[:timeout] = options[:timeout].to_f if options[:timeout]
+      options[:short_circuit_bloated_rebases] = true
 
       time = committer["time"]
       committer["time"] = time.respond_to?(:iso8601) ? time.iso8601 : time

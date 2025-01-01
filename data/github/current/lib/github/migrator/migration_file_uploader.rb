@@ -112,7 +112,7 @@ module GitHub
       end
 
       def with_http_proxy_environment_variable_if_proxy_configured(&block)
-        if GitHub.enterprise? && GitHub.http_proxy_config
+        if GitHub.enterprise? && GitHub.http_proxy_config.present?
           with_temporary_env("HTTP_PROXY", GitHub.http_proxy_config, &block)
         else
           block.call
