@@ -3,6 +3,7 @@
 
 class RepositoryPushJobTrigger
   include GitHub::Memoizer
+  include Repositories::PushDebugLogging
 
   MAX_PUSH_EVENT_REF_UPDATES = 1_000
 
@@ -102,6 +103,22 @@ class RepositoryPushJobTrigger
         payload,
         schema: "github.repositories.v1.Pushed",
         partition_key: repository.id,
+      )
+    end
+
+    if ghes_push_logging_enabled?
+      GitHub.logger.info(
+        "Published push event to Hydro",
+        "code.namespace": "RepositoryPushJobTrigger",
+        "code.function": "publish_hydro_event",
+        "gh.repo.id": repository.id,
+        "gh.repo.path": repository.shard_path,
+        "gh.actor.login": pusher,
+        "gh.request_id": GitHub.context[:request_id],
+        "push.ref_count": total_ref_count,
+        "push.branch_count": total_branch_count,
+        "push.ref_batch_number": ref_batch_number,
+        "push.refs": ref_updates.take(10).map { |ref, before, after| "#{ref}:#{before[0..7]}->#{after[0..7]}" }.join(", ")
       )
     end
   end

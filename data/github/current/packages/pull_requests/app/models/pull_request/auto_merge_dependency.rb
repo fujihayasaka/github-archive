@@ -118,6 +118,10 @@ module PullRequest::AutoMergeDependency
       return CanEnableAutoMergeNotAllowedResult.new(reason: "Pull request is already merged")
     end
 
+    unless repository.async_pushable_by?(actor).sync && base_repository&.async_pushable_by?(actor)&.sync
+      return CanEnableAutoMergeNotAllowedResult.new(reason: "User is not allowed to push to this repository")
+    end
+
     pr_merge_state = cached_merge_state(viewer: actor)
 
     if pr_merge_state.blocked_by_workflow_updates?
@@ -141,10 +145,6 @@ module PullRequest::AutoMergeDependency
     end
 
     repository = T.must(self.repository)
-
-    unless repository.async_pushable_by?(actor).sync
-      return CanEnableAutoMergeNotAllowedResult.new(reason: "User is not allowed to push to this repository")
-    end
 
     if pr_merge_state.blocked_by_invalid_merge_queue_config?
       return CanEnableAutoMergeNotAllowedResult.new(reason: pr_merge_state.blocked_by_invalid_merge_queue_config_message)

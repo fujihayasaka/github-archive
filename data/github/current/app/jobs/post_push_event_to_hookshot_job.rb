@@ -4,6 +4,7 @@
 
 class PostPushEventToHookshotJob < ApplicationJob
   include Hookshot::DeliverJobLogger
+  include Repositories::PushDebugLogging
 
   class PayloadTooLarge < Hookshot::HookshotError; end
   PAYLOAD_TOO_LARGE_MSG = "Payload size of %s exceeds limit: %s, will not be delivered to Hookshot.".freeze
@@ -116,6 +117,21 @@ class PostPushEventToHookshotJob < ApplicationJob
           Repositories::Public.get_active_or_deleted!(webhook_payload.dig(:repository, :id))
         end
       end
+
+      if ghes_push_logging_enabled?
+        GitHub.logger.info(
+          "Preparing push webhook for delivery",
+          "code.namespace": "PostPushEventToHookshotJob",
+          "code.function": "enrich_payload",
+          "gh.webhook.ref": webhook_payload[:ref],
+          "gh.webhook.before": webhook_payload[:before],
+          "gh.webhook.after": webhook_payload[:after],
+          "gh.webhook.delivery_guid": delivery_payload[:guid],
+          "gh.repo.id": @repo.id,
+          "gh.webhook.hook_count": delivery_payload[:hooks].size,
+        )
+      end
+
       @event ||= begin
         event_attrs = {
           repo: @repo,

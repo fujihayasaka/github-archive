@@ -312,11 +312,19 @@ module Elastomer
       slicer.postfix = postfix
       slicer.fullname = name
 
+      successful = true
       if index_class.sliced? && slicer.slice.nil?
-        all_index_slices(name) { |cfg| _delete_index(cfg.name, cfg.cluster, force) }
+        index_map = Elastomer.router.index_map
+        successful = index_map.all_index_slices(name).map { |cfg| _delete_index(cfg.name, cfg.cluster, force) }.all?
       else
-        _delete_index(name, cluster, force)
+        successful = _delete_index(name, cluster, force)
       end
+
+      # Only queue DeleteIndexFromClustersJob if in GitHub Enterprise environment
+      if successful && GitHub.enterprise?
+        Elastomer::DeleteIndexFromClustersJob.perform_later(name)
+      end
+      successful
     end
 
     # Public: Make the given index the primary for the index class. This will
@@ -685,16 +693,23 @@ module Elastomer
         if index.exists?
           delete_repair_job(name)
           begin
-            index.delete
+            response = index.delete
+            success = response && response["acknowledged"] == true
+
+            GitHub.dogstats.event \
+              "Search index deleted: #{name.inspect}",
+              "Search index #{name.inspect} deleted from cluster #{cluster.inspect}",
+              tags: %W[search:ops action:delete cluster:#{cluster}]
+
+            return success
           rescue ElastomerClient::Client::TimeoutError => err
             Failbot.report(err, "db.elasticsearch.cluster.name": cluster)
+            return false
           end
-          GitHub.dogstats.event \
-            "Search index deleted: #{name.inspect}",
-            "Search index #{name.inspect} deleted from cluster #{cluster.inspect}",
-            tags: %W[search:ops action:delete cluster:#{cluster}]
         end
       end
+
+      false
     end
 
     # Injects index-level settings into base settings hash only in prod env, for ES5+ clusters

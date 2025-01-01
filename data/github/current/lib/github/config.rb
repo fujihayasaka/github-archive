@@ -8975,6 +8975,10 @@ module GitHub
       @skip_rebase_commit_generation_from_rebase_merge_settings ||= false
     end
     attr_writer :skip_rebase_commit_generation_from_rebase_merge_settings
+
+    # Enable push debug logging in GHES to assist with debugging webhook and PR update issues.
+    # Set via ENTERPRISE_PUSH_DEBUG_LOGGING_ENABLED environment variable.
+    attr_accessor :push_debug_logging_enabled
   end
 end
 
