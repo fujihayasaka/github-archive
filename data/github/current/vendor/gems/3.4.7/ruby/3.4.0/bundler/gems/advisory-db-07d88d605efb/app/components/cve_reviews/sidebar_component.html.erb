@@ -1,0 +1,231 @@
+<div class="position-sticky top-0 mt-n4 pt-4">
+  <% if show_cve_review_buttons? %>
+    <% if show_reopen_button? %>
+      <%= button_to reopen_cve_review_path(cve_review), {
+        method: :put,
+        class: "d-flex flex-items-center btn btn-block btn-large mb-2",
+        "data-targets": "form-tracker.disableWhenChanged",
+        **test_selector_data_hash("cve-reviews-sidebar-component-reopen-button")
+      } do %>
+        <%= render IconComponent.new(icon: "issue-opened", mr: 3) %>
+        Reopen CVE review
+      <% end %>
+    <% end %>
+    <% if show_update_button? %>
+      <%= render(Primer::ButtonComponent.new(
+        type: :submit,
+        form: "cve-review-form",
+        display: :flex,
+        align_items: :center,
+        mb: 2,
+        data: { targets: "form-tracker.disableWhenUnchanged" },
+        classes: "btn-large width-full",
+        test_selector: "cve-review-sidebar-button"
+      )) do %>
+        <%= render IconComponent.new(icon: "check", mr: 3) %>
+        Save CVE review
+      <% end %>
+    <% end %>
+
+    <% if show_external_action_buttons? %>
+      <hr>
+
+      <% if show_publish_button? %>
+        <%= render Primer::Beta::Details.new(reset: true, overlay: :dark) do |details| %>
+          <% details.with_summary(
+            display: :flex,
+            align_items: :center,
+            scheme: :primary,
+            mb: 2,
+            data: { targets: checks_passed? ? "form-tracker.disableWhenChanged" : nil },
+            aria: { disabled: !checks_passed?, haspopup: true },
+            test_selector: "cve-reviews-sidebar-component-publish-button",
+            classes: "btn-large"
+          ) do %>
+            <%= render IconComponent.new(icon: "rocket", mr: 3, flex_shrink: 0) %>
+            Publish to MITRE
+          <% end %>
+          <% details.with_body(tag: :"details-dialog", animation: :fade_in, classes: "fast no-outline") do %>
+            <%= render Primer::Beta::BorderBox.new do |border_box| %>
+              <% border_box.with_body(font_size: 4) do %>
+              <p class="mb-0">Are you sure you want to publish?</p>
+              <% end %>
+              <% border_box.with_footer(display: :flex, justify_content: :flex_end) do %>
+                <%= render(Primer::ButtonComponent.new(mr: 2, data: { close_dialog: true })) { "Cancel" } %>
+                <%= button_to publish_cve_review_path(cve_review), { method: :put, class: "btn btn-primary", params: { pull_request_url: "api" } } do %>
+                  Publish
+                <% end %>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if show_reject_button? %>
+        <%= render(CVEReviews::RejectButtonComponent.new(cve_review: cve_review, reject_modal_error: reject_modal_error, rejection: rejection, show_reject_modal: show_reject_modal)) %>
+      <% end %>
+    <% end %>
+
+    <hr>
+  <% end %>
+
+  <% if show_checks? %>
+    <h4 class="h6 color-fg-muted">Checks</h4>
+
+    <% checks.each do |check| %>
+      <%= render CheckComponent.new(check: check) %>
+    <% end %>
+
+    <hr>
+  <% end %>
+
+  <h4 class="h6 color-fg-muted">Identifiers</h4>
+
+  <ol class="list-style-none">
+    <li class="d-flex mt-2 flex-items-baseline">
+      <span class="sidebar-key">GHSA</span>
+      <% if advisory %>
+        <%= render(Primer::Beta::Link.new(
+          classes: "text-mono",
+          test_selector: "ghsa-id",
+          href: advisory.database_url,
+          target: :_blank
+        )) { ghsa_id } %>
+      <% else %>
+        <span class="text-mono" <%= test_selector("ghsa-id") %>><%= ghsa_id %></span>
+      <% end %>
+      <%= render ClipboardCopyComponent.new(value: ghsa_id, ml: 2) %>
+    </li>
+
+    <% if assigned_cve_id %>
+      <li class="d-flex mt-2 flex-items-baseline">
+        <span class="sidebar-key">CVE</span>
+        <span id="cve-id" class="text-mono" <%= test_selector("cve-id") %>><%= assigned_cve_id %></span>
+        <%= render ClipboardCopyComponent.new(for: "cve-id", ml: 2) %>
+      </li>
+    <% end %>
+
+    <% if mitre_cve_submission %>
+        <% if mitre_cve_submission.pull_request_url != "api" %>
+          <li class="d-flex mt-2 flex-items-baseline">
+            <span class="sidebar-key">Pull</span>
+            <%= render(Primer::Beta::Link.new(
+              classes: "text-mono",
+              test_selector: "pr-url",
+              href: mitre_cve_submission.pull_request_url,
+              target: :_blank
+            )) { "##{pull_request_number}" } %>
+            <%= render ClipboardCopyComponent.new(value: mitre_cve_submission.pull_request_url, ml: 2) %>
+          </li>
+        <% end %>
+        <li class="d-flex mt-2 flex-items-baseline">
+          <span class="sidebar-key">Record</span>
+          <%= render(Primer::Beta::Link.new(
+            classes: "text-mono",
+            test_selector: "cve-review-api-record-link",
+            href: cve_record_url,
+            target: :_blank
+          )) { "CVE Services API" } %>
+          <%= render ClipboardCopyComponent.new(value: cve_record_url, ml: 2) %>
+        </li>
+    <% end %>
+  </ol>
+
+  <hr>
+
+  <h4 class="h6 color-fg-muted">Current request</h4>
+  <ol>
+    <% if vendor_name.present? %>
+      <li class="d-flex mt-2 flex-items-baseline">
+        <span class="sidebar-key">Vendor</span>
+        <span <%= test_selector("vendor-name") %>><%= vendor_name %></span>
+      </li>
+
+      <% if product.present? %>
+        <li class="d-flex mt-2 flex-items-baseline">
+          <span class="sidebar-key">Product</span>
+          <span <%= test_selector("product") %>>
+            <%= render(Primer::Beta::Link.new(href: "http://github.com/#{vendor_name}/#{product}", target: :_blank, test_selector: "vendor-product")) { product } %>
+          </span>
+        </li>
+      <% end %>
+    <% end %>
+
+    <% if severity.present? %>
+      <li class="d-flex mt-2 flex-items-baseline">
+        <span class="sidebar-key">Severity</span>
+        <%= render(CVEReviews::SeverityIconComponent.new(severity: severity)) %>
+      </li>
+    <% end %>
+
+    <% if ecosystem.present? %>
+      <li class="d-flex mt-2 flex-items-baseline">
+        <span class="sidebar-key">Ecosystem</span>
+        <span <%= test_selector("ecosystem") %>><%= ecosystem %></span>
+      </li>
+    <% end %>
+
+    <% if package.present? %>
+      <li class="d-flex mt-2 flex-items-baseline">
+        <span class="sidebar-key">Package</span>
+        <span id="package" class="wb-break-all" <%= test_selector("package") %>><%= package %></span>
+        <%= render ClipboardCopyComponent.new(for: "package", ml: 2) %>
+      </li>
+    <% end %>
+
+    <% if affected_versions.present? %>
+      <li class="d-flex mt-2 flex-items-baseline">
+        <span class="sidebar-key">Affected</span>
+        <span id="affected_versions" class="wb-break-all" <%= test_selector("affected-versions") %>><%= affected_versions %></span>
+        <%= render ClipboardCopyComponent.new(for: "affected_versions", ml: 2) %>
+      </li>
+    <% end %>
+
+    <% if patches.present? %>
+      <li class="d-flex mt-2 flex-items-baseline">
+        <span class="sidebar-key">Patched</span>
+        <span id="patches" class="wb-break-all" <%= test_selector("patches") %>><%= patches %></span>
+        <%= render ClipboardCopyComponent.new(for: "patches", ml: 2) %>
+      </li>
+    <% end %>
+  </ol>
+  <% if cve_request.affected_products_payload && cve_request.affected_products_payload.length > 1 %>
+    <p class="mt-2" <%= test_selector("additional-affected-products-message") %>>
+      And <%= cve_request.affected_products_payload.length - 1 %> more affected <%= "product".pluralize(cve_request.affected_products_payload.length - 1) %>.
+    </p>
+  <% end %>
+
+  <% if show_related_reviews? %>
+    <hr>
+
+    <h4 class="h6 color-fg-muted">Related reviews</h4>
+
+    <ul>
+      <% related_cve_reviews.each do |related_cve_review| %>
+        <li class="d-flex mt-2 flex-items-center">
+          <%= render(Primer::Beta::Link.new(href: cve_review_path(related_cve_review), target: :_blank, scheme: :primary, mr: 3, flex_shrink: 0)) do %>
+            <%= render ReviewStateIconComponent.new(review: related_cve_review, mr: 1) %>CVE
+          <% end %>
+          <%= render(Primer::Truncate.new(inline: true, expandable: true, max_width: 62, style: "min-width: 62px", mr: 3, flex_shrink: 0)) do %>
+            <% if related_cve_review.submitted? %>
+              <%= render(Primer::Beta::Link.new(href: "https://nvd.nist.gov/vuln/detail/#{related_cve_review.assigned_cve_id}", target: :_blank)) do %>
+                NVD <%= render IconComponent.new(icon: "link-external") %>
+              <% end %>
+            <% elsif related_cve_review.assigned? %>
+              <%= related_cve_review.assigned_cve_id %>
+            <% else %>
+              <span class="color-fg-subtle">No CVE</span>
+            <% end %>
+          <% end %>
+          <% if related_cve_review.advisory_review %>
+            <%= render(Primer::Truncate.new) do %>
+              <%= render(Primer::Beta::Link.new(href: advisory_review_path(related_cve_review.advisory_review), target: :_blank, scheme: :primary)) do %>
+                <%= render ReviewStateIconComponent.new(review: related_cve_review.advisory_review, mr: 1) %>Advisory
+              <% end %>
+            <% end %>
+          <% end %>
+        </li>
+      <% end %>
+    </ul>
+  <% end %>
+</div>

@@ -1,0 +1,418 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+PROCESSOR_TYPES = [
+  # Audit Logging
+  "GitHub::StreamProcessors::Audit::EnterpriseDriftwoodProcessor",
+  # Code scanning
+  "GitHub::StreamProcessors::CodeScanningAlertEvent",
+  "GitHub::StreamProcessors::CodeScanningProcessedAnalysis",
+  # Secret scanning
+  "GitHub::StreamProcessors::SecretScanning::AlertEventsProcessor",
+  "GitHub::StreamProcessors::SecretScanningNotificationsProcessor",
+  "GitHub::StreamProcessors::SecretScanning::ScanCompletionProcessor",
+  # Security Center
+  "GitHub::StreamProcessors::SecurityCenterRepositoryUpdateProcessor",
+  # Packages Consumers
+  "GitHub::StreamProcessors::PackageVersionDownloadedProcessor",
+  "GitHub::StreamProcessors::PackageRegistry::DownloadActivityProcessor",
+  "GitHub::StreamProcessors::PackageRegistry::PackageTransferredProcessor",
+  "GitHub::StreamProcessors::PackageRegistry::PackageVersionDeletedProcessor",
+  "GitHub::StreamProcessors::PackageRegistry::PackageFilePublishedProcessor",
+  "GitHub::StreamProcessors::PackageRegistry::PackageVersionRestoreMigrationProcessor",
+  "GitHub::StreamProcessors::PackageRegistry::SyncV1PackageVersionDeleteToV2Processor",
+  "GitHub::StreamProcessors::RegistryMetadata::VersionMigrationStatusProcessor",
+  "GitHub::StreamProcessors::RegistryMetadata::MigrationDataSyncEventProcessor",
+  "GitHub::StreamProcessors::PackageRegistry::PackageDeleteSyncProcessor",
+  "GitHub::StreamProcessors::PackageRegistry::PackageRestoreMigrationProcessor",
+  # Aqueduct Bridge
+  "GitHub::StreamProcessors::AqueductHydroMessageBridge",
+  # Actions Cache Usage
+  "GitHub::StreamProcessors::ActionsCacheUsageProcessor",
+  # Check Suite Status Change
+  "GitHub::StreamProcessors::CheckSuiteStatusChangeProcessor",
+  # Pull Request Review Submissions
+  "GitHub::StreamProcessors::PullRequestReviewSubmitProcessor",
+  # Pages deployment status reporter
+  "GitHub::StreamProcessors::PagesDeploymentStatusProcessor",
+  # Memex live updates processor
+  "GitHub::StreamProcessors::MemexLiveUpdatesProcessor",
+  # Memex events processor
+  "GitHub::StreamProcessors::MemexEventsProcessor",
+  # Projects denormalizer processor
+  "Projects::DenormalizationProcessor",
+  # Sub-issue list recalculation processor
+  "HierarchyProcessors::SubIssueListRecalculationProcessor",
+  # Job Execution Processor
+  ("GitHub::StreamProcessors::EnterpriseServerActionsUsageProcessor" if GitHub.environment.fetch("ENTERPRISE_ENABLE_ACTIONS_USAGE_STATS", false) == "true"),
+  # PATsV2 Processor
+  "GitHub::StreamProcessors::ProgrammaticAccessProcessor",
+  # Dependabot Alerts
+  "GitHub::StreamProcessors::ProgressProcessor",
+  "GitHub::StreamProcessors::DependabotAlerts::AlertingProgressProcessor",
+  "GitHub::StreamProcessors::DependabotAlerts::VulnerableDependencyProcessor",
+  # Issue Project Events
+  "GitHub::StreamProcessors::IssueProjectEventsProcessor",
+].compact
+
+class ProcessorMap
+  def initialize
+    @mutex = Mutex.new
+    @states_by_name = {}
+  end
+
+  def each_state
+    @mutex.synchronize do
+      @states_by_name.values
+    end.each do |state|
+      yield state
+    end
+  end
+
+  def put(thread_name, state)
+    @mutex.synchronize do
+      @states_by_name[thread_name] = state
+    end
+  end
+
+  def get(thread_name)
+    @mutex.synchronize do
+      @states_by_name[thread_name]
+    end
+  end
+end
+
+class ProcessorState
+
+  def initialize(name, should_restart:)
+    @name = name
+    @mutex = Mutex.new
+    @start_attempt = 0
+    @should_restart = should_restart
+    @errors = 0
+  end
+
+  def name
+    @name
+  end
+
+  def join
+    if @thread != nil
+      @thread.join
+    end
+  end
+
+  def set_thread(thread)
+    @mutex.synchronize do
+      @thread = thread
+    end
+  end
+
+  def set_consumer(consumer)
+    @mutex.synchronize do
+      @consumer = consumer
+    end
+  end
+
+  def increment_start_attempt
+    @mutex.synchronize do
+      @start_attempt += 1
+    end
+  end
+
+  def start_attempt
+    @mutex.synchronize do
+      @start_attempt
+    end
+  end
+
+  def increment_errors
+    @mutex.synchronize do
+      @errors += 1
+    end
+  end
+
+  def errors
+    @mutex.synchronize do
+      @errors
+    end
+  end
+
+  def close
+    @mutex.synchronize do
+      if @consumer != nil
+        start = Time.now
+        # Blocks until the underlying ruby-kafka fetcher thread stops
+        @consumer.close
+        elapsed = Time.now - start
+        GitHub.logger.info "#{name} consumer_close_elapsed=#{elapsed}s"
+      end
+    end
+  end
+
+  def should_restart?
+    @should_restart
+  end
+end
+
+class ThreadedProcessorRunner
+  SUCCESS = "success"
+  TIMEOUT = "timeout"
+  INTERRUPTED = "interrupted"
+
+  attr_accessor :start_attempt
+
+  def initialize(processor_types:, threads_per_processor:, stop_queue:, shutdown_timeout_sec:, restart_delay_sec:, test_processor_factory: nil, topic_checker_client_factory: nil, consumer_factory: nil, do_not_restart: {})
+    @processor_types = processor_types
+    @stop_queue = stop_queue
+    @threads_per_processor = threads_per_processor
+    @shutdown_timeout_sec = shutdown_timeout_sec
+    @restart_delay_sec = restart_delay_sec
+
+    @processors = ProcessorMap.new
+    @mutex = Mutex.new
+    @running = true
+
+    # Allow replacing implementation for testability
+    @test_processor_factory = test_processor_factory ||= proc do |processor_type|
+      processor = processor_type.new
+    end
+    @topic_checker_client_factory = topic_checker_client_factory ||= proc do
+      Kafka.new(seed_brokers: GitHub.environment.fetch("HYDRO_KAFKA_BROKERS", GitHub::Config::HydroConfig::DEVELOPMENT_BROKER).split(","))
+    end
+    @consumer_factory = consumer_factory ||= proc do |_, processor_options|
+      GitHub.hydro_consumer(processor_options)
+    end
+    @do_not_restart = do_not_restart
+  end
+
+  def sleep(sec)
+    Kernel::sleep sec
+  end
+
+  def start
+    @processor_types.map(&:constantize).each do |processor_type|
+      @threads_per_processor.times do |i|
+        thread_name = "#{processor_type.name.demodulize}_#{i}"
+
+        should_restart = !@do_not_restart.fetch(processor_type, false)
+        # Track the processor state to perform graceful shutdown on consumers in response to uncaught errors or SIGTERM
+        @processors.put(thread_name, ProcessorState.new(thread_name, should_restart: should_restart))
+
+        GitHub.logger.info "Starting thread for processor=#{thread_name}"
+        Thread.new(thread_name) do |thread_name| # rubocop:disable GitHub/ThreadUse
+          Thread.current.name = thread_name
+          Thread.current.abort_on_exception = false
+          this_processor = @processors.get(thread_name)
+          this_processor.set_thread(Thread.current)
+
+          Rails.application.executor.wrap do
+            GitHub.logger.with_named_tags("code.namespace" => processor_type.name) do
+              while running? do
+                this_processor.increment_start_attempt
+                processor = @test_processor_factory.call processor_type
+
+                GitHub.logger.info "[#{thread_name}] starting topic check"
+                begin
+                  topic_checker_client = @topic_checker_client_factory.call
+                  subscribe_to = Array(processor.options[:subscribe_to])
+                  GitHub.logger.with_named_tags("messaging.destination" => subscribe_to) do
+                    while running? && subscribe_to.flat_map { |pattern| topic_checker_client.topics.grep(pattern) }.empty?
+                      sleep 1.second
+                    end
+                  end
+                  break unless running?
+
+                  GitHub.logger.info "[#{thread_name}] finished topic check"
+                rescue StandardError => e # rubocop:todo Lint/RescueException
+                  GitHub.logger.error("processor=#{processor_type.name} topic checker encountered an error, restarting it", e)
+                  next
+                ensure
+                  topic_checker_client.close
+                end
+
+                consumer = @consumer_factory.call(processor_type, processor.options)
+                this_processor.set_consumer(consumer)
+
+                begin
+                  GitHub.logger.info "[#{thread_name}] starting hydro executor"
+                  # Do not pass shutdown signals to avoid unwanted interplay with hydro-client-ruby signal handlers
+                  executor = Hydro::Executor.new(processor: processor, consumer: consumer, shutdown_signals: [])
+                  # Hydro::Executor#run blocks until an exception is encountered or the underlying ruby-kafka consumer is closed
+                  executor.run
+                  GitHub.logger.info "[#{thread_name}] hydro executor cleanly exited"
+                  # The executor will only return in tests or if the runner has stopped, i.e. due to shutdown
+                  break unless this_processor.should_restart?
+                rescue StandardError => e # rubocop:todo Lint/RescueException
+                  this_processor.increment_errors
+                  if this_processor.should_restart?
+                    GitHub.logger.error("processor=#{thread_name} encountered an error, restarting it in #{@restart_delay_sec}s", e)
+                    sleep @restart_delay_sec
+                  else
+                    GitHub.logger.error("processor=#{thread_name} encountered an error, not restarting it based on config", e)
+                    break
+                  end
+                ensure
+                  GitHub.logger.info "[#{thread_name}] processor=#{processor_type.name} closing the processor and consumer"
+                  this_processor.close
+                end
+              end
+              GitHub.logger.info "[#{thread_name}] exiting executor loop"
+            end
+          end
+        end
+      end
+    end
+
+    GitHub.logger.info "Started all stream processor threads"
+  end
+
+  # Returns true on successful graceful shutdown, else false
+  def await_termination
+    # Blocks until graceful shutdown completes or times out
+    signal = @stop_queue.pop
+    graceful_shutdown = Thread.new(signal) do |signal|
+      Thread.current.name = "processor-runner-shutdown"
+      begin
+        GitHub.logger.info "Received #{signal}, stopping stream processors to terminate..."
+        Timeout.timeout(@shutdown_timeout_sec) do
+          stop
+        end
+        @stop_queue.push SUCCESS
+      rescue Timeout::Error => e
+        GitHub.logger.error("failed to gracefully terminate", e)
+        @stop_queue.push TIMEOUT
+      end
+    end
+
+    # Wait for graceful shutdown to complete or for a second signal to stop immediately
+    result = @stop_queue.pop
+    case result
+    when SUCCESS
+      graceful_shutdown.join
+    when TIMEOUT
+      graceful_shutdown.join
+    when :TERM, :INT
+      graceful_shutdown.kill
+      GitHub.logger.info "Received #{result} during graceful shutdown, terminating all processors immediately"
+      result = INTERRUPTED
+    end
+    result
+  end
+
+  def running?
+    @mutex.synchronize do
+      @running
+    end
+  end
+
+  def stop
+    # Stop the executor loop from restarting processors
+    @mutex.synchronize do
+      @running = false
+    end
+
+    @processors.each_state do |state|
+      GitHub.logger.info "closing state for #{state.name}"
+      # This closes the consumer, which will cause ruby-kafka's underlying fetcher and consumers to stop.
+      # After the ruby-kafka consumer closes, calls to Hydro::Processor#process_with_consumer to no longer block,
+      # which then unblocks the Hydro::Executor#wait_for_threads and Hydro::Executor##run_processor_loop, allowing
+      # Hydro::Executor#run to unblock and return.
+      state.close
+      GitHub.logger.info "closed state for #{state.name}"
+      state.join
+      GitHub.logger.info "#{state.name} thread finished"
+    end
+  end
+
+  # Test-only
+  def get_processor_state(thread_name)
+    @mutex.synchronize do
+      @processors.get(thread_name)
+    end
+  end
+end
+
+if __FILE__ == $0
+  # Define the number of threads per processor type, defaulting to 1
+  THREADS_PER_PROCESSOR = (ENV["ENTERPRISE_THREADS_PER_PROCESSOR"] || 1).to_i
+
+  # The maximum time to wait for all stream processor threads to gracefully shutdownProc
+  PROCESSORS_SHUTDOWN_TIMEOUT_SEC = (ENV["ENTERPRISE_PROCESSORS_SHUTDOWN_TIMEOUT_SEC"] || 60).to_i
+
+  # The time to wait before restarting a stream processor after encountering an error
+  RESTART_DELAY_SEC = (ENV["ENTERPRISE_PROCESSORS_RESTART_DELAY_SEC"] || 10).to_i
+
+  # The path to a file containing a JSON map of Processor class names that should not restart on errors
+  DO_NOT_RESTART_PATH = (ENV["ENTERPRISE_PROCESSORS_DO_NOT_RESTART_PATH"] || "")
+
+  # Each processor requires at least one connection that will be held open for the lifetime
+  # of the application.
+  # The default pool size is 5 which is not enough to do this so we need to increase it.
+  # Give each processor its own pool of 5 connections.
+  # If extra threads are requested, also give each processor that many extra connections.
+  # Set the pool size before the require_relative below.
+  ENV["ENTERPRISE_MYSQL_POOL"] = (PROCESSOR_TYPES.length * THREADS_PER_PROCESSOR * 5).to_s
+  ENV["DEVELOPMENT_MYSQL_POOL"] = (PROCESSOR_TYPES.length * THREADS_PER_PROCESSOR * 5).to_s
+
+  require_relative "../config/environment"
+  require "ruby_kafka_monkey_patch"
+
+  GitHub.logger.warn "Starting Enterprise stream processors in threaded mode..."
+
+  # Log the thread count and specify if extra threads are requested
+  GitHub.logger.warn "Starting #{PROCESSOR_TYPES.length} processor threads with #{THREADS_PER_PROCESSOR} threads per processor"
+
+  # A signal handler to allow for manually getting the current state of all threads.
+  Signal.trap(:USR2) do
+    STDERR.puts "Manually initiated thread dump:"
+    Thread.list.each do |thread|
+      STDERR.puts "Thread ##{thread.object_id}"
+      STDERR.puts thread.backtrace.join("\n")
+    end
+  end
+
+  stop_queue = Queue.new
+  [:INT, :TERM].each do |signal|
+    Signal.trap(signal) do
+      stop_queue.push signal
+    end
+  end
+
+  do_not_restart = {}
+  if DO_NOT_RESTART_PATH != ""
+    do_not_restart = JSON.load_file(DO_NOT_RESTART_PATH)
+    do_not_restart.transform_keys!(&:constantize)
+  end
+
+  runner = ThreadedProcessorRunner.new(
+    processor_types: PROCESSOR_TYPES,
+    threads_per_processor: THREADS_PER_PROCESSOR,
+    stop_queue: stop_queue,
+    shutdown_timeout_sec: PROCESSORS_SHUTDOWN_TIMEOUT_SEC,
+    restart_delay_sec: RESTART_DELAY_SEC,
+    do_not_restart: do_not_restart
+  )
+  runner.start
+
+  stop_result = runner.await_termination
+  case stop_result
+  when ThreadedProcessorRunner::SUCCESS
+    GitHub.logger.info "All stream processors gracefully terminated."
+    exit
+  when ThreadedProcessorRunner::TIMEOUT
+    GitHub.logger.error "Could not terminate stream processors within #{PROCESSORS_SHUTDOWN_TIMEOUT_SEC}s, force exiting"
+    puts "Manually initiated thread dump:"
+    Thread.list.each do |thread|
+      puts "Thread id##{thread.object_id} name=#{thread.name}"
+      puts thread.backtrace.join("\n") unless thread.backtrace.nil?
+    end
+    exit 1
+  when ThreadedProcessorRunner::INTERRUPTED
+    GitHub.logger.info "Force exiting due to second signal during graceful shutdown"
+    exit 130
+  else
+    GitHub.logger.error "unexpected stop result: #{stop_result}, force exiting"
+    exit 1
+  end
+end

@@ -1,0 +1,99 @@
+<%# `view` is an instance of
+  Orgs::SecuritySettings::TwoFactorEnforcementConfirmationView %>
+
+<%# stop removing OCs after https://github.com/github/authorization/issues/4526 %>
+<%
+  removal_count = outside_collabs_without_2fa_count
+  removal_preview = view.users_with_two_factor_disabled
+%>
+
+<input id="two-factor-org-name" type="hidden" name="org_name" value="<%= view.organization.safe_profile_name %>">
+
+<%
+  if view.organization.two_factor_requirement_enabled?
+    dialog_title = "Are you sure you want to remove the two-factor authentication for all users in #{view.organization.safe_profile_name}?"
+    button_scheme = :danger
+  else
+    dialog_title = "Are you sure you want to require two-factor authentication for all users in #{view.organization.safe_profile_name}?"
+    button_scheme = :primary
+  end
+%>
+
+<%= render layout: "shared/details_dialog", locals: {
+    button_text: "Save",
+    button_class: "btn js-org-two-factor-submit-button float-left mr-4",
+    disabled: true,
+    details_class: "d-inline-block js-org-two-factor-confirmation-dialog",
+    title: dialog_title,
+  } do %>
+    <div class="m-2">
+      <div class="ml-2 my-2 js-org-two-factor-confirmation-dialog-body">
+        <%#
+          Based on the changes the current state and the user has made to the checkboxes, we need to dyamically
+          update the contents of the confirmation dialog.  So we render all of them as hidden spans and dynamically
+          unhide them prior to showing the dialog with JS.
+
+          The title of the dialog in updated directly in the Typescript code because it is a string, not HTML content.
+        %>
+
+        <%# disabling requirement entirely (default if require enabled) %>
+        <span id="tfrc-disabling-requirement" <%= "hidden" unless view.organization.two_factor_requirement_enabled? %>>
+          <p>Two-factor authentication will no longer be required to access any resources in the <%= view.organization.safe_profile_name %> organization.</p>
+          <p>Users' two-factor authentication methods will not be affected.</p>
+        </span>
+
+        <%# enabling requirement w/ secure methods %>
+        <span id="tfrc-enabling-requirement-with-secure-methods" hidden>
+          <p>Users will be required to set up two-factor authentication using a secure method in order to access the <%= view.organization.safe_profile_name %> organization.</p>
+        </span>
+
+        <%# enabling requirement w/o secure methods (default if requirement disabled) %>
+        <span id="tfrc-enabling-requirement-without-secure-methods" <%= "hidden" if view.organization.two_factor_requirement_enabled? %>>
+          <p>Users will be required to set up two-factor authentication in order to access the <%= view.organization.safe_profile_name %> organization.</p>
+        </span>
+
+        <%# disabling secure methods for existing requirement %>
+        <span id="tfrc-disabling-secure-methods-only" hidden>
+          <p>Secure methods of two-factor authentication will no longer be required to access any organization's resources in the <%= view.organization.safe_profile_name %> organization.</p>
+          <p>Users' two-factor authentication methods will not be affected.</p>
+        </span>
+
+        <%# enabling secure methods for existing requirement %>
+        <span id="tfrc-enabling-secure-methods-only" hidden>
+          <p>Users will be required to set up two-factor authentication using a secure method in order to access the <%= view.organization.safe_profile_name %> organization.</p>
+        </span>
+      </div>
+
+      <% if removal_count > 0 %>
+        <div class="ml-2 my-2">
+          <p class="fgColor-danger">
+            <b><%= removal_count %> <%= "outside collaborator".pluralize(removal_count) %></b> will be removed from the
+            <b><%= view.organization.safe_profile_name %></b> organization and notified.
+          </p>
+          <label>
+            Enter this organization's name to confirm
+            <input type="text"
+                  class="form-control input-block mt-1"
+                  name="confirmation"
+                  pattern="<%= case_insensitive_pattern(view.organization.safe_profile_name) %>"
+                  required
+                  autofocus>
+          </label>
+        </div>
+      <% end %>
+
+      <input type="hidden" name="two_factor_requirement" value="on">
+      <%= render Primer::Beta::Button.new(
+        type: :submit,
+        block: true,
+        scheme: button_scheme,
+        mt: 2,
+        w: :full,
+        classes: "js-org-two-factor-confirmation-dialog-button",
+        "data-disable-invalid": "",
+        "data-disable-with": ""
+      ) do %>
+        Confirm
+      <% end %>
+    </div>
+  <% end %>

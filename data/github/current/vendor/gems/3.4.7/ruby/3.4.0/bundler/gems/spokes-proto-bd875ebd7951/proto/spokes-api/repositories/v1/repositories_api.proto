@@ -1,0 +1,121 @@
+syntax = "proto3";
+
+package github.spokes.repositories.v1;
+
+option go_package = "github.com/github/spokes-proto/gen/go/v1/repositories";
+option ruby_package = "GitHub::Spokes::Proto::Repositories::V1";
+
+import "spokes-api/types/v1/repository.proto";
+import "spokes-api/types/v1/request_context.proto";
+import "spokes-api/types/v1/sockstat.proto";
+import "spokes-api/types/v1/update_references_priority.proto";
+
+import "spokes-api/repositories/v1/replica_item.proto";
+
+// RepositoriesAPI contains APIs for repository related operations.
+service RepositoriesAPI {
+    // ListAvailableReplicas returns a list of all the available replicas for a
+    // repository.
+    rpc ListAvailableReplicas(ListAvailableReplicasRequest) returns (ListAvailableReplicasResponse);
+
+    // UpdateInfoNWO creates or updates the info/nwo file that lives in a repository.
+    rpc UpdateInfoNWO(UpdateInfoNWORequest) returns (UpdateInfoNWOResponse);
+
+    // RecomputeChecksums does a 3pc transaction to recompute the checksums, but does not change hard state.
+    rpc RecomputeChecksums(RecomputeChecksumsRequest) returns (RecomputeChecksumsResponse);
+    
+}
+
+message ListAvailableReplicasRequest {
+    // repository is the repository used to retrieve replicas.
+    github.spokes.types.v1.Repository repository = 1;
+}
+
+message ListAvailableReplicasResponse {
+    // replicas are the available replicas for the repository, sorted by most to least recommended.
+    repeated ReplicaItem replicas = 1;
+}
+
+message UpdateInfoNWORequest {
+    // repository is the repository used to update the info/nwo file.
+    github.spokes.types.v1.Repository repository = 1;
+
+    // nwo is the repository "name with owner" to write to the info/nwo file.
+    string nwo = 2; // required
+
+    github.spokes.types.v1.RequestContext request_context = 3;
+
+     // priority is the priority for this update.
+     github.spokes.types.v1.UpdateReferencesPriority priority = 4; // required
+
+     // sockstat is the sockstat data to be used for this update.
+     github.spokes.types.v1.Sockstat sockstat = 5;
+}
+
+message UpdateInfoNWOResponse {
+       enum ErrorReason {
+        ERROR_REASON_INVALID = 0;
+        ERROR_REASON_FAILED_TO_LOCK = 1;
+        ERROR_REASON_THREEPC = 2;
+        ERROR_REASON_TOO_BUSY = 3;
+        ERROR_REASON_TIMEOUT = 4;
+        ERROR_REASON_DATABASE = 5;
+    }
+    // error_reason is a machine-readable 3PC error code.
+    ErrorReason error_reason = 1;
+    // error_message is a human-readable error message.
+    string error_message = 2;
+    // checksum provides the Spokes checksum after the operation completed
+    string checksum = 3;
+
+    // committed_at provides a time value, formatted as a unixtime stamp, for
+    // when the 3pc transaction that updates the info/nwo file has been committed.
+    uint64 committed_at = 4;
+}
+
+message RecomputeChecksumsRequest {
+    // repository is the repository for which the checksum will be recomputed. (required)
+    github.spokes.types.v1.Repository repository = 1;
+
+    // request_context determines the quality of service we ask for from gitmon
+    github.spokes.types.v1.RequestContext request_context = 2;
+
+    // priority is the priority for the checksum recomputation. (required)
+    github.spokes.types.v1.UpdateReferencesPriority priority = 3;
+
+    // sockstat is the sockstat data to be used for this checksum recomputation.
+    github.spokes.types.v1.Sockstat sockstat = 4;
+
+    enum ChecksumStrategy {
+        CHECKSUM_STRATEGY_INVALID = 0;
+        CHECKSUM_STRATEGY_REUSE_CHECKSUMS = 1;
+        CHECKSUM_STRATEGY_FORGET_CHECKSUMS = 2;
+    }
+
+    // checksum_strategy chooses whether we recompute the checksums from scratch. (required)
+    ChecksumStrategy checksum_strategy = 5;
+}
+
+message RecomputeChecksumsResponse {
+    enum ErrorReason {
+        ERROR_REASON_INVALID = 0;
+        ERROR_REASON_FAILED_TO_LOCK = 1;
+        ERROR_REASON_THREEPC = 2;
+        ERROR_REASON_TOO_BUSY = 3;
+        ERROR_REASON_TIMEOUT = 4;
+        ERROR_REASON_DATABASE = 5;
+    }
+
+    // error_reason is a machine-readable 3PC error code.
+    ErrorReason error_reason = 1;
+
+    // error_message is a human-readable error message.
+    string error_message = 2;
+
+    // checksum provides the Spokes checksum after the operation completed
+    string checksum = 3;
+
+    // committed_at provides a time value, formatted as a unixtime stamp, for
+    // when the recomputation happened.
+    uint64 committed_at = 4;
+}

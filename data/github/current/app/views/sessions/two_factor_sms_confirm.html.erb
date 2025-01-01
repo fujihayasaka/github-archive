@@ -1,0 +1,36 @@
+<%# rubocop:disable Lint/InstanceVariable %>
+<% page_info title: "Two-factor authentication", class: "page-two-factor-auth session-authentication" %>
+
+<%
+  form_class = @show_captcha ? "js-octocaptcha-parent" : ""
+%>
+
+<%= render Sessions::AuthenticationWrapperComponent.new(
+    id: "login",
+  ) do |component| %>
+  <% component.with_header do %>
+    <%= render_react_partial name: "sessions-auth-header", props: { variant: "github", avatarUrl: @user ? image_path(@user.primary_avatar_url(100)) : nil, userName: @user&.name, title: "Two-factor authentication", description: "When your phone is ready, click the button below to receive a code via SMS." } %>
+  <% end %>
+
+  <% component.with_body do %>
+    <%= render "shared/flash" %>
+
+    <% if @show_captcha %>
+      <p class="color-fg-muted">
+        Please verify that you're a human.
+      </p>
+    <% end %>
+    <div class="authentication-body-buttons">
+      <%= form_tag two_factor_sms_send_path, :method => :post, :class => form_class do %>
+        <%= csrf_hidden_input_for two_factor_sms_send_path, method: :post, class: "js-data-url-csrf-send" %>
+        <%= hidden_field_tag :resend, params[:resend] %>
+
+        <% if @show_captcha %>
+          <%= render partial: "shared/octocaptcha", locals: { include_header: false, origin_page: "github_two_factor_sms_login", octocaptcha_timeout: @octocaptcha_timeout } %>
+        <% end %>
+        <%= render Primer::Beta::Button.new(type: :submit, scheme: :primary, w: :full, disabled: @show_captcha, classes: "js-octocaptcha-form-submit") do %>Send SMS<% end %>
+      <% end %>
+      <%= render(Sessions::TwoFactorAlternativesComponent.new(user: @user, prompt_type: "sms_confirm", list_label_id: "problems-options")) %>
+    </div>
+  <% end %>
+<% end %>

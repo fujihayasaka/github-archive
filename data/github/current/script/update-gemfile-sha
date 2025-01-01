@@ -1,0 +1,25 @@
+#!/bin/bash
+
+set -eu
+set -o pipefail
+
+# Ensure correct usage
+if [ "$#" -ne 2 ]; then
+    echo "Usage: $0 <gem_name> <new_sha>"
+    exit 1
+fi
+
+GEM_NAME=$1
+NEW_SHA=$2
+
+# Replace the old sha with the provided sha
+sed -i -E "s/(gem \"$GEM_NAME\",[[:space:]]+github: \"[^\"]+\",[[:space:]]+ref: \")[0-9a-f]+\"/\1$NEW_SHA\"/" Gemfile
+
+# Run ruby bundle preamble to install the dependencies
+BUNDLE_FROZEN=false bin/bundle install
+
+# Running tapioca and db:migrate to ensure rbi files are in sync
+bin/tapioca gem "$GEM_NAME"
+bin/rails db:migrate db:test:soft_reset; bin/tapioca dsl
+
+echo "Updated $GEM_NAME to ref $NEW_SHA in Gemfile."

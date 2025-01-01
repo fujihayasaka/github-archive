@@ -1,0 +1,60 @@
+#!/bin/bash
+
+SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+
+create_librarian_binstub() {
+  librarian_path=$1
+  cat > $SCRIPT_DIR/../bin/librarian-filter <<EOF
+#!/bin/bash
+exec 2>> $SCRIPT_DIR/../log/librarian-filter.log
+set -x
+exec $librarian_path/bin/librarian-filter $librarian_path/config.development.json
+EOF
+  chmod +x $SCRIPT_DIR/../bin/librarian-filter
+}
+
+# Set LOCAL_LIBRARIAN_PATH to opt out of docker flow (for librarian developers)
+# It is important that this path is a subdirectory of /workspaces/github so that it can be mounted into the gitrpcd
+# containers. For example, `LOCAL_LIBRARIAN_PATH=/workspaces/github/librarian` will work but
+# `LOCAL_LIBRARIAN_PATH=/workspaces/librarian` will not.
+if [ -n "$LOCAL_LIBRARIAN_PATH" ]; then
+  if [[ "$LOCAL_LIBRARIAN_PATH" != "/workspaces/github"* ]]; then
+    echo "LOCAL_LIBRARIAN_PATH:$LOCAL_LIBRARIAN_PATH must be a subdirectory of /workspaces/github"
+    exit 1
+  fi
+  echo "running librarian with local path: $LOCAL_LIBRARIAN_PATH"
+  create_librarian_binstub $LOCAL_LIBRARIAN_PATH
+  exec $LOCAL_LIBRARIAN_PATH/bin/librariand
+elif [ "$DX_EDGE" = true ] && [ "$DX_FEATURE_SUBPROJECT_CONTAINERS" = true ]; then
+  echo "Running librarian in container"
+
+  source $SCRIPT_DIR/dx/lib/subproject-containers
+
+  SUBPROJECT_VERSION=$(subproject_version "librarian")
+  echo "ghcr.io/github/shared-dev/librarian:${SUBPROJECT_VERSION}"
+  if [ ! -d "$SCRIPT_DIR/../tmp/bin" ]; then
+    mkdir -p "$SCRIPT_DIR/../tmp/bin"
+  fi
+  echo "$SCRIPT_DIR/../tmp/bin exists!"
+  # gitrpcd looks for this file so need to copy it out of the container so it can be mounted into gitrpcd containers
+  docker create --name librarian "ghcr.io/github/shared-dev/librarian:${SUBPROJECT_VERSION}"
+  docker cp librarian:/usr/src/workspace/bin/librarian-filter $SCRIPT_DIR/../tmp/bin/librarian-filter
+  docker cp librarian:/usr/src/workspace/config.development.json $SCRIPT_DIR/../tmp/config.development.json
+  docker rm librarian
+  create_librarian_binstub $SCRIPT_DIR/../tmp
+
+  start_subproject --name librarian "ghcr.io/github/shared-dev/librarian:${SUBPROJECT_VERSION}"
+else
+  echo "Running vendored librarian"
+  script/build-subproject librarian || exit 1
+  create_librarian_binstub $SCRIPT_DIR/../vendor/librarian
+  LIBRARIAN_BIN="vendor/librarian/bin/librariand"
+  until [ -x "$LIBRARIAN_BIN" ]; do
+    # keeps this process alive, which keeps overmind alive.
+    # Because librarian is an optional subproject, this process
+    # needs to stay alive even if librarian didn't build.
+    sleep 60
+  done
+
+  exec $LIBRARIAN_BIN
+fi

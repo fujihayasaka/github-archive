@@ -1,0 +1,280 @@
+<% page_info title: "Upgrade", selected_link: :business_billing_settings,
+  stafftools: stafftools_enterprise_path(this_business) %>
+
+<div class="my-5" <%= test_selector("ghe-upgrade") %>>
+  <div class="container-lg p-responsive">
+    <%= render "businesses/billing_settings/checkout/back_navigation" %>
+
+    <%= render(Primer::Beta::Heading.new(tag: :h1, pb: 3, mb: 5, border: :bottom, test_selector: "billing-upgrade-header")) { "Upgrade GitHub Enterprise" } %>
+
+    <% invoiced_on = GitHub::Billing.today %>
+    <%# We're limiting upgrades to no more than 300 seats at a time %>
+    <% below_max_ghe_seat_count = ghe_seats <= max_ghe_seats %>
+    <% below_max_ghas_seat_count = ghas_seats <= max_ghas_seats %>
+    <% can_complete_purchase = below_max_ghe_seat_count && below_max_ghas_seat_count %>
+
+    <%= form_tag billing_add_seats_enterprise_path(this_business), method: :post, id: 'ghe-upgrade-form' do |f| %>
+      <div class="d-md-flex gutter-md">
+        <div class="col-md-7" <%= test_selector("duration-summary") %>>
+          <%= render(Primer::Alpha::Banner.new(icon: :info, mb: 5)) do |component| %>
+            If you need assistance or require a purchase order,
+            <%= link_to "contact our sales team", "/renewals-help", target: :_blank, rel: "noopener noreferrer", class: 'Link--inTextBlock' %>
+            to upgrade GitHub Enterprise.
+          <% end %>
+
+          <%= render "businesses/billing_settings/checkout/account_information_section" %>
+
+          <%= render(Billing::Settings::Upgrade::SectionComponent.new(title: "Upgrade Seats", icon: :people)) do |component| %>
+            <% component.with_body do %>
+              <% if !this_business.renewal_already_requested? || this_business.renewal_has_ghe_seat_gap? %>
+                <%= render(Growth::SeatsPricingCardComponent.new(seat_price: ghe_price_per_seat, seat_label: "seat", per: "year", mt: 3, test_selector: "ghe-seats-upgrade-section")) do |card| %>
+                  <% card.with_title { "Enterprise" } %>
+                  <% card.with_description do %>
+                    Security, compliance, and flexible deployment
+                  <% end %>
+                  <% if ghe_price_per_seat < ghe_list_price %>
+                    <% card.with_notice(scheme: :success, icon: nil, test_selector: "ghe-discount-notice") do %>
+                      Discounted yearly price applied, check your invoice for more detail
+                    <% end %>
+                  <% end %>
+                  <% card.with_stepper_component(
+                    type: :plan_upgrade,
+                    seats: ghe_seats,
+                    show_label: true,
+                    param_name: "seats",
+                    name: "seats",
+                    min: min_ghe_seats,
+                    max: max_ghe_seats,
+                    form: "ghe-upgrade-form",
+                    current_url: billing_add_seats_enterprise_path(this_business),
+                    min_error_message: min_ghe_seats_error_message,
+                    max_error_message: safe_join(["You can only add up to #{max_new_seats} seats at once. ", link_to('Contact sales', '/renewals-help'), " to add more seats."])
+                  ) do |stepper| %>
+                    <% stepper.with_remove_seat_control(
+                      test_selector: "remove-control",
+                      data: analytics_click_attributes(
+                        category: "business_sales_serve_upgrade",
+                        action: "click_to_decrease_enterprise_seats",
+                        label: "ref_cta:remove_seat;ref_loc:account_upgrade"
+                      )
+                    ) %>
+                    <% stepper.with_input(
+                      data: analytics_click_attributes(
+                        category: "business_sales_serve_upgrade",
+                        action: "click_on_enterprise_seats_input",
+                        label: "ref_cta:seats_input;ref_loc:account_upgrade"
+                      )
+                    ) %>
+                    <% stepper.with_add_seat_control(
+                      test_selector: "add-control",
+                      data: analytics_click_attributes(
+                        category: "business_sales_serve_upgrade",
+                        action: "click_to_add_enterprise_seats",
+                        label: "ref_cta:add_seat;ref_loc:account_upgrade"
+                      )
+                    ) %>
+                    <% stepper.with_context do %>
+                      <span class="js-renewal-upgrade-ghe-seats-context">
+                        <%= upgrade_ghe_seats_context %>
+                      </span>
+                    <% end %>
+                  <% end %>
+                <% end %>
+              <% end %>
+
+              <% if !this_business.renewal_already_requested? || this_business.renewal_has_ghas_seat_gap? %>
+                <%= render(Primer::Beta::Heading.new(tag: :h3, mt: 5)) { "Add-ons" } %>
+                <%= render(Growth::SeatsPricingCardComponent.new(seat_price: ghas_price_per_seat, seat_label: "committer", per: "year", mt: 3, test_selector: "ghas-seats-upgrade-section")) do |card| %>
+                  <% card.with_title { "Advanced Security" } %>
+                  <% card.with_description do %>
+                    Secure software from the start.
+                    <%= link_to docs_url("get-started/about-github-advanced-security"), target: :_blank, rel: "noopener noreferrer", class: "Link--inTextBlock" do %>
+                      Learn more<span class="sr-only">&nbsp;about GitHub Advanced Security</span>
+                    <% end %>
+                  <% end %>
+                  <% if ghas_price_per_seat < ghas_list_price %>
+                    <% card.with_notice(scheme: :success, icon: nil, test_selector: "ghas-discount-notice") do %>
+                      Discounted yearly price applied, check your invoice for more detail
+                    <% end %>
+                  <% elsif suggested_ghas_seats > 0 %>
+                    <% card.with_notice(test_selector: "recommended-committers") { "Based on your trial activity, we recommend #{pluralize(suggested_ghas_seats, "committer")}." } %>
+                  <% end %>
+                  <% card.with_stepper_component(
+                    type: :plan_upgrade,
+                    seats: ghas_seats,
+                    label: "committer",
+                    show_label: true,
+                    param_name: "committers",
+                    name: "committers",
+                    min: min_ghas_seats,
+                    max: max_ghas_seats,
+                    form: "ghe-upgrade-form",
+                    current_url: billing_add_seats_enterprise_path(this_business),
+                    min_error_message: min_ghas_seats_error_message,
+                    max_error_message: safe_join(["You can only add up to #{max_new_seats} seats at once. ", link_to('Contact sales', '/renewals-help'), " to add more seats."])
+                  ) do |stepper| %>
+                    <% stepper.with_remove_seat_control(
+                      test_selector: "remove-control",
+                      data: analytics_click_attributes(
+                        category: "business_sales_serve_upgrade",
+                        action: "click_to_decrease_advanced_security_seats",
+                        label: "ref_cta:remove_committer;ref_loc:account_upgrade"
+                      )
+                    ) %>
+                    <% stepper.with_input(
+                      test_selector: "advanced-security-input",
+                      data: analytics_click_attributes(
+                        category: "business_sales_serve_upgrade",
+                        action: "click_on_advanced_security_seats_input",
+                        label: "ref_cta:committer_input;ref_loc:account_upgrade"
+                      )
+                    ) %>
+                    <% stepper.with_add_seat_control(
+                      test_selector: "add-control",
+                      data: analytics_click_attributes(
+                        category: "business_sales_serve_upgrade",
+                        action: "click_to_add_advanced_security_seats",
+                        label: "ref_cta:add_committer;ref_loc:account_upgrade"
+                      )
+                    ) %>
+                    <% stepper.with_context do %>
+                      <span class="js-renewal-upgrade-ghas-seats-context">
+                        <%= upgrade_ghas_seats_context %>
+                      </span>
+                    <% end %>
+                  <% end %>
+                <% end %>
+              <% end %>
+            <% end %>
+          <% end %>
+
+          <%= render(Billing::Settings::Upgrade::SectionComponent.new(title: "Payment method", icon: :"check-circle-fill", pb: 0)) do |section| %>
+            <% section.with_body(pt: 3) do %>
+              <%= render(TradeCompliance::TradeScreeningRestrictionNoticeComponent.new(
+                target: this_business,
+                title: "You can't proceed with your payment",
+                check_for_current_user: true,
+                class_name: "container-sm mx-0 mb-3",
+              )) %>
+              <%= render Primer::Box.new(display: :flex, p: 3, mb: 3, border: true, border_radius: 2) do %>
+                <span>
+                  <%= render Primer::Beta::Octicon.new(icon: "mail", mr: 2) %>
+                </span>
+                <%= render Primer::Box.new(display: :flex, direction: :column) do %>
+                  <%= render Primer::Beta::Text.new(font_weight: :bold) do %>
+                    Invoice
+                  <% end %>
+                  <%= render Primer::Beta::Text.new(mb: 0, color: :muted, test_selector: "invoiced-on") do %>
+                    Invoiced on <%= invoiced_on.strftime("%b %d, %Y") %>
+                  <% end %>
+                <% end %>
+              <% end %>
+            <% end %>
+          <% end %>
+        </div>
+
+        <div class='col-md-5'>
+          <%= render Primer::Box.new(p: 3, border: true, border_radius: 2) do %>
+            <%= render(Growth::PricingSummaryComponent.new) do |summary| %>
+              <% summary.with_title { "Upgrade Summary" } %>
+              <% summary.with_subtitle(font_size: 6) { "Added seats are available immediately. Upgrade payment is a pro-rated amount of the yearly cost." } %>
+              <% summary.with_line_item(classes: "js-stepper-show-with-value") do |item| %>
+                <% item.with_title { "Enterprise Cloud" } %>
+                <% item.with_description do %>
+                  One time ·
+                  <span class="js-renewal-upgrade-ghe-seats-summary">
+                    <%= ghe_line_item.fetch(:upgrade_seats_summary) %>
+                  </span>
+                  <% if ghe_price_per_seat < ghe_list_price %>
+                    <span class="fgColor-success"> · Discount applied</span>
+                  <% end %>
+                <% end %>
+                <% item.with_cost(classes: "js-renewal-upgrade-ghe-cost") {
+                  ghe_line_item.fetch(:upgrade_cost)&.format
+                } %>
+              <% end %>
+              <% summary.with_line_item(classes: "js-stepper-show-with-value") do |item| %>
+                <% item.with_title { "Advanced Security" } %>
+                <% item.with_description do %>
+                  One time ·
+                  <span class="js-renewal-upgrade-ghas-seats-summary">
+                    <%= ghas_line_item.fetch(:upgrade_seats_summary) %>
+                  </span>
+                  <% if ghas_price_per_seat < ghas_list_price %>
+                    <span class="fgColor-success"> · Discount applied</span>
+                  <% end %>
+                <% end %>
+                <% item.with_cost(classes: "js-renewal-upgrade-ghas-cost") {
+                  ghas_line_item.fetch(:upgrade_cost)&.format
+                } %>
+              <% end %>
+            <% end %>
+
+            <%= render(Growth::PricingSummaryComponent.new(test_selector: "renewal-upgrade-subtotal-summary")) do |summary| %>
+              <% summary.with_line_item(classes: "js-stepper-show-with-value") do |item| %>
+                <% item.with_title { "Subtotal" } %>
+                <% item.with_cost(classes: "js-renewal-upgrade-subtotal") do %>
+                  <%= upgrade_subtotal %>
+                <% end %>
+              <% end %>
+                <% summary.with_sales_tax(classes: "js-stepper-show-with-value") do |total| %>
+                  <% total.with_title(test_selector: "sales-tax-label") { "Tax" } %>
+                  <% total.with_cost(test_selector: "sales-tax-value") { "(applied to your invoice if applicable)" } %>
+                <% end %>
+            <% end %>
+
+            <%= render(Growth::PricingSummaryComponent.new(test_selector: "renewal-upgrade-totals")) do |summary| %>
+              <% summary.with_total do |item| %>
+                <% item.with_title { "Upgrade payment" } %>
+                <% item.with_description(font_weight: :normal) { "Invoiced today" } %>
+                <% item.with_cost(classes: "js-renewal-upgrade-total") { upgrade_total } %>
+              <% end %>
+            <% end %>
+
+            <% submit_btn_text = "Upgrade" %>
+            <%= render "businesses/billing_settings/checkout/terms_of_service", button_text: submit_btn_text %>
+
+            <%= render Primer::Beta::Button.new(
+              scheme: :primary,
+              block: true,
+              type: :submit,
+              size: :large,
+              disabled: !can_complete_purchase || this_business.has_trade_screening_restriction? || current_user.has_trade_screening_restriction?,
+              test_selector: "complete-purchase-button",
+              data: analytics_click_attributes(
+                category: "business_sales_serve_upgrade",
+                action: "click_to_complete_enterprise_purchase",
+                label: "ref_cta:complete_github_enterprise_purchase;ref_loc:account_upgrade;enterprise_id:#{this_business.id}",
+              ).merge(
+                disable_invalid: "",
+                disable_with: ""
+              )
+            ) do %>
+              <%= submit_btn_text %>
+            <% end %>
+            <%= render Primer::Beta::Button.new(
+              href: enterprise_path(this_business), block: true, tag: :a, mt: 2,
+              data: analytics_click_attributes(
+                category: "business_sales_serve_upgrade",
+                action: "cancel_github_enterprise_purchase",
+                label: "enterprise_id:#{this_business.id}"
+              ),
+            ) do %>
+              Cancel
+            <% end %>
+          <% end %>
+
+          <% unless can_complete_purchase %>
+            <%= render(Primer::Alpha::Banner.new(scheme: :danger, icon: :alert, mt: 3)) do |component| %>
+              <% if !below_max_ghe_seat_count || below_max_ghas_seat_count %>
+                You can only purchase up to <%= max_new_seats %> seats at a time.
+                <%= link_to "Contact sales", "/renewals-help", target: :_blank, rel: "noopener noreferrer", class: 'Link--inTextBlock' %>
+                if you require a larger upgrade.
+              <% end %>
+            <% end %>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+  </div>
+</div>

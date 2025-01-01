@@ -1,0 +1,48 @@
+# typed: true
+# frozen_string_literal: true
+
+class Orgs::CopilotSettings::EnableController < Orgs::Controller
+  include Site::MicrosoftAnalyticsDependency
+
+  before_action :dotcom_required
+  before_action :org_admins_only
+
+  before_action :enable_microsoft_analytics, only: [:index]
+  before_action :add_microsoft_analytics_csp_exceptions, only: [:index]
+
+  depends_on_clusters ApplicationRecord::Mysql1,
+    ApplicationRecord::Configurations,
+    ApplicationRecord::IamAbilities,
+    ApplicationRecord::Collab,
+    ApplicationRecord::Mysql5,
+    ApplicationRecord::Billing,
+    ApplicationRecord::Mysql2,
+    ApplicationRecord::NotificationsEntries,
+    ApplicationRecord::Repositories,
+    ApplicationRecord::Copilot,
+    only: [:index]
+
+  def index
+    if copilot_organization.is_business_in_trial_period?
+      return render "settings/organization/copilot/enable/enterprise_trial"
+    end
+
+    unless copilot_organization.has_copilot_for_business? || copilot_organization.is_available_for_copilot_signup?
+      return render_404
+    end
+
+    render "settings/organization/copilot/enable/index", {
+      locals: {
+        enablement_link: copilot_plan_purchase_path(organization: current_organization),
+        enable_msft_analytics: @cookie_consent_enabled && @microsoft_analytics_enabled
+      }
+    }
+  end
+
+  private
+
+  sig { returns Copilot::Organization }
+  memoize def copilot_organization
+    T.must_because(current_copilot_organization) { "#org_admins_only ensures non-nil" }
+  end
+end

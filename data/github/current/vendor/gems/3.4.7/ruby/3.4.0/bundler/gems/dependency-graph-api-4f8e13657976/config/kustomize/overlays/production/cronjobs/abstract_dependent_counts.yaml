@@ -1,0 +1,37 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: abstract-dependent-counts
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "abstract-dependent-counts"
+        heaven.githubapp.com/image-placeholder: "dependency-graph-api"
+spec:
+    schedule: "*/15 * * * *" # Every 15 minutes.
+    concurrencyPolicy: Forbid # Do not allow multiple instances of the same job to run, at the same time.
+    successfulJobsHistoryLimit: 2
+    failedJobsHistoryLimit: 2
+    jobTemplate:
+        spec:
+            template:
+                spec:
+                    dnsPolicy: ClusterFirst
+                    restartPolicy: Never
+                    containers:
+                        - name: abstract-dependent-counts
+                          image: dependency-graph-api
+                          resources:
+                            requests:
+                                memory: "500Mi"
+                            limits:
+                                memory: "500Mi"
+                          command: ["/usr/bin/tools/istio-job-wrapper", "script/run-with-lock", "-lock=abstract_dependent_counts", "-wait=false", "script/views/abstract_dependent_counts_kube"]
+                          envFrom:
+                            - configMapRef:
+                                name: environment
+                            - secretRef:
+                                name: vault-secrets
+                          env:
+                            - name: DOGSTATSD_HOST
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: spec.nodeName

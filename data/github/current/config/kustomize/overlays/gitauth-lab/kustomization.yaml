@@ -1,0 +1,57 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+images:
+  - name: octofactory.service.private-us-east-1.github.net/moda-artifacts-docker/docker-nginx
+    digest: sha256:d0ef7e93ea4b71d6e84acc0d9860e4d6dd4e219afdce99b2481bfa9506446cdc
+
+components:
+  - ../../base/metric-attribution
+
+resources:
+  - ../../base/commonBase/unicorn-gitauth-api
+  - ../../base/commonBase/unicorn-gitauth-api/configmaps
+
+commonLabels:
+  service: unicorn-gitauth-api
+
+configMapGenerator:
+  - name: elasticsearch
+    options:
+      disableNameSuffixHash: true
+      labels:
+        kustomizeOverlayName: overlays__production__unicorn-gitauth-api
+  - name: observability-config
+    options:
+      disableNameSuffixHash: true
+      labels:
+        kustomizeOverlayName: overlays__production__unicorn-gitauth-api
+    literals:
+      - GITHUB_TELEMETRY_LOGS_ENABLED="true"
+      - GH_LOG_DESTINATION="stdout"
+      - DOGSTATSD_SOCKET="/var/run/datadog/dsd.socket"
+      - DOGSTATSD_SOCKET_ENABLED="1"
+
+
+
+patches:
+  - target:
+      version: v1
+      name: unicorn-gitauth-api
+    patch: |-
+      - op: replace
+        path: /metadata/labels/kustomizeOverlayName
+        value: overlays__production__unicorn-gitauth-api
+  - path: ./deployments/unicorn-gitauth-api.yaml
+    target:
+      name: unicorn-gitauth-api
+      labelSelector: "kustomizeOverlayName=overlays__production__unicorn-gitauth-api"
+      group: apps
+      version: v1
+      kind: Deployment
+  - path: ./services/unicorn-gitauth-api.yaml
+    target:
+      name: unicorn-gitauth-api
+      labelSelector: "kustomizeOverlayName=overlays__production__unicorn-gitauth-api"
+      version: v1
+      kind: Service

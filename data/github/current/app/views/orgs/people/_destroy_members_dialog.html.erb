@@ -1,0 +1,100 @@
+<%# erblint:counter DeprecatedComponentsCounter 2 %>
+<%# erblint:counter DeprecatedComponentsCounter 2 %>
+<%# `view` is an instance of Orgs::People::DestroyMembersDialogView  %>
+
+<% if view.show_sso_warning? %>
+  <%= render Primer::Beta::Flash.new(full: true, scheme: :danger) do %>
+    Removed members will be able to rejoin the organization unless they are
+    also deprovisioned from your SAML Identity Provider.
+  <% end %>
+<% end %>
+
+<div class="Box-body border-0 overflow-auto">
+  <% if view.show_indirect_membership_info? && view.selected_users_with_indirect_membership.any? %>
+    <%= render(Primer::Alpha::Banner.new(
+      scheme: :warning,
+      mb: 4,
+      test_selector: "business-teams-warning-banner"
+    )) { BusinessTeam.remove_indirect_organization_membership_notice } %>
+  <% end %>
+
+  <% if view.show_private_fork_info? %>
+    <p class="deleting-private-forks-warning">
+      <%= primer_octicon(:alert) %>
+      Removing people from the <%= view.organization.display_login %> organization
+      will also delete their forks of any private
+      <%= view.organization.display_login %>-owned repositories. This may take up to 24 hours to occur.
+    </p>
+  <% end %>
+
+  <% if view.selected_users_with_direct_membership.any? %>
+    <p>Direct membership for the following members will be removed:</p>
+
+    <div class="confirm-removal-list-container mb-0">
+      <ul class="list-style-none">
+        <% view.selected_users_with_direct_membership.each do |member| %>
+          <li class="confirm-removal-list-item">
+            <%= linked_avatar_for(member, 16, img_class: "avatar") %>
+            <%= profile_link(member) %>
+
+            <% if view.show_private_fork_info? %>
+              <span class="private-fork-count">
+              + <a href="<%= org_person_path(view.organization, member, query: "only:forks") %>">
+                  <%= pluralize(view.private_forks_count_for(member), "private fork") %>
+                </a>
+              </span>
+            <% end %>
+          </li>
+          <% if view.organization.has_linked_billing_contact_to_actor?(actor: member) %>
+            <li class="m-2" <%= test_selector "linked-billing-info-warn" %>>
+              <%= render(Primer::Beta::Flash.new(scheme: :default, mb: 3)) do %>
+                <%= render Primer::Beta::Text.new(tag: :span, font_size: :normal, pt: 1) do %>
+                  <%= TradeControls::Notices.org_member_linked_billing_info_warning %>
+                <% end %>
+              <% end %>
+            </li>
+          <% end %>
+        <% end %>
+      </ul>
+    </div>
+  <% else %>
+    <p>No members with direct membership were selected for removal.</p>
+  <% end %>
+
+  <% if view.show_indirect_membership_info? && view.selected_users_with_indirect_membership.any? %>
+    <p class="mt-4">Indirect membership for the following users will be retained due to
+      membership through an enterprise team:
+    </p>
+
+    <div>
+      <% view.selected_users_with_indirect_membership.each do |member| %>
+        <div <%= test_selector "indirect-member-#{member.id}" %>
+          class="d-inline-block bgColor-muted borderColor-muted border mr-1 mb-1 circle pl-1 pr-2 pb-1">
+          <%= linked_avatar_for(member, 16, img_class: "avatar mr-1") %>
+          <%= profile_link(member) %>
+        </div>
+      <% end %>
+    </div>
+  <% end %>
+</div>
+
+<div class="Box-footer border-0">
+  <%= form_tag org_destroy_people_path(view.organization), :method => :delete do %>
+    <input type="hidden" name="member_ids" value="<%= view.sorted_selected_member_ids %>">
+    <input type="hidden" name="redirect_to_path" value="<%= view.redirect_to_path %>">
+    <div class="d-flex flex-justify-end" style="gap: 15px;">
+      <%= render Primer::Beta::Button.new(
+        "aria-label": "Cancel",
+        "data-close-dialog-id": view.dialog_cancel_button_id,
+        type: :reset,
+        test_selector: "remove-member-dialog-cancel-btn",
+      ).with_content("Cancel") %>
+
+      <%= render Primer::Beta::Button.new(
+        type: :submit,
+        scheme: :danger,
+        "data-disable-with": ""
+      ).with_content("Remove members") %>
+    </div>
+  <% end %>
+</div>

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+mkdir -p /gen/ruby/lib
+
+GO_OUT="/twirp"
+RUBY_OUT="/gen/ruby/lib"
+
+function protoc_package() {
+  local PKG="$1"
+  shift
+
+  local PROTOPATH="/proto"
+
+  if [[ -n "$PKG" ]]; then
+    PROTOPATH="$PROTOPATH/$PKG"
+  fi
+
+  #shellcheck disable=SC2068
+  protoc --twirp_out="$GO_OUT" \
+         --go_out="$GO_OUT" \
+         --twirp_ruby_out="$RUBY_OUT" \
+         --ruby_out="$RUBY_OUT" \
+         --proto_path="/proto" \
+         --experimental_allow_proto3_optional \
+         $@ \
+         "$PROTOPATH"/*.proto
+}
+
+# Generates a "root" package
+# This is our "V1" API protobufs
+protoc_package ""
+
+# Generates the entities package
+# These files don't reference any files outside of their own package
+protoc_package "entities"
+
+# Add go_opt=M arguments for each protobuf imported by this file here
+protoc_package "v2" \
+  --go_opt=Mentities/pull_request.proto=github.com/github/dependency-snapshots-api/pkg/proto/entities \
+  --go_opt=Mentities/push.proto=github.com/github/dependency-snapshots-api/pkg/proto/entities \
+  --go_opt=Mentities/repository.proto=github.com/github/dependency-snapshots-api/pkg/proto/entities \
+  --go_opt=Mentities/user.proto=github.com/github/dependency-snapshots-api/pkg/proto/entities

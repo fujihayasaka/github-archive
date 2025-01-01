@@ -1,0 +1,66 @@
+# typed: true
+# frozen_string_literal: true
+
+require "test_helper"
+
+class <%= definition_test_class_name %> < GitHub::TestCase
+  setup do
+    @business = create :business
+    @org = create :organization, business: @business
+
+    # TODO: Update this to use the right factory and create appropriate test data for your domain
+    @<%= target_class_name.underscore %> = create :<%= target_class_name.underscore %>
+  end
+
+  test "should not save without property_name" do
+    assert_raises ActiveRecord::RecordInvalid do
+      <%= definition_class_name %>.create!(source: @business, value_type: :string)
+    end
+
+    assert_raises ActiveRecord::RecordInvalid do
+      <%= definition_class_name %>.create!(source: @business, property_name: "", value_type: :string)
+    end
+  end
+
+  test "should save property_name as a string" do
+    <%= definition_class_name %>.create!(source: @business, property_name: 13, value_type: :string)
+    assert_equal T.must(<%= definition_class_name %>.last).property_name, "13"
+  end
+
+  test "can save" do
+    assert <%= definition_class_name %>.create!(source: @business, property_name: "environment", value_type: :string)
+  end
+
+  [:string, :single_select].each do |value_type|
+    test "non-required is by default when creating a #{value_type} definition" do
+      definition = <%= definition_class_name %>.create!(
+        source: @business,
+        property_name: "environment",
+        value_type: value_type,
+        allowed_values: (%w[prod dev] if value_type == :single_select)
+      )
+      refute definition.required?
+    end
+  end
+
+  test "can save largest allowed name" do
+    key75 = "a" * CustomPropertiesCore::Public::MAX_LENGTH
+    assert <%= definition_class_name %>.create!(source: @business, property_name: key75, value_type: :string)
+  end
+
+  test "can save largest allowed description" do
+    description = "a" * CustomPropertiesCore::Public::DESCRIPTION_MAX_LENGTH
+    assert <%= definition_class_name %>.create!(source: @business, property_name: "environment", value_type: :string, description: description)
+  end
+
+  context "instrumentation" do
+    test "should audit log with the correct class name" do
+      events = subscribe "<%= target_class_name.underscore %>_custom_property_definition.create"
+      definition = create :<%= target_class_name.underscore %>_custom_property_definition,
+        :string,
+        source: @business,
+        property_name: "environment"
+      refute_nil event = events.pop, "an event was expected"
+    end
+  end
+end

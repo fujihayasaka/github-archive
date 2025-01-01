@@ -1,0 +1,199 @@
+<%# Automated code reviews using rulesets section %>
+<%= render Primer::Box.new(test_selector: "automated-code-reviews-rulesets", id: "automated-code-reviews-rulesets", mt: 4) do %>
+  <%= render Primer::Beta::Subhead.new(hide_border: true) do |component| %>
+    <% component.with_heading(tag: :h2, font_size: 4) do %>
+      Automated code reviews using rulesets
+    <% end %>
+    <% component.with_description(classes: "d-flex flex-items-start flex-justify-between") do %>
+      <div>
+        Use rulesets to configure Copilot to review pull requests automatically. <%= render Primer::Beta::Link.new(
+          href: Copilot::CODE_REVIEW_CONFIGURING_AUTO_DOCS_URL,
+          classes: "Link--inTextBlock",
+          ).with_content("Learn how to set up rulesets.")
+        %>
+      </div>
+      <div class="d-flex flex-items-center ml-4">
+        <%= render Primer::Beta::Button.new(
+          tag: :a,
+          href: repository_rulesets_path,
+          size: :small
+        ) do %>
+          Go to rulesets
+          <%= render Primer::Beta::Octicon.new(icon: "link-external", size: :small, classes: "ml-1") %>
+        <% end %>
+      </div>
+    <% end %>
+  <% end %>
+
+  <%
+    # Get organization rulesets only if the owner is an organization
+    org_rulesets = if current_repository.owner.is_a?(Organization)
+      # First get all potential organization rulesets
+      potential_org_rulesets = current_repository.owner.rulesets
+        .joins(:rule_configurations)
+        .where(target: "branch")
+        .where(
+          repository_rule_configurations: {
+            rule_type: ["copilot_code_review", "pull_request"]
+          }
+        )
+        .where(
+          "repository_rule_configurations.rule_type = ? OR " \
+          "(repository_rule_configurations.rule_type = ? AND " \
+          "JSON_UNQUOTE(JSON_EXTRACT(repository_rule_configurations.parameters, '$.automatic_copilot_code_review_enabled')) = ?)",
+          "copilot_code_review", "pull_request", "true"
+        )
+        .distinct
+
+      # Filter to only include rulesets that apply to this repository
+      potential_org_rulesets.select do |ruleset|
+        ruleset.definition.applies_to_source?(ruleset, current_repository)
+      end
+    else
+      []
+    end
+
+    # Get repository rulesets directly from the repository and filter for Copilot code review rules
+    repo_rulesets = current_repository.rulesets
+      .joins(:rule_configurations)
+      .where(target: "branch")
+      .where(
+        repository_rule_configurations: {
+          rule_type: ["copilot_code_review", "pull_request"]
+        }
+      )
+      .where(
+        "repository_rule_configurations.rule_type = ? OR " \
+        "(repository_rule_configurations.rule_type = ? AND " \
+        "JSON_UNQUOTE(JSON_EXTRACT(repository_rule_configurations.parameters, '$.automatic_copilot_code_review_enabled')) = ?)",
+        "copilot_code_review", "pull_request", "true"
+      )
+      .distinct
+
+    total_rulesets = org_rulesets.count + repo_rulesets.count
+
+    # Get target counts for all rulesets (both org and repo) against this specific repository
+    # This will tell us how many branches in this repository are targeted by each ruleset
+    all_rulesets = org_rulesets + repo_rulesets
+    target_counts_by_ruleset = if all_rulesets.any?
+      all_ruleset_ids = all_rulesets.map(&:id)
+      RulesEngine::RulesetMatcher.rulesets_target_count(current_repository, all_ruleset_ids).index_by { |result| result[:rulesetId] }
+    else
+      {}
+    end
+  %>
+
+  <% if total_rulesets > 0 %>
+    <% if current_repository.owner.is_a?(Organization) && org_rulesets.any? %>
+      <%= render Primer::Beta::BorderBox.new do |component| %>
+        <% component.with_row(classes: "Box-row d-flex px-3 py-2 flex-items-center flex-justify-between color-bg-subtle border-top") do %>
+          <strong><%= pluralize(org_rulesets.count, "organization ruleset") %></strong>
+          <span class="text-small color-fg-muted">Managed by <%= current_repository.owner.name %></span>
+        <% end %>
+        <% org_rulesets.each do |ruleset| %>
+          <% component.with_row(classes: "Box-row d-flex px-3 py-2 flex-justify-between flex-items-center") do %>
+            <div class="d-flex flex-items-center gap-2">
+              <% case ruleset.enforcement %>
+              <% when "enabled" %>
+                <%= render Primer::Beta::Octicon.new(icon: "play", classes: "color-fg-success", size: :small, "aria-label": "Active") %>
+              <% when "evaluate" %>
+                <%= render Primer::Beta::Octicon.new(icon: "meter", classes: "color-fg-severe", size: :small, "aria-label": "Evaluate") %>
+              <% else %>
+                <%= render Primer::Beta::Octicon.new(icon: "skip", classes: "color-fg-muted", size: :small, "aria-label": "Disabled") %>
+              <% end %>
+
+              <div class="d-flex flex-column">
+                <%= render Primer::Beta::Link.new(
+                  href: organization_ruleset_path(current_repository.owner, ruleset),
+                  classes: "color-fg-default text-bold"
+                ) do %>
+                  <%= ruleset.name %>
+                <% end %>
+                <div class="text-small color-fg-muted">
+                  <%
+                    # Since we've already filtered to only include rulesets that apply to this repo,
+                    # we can directly get the target count
+                    target_count_info = target_counts_by_ruleset[ruleset.id]
+                    target_count = target_count_info&.dig(:count)
+                    if target_count_info&.dig(:errorMessage)
+                      target_text = "targeting branches (too many to display)"
+                    elsif target_count
+                      target_text = "targeting #{pluralize(target_count, "branch")} in this repository"
+                    else
+                      target_text = "targeting #{pluralize(ruleset.conditions.count, "branch condition")}"
+                    end
+                  %>
+                  <%= pluralize(ruleset.rule_configurations.count, "branch rule") %> • <%= target_text %>
+                </div>
+              </div>
+            </div>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <% if repo_rulesets.any? %>
+      <%= render Primer::Beta::BorderBox.new(mt: (current_repository.owner.is_a?(Organization) && org_rulesets.any?) ? 3 : 0) do |component| %>
+        <% component.with_row(classes: "Box-row d-flex px-3 py-2 flex-items-center color-bg-subtle border-top") do %>
+          <div class="d-flex flex-items-center">
+            <strong><%= pluralize(repo_rulesets.count, "repository ruleset") %></strong>
+          </div>
+        <% end %>
+        <% repo_rulesets.each do |ruleset| %>
+          <% component.with_row(classes: "Box-row d-flex px-3 py-2 flex-justify-between flex-items-center") do %>
+            <div class="d-flex flex-items-center gap-2">
+              <% case ruleset.enforcement %>
+              <% when "enabled" %>
+                <%= render Primer::Beta::Octicon.new(icon: "play", classes: "color-fg-success", size: :small, "aria-label": "Active") %>
+              <% when "evaluate" %>
+                <%= render Primer::Beta::Octicon.new(icon: "meter", classes: "color-fg-severe", size: :small, "aria-label": "Evaluate") %>
+              <% else %>
+                <%= render Primer::Beta::Octicon.new(icon: "skip", classes: "color-fg-muted", size: :small, "aria-label": "Disabled") %>
+              <% end %>
+
+              <div class="d-flex flex-column">
+                <%= render Primer::Beta::Link.new(
+                  href: repository_ruleset_path(current_repository.owner, current_repository, ruleset),
+                  classes: "color-fg-default text-bold"
+                ) do %>
+                  <%= ruleset.name %>
+                <% end %>
+                <div class="text-small color-fg-muted">
+                  <%
+                    target_count_info = target_counts_by_ruleset[ruleset.id]
+                    target_count = target_count_info&.dig(:count)
+                    if target_count_info&.dig(:errorMessage)
+                      target_text = "targeting branches (too many to display)"
+                    elsif target_count
+                      target_text = "targeting #{pluralize(target_count, "branch")}"
+                    else
+                      target_text = "targeting #{pluralize(ruleset.conditions.count, "branch condition")}"
+                    end
+                  %>
+                  <%= pluralize(ruleset.rule_configurations.count, "branch rule") %> • <%= target_text %>
+                </div>
+              </div>
+            </div>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% else %>
+    <%= render Primer::Beta::BorderBox.new do |component| %>
+      <% component.with_row(classes: "d-flex flex-column flex-items-center p-4") do %>
+        <%= render Primer::Beta::Heading.new(tag: :h3, mb: 2).with_content("No rulesets set up for automated reviews") %>
+        <%= render Primer::Beta::Text.new(tag: :p, classes: "fgColor-muted text-center mb-3").with_content("Create a ruleset to automate code reviews for pull requests targeting your default branch") %>
+        <%= form_with url: repo_create_copilot_ruleset_repo_repo_settings_copilot_code_review_path(current_repository.owner, current_repository), method: :post, local: true do |form| %>
+          <%= render Primer::Beta::Button.new(
+            scheme: :primary,
+            type: :submit,
+            data: {
+              disable_with: "Creating ruleset for default branch..."
+            },
+            id: "create-ruleset-button"
+          ).with_content("Create ruleset for default branch") %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

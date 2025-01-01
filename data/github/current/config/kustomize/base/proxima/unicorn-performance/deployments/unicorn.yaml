@@ -1,0 +1,50 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    moda.github.net/allow-missing-ready-pods: null
+  name: unicorn
+spec:
+  selector:
+    matchLabels:
+      service: unicorn-performance
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 100%
+  template:
+    metadata:
+      labels:
+        service: unicorn-performance
+        moda.github.net/reliability-test-engine: degrader
+    spec:
+      containers:
+        - name: nginx
+        - name: voltron
+        - name: unicorn
+        - name: degrader
+          image: octofactory.service.private-us-east-1.github.net/moda-artifacts-docker/degrader:5e3e254166dc3e64531fa05ce88f81fbbd74a35e
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: degrader
+            - name: DOGSTATSD_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: STATSD_ADDR
+              value: $(DOGSTATSD_HOST):28125
+          volumeMounts:
+            - mountPath: /etc/degrader/
+              name: degrader-config
+          resources:
+            requests:
+              cpu: 20m
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+      volumes:
+        - configMap:
+            name: degrader-config-unicorn-performance
+          name: degrader-config

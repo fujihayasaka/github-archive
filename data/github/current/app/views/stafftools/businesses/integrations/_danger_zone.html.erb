@@ -1,0 +1,248 @@
+<%# erblint:counter DeprecatedComponentsCounter 4 %>
+<%# erblint:counter DeprecatedComponentsCounter 4 %>
+<%# `view` is an instance of Stafftools::Integrations::ShowView %>
+
+<%= render Primer::Beta::Subhead.new(hide_border: true) do |component| %>
+  <% component.with_heading(tag: :h2, danger: true) { "Danger Zone" } %>
+<% end %>
+
+<%= render(Primer::Beta::BorderBox.new(border_color: :danger_emphasis)) do |box| %>
+  <% box.with_row(display: :flex, classes: "js-details-container") do %>
+    <div class="flex-auto">
+      <strong>Rename integration</strong>
+
+      <div class="text-small color-fg-muted">
+        <p>Rename this integration and the slug. This should be done in accordance with the rename policy.</p>
+      </div>
+
+      <div class="inline-confirm mb-2">
+        <%= form_tag rename_stafftools_business_app_path do %>
+          <dl class="form-group">
+            <dt><label for="integration_rename">Rename integration</label></dt>
+            <dd>
+              <%= text_field_tag :name, view.integration.name, class: "short", id: "integration_rename" %>
+              <%= render Primer::Beta::Button.new(type: :submit) do %>Change name<% end %>
+            </dd>
+          </dl>
+        <% end %>
+      </div>
+    </div>
+    <%= render(Primer::Beta::Button.new(scheme: :danger, classes: "js-details-target", "aria-expanded": "false")) { "Rename" } %>
+  <% end %>
+
+   <% box.with_row(display: :flex, align_items: :center) do %>
+    <div class="flex-auto">
+      <strong>Revoke public keys</strong>
+      <div class="text-small color-fg-muted">
+        This will revoke all public keys made by the GitHub App via <code>server-to-server</code> requests.
+      </div>
+    </div>
+
+    <%= render(Primer::Alpha::Dialog.new(
+      size: :medium_portrait,
+      title: "Revoke public keys",
+    )) do |dialog| %>
+      <% dialog.with_show_button(scheme: :danger) { "Revoke keys" } %>
+      <%= render(Primer::Alpha::Dialog::Body.new) do %>
+        <%= render(Primer::Beta::Flash.new(
+          icon: :stop,
+          scheme: :danger,
+        )) do %>
+          Are you sure you want to revoke these public keys?
+        <% end %>
+        <%= form_tag revoke_public_keys_stafftools_business_app_path, method: :delete do %>
+          <%= submit_tag "Confirm revoke keys", class: "btn btn-danger" %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if view.integration.feature_flag_enabled_or_raise?(:bulk_uninstall) # rubocop:disable GitHub/FeatureManagement/NoVexiActorFeatureFlagEnabledOrRaiseUsage %>
+    <% box.with_row(display: :flex, align_items: :center) do %>
+      <div class="flex-auto">
+        <strong>Uninstall all installations</strong>
+        <div class="text-small color-fg-muted">
+          This will uninstall the GitHub Application from every account it is installed on.
+        </div>
+      </div>
+
+      <%= render(Primer::Alpha::Dialog.new(
+        size: :medium_portrait,
+        title: "Uninstall All",
+      )) do |dialog| %>
+        <% dialog.with_show_button(
+          scheme: :danger,
+          disabled: view.disable_uninstall_all_button?,
+          test_selector: "uninstall-all-button",
+        ) do %>
+          <% if view.pending_bulk_uninstall? %>
+            <div class="d-flex flex-items-center">
+              <%= view.pending_bulk_uninstall_text %>
+              <%= render(Primer::Beta::Spinner.new(size: :small, ml: 1)) %>
+            </div>
+          <% else %>
+            <%= "Uninstall All" %>
+          <% end %>
+        <% end %>
+        <%= render(Primer::Alpha::Dialog::Body.new) do %>
+          <%= render(Primer::Beta::Flash.new(
+            icon: :stop,
+            scheme: :danger,
+          )) do %>
+            Are you sure you want to uninstall <%= view.integration.name %> app from all accounts? This will uninstall <%= view.installations_count %> <%= "installation".pluralize(view.installations_count) %>.
+          <% end %>
+          <%= form_tag bulk_uninstall_stafftools_business_app_path, method: :post do %>
+            <%= submit_tag "Uninstall All Installations", class: "btn btn-danger" %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% if view.pending_bulk_uninstall? %>
+        <%= form_tag cancel_bulk_uninstall_stafftools_business_app_path, method: :delete, class: "mr-2" do %>
+          <%= render(Primer::Beta::Button.new(
+            type: :submit,
+            scheme: :default,
+            classes: "ml-2"
+          )) do %>
+            Cancel
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if view.integration.suspended? %>
+    <% box.with_row(display: :flex, align_items: :center) do %>
+      <div class="flex-auto">
+        <strong>Unsuspend GitHub App</strong>
+        <div class="text-small color-fg-muted">
+          This removes the suspension on this app. This app will become available for use again.
+        </div>
+      </div>
+
+      <%= render(Primer::Alpha::Dialog.new(
+        size: :medium_portrait,
+        title: "Unsuspend GitHub App",
+      )) do |dialog| %>
+        <% dialog.with_show_button(scheme: :danger) { "Unsuspend App" } %>
+        <%= render(Primer::Alpha::Dialog::Body.new) do %>
+          <%= render(Primer::Beta::Flash.new(
+            icon: :stop,
+            scheme: :danger,
+          )) do %>
+            Are you sure you want to unsuspend this app?
+          <% end %>
+          <%= form_tag unsuspend_stafftools_business_app_path, method: :delete do %>
+            <%= submit_tag "Unsuspend App", class: "btn btn-danger" %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% else %>
+    <% box.with_row(display: :flex, align_items: :center) do %>
+      <div class="flex-auto">
+        <strong>Suspend GitHub App</strong>
+        <div class="text-small color-fg-muted">
+          This blocks all actions and requests from this app until it is unsuspended.
+        </div>
+      </div>
+
+      <%= render(Primer::Alpha::Dialog.new(
+        size: :medium_portrait,
+        title: "Suspend GitHub App",
+      )) do |dialog| %>
+        <% dialog.with_show_button(scheme: :danger) { "Suspend App" } %>
+        <%= render(Primer::Alpha::Dialog::Body.new) do %>
+          <%= render(Primer::Beta::Flash.new(
+            icon: :stop,
+            scheme: :danger,
+          )) do %>
+            Are you sure you want to suspend this app?
+          <% end %>
+          <%= form_tag suspend_stafftools_business_app_path, method: :post do %>
+            <%= render Primer::Alpha::TextArea.new(
+              label: "Suspension reason",
+              name: "reason",
+              placeholder: "Suspension reason",
+              required: true,
+              full_width: true,
+              mb: 3,
+            ) %>
+            <%= submit_tag "Suspend App", class: "btn btn-danger" %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+    <% box.with_row(display: :flex, align_items: :center) do %>
+      <div class="flex-auto">
+        <strong>Transfer ownership</strong>
+        <div class="text-small color-fg-muted">
+          <p>Transfer this GitHub App to another owner</p>
+        </div>
+      </div>
+
+    <div>
+      <%= render layout: "shared/details_dialog", locals: {
+        button_text: "Transfer ownership",
+        button_class: "btn btn-danger mt-1",
+        title: "Where should we transfer #{view.integration.name}?"
+      } do %>
+        <%= form_tag stafftools_business_app_transfer_path(view.integration.owner, view.integration), class: "d-flex flex-column flex-auto js-transfer-form" do %>
+          <div class="Box-body overflow-auto">
+            <dl class="form-group mb-0">
+              <dt><label for="js-transfer-search-input">New owner's GitHub username, organization, or enterprise name:</label></dt>
+              <dd>
+                <div class="js-add-access-search">
+                  <div class="js-transfer-search-selection">
+                    <%= render(Primer::Beta::AutoComplete.new(
+                      src: transfer_suggestions_stafftools_business_app_transfer_path(view.integration.owner, view.integration),
+                      label_text: "Type in the name of the new owner",
+                      visually_hide_label: true,
+                      placeholder: "Search for new owner",
+                      full_width: true,
+                      with_icon: true,
+                      list_id: "transfer-search-results",
+                      input_id: "js-transfer-search-input",
+                      input_name: "transfer_to",
+                      required: true,
+                      test_selector: "transfer-autocomplete",
+                    )) do |autocomplete| %>
+                      <% autocomplete.with_leading_visual_icon(icon: :search) %>
+                      <% autocomplete.with_input(required: true) %>
+                    <% end %>
+
+                    <% if view.enterprise_owned_with_installations? %>
+                      <div class="d-flex flex-items-center mt-3">
+                        <%= render(Primer::Beta::Octicon.new(:info, size: :small, mr: 1)) %>
+                        <%= render(Primer::Beta::Text.new(color: :subtle, font_size: :small, test_selector: "info-enterprise-transfer")) do %>
+                          You cannot transfer this GitHub App to another Enterprise because it has active installations.
+                        <% end %>
+                      </div>
+                    <% end %>
+                  </div>
+
+                  <div class="js-transfer-search-selected" hidden>
+                    <div class="js-selected-transfer-badge"></div>
+                  </div>
+                </div>
+              </dd>
+            </dl>
+          </div>
+          <div class="Box-footer">
+            <div hidden id="uninstall-warning-banner"
+              data-has-installations="<%= view.integration.installations.any? %>"
+              data-is-private-app="<%= view.integration.private_visibility? %>"
+              data-owner-type="<%= view.integration.owner.class.name %>">
+              <%= render(Primer::Alpha::Banner.new(scheme: :warning, mb: 3 )) do %>
+                <p><%= view.uninstall_warning_text %></p>
+              <% end %>
+            </div>
+            <%= render Primer::Beta::Button.new(type: :submit, block: true, scheme: :danger, "data-disable-invalid": "") do %>Transfer this GitHub App<% end %>
+          </div>
+          <% end %>
+        <% end %>
+    </div>
+  <% end %>
+<% end %>

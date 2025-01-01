@@ -1,0 +1,400 @@
+#!/usr/bin/env safe-ruby
+# typed: true
+# frozen_string_literal: true
+
+require_relative "../config/environment"
+require_relative "./seeds/objects"
+require "optparse"
+require "time"
+require "open3"
+require "json"
+
+rails_server_running = system <<-SHELL
+if ! lsof -Pi :8152 -sTCP:LISTEN -t >/dev/null ; then
+  echo "Your Rails server is not running. Please start it with script/dx/server-start and run this setup script again."
+  exit 1
+fi
+SHELL
+return unless rails_server_running
+
+# Helper class to parse and validate command line arguments
+class Runner
+  attr_reader :args, :launcher, :envvars
+
+  LAUNCHER_ACTIONS = "actions"
+  LAUNCHER_DOCKER = "docker"
+
+  def initialize
+    @args = parse_args(ARGV)
+    @launcher = @args[:launcher]
+    @envvars = {}
+  end
+
+  def capi?
+    @args[:capi]
+  end
+
+  def proxima?
+    @args[:proxima]
+  end
+
+  def docker?
+    @launcher == LAUNCHER_DOCKER
+  end
+
+  def actions?
+    @launcher == LAUNCHER_ACTIONS
+  end
+
+  def seed_github_app
+    integration = T.must(Apps::Privileged::CopilotSWEAgent.seed_database!)
+
+    key = integration.generate_key(creator: mona).private_key.to_pem
+
+    [integration, key]
+  end
+
+  def capi_hmac_key
+    @capi_hmac_key ||= get_capi_hmac_key.strip
+  end
+
+  def get_capi_hmac_key
+    onep_capi_hmac_key || stdin_capi_hmac_key
+  end
+
+  # Install the app on monalisa and the github org
+  def install_github_app(integration)
+    if integration.installations.any?
+      bot = integration.installations_on(Organization.find_by_login("github")).first.bot
+      seed_copilot_pr(bot)
+    else
+      integration.install_on(mona, repositories: [], installer: mona, entry_point: :test_case)
+      github = integration.install_on(Organization.find_by_login("github"), repositories: [], installer: mona, entry_point: :test_case)
+
+      if github.success? && !github.installation.nil? && !github.installation.bot.nil?
+        seed_copilot_pr(github.installation.bot)
+      else
+        puts "\n➡️ Optional: To Seed a Copilot-authored PR, please re-run the script once the server is up and running\n"
+      end
+    end
+  end
+
+  def seed_copilot_pr(bot)
+    puts "\n➡️ Seeding a Copilot-authored PR\n"
+
+    repo = Repository.nwo("github/private-server")
+
+    # Needs to start with copilot/
+    branch_name = "copilot/branch-#{Time.now.strftime('%Y-%m-%d-%H%M%S')}"
+
+    base_ref = repo.heads.find_or_build("main")
+    head_ref = repo.heads.create(branch_name, base_ref.target, bot)
+    head_ref.append_commit({ message: "copilot changes", committer: bot }, bot) do |files|
+      files.add("README.md", "foo")
+      files.add("config/gitconfig", "foo")
+    end
+
+    pull = PullRequest.create_for!(repo, { title: "a pr with a missing base ref", head: branch_name, base: "main", body: "copilot wrote me a PR", user: bot })
+    pull.pull_request_copilot_attributions.create(user: mona)
+  end
+
+  def allow_swe_agent_access
+    Organization.find_by_login("github").update_copilot_swe_agent_access("all_repos", actor: User.find_by_login("ghost"))
+    User.find_by_login("monalisa").update_copilot_swe_agent_access("all_repos", actor: User.find_by_login("ghost"))
+  end
+
+  def add_self_hosted_runner
+    scope = Organization.find_by_login("github").runner_creation_token_scope
+    token = User.find_by_login("monalisa").signed_auth_token(scope: scope, expires: 1.hour.from_now)
+    system("/workspaces/sweagentd/script/docker-self-hosted-runner ./config.sh --url http://github.localhost:80/github --token #{token} --unattended --labels docker-self-hosted-runner")
+  end
+
+  def enable_swe_agent_policies(org: "github", user: mona)
+    org = Organization.find_by_login(org)
+    copilot_org = Copilot::Organization.new(org)
+    copilot_business = copilot_org.copilot_business
+
+    # Enable Copilot for the business and upgrade it to the enterprise plan
+    copilot_business.enable_copilot_for_all_organizations!(user)
+    copilot_business.copilot_plan_enterprise!
+
+    # Give monalisa a Copilot seat
+    copilot_org.seat_management_allow_all!(user)
+
+    # Enable the SWE agent and MCP policies
+    copilot_business.swe_agent_enabled!
+    copilot_business.mcp_enabled!
+  end
+
+  def add_env_vars(vars)
+    envvars.merge!(vars)
+  end
+
+  def add_env_comment(comment)
+    envvars["##{Random.random_number}"] = comment
+  end
+
+  def write_env_file
+    puts "\n➡ Creating /workspaces/sweagentd/.env with these variables\n"
+    content = envvars_to_s
+    puts content
+    File.write("/workspaces/sweagentd/.env", content)
+  end
+
+  private
+
+  def mona
+    @mona ||= User.find_by_login("monalisa")
+  end
+
+  def parse_args(args)
+    options = {
+      launcher: LAUNCHER_ACTIONS,
+    }
+    OptionParser.new do |opts|
+      opts.banner = "Usage: bin/setup-codespaces-copilot-swe-agent.rb [OPTIONS]"
+
+      opts.on("-l=LAUNCHER", "--launcher=LAUNCHER", "Name of launcher to use, either `actions` or `docker`") do |arg|
+        if arg != LAUNCHER_ACTIONS && arg != LAUNCHER_DOCKER
+          puts "Invalid launcher. Must be either `actions` or `docker`"
+          exit 1
+        end
+        options[:launcher] = arg
+      end
+
+      opts.on("-c", "--capi", "Set up Copilot API") do
+        options[:capi] = true
+      end
+
+      opts.on("-p", "--proxima", "Set up coding agent in Proxima") do
+        options[:proxima] = true
+      end
+
+      opts.on("-h", "--help", "Prints this help") do
+        puts opts
+        exit 1
+      end.parse!(args)
+    end
+
+    options
+  end
+
+  def envvars_to_s
+    envvars.map do |k, v|
+      k.start_with?("#") ? "\n# #{v}" : "#{k}=\"#{v}\""
+    end.join("\n")
+  end
+
+  def stdin_capi_hmac_key
+    print "\nInput the CAPI_HMAC_KEY (CAPI / Copilot Developer (Dev) API secret in 1P): "
+    STDIN.noecho(&:gets).chomp
+  end
+
+  def onep_capi_hmac_key
+    onep_secret_key = ENV["ONEP_SECRET_KEY"]
+    onep_password = ENV["ONEP_PASSWORD"]
+    github_user = ENV["GITHUB_USER"]
+
+    return unless onep_secret_key && onep_password && github_user
+
+    print "\n1Password secrets detected. installing 1Password CLI..."
+    system("script/install_1password_cli")
+
+    print "\nSigning in to 1Password..."
+
+    # First add the account
+    Open3.popen3("op", "account", "add",
+                "--address", "github.1password.com",
+                "--email", "#{github_user}@github.com",
+                "--secret-key", onep_secret_key) do |stdin, _stdout, _stderr, wait_thr|
+      stdin.write(onep_password)
+      stdin.close
+      wait_thr.value # Wait for completion
+    end
+
+    # Then sign in with the password
+    session_success = false
+    Open3.popen3("op", "signin", "--account", "github.1password.com") do |stdin, stdout, _stderr, wait_thr|
+      stdin.write(onep_password)
+      stdin.close
+      # Capture the session token from stdout
+      session_output = stdout.read
+      if session_output.include?("export OP_SESSION")
+        # Extract and set the session token
+        match = session_output.match(/export OP_SESSION_[^=]+=([^;\s]+)/)
+        if match
+          session_token = match[1]
+          ENV["OP_SESSION_github"] = session_token.gsub(/["']/, "")
+          session_success = true
+        else
+          warn "Could not extract OP_SESSION token from 1Password CLI output."
+        end
+      else
+        warn "No OP_SESSION found in 1Password CLI output."
+      end
+      wait_thr.value
+    end
+
+    return unless session_success
+
+    print "\nRetrieving CAPI_HMAC_KEY from 1Password..."
+    cmd = ["op", "item", "get", "CAPI / Copilot Developer (Dev) API secret", "--format", "json"]
+    json_output, status = Open3.capture2(*cmd)
+    if !status.success?
+      warn "\nFailed to retrieve item from 1Password. Please check your 1Password CLI setup and try again."
+      return
+    end
+
+    fields = JSON.parse(json_output)["fields"]
+    credential = fields.find { |f| f["label"] == "credential" }
+    if credential && credential["value"]
+      credential["value"]
+    else
+      warn "\nCredential field not found in 1Password item."
+    end
+  end
+end
+
+# Actually start the setup process
+runner = Runner.new
+
+# Note this script brings in production feature flags, so any feature flag updates need to happen after this point
+puts "\n➡️ script/enable-copilot-chat\n"
+system("script/enable-copilot-chat")
+
+capi_hmac_key = runner.capi_hmac_key
+
+if runner.capi?
+  puts "\n➡️ script/setup-codespaces-copilot-api\n"
+  system("script/setup-codespaces-copilot-api")
+
+  puts "\n➡️ Enabling model feature flags for CAPI\n"
+  system("bin/toggle-feature-flag enable copilot_api_model_rollout_claude35sonnet_integrations_no_users")
+
+  puts "\n➡️ Disabling firewall feature flag\n"
+  system("bin/toggle-feature-flag disable copilot_swe_agent_firewall_enabled_by_default")
+
+  runner.add_env_comment("For local CAPI")
+  runner.add_env_vars({
+    "COPILOT_API_URL": "http://localhost:2206",
+    "CAPI_HMAC_KEY": "#{capi_hmac_key}",
+    "COPILOT_INTEGRATION_ID": "dev",
+  })
+else
+  puts "\n➡️ Disabling CAPI session feature flag\n"
+  system("bin/toggle-feature-flag disable copilot_api_agent_sessions")
+end
+
+puts "\n➡️ Enabling feature flags\n"
+system("bin/toggle-feature-flag enable copilot_swe_agent \
+  -F pull_request_copilot_attributions \
+  -F copilot_coding_agent_premium_requests \
+  -F copilot_global_overlay_v2 \
+  -F copilot_immersive_agent_branch_selection \
+  -F copilot_agent_tasks_btn_file_reference \
+  -F copilot_agent_tasks_btn_global_pulls \
+  -F copilot_agent_tasks_btn_repo_pulls \
+  -F copilot_agent_tasks_btn_code_nav \
+  -F copilot_agent_tasks_btn_code_view \
+  -F copilot_agent_tasks_btn_code_view_lines \
+  -F copilot_agent_tasks_btn_repo \
+  -F copilot_mission_control")
+
+if !File.exist?("/workspaces/sweagentd")
+  puts "\n➡️ Cloning github/sweagentd\n"
+  system("git clone https://github.com/github/sweagentd /workspaces/sweagentd")
+  puts "\n➡️ Installing sweagentd dependencies\n"
+  system("/workspaces/sweagentd/script/install-all-deps")
+end
+
+puts "\n➡️ Enabling Issues React UX\n"
+system("script/setup-issues-react")
+
+puts "\n➡️ Seeding GitHub app\n"
+integration, key = runner.seed_github_app
+runner.install_github_app(integration)
+
+puts "\n➡️ Allowing SWE agent access\n"
+runner.allow_swe_agent_access
+
+puts "\n➡️ Enabling SWE agent and MCP policies\n"
+runner.enable_swe_agent_policies
+
+if runner.proxima?
+  puts "\n➡️ Enabling SWE agent and MCP usage in Proxima\n"
+  system("bin/toggle-feature-flag enable -F coding_agent_in_proxima")
+
+  # Fetch the proxima user and enable policies
+  user = User.find_by_login("monalisa_avo")
+  runner.enable_swe_agent_policies(org: "avocado-gmbh-research_avo", user: user)
+end
+
+runner.add_env_comment("GitHub App Credentials")
+runner.add_env_vars({
+  "GITHUB_APP_ID": integration.id,
+  "GITHUB_APP_BOT_ID": integration.bot.id,
+  "GITHUB_APP_LOGIN": integration.slug,
+  "GITHUB_BOT_LOGIN": integration.bot.login,
+  "GITHUB_APP_PRIVATE_KEY": Base64.strict_encode64(key.strip),
+  "GITHUB_SERVER_URL": "http://github.localhost/",
+  "GITHUB_API_BASE_URL": "http://api.github.localhost/",
+  "GITHUB_SERVER_URL_OVERRIDE": "http://github.localhost/",
+  "GITHUB_API_BASE_URL_OVERRIDE": "http://api.github.localhost/",
+})
+
+runner.add_env_comment("User and email for commits - the email below makes it look like the commit was done by Copilot")
+runner.add_env_vars({
+  "GITHUB_COMMIT_LOGIN": "Copilot",
+  "GITHUB_COMMIT_EMAIL": "#{integration.bot.id}+#{integration.bot.login}@users.noreply.github.localhost",
+})
+
+runner.add_env_comment("This is the URL that the agent will use to send callbacks to - should be sweagentd")
+runner.add_env_vars({
+  "AGENT_CALLBACK_URL": "http://localhost:2208/agent",
+  "AGENT_LAUNCHER": runner.launcher,
+})
+
+if runner.actions?
+  puts "\n➡️ Mirroring github/copilot-developer-action\n"
+  system("bin/seed github_repo --nwo github/copilot-developer-action -t $GITHUB_TOKEN")
+
+  puts "\n➡️ Starting Actions (run start-actions if it gets stopped)\n"
+  system("/workspaces/actions/actions-codespaces/script/server --scenario actions-codespaces-vnext --verbose")
+
+  puts "\n➡️ Enabling four-nines Actions architecture\n"
+  system("/workspaces/actions/actions-dotnet/src/Scripts/toggle-four-nines on")
+
+  puts "\n➡️ Setting up Docker self-hosted runner\n"
+  runner.add_self_hosted_runner
+
+  runner.add_env_vars({
+    "ACTIONS_DEFAULT_RUNS_ON_LABELS": "docker-self-hosted-runner",
+    "COPILOT_INTEGRATION_ID": "copilot-developer-dev",
+    "CAPI_HMAC_KEY": "#{capi_hmac_key}",
+  })
+
+  unless runner.capi?
+    puts "\n📣 Set `CAPI_HMAC_KEY_OVERRIDE` and `COPILOT_INTEGRATION_ID_OVERRIDE` as org secrets for the github org\n"
+    puts "\n📣 If you didn't set `CAPI_HMAC_KEY`, make sure to update it in your `.env`! `\n"
+  end
+end
+
+if runner.docker?
+  image_name = "sweagentd-runtime"
+  puts "\n➡️ Building the Docker image from sweagentd/runtime\n"
+  system("/workspaces/sweagentd/runtime npm run docker:build #{image_name}")
+  runner.add_env_comment("This is the image that the agent will use to run the container")
+  runner.add_env_vars({
+    "DOCKER_AGENT_CONTAINER_IMAGE": image_name,
+  })
+
+  runner.add_env_comment("For production CAPI")
+  runner.add_env_vars({
+    "COPILOT_INTEGRATION_ID": "copilot-developer-dev",
+    "CAPI_HMAC_KEY": "#{capi_hmac_key}",
+  })
+end
+
+runner.write_env_file
+
+puts "\n🎉 Done!"

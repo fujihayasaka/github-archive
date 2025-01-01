@@ -1,0 +1,95 @@
+<%
+  analytics_dimensions = {
+    currently_following_users_count: following_count,
+    events_shown: view_model.visible_events.any?,
+    banner_shown: view_model.visible_events.none?,
+    banner_dismissable: view_model.visible_events.none?,
+    page_type: "activity"
+  }
+
+  shared_dashboard_feed_data = {
+    followed_user_ids: followed_user_ids,
+    starred_repo_ids: starred_repo_ids,
+    sponsored_user_ids: sponsored_user_ids,
+    sponsorable_user_ids: sponsorable_user_ids,
+    starrable_repo_ids: starrable_repo_ids,
+    discussion_number_and_comment_count_by_release_id: discussion_number_and_comment_count_by_release_id,
+    reaction_count_by_content_by_release_id: reaction_count_by_content_by_release_id,
+    viewer_reaction_contents_by_release_id: viewer_reaction_contents_by_release_id,
+  }
+%>
+
+<% if FeatureFlag.vexi.enabled?(:conduit_dashboard_feed, current_user, default: false) %>
+ <%= render Primer::BaseComponent.new(
+    tag: :div,
+    py: 6,
+    hidden: true,
+    display: :flex,
+    justify_content: :center,
+    align_items: :center,
+    data: {
+      target: 'feed-container.spinner',
+    }) do %>
+    <%= render(Primer::Beta::Spinner.new(size: :medium)) %>
+  <% end %>
+  <div data-target='feed-container.content' <%= test_selector("for-you-feed-container") %>>
+    <%= render partial: "dashboard/include_for_you_feed", locals: { url: url_for_feed(source: "dashboard_feed") } %>
+  </div>
+<% elsif view_model.visible_events.any? %>
+  <div data-repository-hovercards-enabled data-hpc <%= test_selector("dashboard-feed") %>>
+    <% view_model.event_groups.each do |group_view| %>
+      <% if group_view.is_a?(Dashboard::EventGroupView) %>
+        <%= render_event_group(group_view, locals: shared_dashboard_feed_data) %>
+      <% else %>
+        <%= render_event(group_view, locals: shared_dashboard_feed_data) %>
+      <% end %>
+    <% end %>
+
+    <% if view_model.has_next_page? %>
+      <%= render "events/more_paginate" %>
+    <% end %>
+  </div>
+<% elsif !current_organization %>
+  <div class="Box p-5 mt-3" data-hpc <%= test_selector("dashboard-feed-empty") %>>
+    <h2 class="h2 lh-condensed mb-2">Discover interesting projects and people to populate your personal news feed.</h2>
+    <p class="f4 color-fg-muted">
+      Your news feed helps you keep up with recent activity on repositories you
+      <% if GitHub.explore_enabled? %>
+        <%= link_to(
+          "watch",
+          trending_index_path,
+          data: dashboard_empty_feed_watch_data_attributes(analytics_dimensions),
+          class: "Link--inTextBlock"
+        )%>
+        or
+        <%= link_to(
+          "star",
+          "/#{current_user.display_login}?tab=stars",
+          data: dashboard_empty_feed_star_data_attributes(analytics_dimensions),
+          class: "Link--inTextBlock"
+        )%>
+        and people you
+        <%= link_to(
+          "follow",
+          trending_developers_path,
+          data: dashboard_empty_feed_follow_data_attributes(analytics_dimensions),
+          class: "Link--inTextBlock"
+        )%>.
+      <% else %>
+        watch or star and people you follow.
+      <% end %>
+    </p>
+    <% if GitHub.explore_enabled? %>
+      <%= link_to(
+        "Explore GitHub",
+        explore_path,
+        class: "btn mt-2",
+        data: dashboard_empty_feed_explore_data_attributes(analytics_dimensions)
+      )%>
+    <% end %>
+  </div>
+<% elsif current_organization && feed_has_only_one_page_of_events? %>
+  <div <%= test_selector("org-welcome-message") %>>
+    <%= render_org_welcome %>
+  </div>
+<% end %>

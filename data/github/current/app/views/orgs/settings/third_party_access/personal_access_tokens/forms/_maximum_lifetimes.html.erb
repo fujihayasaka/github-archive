@@ -1,0 +1,73 @@
+<%= render(Primer::Beta::Heading.new(tag: :h3, font_weight: :normal, pb: 2, pt: 5)) do %>
+  Set maximum lifetimes for personal access tokens
+<% end %>
+
+<%= render(Primer::Beta::Text.new(tag: :p)) do %>
+  Control the maximum lifetime for <%= pat_type.name %> in your organizations. If set, your
+  organization members can only use <%= pat_type.name %> against your resources if the
+  tokens are set to expire within the period you provide. <a target="_blank" href="<%= GitHub.help_url %>/organizations/managing-programmatic-access-to-your-organization/setting-a-personal-access-token-policy-for-your-organization">Learn more about token expiration policies.</a>
+<% end %>
+
+<% if business = current_organization.business %>
+  <% business_lifetime_limit = pat_type == ProgrammaticAccessTokenType::FineGrained ? business.fine_grained_personal_access_token_expiration_limit : business.personal_access_token_classic_expiration_limit %>
+<% end %>
+
+<% if business_lifetime_limit.present? %>
+  <%= render Primer::Alpha::Banner.new(scheme: :warning, dismiss_scheme: :none, mb: 3, id: "enforce-biz-limit-banner") do %>
+    <strong>Maximum lifetime of <%=  pat_type.name %> must be <%= pluralize(business_lifetime_limit, "day") %> or less.</strong><br>This limit is controlled by your <%= business.display_login %> enterprise.
+  <% end %>
+<% end %>
+
+<%= form_with model: current_organization, url: settings_org_personal_access_tokens_maximum_lifetimes_path(current_organization), method: :patch, class: "d-block" do |f| %>
+  <%= f.hidden_field :pat_type, value: pat_type.serialize %>
+  <% org_pats_disabled = pat_type == ProgrammaticAccessTokenType::FineGrained ? current_organization.personal_access_tokens_restricted? : current_organization.legacy_personal_access_tokens_restricted?%>
+  <% disable_require_expiration_checkbox = org_pats_disabled || business_lifetime_limit.present? %>
+  <% lifetime_configuration = ProgrammaticAccessTokenLifetimeConfiguration.new(current_organization, pat_type) %>
+  <% lifetime_limit = lifetime_configuration.expiration_limit # This can be either set by org or its business %>
+  <% custom_timeframe_selected = custom_expiration_timeframe?(lifetime_limit, extra_timeframes: [366]) %>
+
+  <div class="form-group form-checkbox">
+    <%= f.check_box :require_pat_to_expire, id: "require_pat_to_expire", class: "form-checkbox-details-trigger", checked: lifetime_configuration.personal_access_token_expiration_limit_enabled?, disabled: disable_require_expiration_checkbox %>
+    <%= f.label :require_pat_to_expire, "#{pat_type.name.capitalize} must expire", for: "require_pat_to_expire" %>
+
+    <%= render(Primer::Beta::Text.new(tag: :p, font_weight: :normal)) do %>
+      Select a maximum lifetime for <%= pat_type.name %> to be allowed to access your organizations.
+    <% end %>
+
+    <div class="form-checkbox-details" aria-live="polite" <%= "hidden" if org_pats_disabled %>>
+      <div class="d-flex gap-2">
+        <%= f.select(
+            :fine_grained_personal_access_token_expiration_limit,
+            options_for_select(expiration_timeframes(allow_none: false, target_expiration_limit: business_lifetime_limit, extra_timeframes: [366]), custom_timeframe_selected ? "custom" : lifetime_limit),
+            {},
+            class: "js-pat-expiration-limit",
+            style: "min-height: 35px;",
+            aria: { label: "Select the maximum lifetime for #{pat_type.name}" }
+          )
+        %>
+
+        <div id="custom-pat-expiration-limit-wrapper" class="d-inline-block" <%= "hidden" if org_pats_disabled || !custom_timeframe_selected %>>
+          <span class="border rounded-2 pr-3 d-inline-flex" style="min-height: 35px;">
+            <%=
+              f.number_field(
+                :custom_fine_grained_personal_access_token_expiration_limit,
+                in: 1..[366, business_lifetime_limit].compact.min,
+                id: "custom_lifetime_limit",
+                class: "form-control border-0",
+                style: "width: 6em; background-color: transparent;",
+                value: custom_timeframe_selected ? lifetime_limit : nil,
+                aria: { label: "Enter a custom maximum lifetime for #{pat_type.name}" }
+              )
+            %>
+            <span class="flex-self-center">
+              days
+            </span>
+          </span>
+          <small class="ml-2 text-small color-fg-muted">between 1 and <%= [366, business_lifetime_limit].compact.min %> days</small>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <%= f.submit "Save", id: "lifetime-submit", class: "btn", "data-confirm" => "Are you sure you want to update your selection?", disabled: org_pats_disabled %>
+<% end %>

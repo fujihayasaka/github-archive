@@ -1,0 +1,51 @@
+<%= render(Primer::Alpha::Dialog.new(
+  title: "Delete Copilot Seat",
+  subtitle: user&.display_login,
+  id: "delete-copilot-seat-#{copilot_seat.id}",
+  size: :xlarge,
+)) do |d| %>
+  <% d.with_show_button(scheme: :link, title: "Cancel") do %>
+    <%= render(Primer::Beta::Octicon.new(:"x-circle", color: :danger, scheme: :danger)) %>
+  <% end %>
+  <% d.with_body do %>
+    <%= render(Primer::Alpha::Banner.new(scheme: :danger)) do %>
+      Are you sure?? Cancelling a seat will immediately remove the user's access to Copilot and we will stop billing the customer for the seat.
+    <% end %>
+    <br>
+    <% if seat_assignment&.pending_cancellation? %>
+      <%= render(Primer::Alpha::Banner.new(scheme: :warning)) do %>
+        This seat is already pending cancellation on <%= copilot_seat.pending_cancellation_date %>
+      <% end %>
+    <% else %>
+      <% if can_cancel_non_user? %>
+        <%= render(Primer::Alpha::Banner.new(scheme: :warning)) do %>
+          Setting pending cancellation on a Seat associated with a non-User assignable type will create a disassociated User assignment and set it to pending cancellation.
+        <% end %>
+      <% end %>
+      <%= render(Primer::Alpha::Banner.new(scheme: :warning)) do %>
+        Note: Seats are scheduled for cancellation at the end of the enterprise's or organization's billing cycle. For example, if an admin of <strong><%= owner.display_login %></strong> removed this seat for <em><%= user.present? ? user.display_login : "this user" %></em>, the seat will be scheduled for cancellation on <%= owner_billing_cycle_end %>.
+      <% end %>
+      <br>
+      <%= render(Primer::Beta::Text.new(tag: :p)) do %>
+      Would you like to schedule the seat for cancellation or cancel it immediately?
+      <% end %>
+    <% end %>
+  <% end %>
+  <% d.with_footer do %>
+    <% unless suspended || copilot_seat.seat_assignment.pending_cancellation? %>
+      <%= form_tag stafftools_copilot_seat_path(copilot_seat), method: :put do %>
+        <%= hidden_field_tag :cancellation_at, "owner", id: "cancel_owner_cancellation_at_#{copilot_seat.id}" %>
+        <%= hidden_field_tag :seat_id, copilot_seat.id, id: "cancel_owner_seat_id_#{copilot_seat.id}" %>
+        <%= hidden_field_tag :owner_id, owner.id, id: "cancel_owner_owner_id_#{copilot_seat.id}" %>
+        <%= hidden_field_tag :assigned_user_id, copilot_seat.assigned_user_id, id: "cancel_owner_assigned_user_id_#{copilot_seat.id}" %>
+        <%= render(Primer::Beta::Button.new(scheme: :primary, type: :submit)) { "Schedule Cancellation for #{owner_billing_cycle_end}" } %>
+      <% end %>
+    <% end %>
+    <%= form_tag stafftools_copilot_seat_path(copilot_seat), method: :delete do %>
+      <%= hidden_field_tag :seat_id, copilot_seat.id, id: "cancel_seat_id_#{copilot_seat.id}" %>
+      <%= hidden_field_tag :owner_id, owner.id, id: "cancel_owner_id_#{copilot_seat.id}" %>
+      <%= hidden_field_tag :assigned_user_id, copilot_seat.assigned_user_id, id: "cancel_assigned_user_id_#{copilot_seat.id}" %>
+      <%= render(Primer::Beta::Button.new(scheme: :danger, type: :submit)) { "Cancel Immediately" } %>
+    <% end %>
+  <% end %>
+<% end %>

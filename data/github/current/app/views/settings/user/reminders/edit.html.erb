@@ -1,0 +1,143 @@
+<%# erblint:counter ButtonComponentMigrationCounter 1 %>
+<%# erblint:counter GoogleAnalyticsDeprecation 1 %>
+<% page_info responsive: false, title: view.title %>
+
+<%= render layout: "settings/settings" do %>
+  <%= outdated_slack_installation_warning unless ms_teams_feature_flag %>
+  <%= client_outdated_or_not_installed_message if ms_teams_feature_flag %>
+  <%= client_outdated_or_not_installed_message client_app: :msteams, client_workspace_configured: ms_teams_configured if ms_teams_feature_flag %>
+  <%= render partial: "reminders/header", locals: { title: view.heading } %>
+
+<%= form_tag authorize_reminder_slack_workspace_path(view.organization, personal: true), id: "authorize-personal-reminder-org-form" do %>
+<% end %>
+
+<%= form_for view.personal_reminder, url: view.form_url, method: :patch, html: { class: "js-reminders-form" }  do |form| %>
+    <% if ms_teams_feature_flag %>
+    <dl class="form-group js-reminders-client-form-group">
+      <dt><%= form.label :chat_client, "Platform" %></dt>
+      <dd>
+        <% if view.available_chat_clients.present? %>
+          <%=
+            render partial: "reminders/form/client_dropdown", locals: {
+              selected_chat_client: view.selected_chat_client,
+              available_chat_clients: view.available_chat_clients,
+              personal: true
+            }
+          %>
+        <% end -%>
+        <div class="error">You must select a Platform</div>
+      </dd>
+    </dl>
+    <% end -%>
+
+    <dl class="form-group js-slack-form-group" <% if ms_teams_feature_flag %>hidden<% end -%> >
+      <dt><%= form.label :reminder_slack_workspace_id, "Slack workspace" %></dt>
+      <dd>
+        <% if view.client_workspaces.where(type: ReminderSlackWorkspace).present? %>
+          <%=
+            render partial: "reminders/form/slack_dropdown", locals: {
+              selected_slack_workspace: view.selected_workspace_for(ReminderSlackWorkspace),
+              slack_workspaces: view.client_workspaces.where(type: ReminderSlackWorkspace),
+              can_add_slack_workspace: true,
+              add_slack_workspace_form_id: "authorize-personal-reminder-org-form",
+              personal: true,
+            }
+          %>
+        <% else -%>
+          <%= render Primer::Beta::Button.new(
+            scheme: :primary,
+            type: :submit,
+            form: "authorize-personal-reminder-org-form",
+            test_selector: "authorize-workspace-button",
+          ).with_content("Authorize Slack workspace") %>
+        <% end -%>
+        <div class="error">You must select a Slack Workspace</div>
+      </dd>
+    </dl>
+
+    <hr>
+
+    <%= form.fields_for :delivery_time do |delivery_time| %>
+      <dl class="form-group js-day-form-group">
+        <dt><%= delivery_time.label :days, "Days" %></dt>
+        <dd>
+          <%= render partial: "reminders/form/day_select", locals: { selected: view.selected_days, summary_text: view.days_text, allow_blank: true, form: delivery_time } %>
+        </dd>
+      </dl>
+
+      <dl class="form-group js-time-form-group">
+        <dt><%= delivery_time.label :times, "Times" %></dt>
+        <dd class="d-flex">
+          <%= render partial: "reminders/form/time_select", locals: { selected: view.selected_times, allow_blank: true, form: delivery_time } %>
+          <%= render partial: "reminders/form/time_zone_select", locals: { selected: view.personal_reminder.time_zone_name, form: form } %>
+        </dd>
+        <dd class="error">You must select at least one time</dd>
+      </dl>
+    <% end -%>
+
+    <hr>
+
+    <div class="form-checkbox">
+      <%= form.label :include_review_requests, "" do %>
+        <%= form.check_box :include_review_requests %>
+        Review requests assigned to you
+        <p class="note">
+          Receive reminders for pull request reviews waiting on you.
+        </p>
+      <% end -%>
+    </div>
+
+    <div class="form-checkbox">
+      <%= form.label :include_team_review_requests, "" do %>
+        <%= form.check_box :include_team_review_requests %>
+        Review requests assigned to your team
+        <p class="note">
+          Receive reminders for pull request reviews waiting on your team.
+        </p>
+      <% end -%>
+    </div>
+
+    <hr>
+
+    <%= render Users::Settings::PersonalReminders::RealTimeAlertSettingsComponent.new(
+      form: form,
+      personal_reminder: view.personal_reminder,
+    ) %>
+
+    <% unless view.personal_reminder.supports_private_repos? %>
+      <div class="note overflow-hidden mb-3">
+        You will only receive notifications from public repositories in this organization because the current plan for <%= link_to view.organization, view.organization.name, class: "Link--inTextBlock" %> does not support reminders for private repositories.
+        <% if !GitHub.enterprise? %>
+          <% if view.organization.adminable_by?(current_user) %>
+            <a
+              href="<%= upgrade_path(
+                plan: GitHub::Plan.business,
+                target: "organization",
+                org: view.organization
+              ) %>"
+              class="btn-link"
+              data-upgrade-link="<%= view.organization.name %>"
+              data-ga-click="Orgs, upgrade to team, location:create repo prompt">
+              Upgrade to Team
+            </a>
+          <% else %>
+            An administrator can upgrade the plan.
+          <% end %>
+        <% end %>
+      </div>
+    <% end %>
+
+    <%= render Primer::Beta::Button.new(
+      type: :submit,
+      scheme: view.client_workspaces.present? ? :primary : :default,
+      classes: class_names("js-reminder-submit-button" => view.client_workspaces.present?),
+      disabled: view.client_workspaces.blank?,
+      test_selector: "reminder-submit-button",
+    ).with_content(view.new_record? ? "Create reminder" : "Update reminder") %>
+  <% end -%>
+
+  <% unless view.new_record? %>
+    <hr>
+    <%= render partial: "reminders/delete_section", locals: { url: personal_reminder_path(view.organization.display_login) } %>
+  <% end %>
+<% end %>

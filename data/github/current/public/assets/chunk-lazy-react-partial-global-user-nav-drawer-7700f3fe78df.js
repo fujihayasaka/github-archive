@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["lazy-react-partial-actions-survey","lazy-react-partial-global-sso-banner","lazy-react-partial-global-user-nav-drawer"],{79473:(a,i,l)=>{var r=l(7123),u=l(24030);(0,r.k)("global-user-nav-drawer",{Component:u.fi})}}]);
+//# sourceMappingURL=lazy-react-partial-global-user-nav-drawer-f21b76d7a4fa.js.map

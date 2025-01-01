@@ -1,0 +1,245 @@
+<div role="region" aria-label="Caches">
+  <%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+    <% component.with_header(font_weight: :bold) do %>
+      Repository Cache Usage
+    <% end %>
+    <% component.with_row(classes: "summary") do %>
+      <% if cache_usage.nil? %>
+        <p>No cache usage data available. Either the backend data has not been synchronized yet, or there is no cache usage yet on the repository.</p>
+      <% else %>
+        <dl>
+          <dt class="mr-5"><b>Backend</b></dt>
+          <dd><%= cache_usage.is_results_usage ? "Actions Results" : "Artifact Cache (Legacy)" %></dd>
+        </dl>
+        <dl>
+          <dt class="mr-5"><b>Count</b></dt>
+          <dd><%= cache_usage.active_caches_count %></dd>
+        </dl>
+        <dl>
+          <dt class="mr-5"><b>Size</b></dt>
+          <dd>
+            <%= number_to_human_size(cache_usage.active_caches_size, precision: 2) %>
+            <% if is_over_limit %>
+              <span class="text-small color-fg-attention">
+                <%= primer_octicon(:alert, ml: 1) %> Exceeding limit.
+              </span>
+            <% end %>
+          </dd>
+        </dl>
+        <dl>
+          <dt class="mr-5"><b>Size Limit</b></dt>
+          <dd><%= cache_limit %> GB</dd>
+        </dl>
+        <dl>
+          <dt class="mr-5"><b>Last Synchronized</b></dt>
+          <dd><relative-time datetime="<%= cache_usage.updated_at.utc.iso8601 %>"></relative-time></dd>
+        </dl>
+      <% end %>
+
+      <div class="text-small my-2">
+        <%= link_to Stafftools::RepositoriesHelper.get_audit_log_link_for_repo_deleted_caches(current_repository.id) do %>
+          <%= primer_octicon(:search) %> Cache deletion audit logs
+        <% end %>
+      </div>
+
+      <% if !GitHub.enterprise? && cache_usage&.is_results_usage %>
+        <div class="text-small my-2">
+          <%= link_to Stafftools::RepositoriesHelper.get_kusto_link_for_cache_eviction(current_repository.id) do %>
+            <%= primer_octicon(:graph) %> Recent Size Based Evictions (Kusto)
+          <% end %>
+        </div>
+      <% end %>
+    <% end %>
+  <% end %>
+</div>
+<br>
+<% unless GitHub.enterprise? %>
+  <div role="region" aria-label="Repository Cache Policies">
+    <%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+      <% component.with_header(font_weight: :bold) do %>
+        Repository Cache Policies
+      <% end %>
+      <% component.with_row(classes: "summary") do %>
+        <dl>
+          <dt class="mr-5"><b>Applied Storage Limit</b></dt>
+          <dd><%= applied_storage_limit %> GB</dd>
+        </dl>
+        <dl>
+          <dt class="mr-5"><b>Applied Retention Policy</b></dt>
+          <dd><%= applied_retention_limit %> days</dd>
+        </dl>
+        <dl>
+          <dt class="mr-5"><b>Ownership Hierarchy</b></dt>
+          <dd>
+            <%= current_repository.name %> (repo) > <%= current_repository.owner.display_login %> (<%= current_repository.owner.class.name.downcase %>)<% if current_repository.owner.is_a?(Organization) && current_repository.owner.business %> > <%= current_repository.owner.business.name %> (enterprise)<% end %>
+          </dd>
+        </dl>
+        <dl>
+          <dt class="mr-5"><b>Storage Policies</b></dt>
+          <dd>
+            <% if storage_limits&.any? %>
+              <%= storage_limits.map { |limit| "#{limit[:storage_limit] ? "#{limit[:storage_limit]} GB" : 'No limit set'} (#{ limit[:entity].is_a?(Repository) ? 'repo' : limit[:entity].is_a?(Organization) ? 'org' : 'ent' })" }.join(', ') %>
+            <% else %>
+              No storage policies available
+            <% end %>
+          </dd>
+        </dl>
+        <dl>
+          <dt class="mr-5"><b>Retention Policies</b></dt>
+          <dd>
+            <% if retention_limits&.any? %>
+              <%= retention_limits.map { |limit| "#{limit[:retain_for] ? "#{limit[:retain_for]} days" : 'No policy set'} (#{ limit[:entity].is_a?(Repository) ? 'repo' : limit[:entity].is_a?(Organization) ? 'org' : 'ent' })" }.join(', ') %>
+            <% else %>
+              No retention policies available
+            <% end %>
+          </dd>
+        </dl>
+      <% end %>
+    <% end %>
+  </div>
+  <br>
+  <div role="region" aria-label="Repository Cache Billing">
+    <%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+      <% component.with_header(font_weight: :bold) do %>
+        Repository Cache Billing
+      <% end %>
+      <% component.with_row(classes: "summary") do %>
+        <dl>
+          <dt class="mr-5"><b>Billing Owner</b></dt>
+          <dd>
+            <% if billing_owner %>
+              <%= billing_owner.display_login %> (<%= billing_owner.class.name.downcase %>)
+            <% else %>
+              No billing owner found
+            <% end %>
+          </dd>
+        </dl>
+        <dl>
+          <dt class="mr-5"><b>Customer ID</b></dt>
+          <dd>
+            <%= billing_customer_id || "No customer ID found" %>
+          </dd>
+        </dl>
+        <dl>
+          <dt class="mr-5"><b>Current Usage</b></dt>
+          <dd>
+            <% if cache_usage %>
+              <%= number_to_human_size(cache_usage.active_caches_size, precision: 2) %>
+              (<%= cache_usage_percentage %>% of limit)
+            <% else %>
+              No cache usage data available
+            <% end %>
+          </dd>
+        </dl>
+        <dl>
+          <dt class="mr-5"><b>Expected Billing Level</b></dt>
+          <dd>
+            <% if expected_billing_level.is_a?(Numeric) %>
+              <%= expected_billing_level %> GB
+            <% else %>
+              <%= expected_billing_level || "No data available" %>
+            <% end %>
+          </dd>
+        </dl>
+        <dl>
+          <dt class="mr-5"><b>Watermark Billing Level</b></dt>
+          <dd>
+            <% begin %>
+              <% if watermark_billing_level.is_a?(Numeric) %>
+                <%= watermark_billing_level %> GB
+              <% else %>
+                <%= watermark_billing_level || "No data available" %>
+              <% end %>
+            <% rescue => e %>
+              Error retrieving billing level data
+            <% end %>
+          </dd>
+        </dl>
+        <dl>
+          <dt class="mr-5"><b>Watermark vs Expected</b></dt>
+          <dd>
+            <% begin %>
+              <% discrepancy_text = discrepancy || "No data available" %>
+              <% if discrepancy_text.include?("+") %>
+                <span class="color-fg-attention"><%= discrepancy_text %></span>
+              <% elsif discrepancy_text.include?("-") %>
+                <span class="color-fg-severe"><%= discrepancy_text %></span>
+              <% elsif discrepancy_text.include?("0 GB") %>
+                <span class="color-fg-success"><%= discrepancy_text %></span>
+              <% else %>
+                <%= discrepancy_text %>
+              <% end %>
+            <% rescue => e %>
+              Error calculating discrepancy
+            <% end %>
+          </dd>
+        </dl>
+        <dl>
+          <dt class="mr-5"><b>Can Proceed With Usage?</b></dt>
+          <dd>
+            <% if can_proceed_with_usage[:billable] %>
+              <span class="color-fg-success">Yes</span>
+            <% else %>
+              <span class="color-fg-severe">No</span>
+            <% end %>
+            - Status: <%= can_proceed_with_usage[:status] %>
+          </dd>
+        </dl>
+      <% end %>
+    <% end %>
+  </div>
+  <br>
+<% end %>
+<div role="region" aria-label="Cache List">
+  <%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+    <% if caches.empty? %>
+      <% component.with_header(font_weight: :bold) do %>
+          Repository Cache List
+      <% end %>
+      <% component.with_row(classes: "summary") do %>
+        <p>No cache entries found.</p>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if caches.any? %>
+    <div class="actions-fullwidth-module color-bg-default Box color-shadow-small mb-3 pt-2 pb-1 border rounded">
+      <table class="width-full mt-n1 actions-workflow-table">
+        <thead>
+          <tr class="color-fg-muted border-bottom color-border-muted">
+            <th class="mr-4"><b>Key</b></th>
+            <th class="mr-4">Scope</th>
+            <th class="mr-4">Size</th>
+            <th class="mr-4">Last accessed at</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          <% caches.each_with_index do |cache, index| %>
+            <%
+              last = index == caches.count - 1
+            %>
+            <tr role="row">
+              <td class="compact pr-4<% unless last %> border-bottom color-border-muted<% end %>">
+                <%= cache[:key] %>
+              </td>
+              <td class="compact pr-4<% unless last %> border-bottom color-border-muted<% end %>">
+                <%= cache[:ref] %>
+              </td>
+              <td class="compact pr-4<% unless last %> border-bottom color-border-muted<% end %>">
+                <%= number_to_human_size(cache[:size_in_bytes], precision: 2) %>
+              </td>
+              <td class="compact pr-4<% unless last %> border-bottom color-border-muted<% end %>">
+                <%= Time.at(cache[:last_accessed_at].to_i).strftime("%d-%m-%Y %I:%M %p") %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+
+      <div class="paginate-container">
+        <%= will_paginate caches %>
+      </div>
+  <% end %>
+</div>

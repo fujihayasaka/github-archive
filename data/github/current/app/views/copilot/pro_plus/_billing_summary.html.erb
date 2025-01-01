@@ -1,0 +1,87 @@
+<%# locals(payment_duration:, subscribe_path:, copilot_user:, success_path: nil, return_to_path: nil) -%>
+
+<%
+  success_path ||= nil
+  return_to_path ||= nil
+
+  copilot_base_price = payment_duration == "monthly" ? Copilot::COPILOT_PRO_PLUS_MONTHLY_BASE_PRICE : Copilot::COPILOT_PRO_PLUS_YEARLY_BASE_PRICE
+  copilot_price = copilot_base_price * 100
+  billing_period = payment_duration == "monthly" ? 1.month : 1.year
+  next_billing_date = (Time.now + billing_period).strftime("%B %e, %Y")
+
+  has_entered_all_required_info = current_user.has_saved_billing_information? && current_user.has_valid_payment_method?
+  has_active_subscription = copilot_user.has_active_subscription?
+%>
+
+<%= render Primer::Box.new(p: 3, border: true, border_radius: 2, bg: :default) do %>
+  <h2 class="sr-only">Subscription summary</h2>
+
+  <%= render Primer::Alpha::Stack.new(direction: :horizontal, justify: :space_between, mb: 2) do %>
+    <%= render Primer::Beta::Text.new(tag: :p, font_size: 5, font_weight: :bold, flex_grow: 0, mb: 0) do %>
+      <span>GitHub Copilot Pro+</span>
+    <% end %>
+
+    <%= render Primer::Beta::Text.new(tag: :p, font_size: 5, font_weight: :bold, mb: 0) do %>
+      <%= Billing::Money.new(copilot_price).format(no_cents_if_whole: false) %>
+    <% end %>
+  <% end %>
+
+  <% if FeatureFlag.vexi.enabled?(:site_spark_pro_plus_activation_flow, current_user, default: false) %>
+    <%= render Primer::Alpha::Stack.new(direction: :horizontal, align: :center, gap: :condensed, mb: 3) do %>
+      <%= render Primer::Beta::Octicon.new(:"sparkle-fill", size: :small, color: :done, flex_grow: 0) %>
+
+      <%= render Primer::Beta::Text.new(tag: :p, color: :muted, font_size: 6, mb: 0) do %>
+        Includes access to GitHub Spark
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <%= render Primer::Beta::Text.new(tag: :p, color: :default, font_size: 6, mb: 0) do %>
+    You will be billed <%= Billing::Money.new(copilot_price).format(no_cents_if_whole: false) %> today<%= has_active_subscription ? ", minus a prorated credit from your existing subscription." : "." %>
+    Your next payment will be <%= Billing::Money.new(copilot_price).format(no_cents_if_whole: false) %> on <%= next_billing_date %>.
+  <% end %>
+
+  <% if has_entered_all_required_info %>
+    <% if current_user.billing_contact.country_code == "KR" %>
+      <%= render Primer::Alpha::Dialog.new(title: "Privacy agreement", size: :medium_portrait) do |d| %>
+        <% d.with_header(show_divider: true) do %>
+          Privacy agreement
+        <% end %>
+
+        <% d.with_show_button(scheme: :primary, size: :large, block: true, mt: 3) { "Continue" } %>
+
+        <% d.with_body do %>
+          <%= render "copilot/pro_plus/subscribe_form",
+            payment_duration: payment_duration,
+            subscribe_path: subscribe_path,
+            success_path: success_path,
+            return_to_path: return_to_path,
+            hide_submit: true
+          %>
+        <% end %>
+
+        <% d.with_footer(show_divider: true) do %>
+          <%= render Primer::Beta::Button.new(scheme: :primary, type: :submit, size: :large, block: true,
+            form: "copilot-pro-plus-subscription-form",
+            data: {
+              target: "billing-checkout.submitButton",
+              action: "click:billing-checkout#handleSubscriptionActivation"
+            }
+          ) do %>
+            Activate now
+          <% end %>
+        <% end %>
+      <% end %>
+    <% else %>
+      <hr class="my-3">
+
+      <%= render "copilot/pro_plus/subscribe_form",
+        payment_duration: payment_duration,
+        subscribe_path: subscribe_path,
+        success_path: success_path,
+        return_to_path: return_to_path,
+        hide_submit: !billing_info_exists_without_errors
+      %>
+    <% end %>
+  <% end %>
+<% end %>

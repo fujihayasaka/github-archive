@@ -1,0 +1,275 @@
+# typed: true
+# frozen_string_literal: true
+
+class Integrations::ShowView < ViewModel # rubocop:todo ViewComponent/NoMoreViewModels
+  BETA_FEATURE_FLAGS = {
+    user_token_expiration: "user_token_expiration_opt_in",
+    apps_multiple_callback_urls: "apps_multiple_callback_urls_opt_in",
+  }
+
+  BETA_FEATURE_MODEL_ATTRIBUTES = {
+    "user_token_expiration_opt_in" => :user_token_expiration
+  }
+
+  BETA_FEATURE_NAMES = {
+    "user_token_expiration_opt_in" => "User-to-server token expiration",
+    "apps_multiple_callback_urls_opt_in" => "Multiple User authorization callback URLs",
+  }
+
+  LAUNCHED_FEATURES = %i[
+    user_token_expiration
+  ]
+
+  def self.toggle_feature(flag, value, integration:)
+    return unless %w[enable disable].include?(value)
+    return unless BETA_FEATURE_FLAGS.values.include?(flag)
+
+    global_key = BETA_FEATURE_FLAGS.key(flag)
+    return unless FeatureFlag.vexi.enabled_or_raise?(global_key, integration.owner) # rubocop:disable GitHub/FeatureManagement/NoVexiEnabledOrRaiseUsage
+
+    case value
+    when "disable"
+      FeatureFlag.vexi_management.remove_feature_flag_actors(flag.to_sym, [integration]) # rubocop:disable GitHub/FeatureManagement/NoVexiManagementUsage
+    when "enable"
+      FeatureFlag.vexi_management.add_feature_flag_actors(flag.to_sym, [integration]) # rubocop:disable GitHub/FeatureManagement/NoVexiManagementUsage
+    end
+  end
+
+  def self.toggle_feature_flash_message(flag, value, integration:)
+    feature_name = BETA_FEATURE_NAMES[flag]
+    past_tense_value = case value
+    when "disable"
+      "disabled"
+    when "enable"
+      "enabled"
+    end
+
+    "#{feature_name} is being #{past_tense_value} for #{integration.name}."
+  end
+
+  def self.model_owned_opt_in_attribute(flag)
+    BETA_FEATURE_MODEL_ATTRIBUTES[flag]
+  end
+
+  def self.enable_or_disable_to_boolean(value)
+    case value
+    when "disable"
+      false
+    when "enable"
+      true
+    end
+  end
+
+  attr_reader :integration, :page
+
+  delegate :pending_transfer?, :public?, :can_make_private?, :can_make_public?, :description,
+           :transfer, :hook, :can_delete?, to: :integration
+
+  delegate :pricing_url?, :pricing_url, :documentation_url?, :documentation_url,
+           :tos_url?, :tos_url, :support_url?, :support_url,
+           :status_url?, :status_url, :privacy_policy_url, to: :listing
+
+  def show_features?
+    features.any?
+  end
+
+  # Public: Determine if "Install app" link should be shown. Full-trust GitHub
+  # App installations should never be manually installed by end-users, so
+  # "Install app" should never be visible for those apps. Otherwise, checks to
+  # make sure the integration is installable anywhere by the current user.
+  #
+  # Returns a Boolean.
+  def hide_install_app_section?
+    return true unless Apps::Privileged.capable?(:user_installable, app: integration)
+    return true unless integration.installable_by?(current_user)
+    false
+  end
+
+  # Public: Determine if a field for setting the given GitHub App's bgcolor should be shown in the
+  # page.
+  #
+  # Returns a Boolean.
+  def allow_editing_bgcolor?
+    if GitHub.enterprise?
+      integration.primary_avatar.present?
+    else
+      return false unless integration.primary_avatar
+
+      listing = integration.marketplace_listing
+      listing.nil? || !listing.publicly_listed?
+    end
+  end
+
+  def features
+    return [] unless listing && listing.features.any?
+
+    listing.features
+  end
+
+  def beta_features?
+    return true if defined?(LAUNCHED_FEATURES) && LAUNCHED_FEATURES.any?
+    BETA_FEATURE_FLAGS.any? do |(global_flag, _opt_in)|
+      FeatureFlag.vexi.enabled_or_raise?(global_flag, integration.owner) # rubocop:disable GitHub/FeatureManagement/NoVexiEnabledOrRaiseUsage
+    end
+  end
+
+  def beta_feature_available?(flag)
+    global_key = BETA_FEATURE_FLAGS.key(flag)
+    return true if LAUNCHED_FEATURES.include?(global_key)
+
+    FeatureFlag.vexi.enabled_or_raise?(global_key, integration.owner) # rubocop:disable GitHub/FeatureManagement/NoVexiEnabledOrRaiseUsage
+  end
+
+  def beta_feature_enabled?(flag)
+    if (attribute = self.class.model_owned_opt_in_attribute(flag))
+      integration[attribute]
+    else
+      FeatureFlag.vexi.enabled_or_raise?(flag, integration) # rubocop:disable GitHub/FeatureManagement/NoVexiEnabledOrRaiseUsage
+    end
+  end
+
+  def beta_feature_toggle_value(flag)
+    beta_feature_enabled?(flag) ? "disable" : "enable"
+  end
+
+  def enterprise_owned?
+    integration.enterprise_owned?
+  end
+
+  def beta_feature_toggle_submit_value(flag)
+    beta_feature_enabled?(flag) ? "Opt-out" : "Opt-in"
+  end
+
+  def show_more_info?
+    listing.present?
+  end
+
+  def selected_link
+    :integrations
+  end
+
+  def hook_url
+    hook&.url
+  end
+
+  def make_private_tooltip_content
+    reason = if integration.owner.is_enterprise_managed?
+      "Enterprise Managed Accounts cannot have private integrations."
+    else
+      "it is #{(listing.present? ? "part of the Integrations Directory." : "already installed on other accounts.")}"
+    end
+
+    "This integration cannot be made private since #{reason}"
+  end
+
+  def show_unable_to_transfer_to_biz_message?
+    integration.owner.is_a?(User) &&
+    integration.public_visibility? &&
+    !is_enterprise_managed?
+  end
+
+  def uninstall_warning_text
+    prefix = "When the transfer is completed, this app will be automatically uninstalled from"
+
+    owner = integration.owner
+
+    case owner
+    when Business
+      "#{prefix} the #{owner.display_login} enterprise."
+    when Organization
+      "#{prefix} the #{owner.display_login} organization."
+    else
+      "#{prefix} your account."
+    end
+  end
+
+  def transfer_to_label_text
+    if show_unable_to_transfer_to_biz_message?
+      return "New owner's GitHub username or organization name:"
+    end
+
+    "New owner's GitHub username, organization, or enterprise name:"
+  end
+
+  def delete_tooltip_content
+    "This integration cannot be deleted since it has active marketplace subscriptions."
+  end
+
+  def events
+    integration.default_events.map do |event_type|
+      Hook::EventRegistry.for_event_type(event_type)
+    end.sort_by(&:display_name)
+  end
+
+  def transfer_target
+    transfer.target
+  end
+
+  def keys_classes
+    klasses = []
+    klasses << "has-keys" if integration.public_keys.any?
+    klasses << "multi-keys" if integration.public_keys.count > 1
+    klasses.join(" ")
+  end
+
+  def show_app_id_deprecation_message?
+    integration.owner.feature_flag_enabled?(:jwt_client_id_discourage_app_id, default: false)
+  end
+
+  def eligible_for_marketplace?
+    return false unless GitHub.marketplace_enabled?
+    return false unless public?
+    return false if is_enterprise_managed?
+    true
+  end
+
+  sig { returns(T::Boolean) }
+  def marketplace_listing_published?
+    listing = integration.marketplace_listing
+    listing.present? && listing.publicly_listed?
+  end
+
+  sig { returns(T.nilable(String)) }
+  def marketplace_listing_slug
+    listing = integration.marketplace_listing
+    listing&.slug
+  end
+
+  def user_facing_app_url_text
+    self.class.user_facing_app_url_text(integration)
+  end
+
+  def self.user_facing_app_url_text(integration)
+    integration&.enterprise_owned? ? "Profile page" : "Public page"
+  end
+
+  def is_enterprise_managed?
+    owner = integration.owner
+    case owner
+    when Organization
+      owner.enterprise_managed_user_enabled?
+    when User
+      owner.is_enterprise_managed?
+    else
+      false
+    end
+  end
+
+  def show_app_managers?
+    (integration.owner.is_a?(Organization) || integration.owner.is_a?(Business)) && integration.owner.admins.include?(current_user)
+  end
+
+  def app_managers_path
+    if integration.owner.is_a?(Organization)
+      Rails.application.routes.url_helpers.settings_org_permissions_integrations_managers_path(integration.owner, integration)
+    else
+      Rails.application.routes.url_helpers.settings_permissions_apps_managers_enterprise_path(integration.owner, integration)
+    end
+  end
+
+  private
+
+  def listing
+    @listing ||= integration.integration_listing
+  end
+end

@@ -1,0 +1,90 @@
+#!/bin/bash
+
+set -e
+
+export ALL_USERS_ARE_EMPLOYEES=1
+export MVND_HMAC_KEY="deadbeef"
+export MVND_HOST="${MVND_HOST:-http://localhost:8083}"
+export NO_VOLTRON=1
+export DOMAIN_NAME="${DOMAIN_NAME:-avocado-gmbh.ghe.localhost}"
+
+# Parse --branch/-b and --reset/-r flags
+MVND_BRANCH_ARG=""
+RESET_FLAG=false
+OPEN_VSCODE=false
+ARGS=()
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -c|--code)
+      OPEN_VSCODE=true
+      shift
+      ;;
+    -h|--help)
+      echo "Usage: $0 [--branch <branch>] [--reset] [<additional args>]"
+      echo "Options:"
+      echo "  -c, --code              Open migrations-vnext directory in VS Code"
+      echo "  -b, --branch <branch>   Clone migrations-vnext in the specified branch (default: main)"
+      echo "  -r, --reset             Reset the database and elastomer"
+      exit 0
+      ;;
+    -b|--branch)
+      MVND_BRANCH_ARG="$2"
+      shift 2
+      ;;
+    -r|--reset)
+      RESET_FLAG=true
+      shift
+      ;;
+    *)
+      ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+set -- "${ARGS[@]}"
+
+# Use branch from flag if provided, else from env
+BRANCH_TO_USE="${MVND_BRANCH_ARG:-$MVND_BRANCH}"
+
+# Clone migrations-vnext repo in parent directory if it doesn't exist
+MIGRATIONS_VNEXT_DIR="$(dirname "$PWD")/migrations-vnext"
+if [ ! -d "$MIGRATIONS_VNEXT_DIR" ]; then
+  # If no branch is specified, ask for confirmation before cloning
+  if [ -z "$BRANCH_TO_USE" ]; then
+    echo "❌ The migrations-vnext repository is not cloned in the parent directory."
+    echo "💡 You can run script/setup-codespaces-migrations-vnext to clone it before running this script."
+    read -p "Do you want to clone the migrations-vnext repository now? (y/n): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+      echo "Continuing without cloning migrations-vnext repository."
+    else
+      git clone https://github.com/github/migrations-vnext.git "$MIGRATIONS_VNEXT_DIR"
+    fi
+  else
+    git clone --branch "$BRANCH_TO_USE" https://github.com/github/migrations-vnext.git "$MIGRATIONS_VNEXT_DIR"
+  fi
+fi
+
+# Open migrations-vnext directory in VS Code if available
+if [ "$OPEN_VSCODE" = true ]; then
+  if command code -v >/dev/null 2>&1; then
+    code -n "$MIGRATIONS_VNEXT_DIR"
+  else
+    echo "VS Code is not installed or not found in PATH. Skipping opening migrations-vnext directory."
+  fi
+fi
+
+# Run reset commands if --reset/-r flag is set
+if [ "$RESET_FLAG" = true ]; then
+  bin/rails db:reset && bin/elastomer reset
+fi
+
+./bin/toggle-feature-flag enable migrations_vnext_api_migrations
+script/multi-tenant/toggle-feature-flags enable
+
+# ensure multi-tenant flag is passed to script/server
+if [[ ! " $@ " =~ " --multi-tenant " ]]; then
+  ./script/server --multi-tenant "$@"
+else
+  ./script/server "$@"
+fi

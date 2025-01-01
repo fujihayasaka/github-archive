@@ -1,0 +1,52 @@
+<% page_info :title => "Personal access tokens (classic) - #{organization}",
+             :selected_link => :personal_access_tokens_classic %>
+
+<%= render Primer::Beta::Subhead.new do |component| %>
+  <% component.with_heading { "Personal access tokens (classic)" } %>
+<% end %>
+
+<% legacy_pats_restricted = organization.legacy_personal_access_tokens_restricted? %>
+
+<%= render(Primer::Beta::BorderBox.new(mb: 4)) do |component| %>
+  <% component.with_header(font_weight: :emphasized) { "Access Restriction" } %>
+  <% component.with_body do %>
+    <% if organization&.business && !organization.business.legacy_personal_access_tokens_delegated_policy? %>
+      <%= render(Primer::Alpha::Banner.new(scheme: :warning, test_selector: "stafftools-enterprise-organization-delegation-notice")) do %>
+        This setting is configured at the enterprise level ("<%= "#{organization.business.name}" %>").
+      <% end %>
+    <% end %>
+
+    <% if legacy_pats_restricted %>
+      <strong>Restricted</strong> &ndash; Organization members are not allowed to access the organization using a PAT (classic).
+    <% else %>
+      <strong>Permitted</strong> &ndash; Organization administrators can restrict or permit access via PATs (classic).
+    <% end %>
+  <% end %>
+<% end %>
+
+<% unless legacy_pats_restricted %>
+  <%= render(Primer::Beta::BorderBox.new(mb: 4)) do |component| %>
+    <% component.with_header(font_weight: :emphasized) { "Token Expiration Limit" } %>
+    <% component.with_body do %>
+      <% if organization.personal_access_token_classic_expiration_limit_enabled? %>
+        <% limit = organization.personal_access_token_classic_expiration_limit %>
+        <% enterprise = organization&.business %>
+        Personal access tokens (classic) used against resources belonging to the <strong><%= organization.display_login %></strong> organization must expire within <%= limit %> days of creation.
+        <% if enterprise.present? %>
+          <% enterprise_level_policy = enterprise.personal_access_token_classic_expiration_limit == limit %>
+          <% exempt = enterprise.personal_access_token_classic_expiration_limit_exemption_enabled? %>
+          <% if enterprise_level_policy %>
+            This limit was set by the <strong><%= organization.business.display_login %></strong> enterprise.
+          <% else %>
+            This limit was set by this organization.
+          <% end %>
+            Enterprise administrators are <%= exempt ? "" : "not " %>exempt from this policy.
+        <% else %>
+          This limit was set by this organization.
+        <% end %>
+      <% else %>
+        No expiration limit is enforced for this organization.
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

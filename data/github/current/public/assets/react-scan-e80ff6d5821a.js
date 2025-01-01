@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["react-scan"],{36145:(i,u,e)=>{var n=e(39219);"undefined"!=typeof window&&(0,n.scan)({dangerouslyForceRunInProduction:!0})}},i=>{i.O(0,["react-lib","vendors-node_modules_react-scan_dist_index_js"],()=>i(i.s=36145)),i.O()}]);
+//# sourceMappingURL=react-scan-eb3512e80ad4.js.map

@@ -1,0 +1,210 @@
+<% if delegated_billing? %>
+  <%= render(Primer::Alpha::Banner.new(variant: :warning, icon: :info)) do %>
+    <strong>Enterprise-managed billing</strong><br>
+    This organization's billing is managed by enterprise <strong><%= enterprise_slug %></strong>.
+    Please manage trials at the enterprise level.
+  <% end %>
+<% elsif trial_enabled? %>
+  <div class="d-flex flex-justify-between flex-items-start mb-3">
+    <%= render(Primer::Beta::Subhead.new(hide_border: true)) do |subhead| %>
+      <% subhead.with_heading(tag: :h3, classes: "h4") do %><%= trial_type_display_name%> Trial Settings<% end %>
+    <% end %>
+    <div class="d-flex">
+      <%= render(Primer::Experimental::Dialog.new(
+        dialog_id: "edit-trial-dialog-#{trial_type_param}",
+        header_variant: :large,
+        width: :large,
+        title: "Edit #{trial_type_display_name} Trial"
+      )) do |c| %>
+        <% c.with_show_button(
+          scheme: :default,
+          size: :small,
+          test_selector: "edit-trial-dialog-button-#{trial_type_param}"
+        ) do |s| %>
+          Edit
+        <% end %>
+        <% c.with_body do %>
+          <%= form_with url: trial_form_path, method: :patch, local: true do |form| %>
+            <dl class="form-group">
+              <dt><%= form.label "Total trial duration (days)", for: "number_of_days_for_#{trial_type_display_name}_trial" %></dt>
+              <dd>
+                <%= form.number_field :number_of_days_for_trial,
+                    value: current_trial_duration_days,
+                    placeholder: "Total trial duration in days",
+                    min: 1,
+                    max: 90,
+                    class: "form-control",
+                    required: true,
+                    id: "number_of_days_for_#{trial_type_display_name}_trial",
+                    "aria-describedby": "trial-days-help" %>
+                <p class="note" id="trial-days-help">Remember this is total days. The new end of the trial will be calculated from its start date on <%= trial_start_date %>.</p>
+              </dd>
+            </dl>
+
+            <div class="form-group">
+              <fieldset>
+                <legend class="sr-only">Reset private repositories on expiration</legend>
+                <div class="form-group-header">
+                  <label>Reset private repositories on expiration</label>
+                </div>
+                <div class="form-checkbox">
+                  <%= form.radio_button :reset_private_repos_on_expiration, "true",
+                      checked: reset_on_expiration?,
+                      id: "reset_private_repos_true_#{trial_type_param}" %>
+                  <%= form.label "reset_private_repos_on_expiration_true", "Yes",
+                      for: "reset_private_repos_true_#{trial_type_param}" %>
+                </div>
+                <div class="form-checkbox">
+                  <%= form.radio_button :reset_private_repos_on_expiration, "false",
+                      checked: !reset_on_expiration?,
+                      id: "reset_private_repos_false_#{trial_type_param}" %>
+                  <%= form.label "reset_private_repos_on_expiration_false", "No",
+                      for: "reset_private_repos_false_#{trial_type_param}" %>
+                </div>
+              </fieldset>
+            </div>
+
+            <div class="form-actions">
+              <%= render(Primer::Beta::Button.new(type: :submit, scheme: :primary)) do %>
+                Update Trial
+              <% end %>
+              <%= render(Primer::Beta::Button.new(
+                data: { "close-dialog-id": "edit-trial-dialog-#{trial_type_param}" }
+              )) do %>
+                Cancel
+              <% end %>
+            </div>
+          <% end %>
+        <% end %>
+      <% end %>
+      <%= form_with url: trial_form_path, method: :delete, local: true, class: "ml-2" do |form| %>
+        <%= render(Primer::Beta::Button.new(
+          size: :small,
+          scheme: :danger,
+          type: :submit,
+          "data-confirm": "Are you sure you want to expire this trial?"
+        )) do %>
+          Expire Trial
+        <% end %>
+      <% end %>
+    </div>
+  </div>
+  <%= render(Primer::Alpha::Banner.new(variant: :default, icon: :check, mb: 3)) do %>
+    <strong>Trial Active</strong>
+  <% end %>
+
+  <dl class="form-group">
+    <dt><label>Total trial duration</label></dt>
+    <dd class="f4 mb-3"><%= current_trial_duration_days %> days</dd>
+  </dl>
+
+  <dl class="form-group">
+    <dt><label>Expiration date</label></dt>
+    <dd class="f4 mb-3"><%= expires_at&.strftime("%B %d, %Y at %l:%M %p %Z") %></dd>
+  </dl>
+
+  <dl class="form-group">
+    <dt><label>Reset private repositories on expiration</label></dt>
+    <dd class="f4"><%= reset_on_expiration? ? "Yes" : "No" %></dd>
+  </dl>
+<% elsif can_start_trial? %>
+  <%= render(Primer::Beta::Subhead.new(hide_border: true)) do |subhead| %>
+    <% subhead.with_heading(tag: :h3, classes: "h4") do %><%= trial_type_display_name%> Trial Settings<% end %>
+  <% end %>
+  <%= render(Primer::Experimental::Dialog.new(
+    dialog_id: "start-trial-dialog-#{trial_type_param}",
+    header_variant: :large,
+    width: :large,
+    title: "Start #{trial_type_display_name} Trial",
+    form_url: trial_form_path,
+    form_method: :post
+  )) do |c| %>
+    <% c.with_show_button(
+      scheme: :primary,
+      test_selector: "start-trial-dialog-button-#{trial_type_param}",
+    ) do |s| %>
+      Start Trial
+    <% end %>
+    <% c.with_body do %>
+      <%= form_with url: trial_form_path, method: :post, local: true do |form| %>
+        <dl class="form-group">
+          <dt><%= form.label :number_of_days_for_trial, "Trial Duration (days)" %></dt>
+          <dd>
+            <%= form.number_field :number_of_days_for_trial,
+                value: 30,
+                min: 1,
+                max: 90,
+                class: "form-control",
+                required: true,
+                "aria-describedby": "start-trial-days-help" %>
+            <p class="note" id="start-trial-days-help">Number of days for the trial (1-90 days)</p>
+          </dd>
+        </dl>
+
+        <dl class="form-group">
+          <dt><%= form.label :sfdc_poc_url, "SFDC POC URL" %></dt>
+          <dd>
+            <%= form.url_field :sfdc_poc_url,
+                placeholder: "https://salesforce.com/...",
+                class: "form-control",
+                required: true,
+                "aria-describedby": "sfdc-url-help" %>
+            <p class="note" id="sfdc-url-help">Required Salesforce Point of Contact URL</p>
+          </dd>
+        </dl>
+
+        <div class="form-group">
+          <fieldset>
+            <legend class="sr-only">Reset private repositories on expiration</legend>
+            <div class="form-group-header">
+              <label>Reset private repositories on trial expiration</label>
+            </div>
+            <div class="form-checkbox">
+              <%= form.radio_button :reset_private_repos_on_expiration, "true",
+                  checked: false,
+                  id: "reset_private_repos_true_start_#{trial_type_param}" %>
+              <%= form.label "reset_private_repos_on_expiration_true", "Yes",
+                  for: "reset_private_repos_true_start_#{trial_type_param}" %>
+            </div>
+            <div class="form-checkbox">
+              <%= form.radio_button :reset_private_repos_on_expiration, "false",
+                  checked: true,
+                  id: "reset_private_repos_false_start_#{trial_type_param}" %>
+              <%= form.label "reset_private_repos_on_expiration_false", "No",
+                  for: "reset_private_repos_false_start_#{trial_type_param}" %>
+            </div>
+          </fieldset>
+        </div>
+
+        <div class="form-actions">
+          <%= render(Primer::Beta::Button.new(type: :submit, scheme: :primary)) do %>
+            Start Trial
+          <% end %>
+          <%= render(Primer::Beta::Button.new(
+            data: { "close-dialog-id": "start-trial-dialog-#{trial_type_param}" }
+          )) do %>
+            Cancel
+          <% end %>
+        </div>
+      <% end %>
+    <% end %>
+  <% end %>
+<% else %>
+  <%= render(Primer::Beta::Subhead.new(hide_border: true)) do |subhead| %>
+    <% subhead.with_heading(tag: :h3, classes: "h4") do %><%= trial_type_display_name%> Trial Settings<% end %>
+  <% end %>
+  <%= render(Primer::Alpha::Banner.new(variant: :default, icon: :info)) do %>
+    <% if enablement_errors.any? %>
+      <strong>Trial cannot be started:</strong>
+      <ul class="pl-3 mt-2 mb-0">
+        <% enablement_errors.each do |error| %>
+          <li><%= error %></li>
+        <% end %>
+      </ul>
+    <% else %>
+      Trial cannot be started for this <%= organization? ? 'organization' : 'enterprise' %>.
+    <% end %>
+  <% end %>
+<% end %>
+
+

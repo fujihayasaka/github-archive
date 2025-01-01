@@ -1,0 +1,235 @@
+<%
+  gh_mobile_link_text = "GitHub Mobile"
+  app_link_text = "Authenticator app"
+  sms_link_text = "SMS Code"
+  resend_sms_link_text = "Resend SMS"
+  recovery_prompt = "2FA recovery code"
+  can_delay_checkup = is_checkup_prompt? && user.can_delay_two_factor_checkup?
+%>
+<% index = 1 %>
+
+<noscript>
+  <p class="flash flash-notice mb-2">
+    It looks like JavaScript is disabled in your browser.
+    <strong>Please enable JavaScript</strong> for the best experience, or use the options below.
+  </p>
+</noscript>
+
+<div class="two-factor-alternatives">
+  <%= render(Primer::Beta::Button.new(
+    scheme: :default,
+    size: :large,
+    classes: "btn-secondary btn btn-block more-options-two-factor",
+    block: true,
+    "data-disable-with": "More options…"
+    )) do |component| %>
+      <span>
+        More options
+        <%= render(Primer::Beta::Octicon.new(:"triangle-down", size: :small)) %>
+      </span>
+    <% end %>
+
+  <span class="two-factor-alternatives-divider"></span>
+
+  <ul class="two-factor-alternatives-body guard-two-factor" id="two-factor-alternatives-body" aria-labelledby="<%= list_label_id %>">
+    <% if can_use_2fa_code_resend? %>
+      <% if user.two_factor_sms_requires_captcha?(session, callsite: :two_factor_alternatives_component) %>
+        <%= render partial: "sessions/two_factor_alternatives_item", locals: {
+          index: index,
+          href: two_factor_sms_confirm_path(resend: true),
+          button_text: resend_sms_link_text,
+          size: :big,
+          data_test_selector: "resend-sms-confirm-link"
+        } %>
+        <% index += 1 %>
+      <% else %>
+      <li class="two-factor-alternatives-item" style="--i: <%= index %>">
+        <%= form_tag two_factor_resend_path, class: "js-send-auth-code", style: "display: block", data: { "test-selector" => "resend-sms-form" } do %>
+          <%= render Primer::Beta::Button.new(type: :submit, scheme: :secondary, size: :large, classes: "btn-secondary btn-block") do %>
+            <span class="two-factor-alternatives-item-text"><%= resend_sms_link_text %></span>
+          <% end %>
+        <% end %>
+      </li>
+      <% index += 1 %>
+      <% end %>
+    <% end %>
+    <% if can_use_trusted_device? %>
+      <%= render partial: "sessions/two_factor_alternatives_item", locals: {
+        index: index,
+        href: webauthn_path,
+        button_text: trusted_device_description,
+        data_test_selector: "webauthn-link"
+      } %>
+      <% index += 1 %>
+    <% end %>
+    <% if can_use_gh_mobile? %>
+      <%= render partial: "sessions/two_factor_alternatives_item", locals: {
+        index: index,
+        href: gh_mobile_path,
+        button_text: gh_mobile_link_text,
+        data_test_selector: "gh-mobile-link"
+      } %>
+      <% index += 1 %>
+    <% end %>
+    <% if can_use_2fa_app_code? %>
+      <%= render partial: "sessions/two_factor_alternatives_item", locals: {
+        index: index,
+        href: two_factor_app_code_path,
+        button_text: app_link_text,
+        data_test_selector: "totp-app-link"
+      } %>
+      <% index += 1 %>
+    <% end %>
+    <% if can_use_2fa_sms_code? %>
+      <%= render partial: "sessions/two_factor_alternatives_item", locals: {
+        index: index,
+        href: two_factor_sms_code_path,
+        button_text: sms_link_text,
+        scheme: :default,
+        data_test_selector: "totp-sms-link"
+      } %>
+      <% index += 1 %>
+    <% end %>
+    <% if can_use_2fa_fallback? %>
+      <li class="two-factor-alternatives-item" style="--i: <%= index %>">
+        <%= form_tag two_factor_send_fallback_path, class: "js-send-auth-code", style: "display: block", data: { "test-selector" => "backup-sms-form" } do %>
+          <%= render Primer::Beta::Button.new(type: :submit, scheme: :secondary, size: :large, classes: "btn-secondary btn-block") do %>
+            <span class="two-factor-alternatives-item-text">Send to your backup SMS number</span>
+          <% end %>
+        <% end %>
+      </li>
+      <% index += 1 %>
+    <% end %>
+    <% if is_checkup_prompt? %>
+      <% if can_delay_checkup %>
+        <li class="two-factor-alternatives-item" style="--i: <%= index %>">
+          <%= form_tag delay_settings_two_factor_checkup_path, method: :put, style: "display: block" do %>
+            <span class="two-factor-alternatives-item-text"><%= render(Primer::Beta::Button.new(type: :submit, scheme: :secondary, size: :large, classes: "btn-secondary btn-block")) { "Verify your 2FA setup tomorrow" } %></span>
+          <% end %>
+        </li>
+        <% index += 1 %>
+      <% end %>
+      <%= render partial: "sessions/two_factor_alternatives_item", locals: {
+        index: index,
+        href: reconfigure_two_factor_path,
+        button_text: "Reconfigure 2FA on this account"
+      } %>
+      <% index += 1 %>
+    <% end %>
+    <% if can_use_recovery_code? %>
+      <%= render partial: "sessions/two_factor_alternatives_item", locals: {
+        index: index,
+        href: recovery_path,
+        button_text: recovery_prompt,
+        extra_classes: "recover-code-button",
+        data_test_selector: "recovery-code-link"
+      } %>
+      <% index += 1 %>
+    <% elsif show_recovery_code_help? %>
+      <%= render partial: "sessions/two_factor_alternatives_item", locals: {
+        index: index,
+        href: helpers.docs_url("authentication/recovering-list-2fa-credentials"),
+        button_text: "Where to find recovery codes",
+        target: "_blank",
+        external: true
+      } %>
+      <% index += 1 %>
+    <% end %>
+    <% if show_account_recovery? %>
+    <li class="two-factor-alternatives-item" style="--i: <%= index %>">
+      <%= render partial: "sessions/two_factor_recover_modal", locals: { tfa_recovery_without_password: false } %>
+    </li>
+    <% end %>
+  </ul>
+
+  <noscript class="width-full border-top pt-3">
+    <ul class="two-factor-alternatives-body-fallback" id="two-factor-alternatives-body-noscript" aria-labelledby="<%= list_label_id %>">
+      <% if can_use_2fa_code_resend? %>
+        <% if user.two_factor_sms_requires_captcha?(session, callsite: :two_factor_alternatives_component) %>
+          <li class="two-factor-alternatives-item-fallback">
+            <%= link_to two_factor_sms_confirm_path(resend: true), class: "btn-secondary btn-block btn" do %>
+              <span class="two-factor-alternatives-item-text-fallback"><%= resend_sms_link_text %></span>
+            <% end %>
+          </li>
+        <% else %>
+          <li class="two-factor-alternatives-item-fallback">
+            <%= form_tag two_factor_resend_path, style: "display: block; visibility: visible; opacity: 1;" do %>
+              <%= render Primer::Beta::Button.new(type: :submit, scheme: :secondary, size: :large, classes: "btn-secondary btn-block", style: "visibility: visible; opacity: 1;") do %>
+                <span class="two-factor-alternatives-item-text-fallback"><%= resend_sms_link_text %></span>
+              <% end %>
+            <% end %>
+          </li>
+        <% end %>
+      <% end %>
+      <% if can_use_trusted_device? %>
+        <li class="two-factor-alternatives-item-fallback">
+          <%= link_to webauthn_path, class: "btn-secondary btn-block btn" do %>
+            <span class="two-factor-alternatives-item-text-fallback"><%= trusted_device_description %></span>
+          <% end %>
+        </li>
+      <% end %>
+      <% if can_use_gh_mobile? %>
+        <li class="two-factor-alternatives-item-fallback">
+          <%= link_to gh_mobile_path, class: "btn-secondary btn-block btn" do %>
+            <span class="two-factor-alternatives-item-text-fallback"><%= gh_mobile_link_text %></span>
+          <% end %>
+        </li>
+      <% end %>
+      <% if can_use_2fa_app_code? %>
+        <li class="two-factor-alternatives-item-fallback">
+          <%= link_to two_factor_app_code_path, class: "btn-secondary btn-block btn" do %>
+            <span class="two-factor-alternatives-item-text-fallback"><%= app_link_text %></span>
+          <% end %>
+        </li>
+      <% end %>
+      <% if can_use_2fa_sms_code? %>
+        <li class="two-factor-alternatives-item-fallback mb-1">
+          <%= link_to two_factor_sms_code_path, class: "btn-secondary btn-block btn" do %>
+            <span class="two-factor-alternatives-item-text-fallback"><%= sms_link_text %></span>
+          <% end %>
+        </li>
+      <% end %>
+      <% if can_use_2fa_fallback? %>
+        <li class="two-factor-alternatives-item-fallback">
+          <%= form_tag two_factor_send_fallback_path, style: "display: block; visibility: visible; opacity: 1;" do %>
+            <%= render Primer::Beta::Button.new(type: :submit, scheme: :secondary, size: :large, classes: "btn-secondary btn-block") do %>
+              <span class="two-factor-alternatives-item-text-fallback">Send to your backup SMS number</span>
+            <% end %>
+          <% end %>
+        </li>
+      <% end %>
+      <% if is_checkup_prompt? %>
+        <% if can_delay_checkup %>
+          <li class="two-factor-alternatives-item-fallback">
+            <%= form_tag delay_settings_two_factor_checkup_path, method: :put, style: "display: block; visibility: visible; opacity: 1;" do %>
+              <%= render(Primer::Beta::Button.new(type: :submit, scheme: :secondary, size: :large, classes: "btn-secondary btn-block", style: "visibility: visible; opacity: 1;")) { "Verify your 2FA setup tomorrow" } %>
+            <% end %>
+          </li>
+        <% end %>
+        <li class="two-factor-alternatives-item-fallback">
+          <%= link_to reconfigure_two_factor_path, class: "btn-secondary btn-block btn" do %>
+            <span class="two-factor-alternatives-item-text-fallback">Reconfigure 2FA on this account</span>
+          <% end %>
+        </li>
+      <% end %>
+      <% if can_use_recovery_code? %>
+        <li class="two-factor-alternatives-item-fallback">
+          <%= link_to recovery_path, class: "btn-secondary btn-block btn recover-code-button" do %>
+            <span class="two-factor-alternatives-item-text-fallback"><%= recovery_prompt %></span>
+          <% end %>
+        </li>
+      <% elsif show_recovery_code_help? %>
+        <li class="two-factor-alternatives-item-fallback">
+          <%= link_to helpers.docs_url("authentication/recovering-list-2fa-credentials"), target: "_blank", class: "btn-secondary btn-block btn", style: "visibility: visible; opacity: 1;" do %>
+            <span class="two-factor-alternatives-item-text-fallback">Where to find recovery codes</span>
+          <% end %>
+        </li>
+      <% end %>
+      <% if show_account_recovery? %>
+          <li class="two-factor-alternatives-item-fallback" style="--i:   <%= index %>">
+            <%= render partial: "sessions/two_factor_recover_modal", locals: { tfa_recovery_without_password: false } %>
+          </li>
+      <% end %>
+    </ul>
+  </noscript>
+</div>

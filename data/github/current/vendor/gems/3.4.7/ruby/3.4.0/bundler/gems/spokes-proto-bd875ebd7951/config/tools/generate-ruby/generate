@@ -1,0 +1,34 @@
+#!/bin/bash
+#
+# Expected to execute inside the docker container built from config/tools/protoc/Dockerfile
+#
+set -e
+
+echo "Cleaning older version..."
+
+rm -rf gen/ruby
+
+echo "Applying template..."
+
+cp -r _template/ruby gen
+mv gen/ruby/spokes-proto.gemspec.tmpl gen/ruby/spokes-proto.gemspec
+
+echo "Generating proto files..."
+
+ruby_out=./gen/ruby/lib/github/spokes/proto
+
+# locate all Protobuf files under the supplied directory
+# and generate appropriate code (protobuf, Twirp etc.)
+for protofile in $(find ./proto -type f -name '*.proto'); do
+
+  # API protobuf files require additional Twirp generation step.
+  # Streaming API is a special case, isn't implemented on Twirp
+  twirp_ruby_out=
+  if [[ $protofile =~ .*_api\.proto$ ]] && [[ ! $protofile =~ streaming ]]; then
+    twirp_ruby_out="--twirp_ruby_out=${ruby_out}"
+  fi
+
+  cmd="protoc --proto_path=proto ${twirp_ruby_out} --ruby_out=${ruby_out} ${protofile}"
+  echo "$cmd"
+  $cmd
+done

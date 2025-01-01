@@ -1,0 +1,88 @@
+<%= render(Primer::Beta::BorderBox.new(test_selector: "models-user-billing-enablement-component")) do |component| %>
+  <% component.with_body do %>
+    <h3 class="mb-2">Models paid usage</h3>
+    <div class="d-flex flex-justify-between">
+      <p class="col-10 color-fg-muted mb-0" <%= test_selector("models-billing-summary") %>>
+        If enabled, usage beyond the free tier will be billed per token based on model pricing from
+        <%= in_stafftools? ? "the user's" : "your" %> Models budget.
+      </p>
+      <div>
+        <% if user.is_enterprise_managed? && user.enterprise_managed_business %>
+          <div class="color-fg-muted mb-2" <%= test_selector("models-business-billing-enablement-status") %>>
+            <%= primer_octicon(:"shield-lock") %>
+            <%= user.enterprise_managed_business.models_billing_enabled? ? "Enabled" : "Disabled" %>
+          </div>
+        <% elsif can_enable_models_billing %>
+          <%= render Primer::Alpha::ActionMenu.new(
+              select_variant: :single,
+              anchor_align: :end,
+              id: "show_models_user_billing_menu",
+              test_selector: "models-user-billing-enablement-menu",
+              dynamic_label: true,
+            ) do |menu| %>
+                <% menu.with_show_button(test_selector: "models-user-billing-selection") do |button|
+                  button.with_trailing_action_icon(icon: :"triangle-down")
+                  show_billing_text
+                end %>
+              <% menu.with_item(
+                label: "Enabled",
+                data: { value: "enabled" },
+                active: billing_enabled,
+                href: billing_enablement_path,
+                form_arguments: {method: :post},
+              ) do |item| %>
+                <% item.with_description.with_content("Allow Models paid usage") %>
+              <% end %>
+              <% menu.with_divider %>
+              <% menu.with_item(
+                label: "Disabled",
+                data: { value: "disabled" },
+                active: !billing_enabled,
+                href: delete_billing_enablement_path,
+                form_arguments: {method: :delete},
+              ) do |item| %>
+                <% item.with_description.with_content("Use models with rate limits") %>
+              <% end %>
+            <% end %>
+        <% else %>
+          <div class="color-fg-muted mb-2">
+            <%= primer_octicon(:"shield-lock") %>
+            Disabled
+          </div>
+        <% end %>
+      </div>
+    </div>
+    <div>
+      <% if billing_enabled %>
+        <%= render Primer::Beta::Link.new(
+          href: settings_billing_usage_url(query: "product:models"),
+          classes: "pr-2",
+          underline: true,
+          test_selector: "models-user-billing-details",
+        ).with_content("View billing details") %>
+      <% end %>
+      <%= render(Primer::Beta::Link.new(href: "https://gh.io/github-models-pricing", underline: true)) { "Models pricing" } %>
+      <% if !has_payment_method && !models_billing_disabled_by_non_payment_method_reason %>
+        <div class="pt-3 color-fg-attention">
+          <%= render(Primer::Beta::Octicon.new(:alert, size: :small)) %>
+          <%= render(Primer::Beta::Text.new(tag: :span)) { "To enable Models paid usage, a payment method is needed." } %>
+          <%= render(Primer::Beta::Link.new(href: settings_user_billing_tab_path(tab: "payment_information"), color: :attention, underline: true)) { "Add payment method" } %>.
+        </div>
+      <% end %>
+      <% if legacy %>
+        <div class="pt-3 color-fg-attention">
+          <%= render(Primer::Beta::Octicon.new(:alert, size: :small)) %>
+          <%= render(Primer::Beta::Text.new(tag: :span)) { "This plan does not support additional Models usage." } %>
+          <%= render(Primer::Beta::Link.new(href: "https://docs.github.com/en/billing/managing-billing-for-your-products/about-billing-for-github-models", color: :attention, underline: true)) { "Learn more about Models billing" } %>.
+        </div>
+      <% end %>
+    </div>
+    <% component.with_footer(bg: :subtle) do %>
+      <%= render GitHubModels::Users::BillingUsageFooterComponent.new(
+        billing_enabled: billing_enabled,
+        is_enterprise_managed_user: user.is_enterprise_managed?,
+        in_stafftools: in_stafftools?,
+      ) %>
+    <% end %>
+  <% end %>
+<% end %>

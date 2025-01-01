@@ -1,0 +1,47 @@
+<%# erblint:counter DeprecatedComponentsCounter 1 %>
+<%
+view = Businesses::BillingSettings::ShowView.new(current_user: current_user, business: this_business)
+show_plan_duration_change_banner = params[:banner_message] != nil
+%>
+
+<% page_info title: "Payment Information", selected_link: :business_billing_vnext_billing_payment_information, sidebar: :billing_and_licensing %>
+<%= render layout: "businesses/layout",
+  locals: {
+    business: this_business,
+    title: "Payment Information",
+    container_attributes: "itemscope itemtype='http://schema.org/Enterprise'",
+  } do %>
+
+  <% if show_plan_duration_change_banner %>
+      <%= render Primer::Alpha::Banner.new(scheme: :default, dismiss_scheme: :remove, icon: :info, mb: 3) do %>
+        <% params[:banner_message] %>
+      <% end %>
+  <% elsif flash[:success].present? %>
+    <%= render(Primer::Beta::Flash.new(scheme: :success, dismissible: true, icon: :check, mb: 3)) { flash[:success] } %>
+  <% end %>
+
+  <% if this_business.feature_flag_enabled?(:ghe_sales_serve_overdue, default: false) %>
+    <%= render Billing::Settings::EnterpriseWithOutstandingInvoicesPleasePayComponent.new(business: this_business, current_user: current_user) %>
+  <% end %>
+
+  <%= render Businesses::Billing::BillingCycleComponent.new(this_business: this_business) %>
+
+  <% if show_azure_subscription_payment_information %>
+    <%= render "businesses/billing_settings/azure_subscription_payment_information", view: view %>
+  <% else %>
+    <% if this_business.eligible_for_self_serve_payment? %>
+      <%= render "businesses/billing_settings/self_serve_payment_information",
+        business: this_business,
+        show_form: !billing_info_exists_without_errors?(this_business),
+        show_invoice_email_form: false
+      %>
+    <% end %>
+    <%= render Businesses::Billing::AzureMeteredPaymentComponent.new(
+      view: view,
+      metered_via_azure: this_business.metered_via_azure?,
+      self_serve: this_business.eligible_for_self_serve_payment?,
+      trial: this_business.trial?,
+      trial_cancelled: this_business.trial_cancelled?
+    ) %>
+  <% end %>
+<% end %>

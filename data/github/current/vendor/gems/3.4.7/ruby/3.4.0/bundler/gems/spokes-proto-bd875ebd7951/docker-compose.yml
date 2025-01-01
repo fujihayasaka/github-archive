@@ -1,0 +1,81 @@
+services:
+  mysql:
+    image: "mysql:5.7"
+    platform: linux/amd64
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      MYSQL_DATABASE: "github_development_spokes"
+    volumes:
+      - "mysql_data:/var/lib/mysql:rw"
+
+  # http://127.0.0.1:12080 requires no authentication at all.
+  # This is the easiest endpoint to use for development.
+  spokesd:
+    image: ${SPOKESD_IMAGE:-ghcr.io/github/spokesd/spokesd:63955338f9433add3996c27471f14fae992797a4}
+    platform: linux/amd64
+    env_file: "env/spokesd"
+    environment:
+      SPOKESD_NO_TLS: "true"
+    ports:
+      - "127.0.0.1:12080:8080"
+    depends_on:
+      - mysql
+
+  # http://127.0.0.1:12443 requires a client cert for all Spokes Access API
+  # requests, using certs/test-client.*. See examples/ for more about how to
+  # configure this.
+  #
+  # If you'll be using a client cert for auth in prod
+  # (https://spokesd-production.service.iad.github.net:10013), use this
+  # endpoint to make sure your client is set up right.
+  spokesds:
+    image: ${SPOKESD_IMAGE:-ghcr.io/github/spokesd/spokesd:63955338f9433add3996c27471f14fae992797a4}
+    platform: linux/amd64
+    env_file: "env/spokesd"
+    entrypoint:
+      - "/spokesd-cert-env"
+      - "/spokesd"
+    ports:
+      - "127.0.0.1:12443:8080"
+    depends_on:
+      - mysql
+    volumes:
+      - "./script/spokesd-cert-env:/spokesd-cert-env"
+      # Root certs will be read from here in script/spokesd-cert-env.
+      - "./certs:/etc/spokesd/certs"
+
+  # http://127.0.0.1:12081 requires a Request-HMAC header for all Spokes Access
+  # API requests, using the key defined below.
+  #
+  # If you'll be using HMAC auth in prod
+  # (https://spokesd-http-production.service.iad.github.net), use this
+  # endpoint to make sure your client's HMAC auth is set up right.
+  spokesdhmac:
+    image: ${SPOKESD_IMAGE:-ghcr.io/github/spokesd/spokesd:63955338f9433add3996c27471f14fae992797a4}
+    platform: linux/amd64
+    env_file: "env/spokesd"
+    environment:
+      SPOKESD_NO_TLS: "true"
+      SPOKESD_REQUIRE_CLIENT_AUTH_IN_TEST: "true"
+      SPOKESD_HMAC_KEY_test_client: "spokes-proto-hmac-key"
+    ports:
+      - "127.0.0.1:12081:8080"
+    depends_on:
+      - mysql
+
+  gitrpcd:
+    image: ${GITRPCD_IMAGE:-ghcr.io/github/gitrpcd/gitrpcd:85d5bc9c3e45afa337cd0da11312a814c595a220}
+    platform: linux/amd64
+    # Need to be root to write to the repositories mount.
+    user: "root"
+    environment:
+      GITRPCD_RELEASE: "test"
+      GITRPCD_NO_TLS: 1
+      BASE_PATH: "/data/repositories"
+    tmpfs:
+      - /tmp
+    volumes:
+      - "./repositories:/data/repositories:rw"
+
+volumes:
+  mysql_data:

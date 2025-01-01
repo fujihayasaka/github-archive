@@ -1,0 +1,96 @@
+<% stats_timer do %>
+  <%= render Feed::ItemNextComponent.new(
+    actor:,
+    action:,
+    timestamp: item.created_at,
+    item:,
+    repository:,
+    heading_icon:,
+  ) do |c| %>
+    <% if item.related_item? %>
+      <% c.with_border do %>
+        <hr class="mb-3 mt-2">
+      <% end %>
+    <% end %>
+
+    <% if item.rollup? %>
+      <% c.with_heading_subject do %>
+        <%= item.rollup_item_count %> <%= "contribution".downcase.pluralize(item.rollup_item_count) %>
+      <% end %>
+    <% else %>
+      <% c.with_heading_subject do %>
+        to <%= helpers.link_to_feed_repo(repository, item, include_owner: true, test_selector: :push_repo_link) %>
+      <% end %>
+    <% end %>
+    <% c.with_body(
+      mt: 2,
+      bg: :subtle,
+      mb: 0,
+      p: 3,
+      border_radius: 1,
+      aria: { label: "Push contribution #{item.unique_html_id}" },
+    ) do |body| %>
+      <div>
+        <span>
+          <%= pluralize(commits_count, "commit") %> to
+          <%= helpers.link_to_feed_branch(
+            branch_name: branch_name,
+            repo: repository,
+            feed_item: item,
+            classes: "branch-name",
+            test_selector: :push_branch_link,
+          ) %>
+          <% if item.rollup? || item.related_item? %>
+            in <%= helpers.link_to_feed_repo(
+              repository,
+              item,
+              include_owner: true,
+              test_selector: :push_body_repo_link,
+            ) %>
+          <% end %>
+        </span>
+        <ul class="pt-1 list-style-none">
+          <% shown_shas.each do |sha, _, message| %>
+            <li class="d-flex flex-items-baseline m-0">
+              <code class="mr-1">
+                <%= helpers.link_to_feed_commit_sha(
+                  sha: sha,
+                  repo: repository,
+                  feed_item: item,
+                  test_selector: :push_commit_sha) %>
+              </code>
+              <div class="dashboard-break-word lh-condensed">
+                <blockquote>
+                  <%= helpers.format_commit_message_short(message, repository) %>
+                </blockquote>
+              </div>
+            </li>
+          <% end %>
+        </ul>
+        <% if show_n_more_commits_link? %>
+          <% number_of_more_commits = commits_count - 2 %>
+          <%= helpers.link_to_feed_push_comparison(
+            text: "#{number_of_more_commits} more #{'commit'.pluralize(number_of_more_commits)} »",
+            url: push_comparison_url,
+            feed_item: item,
+            classes: "Link-secondary",
+            test_selector: :push_comparison_link,
+          ) %>
+        <% end %>
+      </div>
+    <% end %>
+
+    <% if item.rollup? %>
+      <% c.with_related_items_preview do %>
+        <%= render Feed::Cards::PushEventComponent.new(item: item.related_items.slice(0)) %>
+      <% end %>
+
+      <% c.with_related_items do %>
+        <% item.related_items.slice(1..).each do |related_item| %>
+          <% component = related_card_component(related_item:) %>
+          <%= render component.new(item: related_item) %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

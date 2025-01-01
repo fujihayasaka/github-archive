@@ -1,0 +1,48 @@
+# typed: true
+# frozen_string_literal: true
+
+class Orgs::SecurityCenter::SecurityCampaignsCloseController < Orgs::SecurityCenter::AbstractSecurityCampaignsController
+  include ApplicationController::VerifiedFetchDependency
+  include SecurityCampaigns::CampaignsSerializer
+
+  before_action :manage_security_products_permission_required
+
+  CLUSTER_DEPENDENCIES_ALLOWED_NON_GET_REQUESTS = T.let([
+    "Orgs::SecurityCenter::SecurityCampaignsCloseController#update",
+  ].freeze, T::Array[String])
+
+  depends_on_clusters \
+    ApplicationRecord::Billing,
+    ApplicationRecord::Mysql1,
+    ApplicationRecord::Mysql2,
+    ApplicationRecord::Collab,
+    ApplicationRecord::Configurations,
+    ApplicationRecord::IamAbilities,
+    ApplicationRecord::Notify,
+    ApplicationRecord::NotificationsEntries,
+    only: [:update]
+
+  depends_on_clusters \
+    ApplicationRecord::Copilot,
+    ApplicationRecord::SecurityOverviewAnalytics,
+    only: [:update],
+    optional: true
+
+  allow_verified_fetch only: [:update]
+
+  def update
+    campaign = SecurityCampaigns::SecurityCampaign.find_by(number: params[:number], organization: this_organization.id)
+    return render_404 if campaign.nil? || campaign.hide_from_user?(current_user)
+
+    return render status: 422, json: { message: "Campaign is in draft" } if campaign.draft?
+    return render status: 422, json: { message: "Campaign is already closed" } if campaign.closed?
+
+    SecurityCampaigns::ClosureService.call(campaign:, actor: T.must(current_user), org: this_organization)
+
+    render status: 200, json: {
+      campaign: serialized_campaign(security_campaign: campaign, owner_display_login: this_organization.display_login, current_user:),
+      indexPageEnabled: SecurityCampaigns.enabled?(this_organization),
+      showFlashMessage: true,
+    }
+  end
+end

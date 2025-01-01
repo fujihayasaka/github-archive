@@ -1,0 +1,125 @@
+<%# `view` is an instance of Orgs::People::FailedInvitationView %>
+
+<li class="d-flex flex-items-center flex-wrap flex-justify-end member-list-item js-bulk-actions-item border border-top-0 <%= "adminable" if view.show_admin_stuff? %>" data-bulk-actions-id="<%= view.invitation.id %>" <%= test_selector("failed-#{view.invitation.class.name}-row") %>>
+  <div class="py-3 pr-0 pl-3">
+      <input
+        <%= test_selector "org-failed-inv-checkbox" %>
+        name=<%= invitation_id_param_name(view.invitation) %>
+        value="<%= view.invitation.id %>"
+        data-check-all-item
+        class="js-bulk-actions-toggle"
+        type="checkbox"
+        aria-labelledby="member-<%= view.identifier %>"
+      >
+  </div>
+
+  <% if view.email_invitation? %>
+    <div class="py-3 pl-3 pr-0 text-center flex-shrink-0 ">
+      <%= primer_octicon(:mail, height: 48) %>
+    </div>
+    <div class="py-3 pl-3 flex-auto">
+      <span class="d-block f4 color-fg-default" id="member-<%= view.email %>" itemprop="name" style="max-width: 180px;"><%= view.name %></span>
+    </div>
+  <% else %>
+    <%= render(Organizations::Settings::MemberAvatarAndProfileLinkComponent.new(user: view.member, org: view.organization, show_admin_stuff: view.show_admin_stuff?)) %>
+  <% end %>
+
+  <div class="d-flex flex-justify-start flex-items-center ">
+
+      <% if view.invitation.is_a?(RepositoryInvitation) %>
+        <div class="color-fg-muted py-3 f5 pr-3" <%= test_selector("failed-invitation-repo") %>>
+          <%= primer_octicon(:repo, color: :muted) %> <%= view.invitation.repository.name %>
+        </div>
+      <% end %>
+
+    <div class="color-fg-muted py-3 f5 pr-3 " <%= test_selector("failed-invitation-role") %>>
+      <%= invitation_display_role(view.invitation) %>
+    </div>
+
+    <div class="d-flex flex-wrap">
+      <%= render Primer::Beta::Text.new(color: :muted, py: 2, pl: 3, display: :inline_block) do %>
+        <% case view.invitation.failed_reason %>
+        <% when "no_more_seats" %>
+          No seats available. <a class="Link--inTextBlock" href="<%= org_seats_path(view.organization) %>">Buy seats</a>
+        <% when "trade_controls" %>
+          This user isn’t able to use this feature <a class="Link--inTextBlock" href="<%= GitHub.trade_controls_help_url %>">due to trade regulations</a>.
+        <% when "expired" %>
+          Invitation expired. User did not accept this invite for <%= GitHub.invitation_expiry_period %> days
+        <% else %>
+          <a class="Link--inTextBlock" href="<%= contact_path %>">Contact support</a>
+        <% end %>
+      <% end %>
+    </div>
+  </div>
+
+  <% if view.show_admin_stuff? %>
+    <% redirect_url = org_failed_invitations_path(view.organization) %>
+
+    <div class="py-3 pr-3 pl-3">
+      <%= render(Primer::Alpha::ActionMenu.new(test_selector: "failed-invitation-menu", anchor_align: :end)) do |menu| %>
+        <% menu.with_show_button(
+          icon: :"kebab-horizontal",
+          test_selector: "failed-invite-kebab",
+          "aria-label": "Edit invitation"
+        ) %>
+
+        <% unless view.scim_invitation? %>
+          <% menu.with_item(
+            tag: :button,
+            test_selector: "retry-failed-invite",
+            content_arguments: { "data-show-dialog-id": "retry_invitation_dialog-#{view.invitation.id}" }
+          ) do %>
+            Retry invitation
+          <% end %>
+        <% end %>
+
+        <% menu.with_item(
+          tag: :button,
+          scheme: :danger,
+          test_selector: "cancel-failed-invite",
+          content_arguments: { "data-show-dialog-id": "cancel_invitation_dialog-#{view.invitation.id}" }
+        ) do %>
+          Cancel invitation
+        <% end %>
+      <% end %>
+
+      <%= render(Primer::Alpha::Dialog.new(
+        title: "Retry invitation from #{view.organization.display_login}",
+        id: "retry_invitation_dialog-#{view.invitation.id}"
+      )) do |dialog| %>
+        <% dialog.with_body do %>
+          <%= render Primer::Alpha::IncludeFragment.new(my: 3, loading: "lazy", src: "#{ org_invitations_action_dialog_path(
+                        view.organization,
+                        invitation_id_param_name(view.invitation) => view.invitation.id,
+                        redirect_to_path: redirect_url,
+                        action_dialog: 'retry'
+                      ) }", "aria-label": "Loading...") do %>
+            <%= render(Primer::Beta::Spinner.new(size: :large, mx: :auto, display: :block)) %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <%= render(Primer::Alpha::Dialog.new(
+        title: "Cancel invitation from #{view.organization.display_login}",
+        id: "cancel_invitation_dialog-#{view.invitation.id}"
+      )) do |dialog| %>
+        <% dialog.with_body do %>
+          <%= render Primer::Alpha::IncludeFragment.new(my: 3, loading: "lazy", src: "#{ org_invitations_action_dialog_path(
+                        view.organization,
+                        invitation_id_param_name(view.invitation) => view.invitation.id,
+                        redirect_to_path: redirect_url,
+                        action_dialog: 'cancel'
+                      ) }", "aria-label": "Loading...") do %>
+            <%= render(Primer::Beta::Spinner.new(size: :large, mx: :auto, display: :block)) %>
+          <% end %>
+        <% end %>
+      <% end %>
+    </div>
+  <% end %>
+
+  <% unless view.organization.direct_or_team_member?(current_user) %>
+    <div class="text-center color-fg-muted py-3  f5 text-right ">
+      <%= follow_button view.member %>
+    </div>
+  <% end %>
+</li>

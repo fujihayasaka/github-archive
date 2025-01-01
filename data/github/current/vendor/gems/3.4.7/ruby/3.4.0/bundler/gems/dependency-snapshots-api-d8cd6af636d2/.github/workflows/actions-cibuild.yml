@@ -1,0 +1,69 @@
+name: Build container
+# Run this action on any pull request, push to the main branch
+# This is heavily, heavily inspired (almost completely copied) from DG-API's
+#  actions-cibuild.yml which does the same thing. The build team currently doesn't
+#  have this need factored out, but I did create https://github.com/github/build-systems/issues/1932 about it.
+on:
+  pull_request: {}
+  push:
+    branches:
+      - main
+      - enterprise-*.*-release
+jobs:
+  dependency-snapshots-api:
+    runs-on: self-hosted
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      # The CONTAINER_BUILDER_TOKEN requires repos hosting private Go modules
+      # to be added to the "container-builder" org team. See Dockerfile.ghex (in dg-api)
+      # comments for details and Issue links.
+      - name: Log into registry
+        run: echo "${{ secrets.CONTAINER_BUILDER_TOKEN }}" | docker login ghcr.io -u ${{github.actor}} --password-stdin
+
+      - name: Setup go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+
+      - name: Authenticate with goproxy
+        uses: github/setup-goproxy@v1.1.0
+
+      - name: Build containers
+        run: script/ghex-ci-docker-build
+
+      - name: Push result to GPR if a push to main
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ] || [ "${{ github.ref }}" = "refs/heads/master" ]; then
+            is_main_branch=true
+          fi
+
+          if [ "${{ github.event_name }}" = "push" ] && [ "${is_main_branch}" = true ]; then
+            docker_push_url=ghcr.io/github/dependency-snapshots-api/dependency-snapshots-api:${{ github.sha }}
+            echo "JANKY_SHA1=${{ github.sha }}" >> $GITHUB_ENV
+          else
+            docker_push_url=ghcr.io/github/dependency-snapshots-api/dependency-snapshots-api:${{ github.sha }}
+            docker tag ghcr.io/github/dependency-snapshots-api/dependency-snapshots-api:${{ github.sha }} "$docker_push_url"
+            echo "JANKY_SHA1=${{ github.event.pull_request.head.sha }}" >> $GITHUB_ENV
+          fi
+          manifest_digest=$(docker push $docker_push_url | tail -1 | cut -f 3 -d " ")
+          docker_image_url="dependency-snapshots-api=$docker_push_url@$manifest_digest"
+          echo "docker_image_url: $docker_image_url"
+          echo "DOCKER_IMAGE_URL=$docker_image_url" >> $GITHUB_ENV
+          ref="${{ github.ref }}"
+          merge_branch=${ref#"refs/heads/"}
+
+# I don't know if there is a default build waiting for us here or if this step will fail
+      - name: Queue an enterprise2-dependency-snapshots-api-docker Build
+        run: |
+          ref="${{ github.ref }}"
+          merge_branch=${ref#"refs/heads/"}
+          branch_name=${GITHUB_HEAD_REF:-$merge_branch}
+          curl -v -X POST \
+            -u "hubot:${{ secrets.API_AUTH_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"buildable_name":"enterprise2-dependency-snapshots-api-docker","repo":"dependency-snapshots-api","branch_name": "'"$branch_name"'","env_vars":{"JANKY_ENV_DOCKER_IMAGE_URL": "${{ env.DOCKER_IMAGE_URL }}", "JANKY_ENV_SHA1": "${{ env.JANKY_SHA1 }}" },"force":"true","room_id":"#dg-ops"}' \
+            "https://janky.githubapp.com/api/builds"

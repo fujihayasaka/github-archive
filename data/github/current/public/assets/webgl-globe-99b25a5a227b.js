@@ -1,0 +1,1 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["webgl-globe"],{20472:(_,i,u)=>{u(83138)}},_=>{_.O(0,["vendors-node_modules_github_webgl-globe_dist_js_main_js"],()=>_(_.s=20472)),_.O()}]);

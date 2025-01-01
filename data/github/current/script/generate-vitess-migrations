@@ -1,0 +1,59 @@
+#!/usr/bin/env safe-ruby
+# frozen_string_literal: true
+
+#
+#/ Usage: generate-vitess-migrations <name>
+#/
+#/ This generates two separate migration files:
+#/ - the first migration file contains the sequence migration, which both creates the sequence table as well as creates the sequence
+#/ - the second migration file contains the keyspace migration.
+#
+#/ Please first create your migration for a table that will live in a Vitess cluster using the standard `rails g migration` process.
+#/ Then, you can use this script to generate the additional migrations required for getting your table set up in a Vitess cluster.
+#/ For example:
+#/ - first run `rails g migration my_new_table`
+#/ - then run `script/generate-vitess-migrations my_new_table`
+#
+#/ Note: these migrations will need to be run separately and committed into three different PRs.
+
+require "optparse"
+
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: #{$0} name [options]"
+end
+
+parser.parse!
+
+unless (name = ARGV.shift)
+  abort parser.help
+end
+
+require_relative "../config/boot"
+require "active_support/all"
+require "erb"
+require "fileutils"
+require "pry"
+
+sequence_migration_name = "add_sequence_for_#{name}"
+sequence_migration_cmd = "bin/rails g migration #{sequence_migration_name}"
+sequence_migration_file = `#{sequence_migration_cmd}`.match(/db\/migrate\/\w*.rb/).to_s
+
+keyspace_migration_name = "add_keyspace_for_#{name}"
+keyspace_migration_cmd = "bin/rails g migration #{keyspace_migration_name}"
+keyspace_migration_file = `#{keyspace_migration_cmd}`.match(/db\/migrate\/\w*.rb/).to_s
+
+sequence_table_name = "#{name}_id_seq"
+keyspace_table_name = "#{name}_id_ks_idx"
+
+def render_template(template_filename, output_filename, binding)
+  template = File.read(template_filename)
+  File.open(output_filename, "wb") do |f|
+    erb = ERB.new(template, trim_mode: "-")
+    erb.filename = output_filename
+    f.write erb.result binding
+  end
+  puts output_filename
+end
+
+render_template "db/templates/sequence_migration_template.rb.erb", sequence_migration_file, binding
+render_template "db/templates/keyspace_migration_template.rb.erb", keyspace_migration_file, binding

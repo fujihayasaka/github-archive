@@ -1,0 +1,120 @@
+# typed: true
+# frozen_string_literal: true
+
+require "test_helper"
+
+class <%= package_module_name %>::Domain::CustomPropertiesTest < GitHub::TestCase
+  include ::CustomPropertiesCore::Errors
+  include CustomPropertiesTestHelper
+
+  setup do
+    @business = create :business
+    @org = create :organization, business: @business
+
+    # TODO: Update this to use the right factory and create appropriate test data for your domain
+    @<%= target_class_name.underscore %> = create :<%= target_class_name.underscore %>
+
+    @definition = create :<%= target_class_name.underscore %>_custom_property_definition,
+                         source: @org,
+                         property_name: "test_property"
+  end
+
+  sig { returns(<%= package_module_name %>::Domain::CustomProperties) }
+  def domain
+    <%= package_module_name %>.domain.custom_properties
+  end
+
+  context "get_definitions" do
+    test "returns definitions for source" do
+      definitions = domain.get_definitions(@org)
+
+      assert_includes definitions.map(&:property_name), "test_property"
+    end
+  end
+
+  context "get_definition" do
+    test "returns specific definition by property name" do
+      definition = domain.get_definition(@org, "test_property")
+
+      refute_nil definition
+      assert_equal "test_property", T.must(definition).property_name
+    end
+
+    test "returns nil for non-existent property" do
+      definition = domain.get_definition(@org, "nonexistent")
+
+      assert_nil definition
+    end
+  end
+
+  context "save_definition" do
+    test "creates a new definition" do
+      definition = domain.save_definition(
+        @org,
+        property_name: "new_property",
+        value_type: "string",
+        required: false
+      )
+
+      assert_equal "new_property", definition.property_name
+      assert_equal "string", definition.value_type
+      refute definition.required
+    end
+  end
+
+  context "delete_definition" do
+    test "deletes existing definition" do
+      deleted_definition = domain.delete_definition(@org, "test_property")
+
+      refute_nil deleted_definition
+      assert_equal "test_property", T.must(deleted_definition).property_name
+
+      # Verify it's actually deleted
+      assert_nil domain.get_definition(@org, "test_property")
+    end
+
+    test "returns nil for non-existent definition" do
+      deleted_definition = domain.delete_definition(@org, "nonexistent")
+
+      assert_nil deleted_definition
+    end
+  end
+
+  context "set_properties_for" do
+    test "sets property values for targets" do
+      domain.set_properties_for(
+        @org,
+        [@<%= target_class_name.underscore %>],
+        { "test_property" => "test_value" }
+      )
+
+      values = domain.values_for_targets([@<%= target_class_name.underscore %>], value_to_use: :manual)
+      assert_equal "test_value", T.must(values[@<%= target_class_name.underscore %>])["test_property"]
+    end
+  end
+
+  context "values_for_targets" do
+    test "returns manual values for targets" do
+      create :<%= target_class_name.underscore %>_custom_property_value,
+             target: @<%= target_class_name.underscore %>,
+             definition: @definition,
+             value: "manual_value"
+
+      values = domain.values_for_targets([@<%= target_class_name.underscore %>], value_to_use: :manual)
+
+      assert_equal "manual_value", T.must(values[@<%= target_class_name.underscore %>])["test_property"]
+    end
+
+    test "returns effective values for targets with defaults" do
+      required_definition = create :<%= target_class_name.underscore %>_custom_property_definition,
+                                   source: @org,
+                                   property_name: "required_prop",
+                                   required: true,
+                                   default_value: "default_val"
+
+      values = domain.values_for_targets([@<%= target_class_name.underscore %>], value_to_use: :effective)
+
+      assert_equal "default_val", T.must(values[@<%= target_class_name.underscore %>])["required_prop"]
+    end
+  end
+end

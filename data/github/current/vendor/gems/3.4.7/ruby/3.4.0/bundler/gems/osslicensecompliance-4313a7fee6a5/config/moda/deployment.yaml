@@ -1,0 +1,51 @@
+required_builds:
+  - build
+  - osslicensecompliance-moda-config-bundle / osslicensecompliance-moda-config-bundle
+  - osslicensecompliance-docker-image / osslicensecompliance-docker-image
+  - osslicensecompliance-docker-security / osslicensecompliance-docker-security
+
+auto_start_pipeline: production_rollout
+
+notifications:
+  slack_channels:
+    - "#dg-ops"
+
+environments:
+  - name: staging
+    cluster_selector:
+      profile: general
+      region: iad
+    service_mesh:
+      enabled: true
+
+  - name: production
+    require_pipeline: true
+    cluster_selector:
+      profile: general
+      region: iad
+    service_mesh:
+      enabled: true
+
+pipelines:
+  production_rollout:
+    timeout: 3600
+    stages:
+      - name: staging
+        kind: deployment
+        config:
+          environment: staging
+          timeout: 300
+        gates:
+          - kind: timer
+            duration: 300
+      - name: production
+        kind: deployment
+        start_message: We are now going to deploy {{app}}/{{ref}}! Please pause or cancel the pipeline after the deploy if you want more time before your pull request(s) auto merges.
+        config:
+          environment: production
+          timeout: 300
+        gates:
+          - kind: timer
+            duration: 300
+
+ok_for_moda_to_remove_from_deprecating_clusters: true

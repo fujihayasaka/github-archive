@@ -1,0 +1,128 @@
+#!/bin/bash
+set -e
+
+GITHUB_ROOT=$(readlink -f "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../..")
+
+pull_fom_mirror() {
+  local mirror_host=octofactory.githubapp.com/github-subprojects
+
+  local ghcr_image=$1
+  local mirror_image="${ghcr_image/ghcr.io/${mirror_host}}"
+
+  echo "Pulling $mirror_image from mirror"
+  if ! docker pull "$mirror_image"; then
+    echo "Failed to pull $mirror_image"
+    return 1
+  fi
+
+  docker tag $mirror_image $ghcr_image
+}
+
+pull() {
+  local tagged_image="$1"
+  # The no-op pull for this many existing image is noticably slow; use grep to skip it (30s vs 300ms) for all images
+  if ! docker images --format '{{.Repository}}:{{.Tag}}' | grep "$tagged_image"; then
+    echo "Pulling $tagged_image"
+    if ! docker pull "$tagged_image"; then
+      echo "Failed to pull from ghcr; falling back to mirror"
+      pull_fom_mirror "$tagged_image"
+    fi
+  else
+    echo "${tagged_image} already present"
+  fi
+}
+
+load_local_stored_docker_images() {
+  # Load subproject docker images from tarballs
+  echo "Checking local subproject images..."
+  local subproject_image_directory="${GITHUB_ROOT}/vendor/subproject-images"
+  if [ -d "$subproject_image_directory" ] && [ "$(ls -A "$subproject_image_directory")" ]; then
+    echo "Found subproject images in $subproject_image_directory"
+    for filename in $subproject_image_directory/*; do
+      if [ -f "$filename" ]; then
+        echo "Loading Docker image from $filename..."
+        if docker load -i "$filename"; then
+          echo "Successfully loaded: $(basename "$filename")"
+        else
+          echo "Failed to load: $(basename "$filename")"
+        fi
+      fi
+    done
+  else
+    echo "No subproject images found in $subproject_image_directory"
+  fi
+}
+
+subproject_version() {
+  local subproject="$1"
+  local subproject_version_file="${GITHUB_ROOT}/config/${subproject}-version"
+
+  if [[ ! -f "$subproject_version_file" ]] ; then
+    >&2 echo "missing version file at $subproject_version_file"
+    return 1
+  fi
+
+  local subproject_version=$(grep -v '^#' "$subproject_version_file")
+  if [ -n "$subproject_version" ]; then
+    echo $subproject_version
+  else
+    return 1
+  fi
+}
+
+start_subproject() {
+  local NAME=""
+
+
+  case "$1" in
+    --name=*)
+      NAME="${1#--name=}"
+      shift
+      ;;
+    --name)
+      NAME="$2"
+      shift 2
+      ;;
+  esac
+
+  if [ -z "$NAME" ]; then
+    echo "ERROR: Name not provided."
+    exit 1
+  fi
+
+  # Ensure we clean up any existing containers, and remove after shutdown.
+  cleanup_docker() {
+    echo "Stopping ${NAME}..."
+    docker stop ${NAME} || true
+    exit 0
+  }
+
+  trap cleanup_docker EXIT INT QUIT TERM HUP
+
+  docker stop ${NAME} &> /dev/null || true
+  docker rm ${NAME} &> /dev/null || true
+
+  # Pull just the image out of potentially a really long string of args to docker
+  local container=$(echo "$@" | grep -o 'ghcr\.io[^ ]*')
+  pull $container
+
+  # Run the service.
+  docker run -d --rm --name ${NAME} --network host "$@"
+
+  docker logs --follow ${NAME} &
+  wait
+}
+
+# Searches the environment for variables matching the given pattern and writes them to a temporary file.
+# Useful for subprojects that set up a bunch of environment variables as a test service mostly. See authnd or authzd
+env_file() {
+  pattern="$1"
+  ENV_FILE=$(mktemp)
+  if [[ $(env | grep -m 1 -o "$pattern") ]]; then
+    ENV_VARS=$(env | grep -o "$pattern")
+    for VAR in $ENV_VARS; do
+      echo "$VAR" >> $ENV_FILE
+    done
+  fi
+  echo $ENV_FILE
+}

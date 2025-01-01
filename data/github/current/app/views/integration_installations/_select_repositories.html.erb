@@ -1,0 +1,24 @@
+<%# view is instance of IntegrationInstallations::SuggestionsView %>
+<% repository_target_switching_disabled = local_assigns.fetch(:repository_target_switching_disabled, false) %>
+
+<% if view.integration&.suspended? %>
+  <p class="note text-small mb-4 color-fg-muted">
+    This integration has been suspended. Repository access can be modified once the integration is reinstated.
+  </p>
+<% else %>
+  <%= render(Primer::Alpha::RadioButtonGroup.new(name: "install_target", required: true, validation_message: view.errors[:repositories]&.to_sentence.presence)) do |radio_button_group| %>
+    <% radio_button_group.radio_button(label: "Public repositories", value: :none, checked: view.install_target_radio_checked?(:none), caption: "Read-only access to public repositories.", class: "js-installation-repositories-radio") unless view.integration.present? %>
+
+    <% radio_button_group.radio_button(label: "All repositories", value: :all,
+      caption: "This applies to all #{"current and " if view.installable_repositories? || view.requestable_repositories? } future repositories #{view.current_and_future_owned_repositories_text}. Also includes public repositories (read-only).",
+      checked: view.install_target_radio_checked?(:all), class: "js-installation-repositories-radio") unless repository_target_switching_disabled %>
+
+    <% radio_button_group.radio_button(label: "Only select repositories", value: :selected, readonly: repository_target_switching_disabled,
+      caption: "Select at least one repository. #{"Max #{view.max_repositories} repositories. " if view.display_max_repositories_note?} Also includes public repositories (read-only).",
+      checked: view.install_target_radio_checked?(:selected), class: "js-select-repositories-radio js-installation-repositories-radio") if  view.installable_repositories? || view.requestable_repositories? %>
+  <% end %>
+
+  <div class="ml-4">
+    <%= render partial: "integration_installations/repository_picker", locals: { view: view, repository_target_switching_disabled: repository_target_switching_disabled } %>
+  </div>
+<% end %>

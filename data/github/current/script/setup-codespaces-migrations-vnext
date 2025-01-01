@@ -1,0 +1,144 @@
+#!/bin/bash
+set -e
+
+# This script sets up the github/migrations-vnext repository for a github/github codespace.
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+ORANGE='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Install git-lfs if needed
+install_git_lfs() {
+   echo -e "\n${GREEN}➡️ Checking for git-lfs installation...\n${NC}"
+
+   if command -v git-lfs >/dev/null 2>&1; then
+      echo -e "${GREEN}INFO: git-lfs is already installed${NC}"
+      return 0
+   fi
+
+   echo -e "${GREEN}INFO: Installing latest git-lfs${NC}"
+
+   TEMP_DIR=$(mktemp -d)
+   if [ $? -ne 0 ]; then
+      echo -e "${RED}ERROR: Failed to create temporary directory${NC}"
+      return 1
+   fi
+
+   trap "rm -rf '$TEMP_DIR'" EXIT
+
+   echo -e "${BLUE}Fetching latest git-lfs version...${NC}"
+   GIT_LFS_VERSION=$(curl -s https://api.github.com/repos/git-lfs/git-lfs/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+
+   if [ -z "$GIT_LFS_VERSION" ]; then
+      echo -e "${RED}ERROR: Failed to fetch latest git-lfs version${NC}"
+      return 1
+   fi
+
+   echo -e "${GREEN}INFO: Latest git-lfs version is $GIT_LFS_VERSION${NC}"
+
+   DOWNLOAD_URL="https://github.com/git-lfs/git-lfs/releases/latest/download/git-lfs-linux-amd64-v${GIT_LFS_VERSION}.tar.gz"
+   DOWNLOAD_PATH="$TEMP_DIR/git-lfs.tar.gz"
+
+   echo -e "${BLUE}Downloading git-lfs from $DOWNLOAD_URL${NC}"
+   if ! curl -L "$DOWNLOAD_URL" -o "$DOWNLOAD_PATH"; then
+      echo -e "${RED}ERROR: Failed to download git-lfs${NC}"
+      return 1
+   fi
+
+   echo -e "${BLUE}Extracting git-lfs archive${NC}"
+   if ! tar -xzf "$DOWNLOAD_PATH" -C "$TEMP_DIR"; then
+      echo -e "${RED}ERROR: Failed to extract git-lfs archive${NC}"
+      return 1
+   fi
+
+   GIT_LFS_BINARY="$TEMP_DIR/git-lfs-$GIT_LFS_VERSION/git-lfs"
+   if [ ! -f "$GIT_LFS_BINARY" ]; then
+      echo -e "${RED}ERROR: git-lfs binary not found at $GIT_LFS_BINARY${NC}"
+      return 1
+   fi
+
+   echo -e "${BLUE}Installing git-lfs binary to /usr/local/bin${NC}"
+   if ! sudo cp "$GIT_LFS_BINARY" /usr/local/bin/git-lfs; then
+      echo -e "${RED}ERROR: Failed to install git-lfs binary${NC}"
+      return 1
+   fi
+
+   sudo chmod +x /usr/local/bin/git-lfs
+
+   echo -e "${GREEN}INFO: git-lfs binary installed successfully${NC}"
+   return 0
+}
+
+# Function to print help message
+help() {
+   echo "Sets up the github/migrations-vnext repository for a github/github codespace."
+   echo
+   echo "Usage: setup-codespaces-migrations-vnext [-b branch] [-d|h] "
+   echo "Options:"
+   echo "-b     Specify the migrations-vnext branch to clone. Defaults to main if not provided."
+   echo "-d     Before starting, delete the existing migrations-vnext directory in the codespace."
+   echo "-h     Print this help message."
+   echo
+}
+
+# Set the branch as main. If a branch is provided as an argument, it will be set to that when we parse the provided options.
+BRANCH=main
+
+# Get the options
+while getopts ":b:hd" opt; do
+   case $opt in
+      h) # display help message
+         help
+         exit;;
+      b) # If a branch was provided, re-set the variable
+         BRANCH=$OPTARG;;
+      d) # Delete the repository if it exists
+         DELETE_REPO=true;;
+     :)
+      echo "Error: Option -$OPTARG requires an argument."
+      exit 1;;
+     \?) # Invalid option
+         echo "Error: Invalid option -$OPTARG"
+         exit 1;;
+   esac
+done
+
+if [ "$DELETE_REPO" = true ]; then
+  echo -e "\n${GREEN}➡️ Deleting the existing migrations-vnext repo...\n${NC}"
+  sudo rm -rf /workspaces/migrations-vnext
+fi
+
+# Install git-lfs before cloning since the repo uses it
+install_git_lfs
+
+# Do a clone of migrations-vnext to the same dir as the github/github repo.
+# If a branch was supplied, use that branch for the clone.
+echo -e "\n${GREEN}➡️ Cloning migrations-vnext repo at branch $BRANCH...\n${NC}"
+git clone https://$PROXIMA_PAT@github.com/github/migrations-vnext /workspaces/migrations-vnext --branch $BRANCH
+
+# Set up git-lfs for the migrations-vnext repository
+echo -e "\n${GREEN}➡️ Setting up git-lfs for migrations-vnext repo...\n${NC}"
+git -C /workspaces/migrations-vnext lfs install
+git -C /workspaces/migrations-vnext lfs pull
+
+echo -e "\n${GREEN}➡️ Installing deps...\n${NC}"
+
+# Install a specific version of pandoc for consistency
+PANDOC_VERSION="3.7.0.2"
+wget -q https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-amd64.deb
+sudo dpkg -i pandoc-${PANDOC_VERSION}-1-amd64.deb
+rm pandoc-${PANDOC_VERSION}-1-amd64.deb
+
+echo -e "\n${GREEN}➡️ Adding /workspace/migrations-vnext folder to Workspace...\n${NC}"
+code --add /workspaces/migrations-vnext
+
+echo -e ""
+echo -e "${GREEN}🎉🎉 FINISHED! The github/migrations-vnext repo has been set up! 🎉🎉"
+echo -e "Prior to running a live migration, you'll need to start GitHub in proxima mode. To do this, run the following commands:${NC}"
+echo -e ""
+echo -e "${ORANGE}cd /workspaces/github"
+echo -e "${ORANGE}DOMAIN_NAME=avocado-gmbh.ghe.localhost script/mvnd-enabled-server"
+echo -e ""
+echo -e "${GREEN}To run a live migration, see https://github.com/github/migrations-vnext/blob/main/docs/development-and-testing.md"

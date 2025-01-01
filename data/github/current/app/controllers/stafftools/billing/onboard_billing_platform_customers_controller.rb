@@ -1,0 +1,125 @@
+# typed: true
+# frozen_string_literal: true
+
+module Stafftools
+  module Billing
+    class OnboardBillingPlatformCustomersController < StafftoolsController
+      CLUSTER_DEPENDENCIES_ALLOWED_NON_GET_REQUESTS = [
+        "Stafftools::Billing::OnboardBillingPlatformCustomersController#create",
+        "Stafftools::Billing::OnboardBillingPlatformCustomersController#destroy",
+      ]
+
+      before_action :dotcom_required
+      before_action :validate_customer_ids, only: [:create]
+      before_action :stafftools_onboarding_staff_required!
+
+      depends_on_clusters ApplicationRecord::Mysql1,
+      ApplicationRecord::Collab,
+      ApplicationRecord::Mysql2,
+      ApplicationRecord::Mysql5,
+      ApplicationRecord::NotificationsEntries,
+      ApplicationRecord::Billing,
+      ApplicationRecord::Ballast,
+      ApplicationRecord::IamAbilities,
+      ApplicationRecord::Repositories,
+      ApplicationRecord::Configurations,
+      only: [:index, :create, :new]
+
+      depends_on_clusters ApplicationRecord::Copilot,
+      only: [:index, :new], optional: true
+
+      PER_PAGE = 30
+
+      PRODUCTS = [
+        ::Billing::OnboardCustomerToProductInBillingPlatformJob::ProductEnum::Actions,
+        ::Billing::OnboardCustomerToProductInBillingPlatformJob::ProductEnum::Git_Lfs,
+        ::Billing::OnboardCustomerToProductInBillingPlatformJob::ProductEnum::Copilot,
+        ::Billing::OnboardCustomerToProductInBillingPlatformJob::ProductEnum::Ghas,
+        ::Billing::OnboardCustomerToProductInBillingPlatformJob::ProductEnum::Ghec,
+        ::Billing::OnboardCustomerToProductInBillingPlatformJob::ProductEnum::Codespaces,
+        ::Billing::OnboardCustomerToProductInBillingPlatformJob::ProductEnum::Packages,
+      ].freeze
+
+      def index
+        bp_customers_by_id = if onboarded_customers.any?
+          response = billing_platform_client.get_customers(
+            customer_ids: onboarded_customers.pluck(:id).map(&:to_s)
+          )
+          if !response.is_a?(::Billing::Platform::Api::Error)
+            response[:customers].index_by { |c| c[:customerId].to_i }
+          else
+            {}
+          end
+        end
+
+        render("stafftools/billing/onboard_billing_platform_customers/index", locals: {
+          customers: onboarded_customers,
+          bp_customers: bp_customers_by_id,
+          products: PRODUCTS,
+        })
+      end
+
+      def new
+        render("stafftools/billing/onboard_billing_platform_customers/new")
+      end
+
+      def create
+        Customer.where(id: customer_ids_arr).each do |customer|
+          # TODO: Should we enqueue with some kind of rate limit to avoid a thundering heard?
+          customer.onboard_to_all_billing_platform_products
+        end
+
+        flash[:notice] = "You have successfully enqueued the customers for billing platform onboarding"
+        redirect_to(action: :index)
+      end
+
+      private
+
+      memoize def customer_ids
+        params[:new_customer_ids]
+      end
+
+      memoize def customer_ids_arr
+        customer_ids.split(",").map(&:to_i)
+      end
+
+      memoize def customer_duplicated_ids
+        customer_ids_arr.select { |id| customer_ids_arr.count(id) > 1 }
+      end
+
+      def validate_customer_ids
+        if customer_ids.blank?
+          flash[:error] = "Couldn't find any customer ids"
+          return redirect_to(action: :new)
+        end
+        unless customer_ids.match?(/^\s*\d+(?:\s*,\s*\d+)*\s*$/)
+          flash[:error] = "Your list of customer ids is not valid, please use a comma separated list of customer ids"
+          return redirect_to(action: :new)
+        end
+
+        if customer_duplicated_ids.length > 0
+          flash[:error] = "Please only add unique customer ids, you have inputted #{customer_duplicated_ids.uniq.join(", ")} more than once, please remove these customers and try again"
+          redirect_to(action: :new)
+        end
+      end
+
+      def stafftools_onboarding_staff_required!
+        render_404 unless current_user.site_admin?
+      end
+
+      def billing_platform_client
+        ::Billing::Platform::Api::Client.new
+      end
+
+      def onboarded_customers
+        customer_id = params[:customer_id]
+        product = params[:product]&.downcase
+
+        customers = Customer.where(billed_via_billing_platform: true).includes(:billing_platform_enabled_product).order(:id)
+        customers = customers.where(id: customer_id) if customer_id.present?
+        customers = customers.where(billing_platform_enabled_product: { product => true }) if product.present?
+        customers = customers.limit(PER_PAGE)
+      end
+    end
+  end
+end

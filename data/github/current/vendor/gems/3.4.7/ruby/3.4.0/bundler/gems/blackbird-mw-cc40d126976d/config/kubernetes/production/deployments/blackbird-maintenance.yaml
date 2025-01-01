@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: blackbird-maintenance
+    annotations:
+        # Override to run on only one cluster
+        moda.github.net/cluster-preferences: |
+            {
+              "general-2-va3-iad":  {
+                "spec": {
+                  "replicas": 1
+                }
+              }
+            }
+spec:
+    replicas: 0 # times 6 k8s clusters
+    strategy:
+        type: Recreate
+    selector:
+        matchLabels:
+            app: blackbird-maintenance
+    template:
+        metadata:
+            labels:
+                app: blackbird-maintenance
+            annotations:
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: blackbird
+                fluentbit.io/parser: logfmt_sloppy
+        spec:
+            dnsPolicy: ClusterFirst
+            containers:
+                - name: blackbird-maintenance
+                  image: blackbird-mw
+                  command: ["/blackbird-maintenance"]
+                  ports:
+                    - name: http
+                      containerPort: 8080
+                      protocol: TCP
+                  readinessProbe:
+                    initialDelaySeconds: 5
+                    timeoutSeconds: 5
+                    httpGet:
+                        path: /ready
+                        port: 8080
+                  envFrom:
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: BLACKBIRD_MW_ENV
+                      value: "production"
+                    - name: BLACKBIRD_MW_STATS_ADDR
+                      value: "$(KUBE_NODE_HOSTNAME):28125"
+                    - name: BLACKBIRD_MW_POD
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.name
+                    - name: BLACKBIRD_MW_KUBE_NAMESPACE
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.namespace
+                    - name: BLACKBIRD_KAFKA_BROKERS
+                      value: "hydro-kafka-blackbird-boot-1.service.azure-eastus.github.net:9093,hydro-kafka-blackbird-boot-2.service.azure-eastus.github.net:9093,hydro-kafka-blackbird-boot-3.service.azure-eastus.github.net:9093"
+                    - name: SHARED_KAFKA_BROKERS
+                      value: "hydro-kafka-potomac-boot-1.service.iad.github.net:9093,hydro-kafka-potomac-boot-2.service.iad.github.net:9093,hydro-kafka-potomac-boot-3.service.iad.github.net:9093"
+                    - name: CHATTERBOX_URL
+                      value: "https://chatterbox.githubapp.com"
+                    - name: FRENO_HOST
+                      value: "freno.service.github.net:8111"
+                    - name: BLACKBIRD_ENV
+                      value: dsa_client
+                    - name: RUST_LOG
+                      value: warn
+                    - name: GOMAXPROCS
+                      valueFrom:
+                        resourceFieldRef:
+                          containerName: blackbird-maintenance
+                          resource: limits.cpu
+                          divisor: 1
+                  # http://kubernetes.io/docs/user-guide/compute-resources/
+                  resources:
+                    requests:
+                        cpu: 0.1
+                        memory: "1G"
+                    limits:
+                        cpu: 0.8
+                        memory: "20G"

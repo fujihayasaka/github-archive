@@ -1,0 +1,98 @@
+<%# locals(payment_duration:, subscribe_path:, copilot_user:, success_path: nil, return_to_path: nil) -%>
+
+<%
+  success_path ||= nil
+  return_to_path ||= nil
+
+  copilot_base_price = payment_duration == "monthly" ? Copilot::COPILOT_PRO_MONTHLY_BASE_PRICE : Copilot::COPILOT_PRO_YEARLY_BASE_PRICE
+  copilot_price = copilot_base_price * 100
+  billing_amount = copilot_user.eligible_for_trial? ? 0 : copilot_price
+  billing_period = payment_duration == "monthly" ? 1.month : 1.year
+  next_billing_date = (Time.now + billing_period).strftime("%B %e, %Y")
+%>
+
+<%= render Primer::Box.new(p: 3, border: true, border_radius: 2, bg: :default) do %>
+  <h2 class="sr-only">Subscription summary</h2>
+
+  <%= render Primer::Alpha::Stack.new(direction: :horizontal, justify: :space_between, mb: 2) do %>
+    <%= render Primer::Beta::Text.new(tag: :p, font_size: 5, font_weight: :bold, flex_grow: 0, mb: 0) do %>
+      <span>GitHub Copilot Pro</span>
+
+      <% if copilot_user.eligible_for_trial? %>
+        <span> - Free trial</span>
+      <% end %>
+    <% end %>
+
+    <%= render Primer::Beta::Text.new(tag: :p, font_size: 5, font_weight: :bold, mb: 0) do %>
+      <%= Billing::Money.new(billing_amount).format(no_cents_if_whole: false) %>
+    <% end %>
+  <% end %>
+
+  <% if FeatureFlag.vexi.enabled?(:site_spark_pro_activation_flow, current_user, default: false) %>
+    <%= render Primer::Alpha::Stack.new(direction: :horizontal, align: :center, gap: :condensed, mb: 3) do %>
+      <%= render Primer::Beta::Octicon.new(:"sparkle-fill", size: :small, color: :done, flex_grow: 0) %>
+
+      <%= render Primer::Beta::Text.new(tag: :p, color: :muted, font_size: 6, mb: 0) do %>
+        Includes access to GitHub Spark
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <%= render Primer::Beta::Text.new(tag: :p, color: :default, font_size: 6) do %>
+    <% if copilot_user.eligible_for_trial? %>
+      You will be billed <%= Billing::Money.new(copilot_price).format(no_cents_if_whole: false) %>/<%= payment_duration == "monthly" ? "month" : "year" %> starting <span style="white-space: nowrap;"><%= (Time.now + Copilot.free_trial_length.days).strftime("%B %e, %Y") %></span>.
+    <% else %>
+      You will be billed <%= Billing::Money.new(billing_amount).format(no_cents_if_whole: false) %> today. Your next payment will be <%= Billing::Money.new(billing_amount).format(no_cents_if_whole: false) %> on <%= next_billing_date %>.
+    <% end %>
+  <% end %>
+
+  <%= render Primer::Beta::Text.new(tag: :p, color: :muted, font_size: 6, mb: 0) do %>
+    To prevent abuse, we require billing information upfront.
+    <% if copilot_user.eligible_for_trial? %>
+      Your 30-day free trial will automatically convert to a paid plan after the trial ends. You can cancel anytime from settings before the trial expires to avoid being billed.
+    <% end %>
+  <% end %>
+
+  <% if current_user.has_valid_payment_method? %>
+    <% if current_user.billing_contact.country_code == "KR" %>
+      <%= render Primer::Alpha::Dialog.new(title: "Privacy agreement", size: :medium_portrait) do |d| %>
+        <% d.with_header(show_divider: true) do %>
+          Privacy agreement
+        <% end %>
+
+        <% d.with_show_button(scheme: :primary, size: :large, block: true, mt: 3) { "Continue" } %>
+
+        <% d.with_body do %>
+          <%= render "copilot/pro/subscribe_form",
+            payment_duration: payment_duration,
+            subscribe_path: subscribe_path,
+            success_path: success_path,
+            return_to_path: return_to_path,
+            hide_submit: true
+          %>
+        <% end %>
+
+        <% d.with_footer(show_divider: true) do %>
+          <%= render Primer::Beta::Button.new(scheme: :primary, type: :submit, size: :large, block: true,
+            form: "copilot-pro-subscription-form",
+            data: {
+              target: "billing-checkout.submitButton",
+              action: "click:billing-checkout#handleSubscriptionActivation"
+            }
+          ) do %>
+            Activate now
+          <% end %>
+        <% end %>
+      <% end %>
+    <% else %>
+      <hr class="my-3">
+
+      <%= render "copilot/pro/subscribe_form",
+        payment_duration: payment_duration,
+        subscribe_path: subscribe_path,
+        success_path: success_path,
+        return_to_path: return_to_path
+      %>
+    <% end %>
+  <% end %>
+<% end %>

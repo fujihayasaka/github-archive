@@ -1,0 +1,26 @@
+# rubocop:todo GitHub/EnforcePackageAppStructure
+# typed: strict
+# frozen_string_literal: true
+
+class RemoveBusinessOrganizationsJob < ApplicationJob
+  queue_as :remove_business_organizations
+  retry_on_dirty_exit
+
+  resolve_tenant_context do |business_id|
+    Business.find_by(id: business_id)
+  end
+
+  # Public: Remove all member organizations from the business, without
+  # destroying the associated Organization records.
+  #
+  sig { params(business_id: Integer, actor: T.nilable(User)).void }
+  def perform(business_id, actor: nil)
+    return unless business = Business.find_by(id: business_id)
+
+    business.organizations.each do |org|
+      with_write do
+        business.remove_organization(org, actor: actor)
+      end
+    end
+  end
+end

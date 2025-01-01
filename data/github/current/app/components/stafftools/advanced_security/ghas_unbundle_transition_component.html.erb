@@ -1,0 +1,86 @@
+<div class="Box-row">
+  <ghas-unbundle-transition>
+    <div class="form-group d-flex mt-0">
+      <div class="d-flex flex-column col-8 mr-2">
+        <% if business.advanced_security_products_bundled? %>
+          <label>Transition enterprise to unbundled SKUs</label>
+          <span class="note">
+            This enables Secret Protection and Code Security for this enterprise wherever
+            GitHub Advanced Security was previously enabled. This is meant to be permanent,
+            but can be reversed if necessary
+          </span>
+        <% else %>
+          <label>Revert enterprise to bundled GHAS</label>
+          <span class="note">
+            This should only be done in extremely rare circumstances, such as an error
+            with a previous transition to unbundled SKUs, or some other exceptional reason
+          </span>
+        <% end %>
+      </div>
+      <div class="d-flex flex-1 flex-justify-center flex-column">
+        <% if transition&.status == "scheduled" %>
+          <label><%= "Transition to #{target_sku_state_text(target_sku_state: transition.target_sku_state)} scheduled for #{transition.date}" %></label>
+          <%= form_tag cancel_sku_transition_stafftools_advanced_security_path(business, transition.id), method: :delete do %>
+            <%= render(Primer::Alpha::Dialog.new(
+                title: "Cancel transition",
+                id: dom_id(business, :cancel_sku_transition),
+                size: :medium_portrait,
+              )) do |dialog| %>
+              <% dialog.with_show_button(
+                scheme: :danger,
+                block: true,
+                mt: 2
+              ) { "Cancel" } %>
+
+              <% dialog.with_body do %>
+                Are you sure you want to cancel the transition to <%= target_sku_state_text(target_sku_state: transition.target_sku_state) %> scheduled for <%= transition.date %>?
+              <% end %>
+
+              <% dialog.with_footer do %>
+                <%= render(Primer::Beta::Button.new(data: { "close-dialog-id": dom_id(business, :cancel_sku_transition) })) { "Cancel" } %>
+                <%= render(Primer::Beta::Button.new(type: :submit, scheme: :danger)) { "Confirm" } %>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% elsif transition&.status == "queued" || transition&.status == "running" %>
+          <label>Transition in progress, refresh the page to check in.</label>
+          <%= render(Primer::Beta::Spinner.new(size: :medium, my: 4, mx: :auto, display: :block)) %>
+        <% elsif show_bundle_unbundle_action? %>
+          <%= form_tag create_sku_transition_stafftools_advanced_security_path(business), method: :post do %>
+            <input type="hidden" name="target_sku_state" value="<%= target_sku_state %>">
+            <%= render(Primer::Alpha::Dialog.new(
+                title: "Confirm transition to #{target_sku_state} SKU(s)",
+                id: dom_id(business, :create_sku_transition),
+                size: :medium_portrait,
+              )) do |dialog| %>
+              <% dialog.with_show_button(
+                scheme: :danger,
+                block: true,
+                id: dom_id(business, :trigger_sku_transition)
+              ) { "Change to #{target_sku_state_text}" } %>
+
+              <% dialog.with_body do %>
+                <%= render(Primer::Alpha::TextField.new(
+                  id: "transition-date",
+                  type: "date",
+                  name: "transition_date",
+                  value: Date.current,
+                  label: "Transition date",
+                  "aria-labelledby": "transition-date-label",
+                  min: Date.current
+                )) %>
+              <% end %>
+
+              <% dialog.with_footer do %>
+                <%= render(Primer::Beta::Button.new(data: { "close-dialog-id": dom_id(business, :trigger_sku_transition) })) { "Cancel" } %>
+                <%= render(Primer::Beta::Button.new(type: :submit, scheme: :danger)) { "Confirm" } %>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% else %>
+          <label>Cannot unbundle a self-serve customer on a volume SKU.</label>
+        <% end %>
+      </div>
+    </div>
+  </ghas-unbundle-transition>
+</div>

@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: blackbird-admin
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app: blackbird-admin
+    template:
+        metadata:
+            labels:
+                app: blackbird-admin
+            annotations:
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: blackbird
+                fluentbit.io/parser: logfmt_sloppy
+        spec:
+            dnsPolicy: ClusterFirst
+            containers:
+                - name: blackbird-admin
+                  image: blackbird-mw
+                  command: ["/blackbird-admin"]
+                  ports:
+                    - name: http
+                      containerPort: 8080
+                      protocol: TCP
+                  readinessProbe:
+                    initialDelaySeconds: 5
+                    timeoutSeconds: 5
+                    httpGet:
+                        path: /ready
+                        port: 8080
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command: ["sleep", "5"]
+                  envFrom:
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: BLACKBIRD_MW_ENV
+                      value: "production"
+                    - name: BLACKBIRD_MW_STATS_ADDR
+                      value: "$(KUBE_NODE_HOSTNAME):28125"
+                    - name: BLACKBIRD_MW_POD
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.name
+                    - name: BLACKBIRD_MW_KUBE_NAMESPACE
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.namespace
+                    - name: BLACKBIRD_MW_GITHUB_INTERNAL_API_URL
+                      value: "https://internal-api.service.iad.github.net/"
+                    - name: SHARED_KAFKA_BROKERS
+                      value: "hydro-kafka-potomac-boot-1.service.iad.github.net:9093,hydro-kafka-potomac-boot-2.service.iad.github.net:9093,hydro-kafka-potomac-boot-3.service.iad.github.net:9093"
+                    - name: BLACKBIRD_KAFKA_BROKERS
+                      value: "hydro-kafka-blackbird-boot-1.service.azure-eastus.github.net:9093,hydro-kafka-blackbird-boot-2.service.azure-eastus.github.net:9093,hydro-kafka-blackbird-boot-3.service.azure-eastus.github.net:9093"
+                    - name: BLACKBIRD_MW_ACCESSIBLE_RESOURCES_REDIS_ADDR
+                      value: "db-redis-blackbird-rw.service.github.net:6379"
+                    - name: BLACKBIRD_MW_ACCESSIBLE_RESOURCES_REDIS_USERNAME
+                      value: "blackbird"
+                    - name: BLACKBIRD_MW_PAGINATION_REDIS_ADDR
+                      value: "db-redis-blackbird-pagination-rw.service.github.net:6379"
+                    - name: BLACKBIRD_MW_PAGINATION_REDIS_USERNAME
+                      value: "blackbird-pagination"
+                    - name: CHATTERBOX_URL
+                      value: "https://chatterbox.githubapp.com"
+                    - name: BLACKBIRD_MW_SPOKESD_URL
+                      value: "https://spokesd-production.service.iad.github.net:10013"
+                    - name: BLACKBIRD_ENV
+                      value: dsa_client
+                    - name: RUST_LOG
+                      value: warn
+                    - name: GOMAXPROCS
+                      value: "9" # limits.cpu - 1
+                  volumeMounts:
+                    - name: blackbird-chatops-config
+                      mountPath: /config
+                  # http://kubernetes.io/docs/user-guide/compute-resources/
+                  resources:
+                    requests:
+                        cpu: 1.0
+                        memory: "10G"
+                    limits:
+                        cpu: 10.0
+                        memory: "30G"
+            volumes:
+                - name: blackbird-chatops-config
+                  configMap:
+                    name: chatops-config

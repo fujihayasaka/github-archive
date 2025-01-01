@@ -1,0 +1,267 @@
+<%= render Primer::Alpha::ActionMenu.new(
+  test_selector: "role-filter-button",
+  menu_id: "role-menu",
+  select_variant: :single,
+  anchor_align: :end
+) do |menu| %>
+  <% menu.with_show_button do |button| %>
+    <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+      Role
+  <% end %>
+
+  <% menu.with_item(
+    label: "Everyone",
+    href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(role: nil)),
+    active: view.role.nil?
+  ) %>
+
+  <% if view.show_details? && !view.basic? %>
+    <% value = Platform::Enums::EnterpriseUserAccountMembershipRole.values["OWNER"].value %>
+    <% menu.with_item(
+      label: "Organization owners",
+      href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(role: value)),
+      active: view.role == value
+    ) %>
+
+    <% value = Platform::Enums::EnterpriseUserAccountMembershipRole.values["MEMBER"].value %>
+    <% menu.with_item(
+      label: "Organization members",
+      href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(role: value)),
+      active: view.role == value
+    ) %>
+  <% end %>
+
+  <% value = Platform::Enums::EnterpriseUserAccountMembershipRole.values["ENTERPRISE_OWNER"].value %>
+  <% menu.with_item(
+    label: "Enterprise owners",
+    href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(role: value)),
+    active: view.role == value
+  ) %>
+
+  <% if view.show_details? %>
+    <% if !GitHub.enterprise? %>
+      <% value = Platform::Enums::EnterpriseUserAccountMembershipRole.values["BILLING_MANAGER"].value %>
+      <% menu.with_item(
+        label: "Billing managers",
+        href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(role: value)),
+        active: view.role == value
+      ) %>
+    <% end %>
+
+    <% if this_business.enterprise_managed_user_enabled? %>
+      <% value = Platform::Enums::EnterpriseUserAccountMembershipRole.values["GUEST_COLLABORATOR"].value %>
+      <% menu.with_item(
+        label: "Guest collaborators",
+        href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(role: value)),
+        active: view.role == value
+      ) %>
+    <% end %>
+
+    <% if show_unaffiliated_members?(this_business) %>
+      <% value = Platform::Enums::EnterpriseUserAccountMembershipRole.values["UNAFFILIATED"].value %>
+      <% menu.with_item(
+        label: "Unaffiliated",
+        href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(role: value)),
+        active: view.role == value
+      ) %>
+    <% end %>
+  <% end %>
+<% end %>
+
+
+<% if GitHub.single_business_environment? && GitHub.auth.saml? %>
+  <%= render Primer::Alpha::ActionMenu.new(
+    test_selector: "account-type-filter-button",
+    menu_id: "account-type-filter-menu",
+    select_variant: :single,
+    anchor_align: :end
+  ) do |menu| %>
+    <% menu.with_show_button do |button| %>
+      <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+      Account Type
+    <% end %>
+
+    <% current_value = view.account_type %>
+
+    <% menu.with_item(
+      label: "Everyone",
+      href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(account_type: nil)),
+      active: current_value.nil?
+    ) %>
+
+    <% if view.show_details? && !view.basic? %>
+      <% value = BusinessesHelper::ACCOUNT_TYPE["BUILT_IN"] %>
+      <% menu.with_item(
+        label: "Built-in",
+        href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(account_type: value)),
+        active: current_value == value
+      ) %>
+
+      <% value = BusinessesHelper::ACCOUNT_TYPE["SAML_LINKED"] %>
+      <% menu.with_item(
+        label: "SAML JIT provisioned",
+        href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(account_type: value)),
+        active: current_value == value
+      ) %>
+
+      <% value = BusinessesHelper::ACCOUNT_TYPE["SAML_AND_SCIM_LINKED"] %>
+      <% menu.with_item(
+        label: "SCIM provisioned",
+        href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(account_type: value)),
+        active: current_value == value
+      ) %>
+    <% end %>
+  <% end %>
+
+<% end %>
+
+<% if !GitHub.single_business_environment? || !view.show_details? %>
+  <% if vss_enabled || (view.copilot_enabled? && view.show_details?) %>
+    <%= render Primer::Alpha::ActionMenu.new(
+      test_selector: "license-filter-button",
+      menu_id: "license-filter-menu",
+      select_variant: :single,
+      anchor_align: :end
+    ) do |menu| %>
+      <% menu.with_show_button do |button| %>
+        <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+        License
+      <% end %>
+
+      <% current_value = view.license %>
+
+      <% menu.with_item(
+        label: "All",
+        href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(license: nil)),
+        active: current_value.nil?
+      ) %>
+
+      <% if vss_enabled %>
+        <% Platform::Enums::EnterpriseLicenseType.values.values.each do |license_type| %>
+          <% menu.with_item(
+            test_selector: "license-filter-type-#{license_type.value}",
+            label: license_type.description,
+            href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(license: license_type.value)),
+            active: current_value == license_type.value,
+          ) %>
+        <% end %>
+      <% elsif view.copilot_enabled? %>
+        <% BusinessesHelper::ADDITIONAL_ENTERPRISE_LICENSE_TYPES.values.each do |license_type| %>
+          <% menu.with_item(
+            test_selector: "license-filter-type-#{license_type}",
+            label: BusinessesHelper::ADDITIONAL_ENTERPRISE_LICENSE_TYPE_DESCRIPTIONS[license_type],
+            href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(license: license_type)),
+            active: current_value == license_type,
+          ) %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if connected_ghes_instances %>
+    <%= render Primer::Alpha::ActionMenu.new(
+      test_selector: "deployment-filter-button",
+      menu_id: "deployment-filter-menu",
+      select_variant: :single,
+      anchor_align: :end,
+    ) do |menu| %>
+      <% menu.with_show_button do |button| %>
+        <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+        Deployment
+      <% end %>
+
+      <% current_value = view.deployment %>
+
+      <% menu.with_item(
+        label: "All",
+        href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(deployment: nil)),
+        active: current_value.nil?
+      ) %>
+
+      <% value = Platform::Enums::EnterpriseUserDeployment.values["CLOUD"].value %>
+      <% menu.with_item(
+        label: "Cloud",
+        href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(deployment: value)),
+        active: current_value == value
+      ) %>
+
+      <% value = Platform::Enums::EnterpriseUserDeployment.values["SERVER"].value %>
+      <% menu.with_item(
+        label: "Server",
+        href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(deployment: value)),
+        active: current_value == value
+      ) %>
+    <% end %>
+
+
+  <% end %>
+<% end %>
+
+<% if view.show_details? %>
+  <% unless view.basic? %>
+    <%= render Primer::Alpha::SelectPanel.new(
+      test_selector: "org-filter-button",
+      id: "organization-panel",
+      title: "Filter by organization",
+      src: enterprise_org_filter_menu_content_path(this_business, "members", query: query, q: params[:q]),
+      fetch_strategy: :eventually_local,
+      preload: true,
+      size: :auto,
+      anchor_align: :end
+    ) do |panel| %>
+      <% panel.with_show_button do |button| %>
+        <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+        Organization
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <%= render Primer::Alpha::ActionMenu.new(
+    test_selector: "two-factor-filter-button",
+    menu_id: "two-factor-authentication-menu",
+    select_variant: :single,
+    anchor_align: :end
+  ) do |menu| %>
+    <% menu.with_show_button do |button|
+      button.with_trailing_action_icon(icon: :"triangle-down")
+      "Two-factor authentication"
+    end %>
+
+    <% current_value = view.two_factor_status %>
+
+    <% menu.with_item(
+      label: "Everyone",
+      href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(two_factor_status: nil)),
+      active: current_value.nil?,
+    ) %>
+
+    <% value = BusinessesHelper::TWO_FACTOR_STATUS["SECURE"] %>
+    <% menu.with_item(
+      label: "Secure",
+      href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(two_factor_status: value)),
+      active: current_value == value,
+    ) %>
+
+    <% if GitHub.two_factor_sms_enabled? %>
+      <% value = BusinessesHelper::TWO_FACTOR_STATUS["INSECURE"] %>
+      <% menu.with_item(
+        label: "Insecure",
+        href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(two_factor_status: value)),
+        active: current_value == value,
+      ) %>
+    <% end %>
+
+    <% value = BusinessesHelper::TWO_FACTOR_STATUS["DISABLED"] %>
+    <% menu.with_item(
+      label: "Disabled",
+      href: people_enterprise_path(this_business.slug, query: view.apply_query_filters(two_factor_status: value)),
+      active: current_value == value,
+    ) %>
+  <% end %>
+
+  <% if show_cost_center?(this_business) %>
+    <%= render partial: "businesses/people/cost_center_filter_menu", locals: {
+      view: view,
+    } %>
+  <% end %>
+<% end %>

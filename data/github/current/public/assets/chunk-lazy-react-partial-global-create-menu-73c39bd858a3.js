@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["lazy-react-partial-actions-survey","lazy-react-partial-global-create-menu"],{73050:(a,u,i)=>{var t=i(7123),e=i(25519);(0,t.k)("global-create-menu",{Component:e.r})}}]);
+//# sourceMappingURL=lazy-react-partial-global-create-menu-311d61c384b9.js.map

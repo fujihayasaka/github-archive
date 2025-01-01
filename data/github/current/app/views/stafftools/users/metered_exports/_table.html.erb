@@ -1,0 +1,62 @@
+<% if defined?(this_business) %>
+  <% export_url = stafftools_metered_exports_path(this_business) %>
+<% else %>
+  <% export_url = stafftools_user_metered_exports_path(this_user) %>
+<% end %>
+
+<h2 class="mb-3">
+  Metered Usage Exports
+</h2>
+
+<p>
+  <% if defined?(this_business) && this_business.billed_via_billing_platform? %>
+    <%= render Primer::Alpha::Banner.new(scheme: :warning, mb: 4, test_selector: "page-deprecated-banner") do %>
+      Customer is on vNext. You can only generate new usage report from the <%= render Primer::Beta::Link.new(href: stafftools_enterprise_billing_usage_path(this_business), underline: :false).with_content("Usage") %> page under "Billing and licensing" section.
+    <% end %>
+  <% elsif defined?(this_user) && this_user&.delegate_billing_to_business? && this_user&.billable_owner&.billed_via_billing_platform? %>
+    <%= render Primer::Alpha::Banner.new(scheme: :warning, mb: 4, test_selector: "page-deprecated-banner") do %>
+      Customer is on vNext. You can only generate new usage report from the <%= render Primer::Beta::Link.new(href: stafftools_enterprise_billing_usage_path(this_user.billable_owner), underline: :false).with_content("Usage") %> page under "Billing and licensing" section of the owning business.
+    <% end %>
+  <% elsif defined?(this_user) && this_user&.billed_via_billing_platform? %>
+    <%= render Primer::Alpha::Banner.new(scheme: :warning, mb: 4, test_selector: "page-deprecated-banner") do %>
+      Customer is on vNext. You can only generate new usage report from the <%= render Primer::Beta::Link.new(href: stafftools_user_billing_usage_path(this_user), underline: :false).with_content("Usage") %> page under "Billing and licensing" section.
+    <% end %>
+  <% else %>
+    <%= render "billing_settings/metered_export_form", url: export_url, email: current_user.email %>
+  <% end %>
+</p>
+
+<div class="js-details-container Details">
+  <div>
+    <div class="Box">
+      <table class="stafftools-table">
+        <thead>
+          <th class="no-wrap billing-table-cell">Filename</th>
+          <th class="no-wrap billing-table-cell">Export dates</th>
+          <th class="no-wrap billing-table-cell">Requester</th>
+          <th class="no-wrap billing-table-cell">Exported at</th>
+        </thead>
+        <tbody>
+          <% metered_exports.each_with_index do |export, idx| %>
+            <tr class="<%= "color-bg-subtle" if idx.odd? %>">
+              <td>
+                <% if defined?(this_business) %>
+                  <%= link_to export.filename, stafftools_metered_export_path(this_business, export) %>
+                <% else %>
+                  <%= link_to export.filename, stafftools_user_metered_export_path(this_user, export) %>
+                <% end %>
+              </td>
+              <td><%= export.starts_on.iso8601 %> - <%= export.ends_on.iso8601 %></td>
+              <td>
+                <% if export.requester.present? %>
+                  <%= link_to export.requester.name, stafftools_user_path(export.requester) %>
+                <% end %>
+              </td>
+              <td><%= export.created_at.strftime("%c") %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

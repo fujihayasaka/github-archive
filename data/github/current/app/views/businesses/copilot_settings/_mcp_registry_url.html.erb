@@ -1,0 +1,42 @@
+<%# | State | MCP Registry URL input box state | %>
+<%# |-------|------------------------| %>
+<%# | Enterprise has MCP set to `Enabled` | Enterprise registry url input and save button is enabled | %>
+<%# | Enterprise has MCP set to `No policy` | Enterprise registry url input and save button is disabled, if an registry URL exists show it in the input box | %>
+<%# | Enterprise has MCP set to `Disabled` | Enterprise registry url input and save button is disabled, if an registry URL exists show it in the input box | %>
+<%# | Enterprise has MCP set to `Unconfigured` | Enterprise registry url input and save button is disabled | %>
+
+<%= render(Primer::Box.new(display: :flex, justify_content: :space_around, align_items: :center, flex: :auto, direction: :row, ml: 3, test_selector: "copilot-mcp-registry-url-settings")) do %>
+  <%= render(Primer::Box.new(display: :inline_flex, justify_content: :space_between, flex: 1, direction: :column)) do %>
+    <%= render(Primer::Beta::Text.new(tag: :span, mb: 1, font_weight: :bold)) do %>
+      MCP Registry URL (optional)
+    <% end %>
+
+    <%= render(Primer::Beta::Text.new(tag: :p, color: :muted)) do %>
+      URL for a <%= link_to("specification-compliant", "https://github.com/modelcontextprotocol/registry", class: "Link--inTextBlock") %> MCP registry.
+      <% if copilot_business.feature_flag_enabled?(:copilot_mcp_registry_ga, default: false) %>
+        MCP servers listed in this registry will be visible to members in Visual Studio Code.
+      <% else %>
+        MCP servers listed in this registry will be visible to members. Note that the MCP registries are currently supported in VS Code only, with support for all Copilot IDEs coming soon.
+      <% end %>
+    <% end %>
+    <% mcp_disabled = %w[no_policy disabled unconfigured].include?(copilot_business.mcp) %>
+    <% route = mcp_registry.id.present? ? update_settings_copilot_mcp_registry_enterprise_path(business.slug, mcp_registry.id) : create_settings_copilot_mcp_registry_enterprise_path(business.slug) %>
+    <% method = mcp_registry.id.present? ? :put : :post %>
+    <%= form_with model: mcp_registry, url: route, method: method, local: true do |form| %>
+      <%= form.hidden_field :registry_access, value: copilot_business.mcp_registry_access %>
+      <div class="form-group mb-3 d-flex">
+        <%= form.url_field :registry_url, class: "form-control input-block mr-2", placeholder: "https://example.com/mcp-registry", disabled: mcp_disabled %>
+        <%= form.submit "Save",
+          class: "btn btn-default mr-2",
+          data: { disable_with: "Saving..." },
+          disabled: mcp_disabled
+        %>
+        <%= form.submit "Clear",
+          class: "btn btn-danger",
+          data: { disable_with: "Clearing..." },
+          disabled: mcp_disabled || mcp_registry.registry_url.blank?
+        %>
+      </div>
+    <% end %>
+  <% end %>
+<% end %>

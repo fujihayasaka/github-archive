@@ -1,0 +1,99 @@
+<div class="<%= classes %> clearfix d-flex" <%= test_selector("#{comment.id}-comment-header") %> data-morpheus-enabled="false">
+  <div class="timeline-comment-actions flex-shrink-0 d-flex flex-items-center">
+    <% if can_react_on_top? %>
+      <div class="d-none d-md-inline-block">
+        <%= render Reactions::DropdownComponent.new(
+          inline_with_reactions: false,
+          target_global_relay_id: comment.global_relay_id,
+          viewer_reactions: viewer_reactions(comment),
+          reaction_path: comment.reaction_path,
+          available_emotions: comment.respond_to?(:emotions) ? comment.emotions : comment.class.emotions,
+          classes: "timeline-comment-action",
+          px: 1,
+          py: 2,
+          mr: 0
+        ) %>
+      </div>
+    <% end %>
+    <details class="details-overlay details-reset position-relative d-inline-block">
+      <%= render Primer::Beta::Button.new(tag: :summary, scheme: :link, classes: "timeline-comment-action Link--secondary") do %>
+        <%= primer_octicon(:"kebab-horizontal", "aria-label": "Show options") %>
+      <% end %>
+
+      <details-menu
+        class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default"
+        style="width:185px"
+        src="<%= menu_path %>"
+        preload
+        <%= test_selector("comment-header-actions-deferred-menu") %>><%# erblint:disable Primer::Accessibility::DetailsMenuMigration %>
+        <% if menu_path %>
+          <%= render Primer::Alpha::IncludeFragment.new(classes: "js-comment-header-actions-deferred-include-fragment") do %>
+            <p class="text-center mt-3" data-hide-on-error>
+              <%= render(Primer::Beta::Spinner.new("aria-label": "Loading...")) %>
+            </p>
+            <p class="ml-1 mb-2 mt-2" data-show-on-error hidden>
+              <%= primer_octicon(:alert) %>
+              Sorry, something went wrong.
+            </p>
+            <button
+              type="button"
+              class="dropdown-item btn-link js-comment-quote-reply"
+              hidden
+              data-hotkey="<%= hotkeys_for(current_user, :pull_request_conversation, :reply) %>"
+              role="menuitem"><%# erblint:counter ButtonComponentMigrationCounter 1 %>
+             Quote reply
+            </button>
+          <% end %>
+        <% else %>
+          <%= render Primer::Beta::ClipboardCopy.new("aria-label": "Copy link", classes: "dropdown-item btn-link", for: permalink_id, role: "menuitem", test_selector: "comment-menu-copy-link") do %>
+            Copy link
+          <% end %>
+        <% end %>
+      </details-menu>
+    </details>
+  </div>
+  <% unless user_feature_enabled?(:copilot_code_review_ga) %>
+    <div class="d-none d-sm-flex">
+      <div class="flex-1 d-flex gap-1">
+        <% if user_feature_enabled?(:lifecycle_label_name_updates) %>
+          <%= render Primer::Experimental::BetaLabel.new(ml: 1) %>
+        <% else %>
+          <%= render Primer::Beta::Label.new(scheme: :success, ml: 1, title: "Label: Preview").with_content("Preview") %>
+        <% end %>
+      </div>
+    </div>
+  <% end %>
+  <h3 class="f5 text-normal d-flex flex-row gap-2" style="flex-grow: 1; justify-content: unset; flex: 1 1 auto;">
+    <%= content_tag(:div, { class: "d-flex flex-justify-center avatar flex-items-center avatar-3 fgColor-muted bgColor-muted borderColor-muted rounded-2", "data-assignee-name": author&.display_login }) do %>
+      <%= render Primer::Beta::Octicon.new(icon: "copilot", size: :small) %>
+    <% end %>
+
+    <strong class="ml-1 flex-self-center">
+      <%= render Comments::Copilot::CommentActorComponent.new(actor: bot) %>
+    </strong>
+
+    <%= badge %>
+    <%= action_text %>
+
+    <%# If we're rendering this partial, don't we already know that the author is the copilot bot, not dependabot? %>
+    <% if author_is_dependabot? %>
+      on behalf of <strong <%= test_selector("on-behalf-of-dependabot") %>><%= GitHub.dependabot_github_app.owner.display_login %></strong>
+    <% end %>
+
+    <% if show_datestamp %>
+      <a href="<%= permalink_url || "##{dom_id}" %>" id="<%= permalink_id %>" class="Link--secondary js-timestamp flex-self-center"><%= time_ago_in_words_js datestamp %></a>
+    <% end %>
+
+    <% if comment.created_via_email %>
+      via email <%= primer_octicon(:mail) %>
+    <% end %>
+
+    <%= render Comments::CommentEditHistoryComponent.new(comment: comment, author: author) %>
+
+    <% if show_abuse_reports? %>
+      <div class="mt-2">
+        <%= primer_octicon(icon: :report, color: :danger) %> <%= abuse_report_tooltip(comment.report_count, comment.top_report_reason, comment.last_reported_at) %>
+      </div>
+    <% end %>
+  </h3>
+</div>

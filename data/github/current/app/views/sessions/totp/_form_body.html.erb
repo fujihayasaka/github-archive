@@ -1,0 +1,29 @@
+<%# erblint:counter FlashMigrationCounter 1 %>
+<%# erblint:counter DeprecatedComponentsCounter 1 %>
+<%
+  otp_value ||= ""
+  if Rails.env.development?
+    case type
+    when :app
+      otp_value = user.two_factor_app_totp&.now || ""
+    when :sms
+      otp_value = user.two_factor_sms_totp&.now || ""
+    end
+  end
+
+  if otp.present?
+    otp_value = otp
+  end
+
+  otp_param_name = form_type == "sudo" ? "sudo_#{type}_otp".to_sym : "#{type}_otp".to_sym
+%>
+
+<div class="flash flash-error flash-full" hidden></div>
+<% autocomplete = supports_autocomplete_otp? ? "one-time-code" : "off" %>
+<label class="sr-only" for="<%= "#{type&.to_s}_totp" %>">Enter the verification code</label>
+<%= text_field_tag otp_param_name, "", "aria-labelledby": "session-otp-input-label", "aria-describedby": "session-otp-input-description",
+  autocomplete: autocomplete, autofocus: "autofocus", class: "width-full mb-2 js-verification-code-input-auto-submit input-code-verification-2fa #{type&.to_s}_totp",
+  value: otp_value, id: "#{type&.to_s}_totp", :inputmode => "numeric", :pattern => "([0-9]{6})|([0-9a-fA-F]{5}-?[0-9a-fA-F]{5})",
+  :placeholder => "XXXXXX" %>
+
+<%= render Primer::ButtonComponent.new(scheme: :primary, block: true, "data-disable-with": "Verifying…", type: :submit) do %>Verify<% end %>

@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unicorn-gitauth-api
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: nginx
+        - name: unicorn
+          args:
+            - bin/pitchfork
+            - -c
+            - config/pitchfork.rb
+            - -E
+            - production
+            - --port
+            - "8083"
+            - gitauth.ru
+          env:
+            - name: RAILS_ENV
+              value: production
+            - name: SCIENTIST_REGION
+              valueFrom:
+                configMapKeyRef:
+                    key: KUBE_REGION
+                    name: kube-cluster-metadata
+            - name: GH_UNICORN_WORKER_COUNT
+              value: "8"
+            - name: GOTAUTH_URL
+              value: https://gotauth-lab.service.iad.github.net
+          resources:
+            limits:
+              cpu: 4
+              memory: 8Gi
+            requests:
+              cpu: 4
+              memory: 8Gi
+      initContainers:
+          - command:
+              - cp
+              - --recursive
+              - --no-preserve=mode
+              - --verbose
+              - /build/public
+              - /assets
+            image: github
+            imagePullPolicy: IfNotPresent
+            name: unicorn-assets
+            resources:
+              requests:
+                  cpu: 100m
+            volumeMounts:
+              - mountPath: /assets
+                name: assets

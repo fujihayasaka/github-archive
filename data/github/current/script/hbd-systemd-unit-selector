@@ -1,0 +1,70 @@
+#!/bin/bash
+
+# Following is a systemd_unit selector script for Host Based Deployments
+# Script returns the systemd units and actions that the Host Deploy Agent needs to take to manage services
+# based on the app role.
+
+# For gitbackups-maintenance agent executes 'reload-or-restart' for aqueduct-github-gitbackups-maintenance
+
+# For github-dfs agent executes:
+# 'reload-or-restart' for aqueduct-github-fs
+# 'restart'           for timerd-github-fs
+# 'reload-or-restart' for ernicorn-github
+
+# For pages-dfs:
+# 'restart' for timerd
+
+# For:
+#   github-pagesmaintworker
+#   github-backupworker
+#   github-graphworker
+#   github-highworker
+#   github-lowworker
+#   github-exportsworker
+# agent executes:
+# 'restart'           for timerd
+# 'reload-or-restart' for aqueduct
+
+set -euo pipefail
+
+# Worker types that need both timerd and aqueduct systemd units handled
+readonly WORKER_TYPES=(
+  "github-pagesmaintworker"
+  "github-backupworker"
+  "github-graphworker"
+  "github-highworker"
+  "github-lowworker"
+  "github-exportsworker"
+)
+
+# Check if app_role is in worker types array
+is_worker_type() {
+  local app_role="$1"
+  local worker_type
+  for worker_type in "${WORKER_TYPES[@]}"; do
+    [[ "$app_role" == "$worker_type" ]] && return 0
+  done
+  return 1
+}
+
+app=$(jq -r .app /etc/github/metadata.json)
+role=$(jq -r .role /etc/github/metadata.json)
+
+app_role=${app}-${role}
+if [[ "$app_role" == "gitbackups-maintenance" ]]; then
+  echo '[{"name": "aqueduct-github-gitbackups-maintenance.service", "action": "reload-or-restart"}]'
+elif [[ "$app_role" == "github-dfs" ]]; then
+  cat <<EOF
+[
+  {"name":"aqueduct-github-fs.service","action":"reload-or-restart"},
+  {"name":"timerd-github-fs.service","action":"restart"},
+  {"name":"ernicorn-github.service","action":"reload-or-restart"}
+]
+EOF
+elif [[ "$app_role" == "pages-dfs" ]]; then
+  echo '[{"name": "timerd.service", "action": "restart"}]'
+elif is_worker_type "$app_role"; then
+  echo '[{"name": "timerd.service", "action": "restart"}, {"name": "aqueduct.service", "action": "reload-or-restart"}]'
+else
+  echo '[]'
+fi

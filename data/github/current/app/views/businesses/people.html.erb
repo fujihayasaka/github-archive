@@ -1,0 +1,125 @@
+<% page_info title: "Members · #{this_business.name}",
+  stafftools: stafftools_enterprise_path(this_business),
+  sidebar: :people,
+  selected_link: :business_people %>
+<% member_tab_label = scim_managed_enterprise?(this_business) ? "Active" : "Members" %>
+<% owner_actor = this_business.owner?(current_user) %>
+<% view = Businesses::PeopleView.new(business: this_business, query: query, owner_actor: owner_actor, viewer: current_user) %>
+<% vss_enabled = this_business.has_active_vss_bundle? %>
+<% connected_ghes_instances = this_business.enterprise_installations.any? %>
+
+<% header_component_action = content_tag(:div, class: ["ml-3 d-flex"], style: "gap: 8px;") do %>
+  <% if owner_actor && this_business.enterprise_users_export_enabled? %>
+    <%= form_tag people_export_enterprise_path(this_business.slug),
+      method: :post,
+      class: "js-members-download-form d-inline-block" do %>
+      <%= render Primer::Beta::Button.new(
+        id: "download-members-csv",
+        test_selector: "csv-report-button",
+        size: :medium,
+        type: :submit,
+        classes: "js-members-download-btn") do |c| %>
+        <% c.with_leading_visual_icon(icon: :download) %>
+        CSV report
+      <% end %>
+    <% end %>
+    <%= render Primer::Beta::Button.new(id: "download-members-csv-spinner", size: :medium, disabled: true, hidden: true, classes: "js-members-generating") do %>
+      <%= render Primer::Beta::Spinner.new(size: :small, mr: 1, vertical_align: :text_bottom) %>
+      CSV report
+    <% end %>
+  <% end %>
+  <% if this_business.actor_can_manage_invitations?(current_user) && this_business.can_invite_unaffiliated_user_accounts? %>
+    <%= render partial: 'businesses/member_invitations/invite_member_dialog', locals: {
+        business: this_business
+      } %>
+  <% end %>
+<% end %>
+
+<%= render layout: "businesses/layout", locals: {
+    business: this_business,
+    title: "Members",
+    header_component_action: header_component_action
+  } do %>
+  <%= render Accounts::LastOwnerBannerComponent.new(account: this_business, current_user: current_user) %>
+
+  <% invite_admin_task = OnboardingTasks::Businesses::InviteEnterpriseMember.new(taskable: this_business, user: current_user) %>
+  <%= render(Businesses::TipComponent.new(
+    business: this_business,
+    show_tip: params[:show_onboarding_guide_tip].present?,
+    task: invite_admin_task,
+    container_class: "mt-4 mb-4"
+    )) do %>
+    <h2 class="mb-1 h-3">Invite enterprise members</h2>
+
+    <div class="color-fg-muted">
+      <p>
+        You can invite a member as an unaffiliated user by clicking "Invite member".
+        <br>You can invite them to organizations or give them Copilot access.
+      </p>
+
+      <p class="mb-0">
+        <a
+          href="https://docs.github.com/enterprise-cloud@latest/admin/user-management/managing-users-in-your-enterprise/inviting-people-to-manage-your-enterprise"
+          target="_blank"
+        >
+          <%= render(Primer::Beta::Octicon.new(:file, mr: 1)) %>
+          Inviting unaffiliated users to your enterprise
+        </a>
+      </p>
+    </div>
+  <% end %>
+  <%= render partial: "businesses/member_quick_info_boxes", locals: {
+    view: view,
+    vss_enabled: vss_enabled,
+    connected_ghes_instances: connected_ghes_instances,
+    query: query
+    } %>
+
+  <%= form_tag(
+      people_enterprise_path(this_business.slug),
+      method: :get,
+      class: "width-full",
+      "data-autosearch-results-container": "business-members-list",
+    ) do %>
+    <div class="d-flex flex-auto flex-wrap flex-items-start"> <%# Overall container for search and buttons %>
+      <div class="mb-2 mr-2 col-4 flex-auto auto-search-group"> <%# Container for search bar %>
+          <input class="form-control width-full input-contrast auto-search-input js-member-filter-field"
+            type="text"
+            name="query"
+            value="<%= params[:query] %>"
+            placeholder="Find a member…"
+            aria-label="Find a member…"
+            autocomplete="off"
+            data-throttled-autosubmit>
+          <%= render Primer::Beta::Octicon.new(icon: "search") %>
+          <%= render(Primer::Beta::Spinner.new(size: :small, classes: "spinner")) %>
+      </div> <%# End of container for search bar %>
+
+      <div class="d-flex"> <%# Buttons container %>
+        <div class="d-flex flex-wrap flex-justify-center" style="gap: 8px">
+          <%= render partial:  "businesses/member_filter", locals: {
+            view: view,
+            vss_enabled: vss_enabled,
+            connected_ghes_instances: connected_ghes_instances,
+            query: query,
+            } %>
+        </div>
+
+      </div> <%# End of buttons container %>
+    </div> <%# End of Overall container %>
+  <% end %>
+
+  <div
+    id="business-members-list"
+    class="js-bulk-actions-container js-check-all-container"
+    data-bulk-actions-url="<%= enterprise_people_bulk_actions_path(this_business, show_remove: view.show_remove?) %>"
+    data-bulk-actions-parameter="user_ids"
+    data-hpc>
+    <%= render partial: "businesses/members_list", locals: {
+      members: members,
+      vss_enabled: vss_enabled,
+      connected_ghes_instances: connected_ghes_instances,
+      query: query,
+    } %>
+  </div>
+<% end %>

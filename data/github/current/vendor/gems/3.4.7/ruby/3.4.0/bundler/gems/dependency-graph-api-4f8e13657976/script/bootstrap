@@ -1,0 +1,68 @@
+#!/bin/bash
+#
+# Resolve all dependencies required to run the application.
+#
+# Usage:
+#
+#    script/bootstrap
+set -e
+
+cd "$(dirname "$0")/.."
+source script/_env
+
+# Mac-specific commands
+if [ -f "Brewfile" ] && [ -x "$(command -v brew)" ] && [ "$(uname -s)" == "Darwin" ]; then
+  brew update
+
+  brew bundle check >/dev/null 2>&1  || {
+    echo "==> Installing Homebrew dependencies..."
+    brew bundle
+  }
+
+  brew bootstrap-nodenv-node
+  brew bootstrap-rbenv-ruby
+  brew setup-nginx-conf dependencies . config/dev/nginx.conf.erb
+fi
+
+# github/github co-located codespace-specific commands
+if github_github_codespace; then
+  echo "==> Detected a github/github Codespace!"
+  echo "==> Running script/bootstrap-codespaces-dotcom..."
+  script/bootstrap-codespaces-dotcom
+fi
+
+if [ -f "Gemfile" ]; then
+  echo "==> Installing gem dependencies..."
+
+  # Set path to installed gems
+  bundle config set path "$(pwd)/vendor/gems"
+  # Ensure we install development and test gems
+  bundle config set with "development:test"
+  # Ensure gems are cached
+  bundle config set cache_all "true"
+
+  if [[ -n "$DG_DEVCONTAINER" ]] || github_github_codespace; then
+    # Use version of libffi that comes bundled with the ffi gem
+    bundle config build.ffi --disable-system-libffi
+  fi
+
+  # bundle install should update vendor/cache as well
+  bundle install --quiet
+
+  # Reinstall tree-sitter to recompile native extensions
+  bundle pristine tree-sitter
+fi
+
+if [ -f "package.json" ]; then
+  echo "==> Installing npm dependencies..."
+  npm install --quiet
+fi
+
+if ( [[ -n "$DG_DEVCONTAINER" ]] || github_github_codespace ) && [[ -n "$GITHUB_TOKEN" ]]; then
+  # If we are in a devcontainer, and there is a token available, then pull the required containers
+  # to save time later.
+  docker login ghcr.io -u token --password "$GITHUB_TOKEN"
+  docker compose pull
+fi
+
+touch log/development.log

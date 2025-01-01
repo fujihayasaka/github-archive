@@ -1,0 +1,48 @@
+#!/bin/bash
+set -e
+
+# root check
+if [ "$UID" -ne 0 ]; then
+  echo "Please run with sudo"
+  exit
+fi
+
+ES_VERSION=8.17.2
+ES_SHA1=a94c9508c50c269c0e7c2b2ee89462d9d4a3ff43
+
+echo "Downloading and installing Elasticsearch $ES_VERSION"
+curl --fail --location --output /tmp/elasticsearch-$ES_VERSION.tar.gz https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-$ES_VERSION-linux-x86_64.tar.gz && \
+  echo $ES_SHA1 /tmp/elasticsearch-$ES_VERSION.tar.gz | sha1sum --check --status && \
+  tar -zxf /tmp/elasticsearch-$ES_VERSION.tar.gz -C /usr/share/ && \
+  rm /tmp/elasticsearch-$ES_VERSION.tar.gz && \
+  mkdir -p /usr/share/elasticsearch-$ES_VERSION/tmp && \
+  chown --recursive elasticsearch:elasticsearch /usr/share/elasticsearch-$ES_VERSION/ && \
+  chown --recursive elasticsearch:elasticsearch /usr/share/elasticsearch-$ES_VERSION/tmp/
+
+echo "Adding Elasticsearch to supervisord"
+cat >> /etc/supervisord.conf << EOF
+
+[program:elasticsearch8-17]
+redirect_stderr=true
+environment=
+    ES_TMPDIR=/usr/share/elasticsearch-$ES_VERSION/tmp/,
+    ES_JAVA_OPTS=-Xms1g -Xmx1g
+command=/usr/share/elasticsearch-$ES_VERSION/bin/elasticsearch
+    -E http.port=9400
+    -E transport.port=9401
+    -E xpack.security.enabled=false
+    -E ingest.geoip.downloader.enabled=false
+    -E xpack.ml.enabled=true # enable ml capabilities
+    -E indices.lifecycle.history_index_enabled=false
+user=elasticsearch
+group=elasticsearch
+
+EOF
+
+echo "Starting Elasticsearch $ES_VERSION"
+supervisorctl reread
+supervisorctl update
+supervisorctl stop elasticsearch8
+supervisorctl start elasticsearch8-17
+
+echo "Elasticsearch $ES_VERSION started"

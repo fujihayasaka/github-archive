@@ -1,0 +1,1213 @@
+syntax = "proto3";
+
+import "google/protobuf/wrappers.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_package = "com.github.aqueduct.api";
+
+package aqueduct.api.v1;
+
+// The JobQueueService supports enqueuing and dequeueing jobs. Each job has an associated app
+// (e.g. "github-production") and queue (e.g. "push").
+service JobQueueService {
+  // Enqueue a job.
+  rpc Send (SendRequest) returns (SendResponse) {};
+
+  // Enqueue a list of jobs. Jobs must all belong to a single app.
+  rpc SendBatch (SendBatchRequest) returns (SendBatchResponse) {};
+
+  // Dequeue a job.
+  rpc Receive (ReceiveRequest) returns (ReceiveResponse) {};
+
+  // Heartbeats allow workers to indicate that they are still processing a job to avoid triggering
+  // automatic redelivery.
+  rpc Heartbeat (HeartbeatRequest) returns (HeartbeatResponse) {};
+
+  // Acknowledge a job after processing to mark it as complete in the aqueduct
+  // system. If jobs are not acked or hearbeated within the redelivery timeout,
+  // they may be redelivered depending on the job's max_redelivery_attempts.
+  rpc Ack (AckRequest) returns (AckResponse) {};
+
+  // List all job queues.
+  rpc ListQueues (ListQueuesRequest) returns (ListQueuesResponse) {};
+
+  // Fetch the queue depth for a given queue.
+  rpc QueueDepth (QueueDepthRequest) returns (QueueDepthResponse) {};
+
+  // Fetch the job at the head of a queue without removing it. Intended for
+  // debugging.
+  rpc Peek (PeekRequest) returns (PeekResponse) {};
+
+  // List all in progress jobs.
+  rpc InProgressJobs (InProgressJobsRequest) returns (InProgressJobsResponse) {};
+
+  // List all scheduled jobs.
+  rpc Scheduled (ScheduledRequest) returns (ScheduledResponse) {};
+
+  // Count the number of scheduled jobs for a given queue.
+  rpc ScheduledCount (ScheduledCountRequest) returns (ScheduledCountResponse) {};
+
+  // Pause consuming from a queue.
+  rpc Pause (PauseRequest) returns (EmptyResponse) {};
+
+  // Resume consuming from a queue.
+  rpc Resume (ResumeRequest) returns (EmptyResponse) {};
+
+  // List all paused queues.
+  rpc Paused (PausedRequest) returns (PausedResponse) {};
+
+  // Restrict the percentage of workers allowed to pop from a given queue.
+  rpc AddWorkerLimit (AddWorkerLimitRequest) returns (EmptyResponse) {};
+
+  // Un-restrict the percentage of workers allowed to pop from a given queue.
+  rpc RemoveWorkerLimit (RemoveWorkerLimitRequest) returns (EmptyResponse) {};
+
+  // List the queues that have worker limits in effect.
+  rpc WorkerLimits (WorkerLimitsRequest) returns (WorkerLimitsResponse) {};
+
+  // List the queues that have worker limits added due to processing time quotas
+  rpc QuotaWorkerLimits (WorkerLimitsRequest) returns (WorkerLimitsResponse) {};
+
+  // Un-restrict the quota percentage of workers allowed to pop from a given queue.
+  rpc RemoveQuotaWorkerLimit (RemoveWorkerLimitRequest) returns (EmptyResponse) {};
+
+  // An internal RPC to get the backend ID assigned to a client ID. Used for fine-grained capacity
+  // monitoring.
+  rpc BackendIds (BackendIdsRequest) returns (BackendIdsResponse) {};
+
+  // Add a new pausing rule. Any queues matching rule criteria will no longer
+  // be consumed by workers. You can scope the rules to a subset of workers by
+  // also specifying worker tags.
+  rpc AddPausingRule (AddPausingRuleRequest) returns (AddPausingRuleResponse) {};
+
+  // Remove a pausing rule.
+  rpc RemovePausingRule (RemovePausingRuleRequest) returns (RemovePausingRuleResponse) {};
+
+  // List all pausing rules.
+  rpc PausingRules (PausingRulesRequest) returns (PausingRulesResponse) {};
+
+  // Add receive rate quota for a queue.
+  rpc AddReceiveRateQuota (AddReceiveRateQuotaRequest) returns (EmptyResponse) {};
+
+  // Remove receive rate quota for a queue.
+  rpc RemoveReceiveRateQuota (RemoveReceiveRateQuotaRequest) returns (EmptyResponse) {};
+
+  // Get all receive rate quotas.
+  rpc ReceiveRateQuotas (ReceiveRateQuotasRequest) returns (ReceiveRateQuotasResponse) {};
+
+  // Add a processing time quota.
+  rpc AddProcessingTimeQuota(AddProcessingTimeQuotaRequest) returns (AddProcessingTimeQuotaResponse) {};
+
+  // Remove a processing time quota.
+  rpc RemoveProcessingTimeQuota(RemoveProcessingTimeQuotaRequest) returns (RemoveProcessingTimeQuotaResponse) {};
+
+  // List processing time quotas.
+  rpc ProcessingTimeQuotas(ProcessingTimeQuotasRequest) returns (ProcessingTimeQuotasResponse) {};
+}
+
+// A request to send a job.
+message SendRequest {
+  // The app publishing the job. The app name provides namespacing to avoid crosstalk between apps,
+  // and allows aqueuduct to enforce quotas and tag metrics.
+  string app = 1;
+
+  // The job queue name. Applications might use multiple queues to separate high priority jobs from
+  // low priority jobs or to provide granularity for pausing/resuming processing.
+  string queue = 2;
+
+  // The raw job payload, treated as opaque by aqueduct.
+  bytes payload = 3;
+
+  // Intentionally drop the job at the relay. Only used for testing the repair system.
+  bool drop_job = 4;
+
+  // Optional job_id. Aqueduct will generate one if not specified.
+  // FOR INTERNAL USE ONLY
+  string job_id = 5;
+
+  // If aqueduct delivers a job to a worker and doesn't receive a Heartbeat or
+  // Ack within the redelivery timeout, it will assume that the worker has
+  // failed or crashed and requeue the job for delivery up to max_redeliveries
+  // times. This value should be greater than the client's heartbeat interval
+  // and/or maximum expected execution runtime for a job.
+  // Optional, defaults to 600 seconds (10 minutes).
+  google.protobuf.UInt32Value redelivery_timeout_secs = 6;
+
+  // Maximum number of times that this job can be redelivered.  After these many
+  // delivery attempts the job will be timed out and no more attempts to deliver
+  // the job will be made.
+  // Setting this to zero will turn off all redeliveries.
+  // Optional, defaults to 2 redeliveries for a total of 3 deliveries.
+  google.protobuf.UInt32Value max_redelivery_attempts = 7;
+
+  // An optional ID that uniquely identifies the producer, used in conjunction
+  // with producer_sequence for idempotent sends. Both must be set to enable
+  // idempotent sends.
+  string producer_id = 8;
+
+  // An optional incrementing sequence. If multiple jobs are sent with the same
+  // sequence number, only the first job will be processed. Used to support
+  // idempotent sends. Must be greater than 0 to enable idempotent sends.
+  uint64 producer_sequence = 9;
+
+  // Optional headers that describe the job. Example use cases include setting
+  // a client-defined job ID, passing tracing headers, or tracking job enqueue
+  // context like request ID.
+  map<string, string> headers = 10;
+
+  // Optional client ID used for tracking clients in logs and state changes.
+  string client_id = 11;
+
+  // Optional timestamp for when this job should be made available for
+  // delivery. When set, a job is held on an internal schedule until this time
+  // before being made availble for delivery. The maximum allowed distance in
+  // the future is two weeks.
+  google.protobuf.Timestamp deliver_at = 12;
+
+  // An optional, user-supplied ID used to identify a job (e.g. a Rails
+  // ActiveJob ID). The external ID is included in logs so that it's easier to
+  // map and external ID to an aqueduct job ID.
+  string external_id = 13;
+
+  // An optional TTL for a job. If the TTL expires before a worker has consumed
+  // the job, the job will be dropped. A TTL of zero is considered valid and
+  // will drop the job as if the TTL expired.
+  //
+  // For scheduled jobs, TTL is relative to deliver_at.
+  google.protobuf.UInt32Value ttl_seconds = 14;
+}
+
+message SendBatchRequest {
+  repeated SendRequest send_requests = 1;
+}
+
+message SendResponse {
+  // The aqueduct-assigned job ID for the job
+  string job_id = 1;
+
+  // The name of the aqueduct cluster that served the request.
+  // Only set by the aqueduct-gateway, is empty otherwise.
+  // The gateway refers to clusters as "backends".
+  string backend_name = 2;
+}
+
+message BatchMessageResponse {
+  // The index of the message
+  int32 index = 1;
+
+  // The aqueduct-assigned job ID for the job
+  string job_id = 2;
+
+  // An error indicating if something went wrong
+  string error = 3;
+}
+
+message SendBatchResponse {
+  repeated BatchMessageResponse batch_message_responses  = 1;
+
+  // The name of the aqueduct cluster that served the request.
+  // Only set by the aqueduct-gateway, is empty otherwise.
+  // The gateway refers to clusters as "backends".
+  string backend_name = 2;
+}
+
+// A request to receive a job.
+message ReceiveRequest {
+  // Identifies the worker requesting a job. Used for load distribution across
+  // backends (shards for aqueduct and cluster in aqueduct-gateway).
+  Worker worker = 1;
+
+  // The app that published the job.
+  string app = 2;
+
+  // A list of queues from which to receive. If the list of queues contains a
+  // wildcard "*", it will pick the next available job from any of the queues in
+  // the supplied request app.
+  repeated string queues = 3;
+
+  // How long to wait for the receive to complete.
+  // < 1 means "use the default timeout of 5 seconds". The maximum allowed
+  // value is 25 seconds to prevent aborted requests during deploys.
+  int32 timeout_ms = 4;
+
+  // Intentionally drop the job. Only used for testing the repair system.
+  bool drop_job = 5;
+
+  // Optional client ID used for tracking clients in logs and state changes.
+  string client_id = 6;
+
+  // An administrative override to bypass aqueduct queue pausing. Allows users
+  // to pause all workers but continue consuming jobs in an ad-hoc fashion. An
+  // example use case is burning off invalid jobs from a queue.
+  bool bypass_pausing = 7;
+
+  // Aqueduct distributes queue data evenly across several shards. By default,
+  // an aqueduct receive request is deterministically routed to a single shard.
+  // This means that if jobs are enqueued to other shards, a worker won't see
+  // them. Normally this is fine because worker pools are typically large and
+  // there are enough workers to service all shards.
+  //
+  // Setting fanout to true will disable single shard routing and instead scan
+  // every shard for jobs. This option is suitable for small worker pools or
+  // scripting.
+  //
+  // Fanout is the default if the client fails to provide worker metadata. All
+  // official aqueduct client worker implementations provide worker metadata.
+  bool fanout = 8;
+}
+
+message ReceiveResponse {
+  // The app that published the job.
+  string app = 1;
+
+  // The queue to which the job was published. If empty, there were no available jobs.
+  string queue = 2;
+
+  // The job id (MessageId within aqueduct).
+  string job_id = 4;
+
+  // The job payload.
+  bytes payload = 3;
+
+  // Optional headers that describe the job. Example use cases include setting
+  // a client-defined job ID, passing tracing headers, or tracking job enqueue
+  // context like request ID.
+  map<string, string> headers = 5;
+
+  // 1 indicates original delivery, 2 indicates first redelivery and so on
+  uint32 delivery_attempt = 6;
+
+  // The maximum delivery attempts that will be made for this job. This number
+  // includes both the first delivery and the configured or default
+  // max_redelivery_attempts.
+  uint32 max_delivery_attempts = 7;
+
+  // A timestamp indicating when the job was sent to aqueduct.
+  google.protobuf.Timestamp sent_at = 8;
+
+  // The name of the aqueduct cluster that served the request.
+  // Only set by the aqueduct-gateway, is empty otherwise.
+  // The gateway refers to clusters as "backends".
+  string backend_name = 9;
+
+  // Aqueduct may ask the client to back off to preserve resources when queues
+  // are empty.
+  int32 backoff_seconds = 10;
+
+  enum Quota {
+    UNKNOWN_QUOTA = 0;
+    RECEIVE_RATE = 1;
+    PROCESSING_TIME = 2;
+  }
+
+  message ThrottledQueue {
+    // The name of the throttled queue.
+    string queue = 1;
+
+    // The quota that was violated.
+    Quota quota = 2;
+  }
+
+  repeated ThrottledQueue throttled = 11;
+}
+
+message HeartbeatRequest {
+  // The app that published the job.
+  string app = 1;
+
+  // The queue to which the job was published
+  string queue = 2;
+
+  // The job id (MessagaeId within aqueduct).
+  string job_id = 3;
+
+  // Optional client ID used for tracking clients in logs and state changes.
+  string client_id = 4;
+}
+
+message HeartbeatResponse {
+  // The name of the aqueduct cluster that served the request.
+  // Only set by the aqueduct-gateway, is empty otherwise.
+  // The gateway refers to clusters as "backends".
+  string backend_name = 1;
+}
+
+message AckRequest {
+  // The app that published the job.
+  string app = 1;
+
+  // The queue to which the job was published
+  string queue = 2;
+
+  // The job id (MessagaeId within aqueduct).
+  string job_id = 3;
+
+  enum Status {
+    NO_STATUS = 0;
+    SUCCESS = 1;
+    FAILURE = 2;
+  }
+
+  // Did the job succeed or fail? This is informational only, aqueduct will log
+  // the job's status and take no further action.
+  Status status = 4;
+
+  // Optional client ID used for tracking clients in logs and state changes.
+  string client_id = 5;
+}
+
+message AckResponse {
+  // The name of the aqueduct cluster that served the request.
+  // Only set by the aqueduct-gateway, is empty otherwise.
+  // The gateway refers to clusters as "backends".
+  string backend_name = 1;
+}
+
+message ListQueuesRequest {
+  // Optional. The name of the publishing app. Omitting this will return
+  // all apps and queues.
+  string app = 1;
+}
+
+message ListQueuesResponse {
+  repeated Queue queues = 1;
+}
+
+message QueueDepthRequest {
+  // The app that published the job.
+  string app = 1;
+
+  // The queue to which jobs were published.
+  string queue = 2;
+}
+
+message QueueDepthResponse {
+  // The app that published the job.
+  string app = 1;
+
+  // The queue to which the jobs were published.
+  string queue = 2;
+
+  // How many jobs are queued for this queue.
+  int64 depth = 3;
+}
+
+message PeekRequest {
+  // The app that published the job.
+  string app = 1;
+
+  // The queue to which the job was published.
+  string queue = 2;
+
+  // The number of job payloads to return. Aqueduct limits the number of jobs
+  // held in redis, so the number of returned payloads will never exceed
+  // the redis limit even if count > limit.
+  int32 count = 3;
+}
+
+message PeekResponse {
+  // The app that published the job.
+  string app = 1;
+
+  // The queue to which the job was published.
+  string queue = 2;
+
+  // The job payloads. Queue ordering is preserved. If payloads is empty, the
+  // aqueduct queue is empty.
+  repeated bytes payloads = 3;
+}
+
+message InProgressJobsRequest {
+  // The name of the app
+  string app = 1;
+
+  // The name of the queue. Can be * to get in progress jobs for all queues.
+  string queue = 2;
+
+  // Include payloads in the output.
+  bool include_payload = 3;
+}
+
+message InProgressJobsResponse {
+  message Job {
+    // The name of the app
+    string app = 2;
+
+    // The queue to which the job was published.
+    string queue = 3;
+
+    // The job ID
+    string job_id = 7;
+
+    // The job payload
+    bytes payload = 4;
+
+    // When the job was delivered
+    google.protobuf.Timestamp delivered_at = 5;
+
+    // The client that accepted the job
+    string client_id = 6;
+  }
+
+  repeated Job in_progress = 1;
+
+  // An error indicating if something went wrong querying for in-progress jobs.
+  string error = 2;
+}
+
+message ScheduledRequest {
+  // The optional name of the app. When omitted, queries all apps.
+  string app = 1;
+
+  // The optional name of the queue. When omitted, queries all queues.
+  string queue = 2;
+
+  // An optional count to limit output. When omitted, output is not limited.
+  int32 count = 3;
+}
+
+message ScheduledResponse {
+  message Job {
+    // The name of the app
+    string app = 1;
+
+    // The queue to which the job was published.
+    string queue = 2;
+
+    // The job ID
+    string job_id = 3;
+
+    // When the job was delivered
+    google.protobuf.Timestamp deliver_at = 4;
+  }
+
+  repeated Job scheduled = 1;
+
+  // An error indicating if something went wrong querying for scheduled jobs.
+  string error = 2;
+}
+
+message ScheduledCountRequest {
+  // The name of the app.
+  string app = 1;
+
+  // The optional name of the queue. When omitted, returns counts for all queues.
+  string queue = 2;
+}
+
+message ScheduledCountResponse {
+  message Count {
+    // The name of the app.
+    string app = 1;
+
+    // The queue to which the job was published.
+    string queue = 2;
+
+    // The number of scheduled jobs.
+    int64 count = 3;
+  }
+
+  repeated Count counts = 1;
+
+  // An error indicating if something went wrong querying for scheduled jobs.
+  string error = 2;
+}
+
+// An empty response
+message EmptyResponse {}
+
+// Used to identify a unique worker.
+message Worker {
+  reserved 1, 2, 3, 7;
+
+  // A worker could be a process, a thread, a goroutine, etc. The worker ID is
+  // unique for each worker and must persist across Receive requests.
+  string id = 5;
+
+  // The optional worker pool name e.g. lowworker. Required to enable
+  // processing time throttling.
+  string pool = 6;
+
+  // Optional tags like role:high-worker etc.
+  map <string, string> tags = 4;
+
+  // How long a worker spent not processing a job, measured between subsequent Receive requests.
+  // Improves accuracy of Aqueduct reported worker utilization metrics and estimated
+  // required capacity. Increasing trends in idle time indicate inefficiency between job executions.
+  uint64 idle_ms = 8;
+}
+
+// A message queue.
+message Queue {
+  string app = 1; // The name of the app that owns the queue
+  string name = 2; // The name of the queue
+}
+
+message PauseRequest {
+  // The app that published the job.
+  string app = 1;
+
+  // The queue to which the job was published.
+  string queue = 2;
+}
+
+message ResumeRequest {
+  // The name of the publishing app
+  string app = 1;
+
+  // The name of the queue to resume
+  string queue = 2;
+}
+
+message PausedRequest {
+  // Optional. The name of the publishing app. Omitting this will return
+  // everything.
+  string app = 1;
+}
+
+message PausedResponse {
+  repeated Queue queues = 1;
+}
+
+message Tag {
+  // The tag key
+  string name = 1;
+  // The tag value
+  string value = 2;
+}
+
+message DisableSchedulingRequest {
+  // The app that published the job.
+  string app = 1;
+
+  // The queue to which the job was published.
+  string queue = 2;
+}
+
+message EnableSchedulingRequest {
+  // The app that published the job.
+  string app = 1;
+
+  // The queue to which the job was published.
+  string queue = 2;
+}
+
+message SchedulingDisabledRequest {};
+
+message SchedulingDisabledResponse {
+  repeated Queue queues = 1;
+};
+
+message AddWorkerLimitRequest {
+  // The queue for which limits should be applied
+  Queue queue = 1;
+  // The percentage of workers that are able to pop from the queue. Worker
+  // identity is determined by client ID.
+  uint32 percent = 2;
+}
+message RemoveWorkerLimitRequest {
+  Queue queue = 1;
+}
+
+message WorkerLimitsRequest {
+  string app = 1;
+}
+
+message WorkerLimitsResponse {
+  message WorkerLimit {
+    Queue queue = 1;
+    uint32 percent = 2;
+  }
+
+  repeated WorkerLimit limits = 1;
+}
+
+message ReceiveRate {
+  // The number of receives
+  uint64 receives = 2;
+
+  // The interval for receive operations in seconds
+  uint64 interval_in_secs = 3;
+}
+
+message ReceiveRateQuota {
+  Queue queue = 1;
+  ReceiveRate rate = 2;
+}
+
+message AddReceiveRateQuotaRequest {
+  ReceiveRateQuota quota = 1;
+}
+
+message RemoveReceiveRateQuotaRequest {
+  Queue queue = 1;
+}
+
+message ReceiveRateQuotasRequest {
+  string app = 1;
+}
+
+message ReceiveRateQuotasResponse {
+  repeated ReceiveRateQuota quotas = 1;
+}
+
+message BackendIdsRequest {
+  message Client {
+    string client_id = 1;
+    map <string, string> tags = 2;
+  }
+
+  // A list of client to map to backend IDs.
+  // Deprecated. Use workers.
+  repeated Client clients = 1;
+
+  // A list of workers to map to backend IDs.
+  repeated Worker workers = 2;
+}
+
+message BackendIdsResponse {
+  // A map of worker/client ID to aqueduct backend (i.e. redis shard) ID.
+  // If the worker isn't mapped to a specific backend, it will be omitted from the list.
+  map<string, google.protobuf.StringValue> backend_ids = 1;
+
+  // A map of worker/client ID to aqueduct cluster name.
+  // If the worker isn't mapped to a specific aqueduct, it will be omitted from the list.
+  // Only set by the aqueduct-gateway, is empty otherwise.
+  // The gateway refers to clusters as "backends".
+  map<string, google.protobuf.StringValue> backend_names = 2;
+}
+
+message AddPausingRuleRequest {
+  // The app that published the job.
+  string app = 1;
+
+  // The job queue name.
+  // You can specify "*" to pause all queues.
+  string queue = 2;
+
+  // Optional worker tags to scope a rule to a subset of workers. Tags must
+  // match the tags set in the aqueduct client.
+  map<string, string> worker_tags = 3;
+}
+
+message AddPausingRuleResponse {};
+
+message RemovePausingRuleRequest {
+  // The app used when creating a pausing rule.
+  string app = 1;
+
+  // The queue used when creating a pausing rule.
+  string queue = 2;
+
+  // The worker tags used when creating a pausing rule.
+  map<string, string> worker_tags = 3;
+}
+
+message RemovePausingRuleResponse {};
+
+message PausingRulesRequest {
+  // Only returns pausing rules for the specified app.
+  string app = 1;
+}
+
+message PausingRulesResponse {
+  message Rule {
+    // The app that published the job.
+    string app = 1;
+
+    // The job queue name.
+    // You can specify "*" to pause all queues.
+    string queue = 2;
+
+    // Optional worker tags to scope a rule to a subet of workers.
+    map<string, string> worker_tags = 3;
+  }
+
+  repeated Rule rules = 1;
+}
+
+message AddProcessingTimeQuotaRequest {
+  // The percentage of total worker pool processing time the queue can occupy.
+  uint32 percent = 1;
+
+  // The queue app
+  string app = 2;
+
+  // The queue name
+  string queue = 3;
+
+  // The worker pool name
+  string worker_pool = 4;
+}
+
+message AddProcessingTimeQuotaResponse {
+}
+
+message RemoveProcessingTimeQuotaRequest {
+  // The queue app
+  string app = 1;
+
+  // The queue name
+  string queue = 2;
+
+  // The worker pool name
+  string worker_pool = 3;
+}
+
+message RemoveProcessingTimeQuotaResponse {
+}
+
+message ProcessingTimeQuotasRequest {
+  // The queue app
+  string app = 1;
+
+  // The worker pool name
+  string worker_pool = 2;
+}
+
+message ProcessingTimeQuotasResponse {
+  message Quota {
+    // The percentage of total worker pool processing time the queue can occupy.
+    uint32 percent = 1;
+
+    // The queue app
+    string app = 2;
+
+    // The queue name
+    string queue = 3;
+
+    // The worker pool name
+    string worker_pool = 4;
+
+    // The worker pool utilization threshold for which this quota is applied
+    uint32 utilization_threshold_percent = 5;
+  }
+
+  repeated Quota quotas = 1;
+}
+
+// A service for aqueduct introspection and configuration.
+service AdminService {
+  // Query for the number of messages in the state table by state, by queue and by node.
+  rpc StateTableCounts (StateTableCountsRequest) returns (StateTableCountsResponse) {};
+
+  // Disables scheduling for a queue. Aqueduct will continue to accept scheduled jobs for the queue
+  // and will relay scheduled jobs to the state log, but it will drop the jobs in state processor
+  // nodes to avoid state table writes. The primary use case for this endpoint is to provide some
+  // maneuverability in an incident where a single queue gets a huge number of scheduled jobs and
+  // causes evictions, which will affect all queues for an app. To prevent a single queue from
+  // affecting scheduling for all queues, disable scheduling for the problem queue.
+  rpc DisableScheduling (DisableSchedulingRequest) returns (EmptyResponse) {};
+
+  // Resume scheduling for a queue. Requires a state processor rebalance to schedule any jobs that
+  // were dropped while scheduling was disabled.
+  rpc EnableScheduling (EnableSchedulingRequest) returns (EmptyResponse) {};
+
+  // List queues for which scheduling is disabled.
+  rpc SchedulingDisabled (SchedulingDisabledRequest) returns (SchedulingDisabledResponse) {};
+
+  // Enable auth enforcement for a given app.
+  rpc EnforceAuth (EnforceAuthRequest) returns (EmptyResponse) {}
+
+  // Disable auth enforcement for a given app.
+  rpc DisableAuthEnforcement (DisableAuthEnforcementRequest) returns (EmptyResponse) {}
+
+  // List apps that have auth enforcement disabled.
+  rpc AuthEnforcementsDisabled (AuthEnforcementsDisabledRequest) returns (AuthEnforcementsDisabledResponse) {}
+
+  // Enables the high-throughput pop strategy for an app.
+  rpc EnableHighThroughput (EnableHighThroughputRequest) returns (EmptyResponse) {}
+
+  // Disables the high-throughput pop strategy for an app.
+  rpc DisableHighThroughput (DisableHighThroughputRequest) returns (EmptyResponse) {}
+
+  // List apps that use the high-throughput pop strategy.
+  rpc HighThroughputEnabled (HighThroughputEnabledRequest) returns (HighThroughputEnabledResponse) {};
+
+  // Enables the high-throughput pop strategy for a worker tag.
+  rpc EnableHighThroughputTag (EnableHighThroughputTagRequest) returns (EmptyResponse) {};
+
+  // Disables the high-throughput pop strategy for a worker tag.
+  rpc DisableHighThroughputTag (DisableHighThroughputTagRequest) returns (EmptyResponse) {};
+
+  // List worker tags that use the high-throughput pop strategy.
+  rpc HighThroughputTagEnabled (HighThroughputTagEnabledRequest) returns (HighThroughputTagEnabledResponse) {};
+
+  // Query for queues and associated state.
+  rpc DescribeQueues (DescribeQueuesRequest) returns (DescribeQueuesResponse) {};
+
+  // Query for runtime configuration.
+  rpc DescribeConfig (DescribeConfigRequest) returns (DescribeConfigResponse) {};
+
+  // Add an inactive queue.
+  // Will be automatically un-set by the relay if the queue receives new messages.
+  rpc AddInactiveQueue(AddInactiveQueueRequest) returns (AddInactiveQueueResponse) {};
+
+  // Remove an inactive queue.
+  rpc RemoveInactiveQueue(RemoveInactiveQueueRequest) returns (RemoveInactiveQueueResponse) {};
+
+  // List inactive queues.
+  rpc InactiveQueues(InactiveQueuesRequest) returns (InactiveQueuesResponse) {};
+
+  // Query for the current queue limit for an app.
+  rpc QueueLimits(QueueLimitsRequest) returns (QueueLimitsResponse) {};
+
+  // Set the queue limit for an app.
+  rpc SetQueueLimit(SetQueueLimitRequest) returns (SetQueueLimitResponse) {};
+
+  rpc EnableFeature(EnableFeatureRequest) returns (EnableFeatureResponse) {};
+
+  rpc DisableFeature(DisableFeatureRequest) returns (DisableFeatureResponse) {};
+
+  rpc Features(FeaturesRequest) returns (FeaturesResponse) {};
+
+  // Query consumer group to topic mappings
+  rpc DescribeRelayGroups(DescribeRelayGroupsRequest) returns (DescribeRelayGroupsResponse) {};
+}
+
+message DescribeRelayGroupsRequest {
+  string group_id = 1;
+}
+
+message DescribeRelayGroupsResponse {
+  message TopicMapping {
+    string group_id = 1;
+    repeated string topics = 2;
+  }
+  repeated TopicMapping topic_mappings = 1;
+}
+
+message DescribeQueuesRequest {}
+
+message DescribeQueuesResponse {
+  message QueueInfo {
+    // The app and queue name.
+    Queue queue = 1;
+
+    // Is the queue currently paused?
+    bool is_paused = 2;
+
+    // Which pausing rules, if any, could apply to the queue?
+    repeated PausingRulesResponse.Rule pausing_rules = 3;
+
+    // The queue's receive rate quota, if present.
+    ReceiveRateQuota receive_rate_quota = 4;
+
+    // The queue's worker limit, if present.
+    WorkerLimitsResponse.WorkerLimit worker_limit = 5;
+
+    // The current queue depth.
+    int64 depth = 6;
+
+    // Which processing time quotas, if any, could apply to the queue?
+    repeated ProcessingTimeQuotasResponse.Quota processing_time_quotas = 7;
+  }
+
+  message ClusterQueueInfo {
+    // Queue info for all queues in this cluster.
+    repeated QueueInfo queues = 1;
+
+    // The name of the aqueduct cluster that served the request.
+    // Only set by the aqueduct-gateway, is empty otherwise.
+    // The gateway refers to clusters as "backends".
+    string backend_name = 2;
+  }
+
+  repeated ClusterQueueInfo clusters = 1;
+}
+
+message DescribeConfigRequest {
+  // The app (if applicable) to filter configs by.
+  string app = 1;
+}
+
+message DescribeConfigResponse {
+
+  message ConfigInfo {
+    // List pausing rules.
+    PausingRulesResponse pausing_rules = 1;
+
+    // List receive rate quotas.
+    ReceiveRateQuotasResponse receive_rate_quotas = 2;
+
+    // List worker limits.
+    WorkerLimitsResponse worker_limits = 3;
+
+    // List processing time quotas.
+    ProcessingTimeQuotasResponse processing_time_quotas = 4;
+
+    // List inactive queues.
+    InactiveQueuesResponse inactive_queues = 5;
+
+    // List queue limits.
+    QueueLimitsResponse queue_limits = 6;
+
+    // List feature flags.
+    FeaturesResponse features = 7;
+
+    // List quota worker limits
+    WorkerLimitsResponse quota_worker_limits = 8;
+  }
+
+  message ClusterConfigInfo {
+    // Config info for all queues in this cluster.
+    ConfigInfo config = 1;
+
+    // The name of the aqueduct cluster that served the request.
+    // Only set by the aqueduct-gateway, is empty otherwise.
+    // The gateway refers to clusters as "backends".
+    string backend_name = 2;
+  }
+
+  repeated ClusterConfigInfo clusters = 1;
+}
+
+message EnableHighThroughputRequest {
+  // An app that should use the high-throughput pop strategy.
+  string app = 1;
+}
+
+message DisableHighThroughputRequest {
+  // An app that should not use the high-throughput pop strategy.
+  string app = 1;
+}
+
+message HighThroughputEnabledRequest {}
+
+message HighThroughputEnabledResponse {
+  // An app that uses the high-throughput pop strategy.
+  repeated string apps = 1;
+}
+
+message EnableHighThroughputTagRequest {
+  // A worker tag that will enable the high-throughput pop strategy.
+  // NB: Applies across all apps that use the tag.
+  Tag tag = 2;
+}
+
+message DisableHighThroughputTagRequest {
+  // A worker tag that will not enable the high-throughput pop strategy.
+  Tag tag = 2;
+}
+
+message HighThroughputTagEnabledRequest {}
+
+message HighThroughputTagEnabledResponse {
+  // A worker tag that uses the high-throughput pop strategy.
+  repeated Tag tags = 1;
+}
+
+message StateTableCountsRequest {}
+message StateTableCountsResponse {
+  message Count {
+    string state = 1;
+    uint64 count = 2;
+  }
+
+  // The total number of state table messages across all state processor nodes by state.
+  repeated Count total = 1;
+
+  message QueueCount {
+    string app = 1;
+    string queue = 2;
+    string state = 3;
+    uint64 count = 4;
+  }
+
+  // The number of state table messages broken out by state and queue.
+  repeated QueueCount per_queue = 2;
+
+  message NodeCount {
+    string node = 1;
+    string state = 2;
+    uint64 count = 3;
+  }
+
+  // The number of state table messages broken out by state and node.
+  repeated NodeCount per_node = 3;
+
+  // An error indicating if something went wrong querying for counts.
+  string error = 4;
+}
+
+message EnforceAuthRequest {
+  string app = 1;
+}
+
+message DisableAuthEnforcementRequest{
+  string app = 1;
+}
+
+message AuthEnforcementsDisabledRequest {}
+
+message AuthEnforcementsDisabledResponse {
+  repeated string apps = 1;
+}
+
+message AddInactiveQueueRequest {
+  string app = 1;
+  string queue = 2;
+}
+
+message AddInactiveQueueResponse {}
+
+message RemoveInactiveQueueRequest {
+  string app = 1;
+  string queue = 2;
+}
+message RemoveInactiveQueueResponse {
+}
+
+message InactiveQueuesRequest {
+  string app = 1;
+}
+
+message InactiveQueuesResponse {
+
+  message ClusterQueueInfo {
+    // Queue info for all queues in this cluster.
+    repeated Queue queues = 1;
+
+    // The name of the aqueduct cluster that served the request.
+    // Only set by the aqueduct-gateway, is empty otherwise.
+    // The gateway refers to clusters as "backends".
+    string backend_name = 2;
+  }
+
+  reserved 1;
+  repeated ClusterQueueInfo clusters = 2;
+}
+
+message QueueLimitsRequest {
+  string app = 1;
+}
+message QueueLimitsResponse {
+  message Limit {
+    string app = 1;
+    uint32 limit = 2;
+  }
+
+  repeated Limit limits = 1;
+
+  message LimitByBackends {
+    google.protobuf.Int32Value value = 1;
+    repeated string backends = 2;
+  }
+
+  message LimitsByApp {
+    string app = 1;
+    repeated LimitByBackends limits = 2;
+  }
+
+  repeated LimitsByApp limitsByApp = 2;
+}
+
+message SetQueueLimitRequest {
+  string app = 1;
+  uint32 limit = 3;
+}
+
+message SetQueueLimitResponse {
+  string app = 1;
+  uint32 limit = 3;
+}
+
+message EnableFeatureRequest {
+  string feature = 1;
+  // An integer between 0 and 100.
+  // 0 is equivalent to disabling.
+  // 100 is equivalent to fully enabling.
+  uint32 rollout_percent = 2;
+}
+
+message EnableFeatureResponse {
+  string feature = 1;
+  uint32 rollout_percent = 2;
+}
+
+message DisableFeatureRequest {
+  string feature = 1;
+}
+
+message DisableFeatureResponse {
+  string feature = 1;
+}
+
+message FeaturesRequest {}
+
+message FeaturesResponse {
+  message FeatureState {
+    string feature = 1;
+    string description = 2;
+    uint32 rollout_percent = 3;
+  }
+  repeated FeatureState features = 1;
+}
+
+service AuthService {
+  // Generate API key used for authorization header signature
+  rpc GenerateApiKey (GenerateApiKeyRequest) returns (GenerateApiKeyResponse);
+
+  // STAGING ONLY
+  // Retrieve an API key. Makes testing auth config easier because users don't
+  // need to acquire vault entitlements.
+  rpc GetApiKey(GetApiKeyRequest) returns (GetApiKeyResponse);
+
+  // Revokes access to an existing API key used for authorization
+  rpc RevokeApiKey (RevokeApiKeyRequest) returns (EmptyResponse);
+
+  // Validate that auth is working.
+  rpc Test(AuthTestRequest) returns (EmptyResponse);
+}
+
+message GenerateApiKeyRequest {
+  // The name of the publishing app
+  string app = 1;
+
+  // The API key version. An API key can have multiple versions to support rolling credentials.
+  // Attempting to recreate an API key with a version that already exists will fail.
+  uint32 version = 2;
+}
+
+message GenerateApiKeyResponse {
+  // The vault app name where the generated key was stored
+  string vault_app = 1;
+
+  // The name of the key used to store the api key value in vault
+  string key_name = 2;
+}
+
+// STAGING ONLY
+message GetApiKeyRequest {
+  // The name of the publishing app.
+  string app = 1;
+
+  // The API key version.
+  uint32 version = 2;
+}
+
+// STAGING ONLY
+message GetApiKeyResponse {
+  // The name of the publishing app.
+  string app = 1;
+
+  // The API key version.
+  uint32 version = 2;
+
+  // The API key.
+  string api_key = 3;
+}
+
+message RevokeApiKeyRequest {
+  // The name of the publishing app
+  string app = 1;
+
+  // The API key version. An API key can have multiple versions to support rolling credentials.
+  // Attempting to recreate an API key with a version that already exists will fail.
+  uint32 version = 2;
+}
+
+message AuthTestRequest {
+  // The name of the publishing app
+  string app = 1;
+}

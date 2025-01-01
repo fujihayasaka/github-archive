@@ -1,0 +1,223 @@
+<%= render Primer::Beta::Heading.new(tag: :h1, classes: "h2").with_content("Security") %>
+
+<%= render(Primer::Beta::NavList.new(
+    selected_item_id: @selected_tab,
+    p: 2,
+    test_selector: "security-center-alert-centric-views-nav-component",
+  )) do |component| %>
+  <% component.with_heading(title: "Security navigation", heading_level: 2, classes: "sr-only") %>
+
+  <% component.with_item(
+    label: TabNames::OVERVIEW_DASHBOARD,
+    selected_by_ids: :overview_dashboard,
+    hidden: team_org_has_never_enabled_security_sku?,
+    href: security_center_overview_dashboard_path(org: @organization),
+  ) do |item| %>
+    <% item.with_leading_visual_icon(icon: :pulse) %>
+  <% end %>
+
+  <% component.with_item(
+    label: TabNames::RISK,
+    selected_by_ids: :risk,
+    hidden: team_org_has_never_enabled_security_sku?,
+    href: security_center_risk_path(org: @organization),
+  ) do |item| %>
+    <% item.with_leading_visual_icon(icon: :shield) %>
+  <% end %>
+
+  <% component.with_item(
+    label: TabNames::COVERAGE,
+    selected_by_ids: :coverage,
+    hidden: team_org_has_never_enabled_security_sku?,
+    href: security_center_coverage_path(org: @organization),
+  ) do |item| %>
+    <% item.with_leading_visual_icon(icon: :meter) %>
+  <% end %>
+
+  <% if render_secret_risk_assessment_tab? %>
+    <% component.with_item(
+      label: TabNames::SECRET_RISK_ASSESSMENT,
+      selected_by_ids: :secret_risk_assessment,
+      href: security_center_assessments_path(org: @organization),
+    ) do |item| %>
+      <% item.with_leading_visual_icon(icon: :key) %>
+    <% end %>
+  <% end %>
+
+  <% if render_security_campaigns_tab? && !team_org_has_never_enabled_security_sku? %>
+    <% if SecurityCampaigns.show_onboarding_message?(current_user) %>
+      <% component.with_item(
+        component_klass: Primer::Beta::Popover,
+        position: :absolute,
+        right: true,
+        left: true,
+        hide: :whenNarrow,
+        style: "margin-top:-16px; margin-left: 250px;",
+      ) do |component| %>
+        <% component.with_heading(color: :default, font_size: 5) do %>
+          Introducing security campaigns
+        <% end %>
+        <% component.with_body(caret: :left_top, font_size: 5, color: :muted, p: 3, style: "width: 249px;") do %>
+          Security campaigns help your team set clear, achievable goals for developers to fix the most critical vulnerabilities in your organization. <a class="Link--inTextBlock" href="<%= SecurityCampaigns.about_docs_url %>">Learn more about security campaigns.</a>
+          <div class="mt-2 d-flex flex-justify-start">
+            <%= form_tag SecurityCampaigns::ONBOARDING_DISMISSAL_NOTICE_PATH, method: :post do %>
+              <%= render Primer::Beta::Button.new(font_weight: :bold, type: :submit) do %>
+                Got it
+              <% end %>
+            <% end %>
+          </div>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <% component.with_item(
+      label: TabNames::CAMPAIGNS,
+      selected_by_ids: :campaigns,
+      href: security_center_security_campaigns_path(org: @organization),
+      test_selector: "security-center-nav-section-campaigns"
+    ) do |item| %>
+      <% item.with_leading_visual_icon(icon: :goal) %>
+    <% end %>
+  <% end %>
+
+  <% if !team_org_has_never_enabled_security_sku? %>
+    <% component.with_group(test_selector: TRENDS_TAB_GROUP_TEST_SELECTOR) do |group| %>
+      <% group.with_heading(title: "Metrics") %>
+
+      <% group.with_item(
+        label: TabNames::TRENDS_ENABLEMENT,
+        selected_by_ids: :adoption_report,
+        href: security_center_metrics_enablement_path(org: @organization),
+      ) do |item| %>
+        <% item.with_leading_visual_icon(icon: :meter) %>
+      <% end %>
+
+      <% if render_code_scanning_metrics_tab? %>
+        <% group.with_item(
+          label: TabNames::TRENDS_CODE_SCANNING,
+          href: security_center_metrics_codeql_path(org: @organization),
+          selected_by_ids: :code_scanning_metrics
+        ) do |item| %>
+          <% item.with_leading_visual_icon(icon: :codescan) %>
+        <% end %>
+      <% end %>
+
+      <% if render_dependabot_metrics_tab? %>
+        <% group.with_item(
+          label: TabNames::TRENDS_DEPENDABOT,
+          selected_by_ids: :dependabot_metrics,
+          href: security_center_metrics_dependabot_path(org: @organization),
+        ) do |item| %>
+          <% item.with_leading_visual_icon(icon: :dependabot) %>
+        <% end %>
+      <% end %>
+
+      <% if render_secret_scanning_metrics_tab? %>
+        <% group.with_item(
+          label: TabNames::TRENDS_SECRET_SCANNING,
+          href: security_center_secret_scanning_metrics_path(org: @organization),
+          selected_by_ids: :secret_scanning_metrics
+        ) do |item| %>
+          <% item.with_leading_visual_icon(icon: :key) %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if render_any_feature_tab? && !team_org_has_never_enabled_security_sku? %>
+    <%
+      # Here to satisfy test_js_classes_are_referenced_in_both_js_and_non_js_source_code
+      # The class names are built with interpolation below
+      feature_type_js_classes = %w[
+        js-code-scanning-count
+        js-dependabot-alerts-count
+        js-secret-scanning-count
+        js-secret-scanning-default-count
+        js-secret-scanning-generic-count
+      ]
+    %>
+    <% component.with_group(
+        classes: "js-security-center-tab-count-container",
+        "data-url": security_center_tab_counts_path(@organization),
+        test_selector: "security-center-nav-section-alerts"
+      ) do |group| %>
+      <% group.with_heading(title: "Alerts") %>
+
+      <% SecurityCenter::NavComponent::SECURITY_FEATURE_TABS_ORDER.each do |feature_type| %>
+        <% if render_feature_tab?(feature_type) %>
+          <% if split_feature_tab?(feature_type) %>
+            <% group.with_item(expanded: true) do |item| %>
+              <% item.with_leading_visual_icon(icon: get_nav_tab_icon(feature_type)) %>
+              <%= render(Primer::Box.new(display: :flex, justify_content: :space_between)) do %>
+                <%= get_nav_tab_name(feature_type) %>
+              <% end %>
+              <% SECURITY_FEATURE_TAB_SPLITS[feature_type].each do |split_feature_type| %>
+                <% item.with_item(
+                  label: get_nav_tab_name(split_feature_type),
+                  selected_by_ids: split_feature_type.to_sym,
+                  href: get_nav_tab_path(split_feature_type),
+                  test_selector: "security-center-alerts-#{split_feature_type}-nav",
+                ) do |item_count| %>
+                  <% item_count.with_trailing_visual_text(
+                    render(Primer::Beta::Counter.new(count: nil, classes: "js-#{split_feature_type.dasherize}-count"))
+                  ) %>
+                <% end %>
+              <% end %>
+            <% end %>
+          <% else %>
+            <% group.with_item(
+              label: get_nav_tab_name(feature_type),
+              selected_by_ids: feature_type.to_sym,
+              href: get_nav_tab_path(feature_type),
+              test_selector: "security-center-alerts-#{feature_type}-nav",
+            ) do |item| %>
+              <% item.with_leading_visual_icon(icon: get_nav_tab_icon(feature_type)) %>
+              <% item.with_trailing_visual_text(
+                render(Primer::Beta::Counter.new(count: nil, classes: "js-#{feature_type.dasherize}-count"))
+              ) %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+    <% end %>
+  <% end %>
+
+  <% if render_requests? && !team_org_has_never_enabled_security_sku? %>
+    <% component.with_group(test_selector: BYPASS_REQUESTS_GROUP_TEST_SELECTOR) do |group| %>
+      <% group.with_heading(title: "Requests") %>
+
+      <% if render_secret_scanning_delegated_bypass? %>
+        <% group.with_item(
+          label: TabNames::SECRET_SCANNING_BYPASS_REQUESTS,
+          selected_by_ids: :organization_secret_scanning_bypass_requests,
+          href: organization_secret_scanning_bypass_requests_path(org: @organization),
+        ) do |item| %>
+          <% item.with_leading_visual_icon(icon: :key) %>
+          <% item.with_trailing_visual_text(render(GitHub::BatchDeferredContentComponent.new(url: organization_secret_scanning_bypass_requests_counts_path(org: @organization), inputs: { type: "secret-scanning"}))) %>
+        <% end %>
+      <% end %>
+
+      <% if render_secret_scanning_delegated_closures? %>
+        <% group.with_item(
+          label: TabNames::SECRET_SCANNING_CLOSURE_REQUESTS,
+          selected_by_ids: :organization_secret_scanning_closure_requests,
+          href: organization_secret_scanning_closure_requests_path(org: @organization),
+        ) do |item| %>
+          <% item.with_leading_visual_icon(icon: :key) %>
+          <% item.with_trailing_visual_text(render(GitHub::BatchDeferredContentComponent.new(url: organization_secret_scanning_closure_requests_counts_path(org: @organization), inputs: { type: "secret-scanning"}))) %>
+        <% end %>
+      <% end %>
+
+      <% if render_code_scanning_alert_dismissal? %>
+        <% group.with_item(
+          label: TabNames::CODE_SCANNING_ALERT_DISMISSAL_REQUESTS,
+          selected_by_ids: :organization_code_scanning_alert_dismissal_requests,
+          href: organization_code_scanning_alert_dismissal_requests_path(org: @organization),
+        ) do |item| %>
+          <% item.with_leading_visual_icon(icon: :codescan) %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

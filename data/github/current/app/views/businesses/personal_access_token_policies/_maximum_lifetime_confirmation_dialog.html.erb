@@ -1,0 +1,47 @@
+<turbo-frame id="maximum_lifetime_confirmation_dialog">
+  <%= form_with model: this_business, url: settings_maximum_lifetime_enterprise_path(this_business), method: :patch  do |form| %>
+    <%= form.hidden_field :pat_type, value: pat_type.serialize %>
+    <%= form.hidden_field :require_pat_to_expire, value: require_pat_to_expire_enabled? ? "1" : "" %>
+    <%= form.hidden_field :fine_grained_personal_access_token_expiration_limit, value: access_token_expiration_limit %>
+    <%= form.hidden_field :confirm, value: true %>
+    <%= form.hidden_field :exempt_administrators, value: exempt_administrators? ? "1" : "" %>
+    <%= form.hidden_field :exempt_missing_issue_date, value: exempt_missing_issue_date? ? "1" : "" %>
+
+    <%= render(Primer::Alpha::Dialog.new(id: "confirm-lifetimes", title: "Set personal access token expiration", subtitle: organizations_to_confirm_changes.present? ? "Reducing the time limit on personal access tokens will affect the following organizations:" : nil, size: show_emu_classic_pat_warning? ? :large : :medium)) do |d| %>
+      <% d.with_body do %>
+        <% if organizations_to_confirm_changes.present? %>
+          <%= render Primer::Beta::BorderBox.new do |border_box| %>
+            <% organizations_to_confirm_changes.each do |org| %>
+              <%= border_box.with_row do %>
+                <div class="d-flex flex-items-center">
+                  <%= avatar_for org, 20, class: "avatar" %>
+                  <span class="ml-2 f4"><%= org.display_login %></span>
+                  <span class="ml-auto">
+                    <%= "#{ProgrammaticAccessTokenLifetimeConfiguration.new(org, pat_type).expiration_limit} days" %> → <%= access_token_expiration_limit %> days
+                  </span>
+                </div>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% else %>
+          Are you sure you want to update your selection?
+        <% end %>
+
+        <% if show_emu_classic_pat_warning? %>
+          <%= render(Primer::Alpha::Banner.new(scheme: :warning, my: 3)) do %>
+            <p class="text-small">New tokens that target organizations in this enterprise must expire within <%= access_token_expiration_limit %> days of creation. Existing tokens will stop working if they were created with an expiration of more than <%= access_token_expiration_limit %> days.</p>
+
+            <p class="text-small">Note: you have not exempted enterprise administrators from this policy. This can cause an outage for your enterprise, as SCIM provisioning is done with a personal access token. Check that the token being used is within the time limit and that you have a rotation process in place, or exempt administrators from this policy.</p>
+
+            <%= form.check_box :confirm_warning, id: :confirm_warning, required: true %> <%= form.label :confirm_warning, "I understand the risk and have a rotation process for our SCIM token.", for: :confirm_warning, class: "text-small" %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% d.with_footer(show_divider: true) do %>
+        <%= render(Primer::Beta::Button.new(data: { "close-dialog-id": "confirm-lifetimes" })) { "Cancel" } %>
+        <%= render(Primer::Beta::Button.new(scheme: :primary, type: :submit, data: { disable_invalid: true, disable_with: "Saving..." })) { "Save" } %>
+      <% end %>
+    <% end %>
+  <% end %>
+</turbo-frame>

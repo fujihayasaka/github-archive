@@ -1,0 +1,87 @@
+<% if !GitHub.single_tenant_enterprise? %>
+  <%
+    limiter = RepositoryLimit.new(user)
+    default_hard_limit = RepositoryLimit::HARD_LIMIT
+    default_soft_limit = RepositoryLimit::SOFT_LIMIT
+    repo_hard_limit = limiter.hard_limit
+    repo_soft_limit = limiter.soft_limit
+    current_repo_count = limiter.count
+  %>
+  <div class="boxed-group" id="repo_limits_section">
+    <h3>Repository Limits</h3>
+    <div class="boxed-group-inner clearfix">
+      <% if !limiter.enabled? %>
+        <p <%= test_selector("repo_limit_unavailable") %>>Repository limits are not enabled for <strong><%= user.display_login %></strong>.</p>
+        <hr>
+      <% end %>
+      <p>
+        <strong><%= user.display_login %></strong> has a limit of <strong><%= ActiveSupport::NumberHelper.number_to_delimited(repo_hard_limit) %></strong> repositories and currently owns <strong><%= ActiveSupport::NumberHelper.number_to_delimited(current_repo_count) %></strong> repositories.
+        <%= (limiter.soft_limited? || limiter.hard_limited?) ? "They are over the soft limit and have been notified of having over #{ActiveSupport::NumberHelper.number_to_delimited(repo_soft_limit)} repos." : "They are not over the soft limit." %>
+        They <strong>are<%= limiter.hard_limited? ? "" : " not" %></strong> over their hard limit.
+      </p>
+      <hr>
+
+      <% if limiter.overridden? %>
+        <h4>Limit overrides</h4>
+        <%= form_tag override_limit_stafftools_user_path(user), method: :delete do %>
+          <%= render Primer::Beta::Button.new(
+            type: :submit,
+            classes: "boxed-action",
+          ) do %>
+            Reset
+          <% end %>
+        <% end %>
+        <p>
+          Repositories limits for <%= user.display_login %> have been <strong>overridden</strong>:
+          <% if repo_hard_limit != default_hard_limit %>
+            From the default <strong> HARD limit of <%= ActiveSupport::NumberHelper.number_to_delimited(default_hard_limit) %></strong> to <strong><%= ActiveSupport::NumberHelper.number_to_delimited(repo_hard_limit) %></strong>.
+          <% end %>
+          <% if repo_soft_limit != default_soft_limit %>
+            From the default <strong> SOFT limit of <%= ActiveSupport::NumberHelper.number_to_delimited(default_soft_limit) %></strong> to <strong><%= ActiveSupport::NumberHelper.number_to_delimited(repo_soft_limit) %></strong>.
+          <% end %>
+        </p>
+
+        <hr>
+      <% end %>
+
+      <p>
+        Control the maximum amount of repositories that <strong><%= user.display_login %></strong> can own.
+      </p>
+      <%= form_tag override_limit_stafftools_user_path(user), method: :put do %>
+        <div class="d-flex">
+          <input
+            class="form-control"
+            type="number"
+            max="2000000"
+            min="1"
+            aria-label="Hard limit of repositories a user can have"
+            id="repo_hard_limit_override"
+            name="repo_hard_limit_override"
+            value="<%= repo_hard_limit %>"
+          >
+          <%= render(Primer::Beta::Button.new(type: :submit, ml: 2, px: 4)) { "Override Hard Limit" } %>
+        </div>
+      <% end %>
+
+      <hr>
+      <p>
+        Control the soft limit of repositories that <strong><%= user.display_login %></strong> can own.
+      </p>
+      <%= form_tag override_limit_stafftools_user_path(user), method: :put do %>
+        <div class="d-flex">
+          <input
+            class="form-control"
+            type="number"
+            max="2000000"
+            min="1"
+            aria-label="Soft limit of repositories a user can have"
+            id="repo_soft_limit_override"
+            name="repo_soft_limit_override"
+            value="<%= repo_soft_limit %>"
+          >
+          <%= render(Primer::Beta::Button.new(type: :submit, ml: 2, px: 4)) { "Override Soft Limit" } %>
+        </div>
+      <% end %>
+    </div>
+  </div>
+<% end %>
