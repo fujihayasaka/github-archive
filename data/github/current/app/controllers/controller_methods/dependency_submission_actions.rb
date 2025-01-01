@@ -111,6 +111,7 @@ module ControllerMethods
     def show_automatic_submission_prompt?
       with_database_error_fallback(fallback: false) do
         track_execution_time("dependency_submission_action.dist.time", ["method:show_automatic_submission_prompt?"]) do
+          return false if GitHub.enterprise?
           return false unless logged_in?
           return false if current_user.dismissed_notice?(UserNotice::AUTOMATIC_DEPENDENCY_SUBMISSION_BANNER_NOTICE)
           return false unless current_repository.adminable_by?(current_user) && has_automatic_ds_ecosystem?

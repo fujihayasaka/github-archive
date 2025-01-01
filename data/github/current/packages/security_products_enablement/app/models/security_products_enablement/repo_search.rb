@@ -21,7 +21,16 @@ module SecurityProductsEnablement
         query_parser = build_query_parser(organization, query)
         limit_to_repo_ids, search_results_limit_exceeded = execute_mysql_filters(query_parser:, organization:, actor:, user_session:)
 
-        Search::Repositories.search_repos(actor, query_parser.es_query_string, current_page, scope: { org: organization }, per_page:, user_session:, cap_filter:, limit_to_repo_ids:)
+        Search::Repositories.search_repos(
+          actor,
+          query_parser.es_query_string,
+          current_page,
+          scope: { org: organization },
+          per_page:,
+          user_session:,
+          cap_filter:,
+          limit_to_repo_ids: limit_to_repo_ids || repository_ids,
+        )
       end
     end
 

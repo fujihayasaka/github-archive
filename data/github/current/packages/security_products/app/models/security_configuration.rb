@@ -59,6 +59,8 @@ class SecurityConfiguration < ApplicationRecord::Notify
 
   GH_CONFIG_NAME = "GitHub recommended"
 
+  attribute :dependabot_malware_alerts, :integer
+
   # Feature enablement
   enum :private_vulnerability_reporting, FEATURE_STATES, prefix: true, validate: true
   enum :dependency_graph, FEATURE_STATES, prefix: true, validate: true

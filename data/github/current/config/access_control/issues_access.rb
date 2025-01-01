@@ -157,6 +157,77 @@ class Api::AccessControl < Egress::AccessControl
     access.allow(:repo_triagger) { |context| issue_must_match_permission(context, :write) }
   end
 
+  define_access :reopen_issue do |access|
+    resource_must_belong_to_repo(access)
+    issue_must_be_readable(access)
+
+    access.allow(:issue_author) { |context| !context[:prevent_author] && !actor_blocked_by_repo_owner?(context) }
+
+    access.allow(:resource_reopener) do |context|
+      user = extract(context, :user)
+      actor = user.try(:installation) || user
+
+      actor && !actor.can_have_granular_permissions?
+    end
+    access.allow(:repo_triagger)
+    access.allow(:issue_writer) { |context| issue_must_match_permission(context, :write) }
+    access.allow(:pull_request_writer) { |context| issue_must_match_permission(context, :write) }
+  end
+
+  define_access :set_milestone do |access|
+    resource_must_belong_to_repo(access)
+    issue_must_be_readable(access)
+
+    access.allow(:issue_author) { |context| !context[:prevent_author] && !actor_blocked_by_repo_owner?(context) }
+
+    access.allow(:milestone_setter) do |context|
+      user = extract(context, :user)
+      actor = user.try(:installation) || user
+
+      actor && !actor.can_have_granular_permissions?
+    end
+    access.allow(:issue_writer) { |context| issue_must_match_permission(context, :write) }
+    access.allow(:pull_request_writer) { |context| issue_must_match_permission(context, :write) }
+    access.allow(:repo_triagger) { |context| issue_must_match_permission(context, :write) }
+  end
+
+  define_access :custom_role_update_issue do |access|
+    resource_must_belong_to_repo(access)
+    issue_must_be_readable(access)
+
+    # Check if the actor is blocked in general rather than just checking in the issue_author allow rule
+    access.ensure_context :user, :repo do |user, repo|
+      actor = user.try(:installation) || user
+      next true unless actor.respond_to?(:blocked_by?)
+
+      !actor.blocked_by?(repo.owner)
+    end
+
+    access.allow(:issue_author) { |context| !context[:prevent_author] }
+
+    access.allow(:issue_writer) { |context| issue_must_match_permission(context, :write) }
+    access.allow(:pull_request_writer) { |context| issue_must_match_permission(context, :write) }
+
+    access.allow(:resource_closer) do |context|
+      user = extract(context, :user)
+      actor = user.try(:installation) || user
+
+      actor && !actor.can_have_granular_permissions?
+    end
+    access.allow(:resource_reopener) do |context|
+      user = extract(context, :user)
+      actor = user.try(:installation) || user
+
+      actor && !actor.can_have_granular_permissions?
+    end
+    access.allow(:milestone_setter) do |context|
+      user = extract(context, :user)
+      actor = user.try(:installation) || user
+
+      actor && !actor.can_have_granular_permissions?
+    end
+  end
+
   define_access :triage_issue do |access|
     resource_must_belong_to_repo(access)
     issue_must_be_readable(access)

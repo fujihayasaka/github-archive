@@ -49,6 +49,7 @@ module SecretScanning::Features::User
     # Indicates whether push protection anywhere is enabled for this user
     sig { returns(T::Boolean) }
     def enabled?
+      return false if GitHub.enterprise?
       return false unless self.feature_available?
       return true if @user.config.enabled?(CONFIG_KEY_ENABLED_FOR_USER_ANYWHERE)
       return true if FeatureFlag.vexi.enabled_or_raise?(FeatureFlags::PUSH_PROTECTION_FOR_USERS_OPT_OUT, @user) && !self.disabled? && !@user.is_a?(Bot) # rubocop:disable GitHub/FeatureManagement/NoVexiEnabledOrRaiseUsage

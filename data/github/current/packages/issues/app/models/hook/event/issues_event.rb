@@ -34,8 +34,12 @@ class Hook::Event::IssuesEvent < Hook::Event
   event_attr :action, :issue_id, :actor_id, required: true
   event_attr :label_id, :assignee_id, :changes, :milestone_id, :issue_type_id
 
+  # Use find instead of find_by to raise RecordNotFound when the issue doesn't exist.
+  # This allows DeliverHookEventJob to handle the race condition via HookDeliveryRaceConditionCheckJob
+  # when the issue hasn't been committed to the database yet.
+  # See https://github.com/github/issues/issues/19214
   memoize def issue
-    Issue.find_by(id: issue_id)
+    Issue.find(issue_id)
   end
 
   def target_repository
@@ -78,7 +82,9 @@ class Hook::Event::IssuesEvent < Hook::Event
   end
 
   def deliverable?
-    issue.present? && target_repository.present?
+    # Issue accessor raises RecordNotFound if the issue doesn't exist,
+    # which allows HookDeliveryRaceConditionCheckJob to retry.
+    target_repository.present?
   end
 
   memoize def source_issue_transfer

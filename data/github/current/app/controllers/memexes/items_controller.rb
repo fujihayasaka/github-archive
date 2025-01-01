@@ -181,9 +181,15 @@ class Memexes::ItemsController < Memexes::Controller
       end
     end
 
-    # handle "already exists in this project" if we're trying to update column values
+    # Handle "already exists in this project" if we're trying to update column values.
+    # We must perform the same permission checks here as we do for new item creation.
     if item.errors.of_kind?(:content_id, :taken) && !create_memex_item_params[:memex_project_column_values].blank?
       project_item = this_memex.memex_project_items.find_by(content_id: item.content_id, content_type: item.content_type)
+
+      unless project_item.draft_issue?
+        permission_error = check_column_value_permissions(project_item, column_list_for_item_creation)
+        return render_json_error(**permission_error) if permission_error
+      end
 
       create_memex_item_params[:memex_project_column_values].each do |column_data|
         column_id, new_value = column_data.values_at(:memex_project_column_id, :value)
@@ -488,6 +494,40 @@ class Memexes::ItemsController < Memexes::Controller
   end
 
   private
+
+  # Checks permissions for setting column values on an item.
+  # Returns nil if all checks pass, or a hash with :error, :status, and :code keys if a check fails.
+  #
+  # item - The MemexProjectItem to check permissions for
+  # columns - Array of column data hashes with :column and :value keys
+  def check_column_value_permissions(item, columns)
+    content = item_content(item)
+
+    columns.each do |c|
+      column_data_type = c[:column]&.data_type&.to_sym
+      next unless c[:column]&.special_type?
+
+      case column_data_type
+      when :assignees
+        return { error: "User does not have permission to assign users to this item", status: :forbidden, code: "Forbidden" } unless content.assignable_by?(actor: current_user)
+      when :milestone
+        return { error: "User does not have permission to set milestones to this item", status: :forbidden, code: "Forbidden" } unless content.can_set_milestone?(current_user)
+      when :labels
+        return { error: "User does not have permission to label items to this item", status: :forbidden, code: "Forbidden" } unless content.labelable_by?(actor: current_user)
+      when :issue_type
+        return { error: "User does not have permission to set issue type on this item", status: :forbidden, code: "Forbidden" } unless content.can_set_type?(actor: current_user)
+      when :tracked_by
+        add, remove = item.diff_tracked_by_values(content, c[:value], current_user)
+        return { error: "User does not have permission to set tracked by to this item or the parent item", status: :forbidden, code: "Forbidden" } unless content.can_set_tracked_by?(actor: current_user, parent_issues: add + remove)
+      when :parent_issue
+        return { error: "User does not have permission to add sub-issues to this item", status: :forbidden, code: "Forbidden" } unless content.can_add_sub_issue?(actor: current_user, parent_issue_id: c[:value]) # domain-isolation-query-violation:ignore:packages/issues (SELECT)
+      else
+        return { error: "Cannot create an item with pre-populated #{column_data_type} value", status: :forbidden, code: "Forbidden" }
+      end
+    end
+
+    nil
+  end
 
   def require_memex_resync_index_feature_enabled
     render_404 unless memex_resync_index_enabled?

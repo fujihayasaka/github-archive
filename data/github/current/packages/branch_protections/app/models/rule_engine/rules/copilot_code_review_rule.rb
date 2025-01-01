@@ -34,7 +34,8 @@ module RuleEngine
 
       sig { override.params(source: T.nilable(RuleEngine::Types::RuleSource)).returns(T::Boolean) }
       def is_user_configurable?(source = nil)
-        true
+        # Copilot code review is only available on GitHub.com, not on GHES
+        !GitHub.enterprise?
       end
 
       sig { override.returns(String) }
