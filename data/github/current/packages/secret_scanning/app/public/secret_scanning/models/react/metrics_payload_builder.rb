@@ -43,10 +43,12 @@ module SecretScanning
           ).returns(T::Hash[T.untyped, T.untyped])
         end
         def token_type_counts(result)
+          next_cursor = result.next_cursor
+          prev_cursor = result.previous_cursor
           {
             counts: counts_by_token_type(result.data),
-            next_cursor: result.next_cursor,
-            previous_cursor: result.previous_cursor,
+            next_cursor: next_cursor ? Base64.urlsafe_encode64(next_cursor) : nil,
+            previous_cursor: prev_cursor ? Base64.urlsafe_encode64(prev_cursor) : nil,
           }
         end
 
@@ -56,10 +58,12 @@ module SecretScanning
           ).returns(T::Hash[T.untyped, T.untyped])
         end
         def repo_counts(result)
+          next_cursor = result.next_cursor
+          prev_cursor = result.previous_cursor
           {
             counts: counts_by_repo(result.data),
-            next_cursor: result.next_cursor,
-            previous_cursor: result.previous_cursor,
+            next_cursor: next_cursor ? Base64.urlsafe_encode64(next_cursor) : nil,
+            previous_cursor: prev_cursor ? Base64.urlsafe_encode64(prev_cursor) : nil,
           }
         end
 

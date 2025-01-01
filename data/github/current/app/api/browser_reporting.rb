@@ -3,6 +3,8 @@
 
 class Api::BrowserReporting < Api::App
 
+  MAX_BODY_BYTE_SIZE = 1.megabyte
+
   include GitHub::BrowserStatsHelper
 
   ErrorsQuery = PlatformClient.parse <<-'GRAPHQL'
@@ -30,7 +32,7 @@ class Api::BrowserReporting < Api::App
 
     wrap_in_readonly_database do
       begin
-        data = receive(Hash, required: true)
+        data = receive_with_limits(Hash, required: true, max_byte_size: MAX_BODY_BYTE_SIZE, max_depth: 20)
 
         target = target_from_data(data)
 
@@ -69,7 +71,7 @@ class Api::BrowserReporting < Api::App
     @route_owner = "@github/web-systems-reviewers"
 
     wrap_in_readonly_database do
-      data = receive
+      data = receive_with_limits(max_byte_size: MAX_BODY_BYTE_SIZE, max_depth: 20)
 
       # Allow backwards compatibility with the old format
       if data.is_a?(Hash) && data["target"]

@@ -638,10 +638,13 @@ module Api::Serializer::IssuesDependency
     else
       hash[:sub_issues_summary] = issue.async_sub_issues_summary(calculate: !!options[:calculate_sub_issue_list]).sync # domain-isolation-query-violation:ignore:packages/issues (SELECT)
 
-      # Add parent issue URL if feature is enabled and issue has a parent
+      # Add parent issue URL if the issue has a parent and the viewer can access the parent's repository
       if issue.is_a?(Issue) && (parent_issue = issue.parent_issue_relation&.source)
-        parent_repo_path = T.must(parent_issue.repository).name_with_owner_for_api(use: options[:serialize_login])
-        hash[:parent_issue_url] = url("/repos/#{parent_repo_path}/issues/#{parent_issue.number}", options)
+        parent_repo = T.must(parent_issue.repository)
+        if parent_repo.readable_by?(options[:current_user])
+          parent_repo_path = parent_repo.name_with_owner_for_api(use: options[:serialize_login])
+          hash[:parent_issue_url] = url("/repos/#{parent_repo_path}/issues/#{parent_issue.number}", options)
+        end
       end
 
       if IssueDependenciesFeature.enabled?(issue.repository)

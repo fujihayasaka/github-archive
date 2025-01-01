@@ -105,7 +105,30 @@ module Memexes::ItemsController::ResponseDependency
 
   sig { returns(T::Array[T.nilable(Symbol)]) }
   memoize def column_types_to_update
-    column_list_for_item_update.map { |c| c[:column]&.data_type&.to_sym }
+    types = column_list_for_item_update.map { |c| c[:column]&.data_type&.to_sym }
+
+    # For bulk updates, include column types from ALL items (not just the first)
+    # so auth before_actions fire for every special field in the batch.
+    if bulk_item_update_request?
+      lookup = bulk_column_lookup
+      bulk_item_update_params[:memex_project_items]&.each do |item_params|
+        (item_params[:memex_project_column_values] || []).each do |col_params|
+          column = lookup[col_params[:memex_project_column_id].to_s.downcase]
+          types << column.data_type.to_sym if column
+        end
+      end
+    end
+
+    types.uniq
+  end
+
+  # O(1) column lookup by ID or system name, for use in bulk update loops.
+  sig { returns(T::Hash[String, MemexProjectColumn]) }
+  memoize def bulk_column_lookup
+    this_memex.columns.each_with_object({}) do |column, hash|
+      hash[column.id.to_s] = column
+      hash[column.name.downcase] = column if column.system_defined? && column.name.present?
+    end
   end
 
   sig { void }

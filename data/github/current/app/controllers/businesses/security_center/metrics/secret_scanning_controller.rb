@@ -8,6 +8,7 @@ module Businesses
         include ApplicationHelper
         include ApplicationController::VerifiedFetchDependency
         include ::SecurityCenter::DateSpanControllerHelper
+        include ::SecretScanningControllerHelper
 
         before_action :security_center_required
         before_action :secret_scanning_required
@@ -95,7 +96,10 @@ module Businesses
 
         sig { void }
         def block_counts_by_token_type # rubocop:disable GitHub/UseRestfulActions
-          metrics = query_service.get_block_counts_by_token_type(cursor: params[:cursor])
+          cursor, success = cursor_from_params
+          return render json: { error: "Invalid pagination cursor" }, status: 422 unless success
+
+          metrics = query_service.get_block_counts_by_token_type(cursor:)
           if metrics.nil?
             ::SecretScanning::Util::Stats.track_graceful_failure(env)
           end
@@ -111,7 +115,10 @@ module Businesses
 
         sig { void }
         def block_counts_by_repo # rubocop:disable GitHub/UseRestfulActions
-          metrics = query_service.get_block_counts_by_repo(cursor: params[:cursor])
+          cursor, success = cursor_from_params
+          return render json: { error: "Invalid pagination cursor" }, status: 422 unless success
+
+          metrics = query_service.get_block_counts_by_repo(cursor:)
           if metrics.nil?
             ::SecretScanning::Util::Stats.track_graceful_failure(env)
           end
@@ -127,7 +134,10 @@ module Businesses
 
         sig { void }
         def bypass_counts_by_token_type # rubocop:disable GitHub/UseRestfulActions
-          metrics = query_service.get_bypass_counts_by_token_type(cursor: params[:cursor])
+          cursor, success = cursor_from_params
+          return render json: { error: "Invalid pagination cursor" }, status: 422 unless success
+
+          metrics = query_service.get_bypass_counts_by_token_type(cursor:)
           if metrics.nil?
             ::SecretScanning::Util::Stats.track_graceful_failure(env)
           end
@@ -143,7 +153,10 @@ module Businesses
 
         sig { void }
         def bypass_counts_by_repo # rubocop:disable GitHub/UseRestfulActions
-          metrics = query_service.get_bypass_counts_by_repo(cursor: params[:cursor])
+          cursor, success = cursor_from_params
+          return render json: { error: "Invalid pagination cursor" }, status: 422 unless success
+
+          metrics = query_service.get_bypass_counts_by_repo(cursor:)
           if metrics.nil?
             ::SecretScanning::Util::Stats.track_graceful_failure(env)
           end

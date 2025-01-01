@@ -65,8 +65,6 @@ module SecretScanning
             automatic_partner_validity_checks_enabled: validity_feature.enabled?,
             resolve_alerts_allowed: token_scanning_feature.resolve_alerts_allowed?(@user, result.commit_oids),
             wiki_incremental_scans_enabled: SecretScanning::Features::Repo::WikiScanning.new(@repo).enabled?,
-            show_generic_secrets_feedback_notice: SecretScanning::Features::Repo::GenericSecrets.new(@repo).show_user_feedback_link?(@user) && alert.llm_detected,
-            generic_secrets_feedback_notice: UserNotice::AI_DETECTED_SECRET_SCANNING_FEEDBACK_NOTICE,
             one_click_reporting_enabled: token_scanning_feature.one_click_reporting_enabled?(result),
             delegated_closures_enabled: delegated_closures_feature.enabled?,
             existing_closure_request_number: existing_closure_request_number,

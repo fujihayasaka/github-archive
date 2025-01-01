@@ -51,16 +51,26 @@ module Api::Internal::Twirp::Elm
         def build_export_response(topics)
           {
             repository_topics: topics.map do |repo_topic|
+              user = repo_topic.user
               {
                 name: repo_topic.topic_name,
                 url: repo_topic.topic.try(:url),
-                creator_resource_id: GitHub::Resources::UrlForModel.new(repo_topic.user).url,
+                creator_resource_id: user.nil? ? "" : creator_url_for_repository_topic(user),
                 state: map_state_to_protobuf_enum(repo_topic.state),
                 created_at: { seconds: repo_topic.created_at.to_i, nanos: 0 },
                 updated_at: { seconds: repo_topic.updated_at.to_i, nanos: 0 }
               }
             end
           }
+        end
+
+        sig { params(user: User).returns(String) }
+        def creator_url_for_repository_topic(user)
+          return user.permalink if user.is_a?(Bot)
+          GitHub::Resources::UrlForModel.new(user).url
+        rescue ActionController::UrlGenerationError
+          # Fallback if route generation fails for an otherwise valid actor.
+          "#{GitHub.url}/#{user.display_login}"
         end
 
         sig { params(state: String).returns(T.nilable(Symbol)) }

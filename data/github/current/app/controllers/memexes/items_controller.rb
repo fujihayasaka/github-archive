@@ -653,10 +653,25 @@ class Memexes::ItemsController < Memexes::Controller
   def require_actor_can_add_sub_issues
     return unless column_types_to_update.include?(:parent_issue)
 
-    param = update_multiple_column_value_params&.first
-    return unless param.present?
+    # For bulk updates, find parent_issue values across all items (not just the first).
+    if bulk_item_update_request?
+      lookup = bulk_column_lookup
+      checked_parent_ids = Set.new
+      bulk_item_update_params[:memex_project_items]&.each do |item_params|
+        (item_params[:memex_project_column_values] || []).each do |col_params|
+          column = lookup[col_params[:memex_project_column_id].to_s.downcase]
+          if column&.data_type&.to_sym == :parent_issue && checked_parent_ids.add?(col_params[:value])
+            require_these_items_can_add_sub_issues(col_params[:value])
+            return if performed?
+          end
+        end
+      end
+    else
+      parent_issue_column_data = column_list_for_item_update.detect { |c| c[:column]&.data_type&.to_sym == :parent_issue }
+      return unless parent_issue_column_data.present?
 
-    require_these_items_can_add_sub_issues(param[:value])
+      require_these_items_can_add_sub_issues(parent_issue_column_data[:value])
+    end
   end
 
   def require_actor_can_set_tracked_by

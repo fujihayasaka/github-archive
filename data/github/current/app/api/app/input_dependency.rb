@@ -46,6 +46,106 @@ module Api::App::InputDependency
     receive_json(json, type: expected_type, required: required)
   end
 
+  # Public: Receive JSON from the request body and parse it.
+  #
+  # expected_type  - An optional Class that is used to check the basic type of
+  #                 the parsed JSON object.  Usually `Hash` or `Array`.
+  # required       - Optional Boolean that determines if the type or JSON is
+  #                 required.  Default: true if the expected type is set.
+  # check_encoding - Optional boolean to determine whether or not to attempt to decode the request body
+  #                  This is currently added as an option due to the feature-flag check relying on `current_user`,
+  #                  and Api::Lfs inspects the request body in `attempt_login`, but this can be removed once we
+  #                  have fully shipped this feature-flagged code. Defaults to `true` if omitted.
+  # max_byte_size  - Optional Integer maximum allowed byte size of the request body.
+  #                  When set, halts with a 415 if the body exceeds this size.
+  #                  Default: nil (no limit).
+  # max_depth      - Optional Integer maximum allowed nesting depth of the JSON body.
+  #                  When set, halts with a 415 if nesting exceeds this depth.
+  #                  Uses a fast pre-scan heuristic on the raw string.
+  #                  Default: nil (no limit).
+  #
+  # Halts with a 400 if the JSON is invalid.
+  # Halts with a 415 if the body exceeds max_byte_size or max_depth.
+  # Returns the parsed JSON Object.
+  def receive_with_limits(expected_type = nil, required: true, check_encoding: true, max_byte_size: nil, max_depth: nil)
+    json = if check_encoding && FeatureFlag.vexi.enabled?(:api_add_support_for_content_encoded_request_body, current_user, default: false)
+      encoding = request.env["HTTP_CONTENT_ENCODING"]
+
+      GitHub.tracer.in_span("Api::App::InputDependency#receive_encoding", kind: :internal, attributes: { "http.request.content_encoding" => encoding || "nil" }) do
+        if encoding.nil?
+          read_body_with_limit(request.body, max_byte_size)
+        elsif encoding.casecmp?("gzip")
+          read_gzip_with_limit(request.body, max_byte_size)
+        else
+          GitHub.logger.info(
+            "Unable to decode content from request due to unexpected encoding",
+            "code.namespace": "Api::App::InputDependency",
+            "code.function": "receive",
+            "http.request.header.content_encoding": encoding,
+            "gh.request_id": request_id
+          )
+          halt 415
+        end
+      end
+    else
+      read_body_with_limit(request.body, max_byte_size)
+    end
+
+    if max_depth && json_exceeds_depth?(json, max_depth)
+      GitHub.dogstats.increment("api.input_dependency.receive.max_depth_exceeded", tags: [])
+      halt 415
+    end
+
+    receive_json(json, type: expected_type, required: required)
+  end
+
+  # Internal: Read from an IO, enforcing an optional byte-size cap during the
+  # read so that an oversized payload is rejected without buffering it entirely.
+  #
+  # io            - An IO-like object that responds to #read.
+  # max_byte_size - Optional Integer cap. nil means unlimited.
+  #
+  # Returns the String body.
+  # Halts with 415 if the body exceeds max_byte_size.
+  def read_body_with_limit(io, max_byte_size)
+    if max_byte_size
+      data = io.read(max_byte_size + 1)
+      if data && data.bytesize > max_byte_size
+        GitHub.dogstats.increment("api.input_dependency.receive.max_byte_size_exceeded", tags: [])
+        halt 415
+      end
+      data || "".b
+    else
+      io.read
+    end
+  end
+
+  # Internal: Decompress a gzip-encoded IO, enforcing an optional byte-size cap
+  # during decompression so that a decompression bomb is rejected without
+  # expanding the full payload into memory.
+  #
+  # io            - An IO-like object containing gzip-compressed data.
+  # max_byte_size - Optional Integer cap on decompressed size. nil means unlimited.
+  #
+  # Returns the decompressed String body.
+  # Halts with 415 if the decompressed body exceeds max_byte_size.
+  def read_gzip_with_limit(io, max_byte_size)
+    gz = Zlib::GzipReader.new(io)
+
+    if max_byte_size
+      # Read up to max_byte_size + 1 so we can detect overflow without
+      # decompressing the entire stream.
+      data = gz.read(max_byte_size + 1)
+      if data && data.bytesize > max_byte_size
+        GitHub.dogstats.increment("api.input_dependency.receive.max_byte_size_exceeded", tags: [])
+        halt 415
+      end
+      data || "".b
+    else
+      gz.read
+    end
+  end
+
   # Public: Converts a message from the API that talks about Ruby objects to talk
   # about JavaScript objects.
   #
@@ -355,5 +455,57 @@ module Api::App::InputDependency
       push_options = data["sockstat"].grep(/\Astat=push_option_\d\d?=(.{1,1000})\z/) { |_| $1 }
       data["push_options"] = push_options if push_options.any?
     end
+  end
+
+  # Internal: Fast pre-scan heuristic to check whether a JSON string's nesting
+  # depth exceeds a given limit. Scans for `{`, `}`, `[`, `]` while skipping
+  # over string literals to avoid false positives from bracket characters
+  # inside strings. Returns early as soon as the limit is exceeded.
+  #
+  # json      - The raw JSON String to scan.
+  # max_depth - Integer maximum allowed nesting depth.
+  #
+  # Returns true if nesting exceeds max_depth, false otherwise.
+  def json_exceeds_depth?(json, max_depth)
+    depth = 0
+    in_string = T.let(false, T::Boolean)
+    escape = T.let(false, T::Boolean)
+    i = 0
+    len = json.bytesize
+
+    while i < len
+      byte = json.getbyte(i)
+
+      if escape
+        escape = false
+        i += 1
+        next
+      end
+
+      if byte == 0x5C # backslash
+        escape = true if in_string
+        i += 1
+        next
+      end
+
+      if byte == 0x22 # double quote
+        in_string = !in_string
+        i += 1
+        next
+      end
+
+      unless in_string
+        if byte == 0x7B || byte == 0x5B # { or [
+          depth += 1
+          return true if depth > max_depth
+        elsif byte == 0x7D || byte == 0x5D # } or ]
+          depth -= 1
+        end
+      end
+
+      i += 1
+    end
+
+    false
   end
 end

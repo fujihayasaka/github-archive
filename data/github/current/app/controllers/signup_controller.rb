@@ -24,6 +24,8 @@ class SignupController < ApplicationController
   before_action :enable_microsoft_analytics, only: [:join]
   before_action :add_microsoft_analytics_csp_exceptions, only: [:join]
   before_action :redirect_to_new_signup_feature_flagged, only: [:create_account]
+  before_action :redirect_external_auth, only: [:create_account]
+
   before_action :redirect_to_new_signup, only: [:join]
   layout "enterprise_funnel", only: [:join]
 
@@ -158,7 +160,6 @@ class SignupController < ApplicationController
 
   # creates a new account.
   def create_account # rubocop:todo GitHub/UseRestfulActions
-    redirect_to "/login" if GitHub.auth.external?
     octocaptcha = Octocaptcha.new(session, params["octocaptcha-token"])
     octocaptcha.set_test_group(params[:source])
     octocaptcha.instrument_event("signup_started")
@@ -715,6 +716,10 @@ class SignupController < ApplicationController
     unless GitHub.signup_enabled? || GitHub.enterprise_first_run?
       redirect_to(login_path)
     end
+  end
+
+  def redirect_external_auth
+    redirect_to "/login" if GitHub.auth.external?
   end
 
   def render_signup_view

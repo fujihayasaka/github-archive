@@ -134,7 +134,9 @@ module RuleEngine
           description: "Pushing to a branch after a pull request is opened will disqualify users from being eligible to approve it.", internal: true))
         schema.add_field(ParameterSchema::Field.new(name: "automatic_copilot_code_review_enabled", display_name: "Automatically request Copilot code review",
           type: :boolean, required: false, default_value: false,
-          description: "Request Copilot code review for new pull requests automatically if the author has access to Copilot code review."))
+          description: "Request Copilot code review for new pull requests automatically if the author has access to Copilot code review.",
+          # Copilot code review is only available on GitHub.com, not on GHES
+          visibility_fn: -> (_source) { !GitHub.enterprise? }))
         schema.add_field(ParameterSchema::Array.new(name: "allowed_merge_methods", display_name: "Allowed merge methods",
           content_type: :string, required: false, description: "When merging pull requests, you can allow any combination of merge commits, squashing, or rebasing. At least one option must be enabled.",
           description_api: "Array of allowed merge methods. Allowed values include `merge`, `squash`, and `rebase`. At least one option must be enabled.",
@@ -353,6 +355,9 @@ module RuleEngine
         end
 
         def automatic_copilot_code_review_enabled?
+          # Copilot code review is only available on GitHub.com, not on GHES
+          return false if GitHub.enterprise?
+
           configs_by_type("pull_request").any? { |c| c.param("automatic_copilot_code_review_enabled") }
         end
 
