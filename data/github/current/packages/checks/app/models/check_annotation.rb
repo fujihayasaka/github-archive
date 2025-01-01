@@ -56,8 +56,12 @@ class CheckAnnotation < ApplicationRecord::Domain::RepositoriesActionsChecks
 
   # There should only be 3 types of annotations, however it appears that users are somehow creating annotations with other types of warning levels such as "success"
   # If we encounter an unknown warning level, we will default to 3 which is the lowest priority.
-  def warning_level_to_i
+  def self.warning_level_to_i(warning_level)
     WARNING_LEVEL_SORT[warning_level] || 3
+  end
+
+  def warning_level_to_i
+    self.class.warning_level_to_i(warning_level)
   end
 
   def github_app

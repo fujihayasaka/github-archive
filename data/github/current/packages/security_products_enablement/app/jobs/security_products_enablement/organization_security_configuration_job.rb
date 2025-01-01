@@ -24,10 +24,10 @@ module SecurityProductsEnablement
 
     around_perform do |job, block|
       job.enqueued_any_job = false
-
+      job_progress_tracker.start unless job_progress_tracker.in_progress?
       block.call
     ensure
-      job_progress_tracker.finish unless job.enqueued_any_job
+      job_progress_tracker.clear unless job.enqueued_any_job
     end
 
     around_perform do |_job, block|
@@ -145,21 +145,27 @@ module SecurityProductsEnablement
       GitHub.logger.info("prevent_additional_sku_usage: #{prevent_additional_sku_usage}")
 
       parse_repository_ids(action: :apply, organization:, actor:, repository_ids:, repository_query:) do |repository_id|
-        repository = Repositories::Public.find_active!(repository_id)
-        enqueued_job = T.must(security_configuration).apply_to_repository(
-          repository,
-          actor:,
-          override_existing_config:,
-          override_params:,
-          prevent_additional_sku_usage: prevent_additional_sku_usage.to_a
-        )
+        begin
+          repository = Repositories::Public.find_active!(repository_id)
+          enqueued_job = T.must(security_configuration).apply_to_repository(
+            repository,
+            actor:,
+            override_existing_config:,
+            override_params:,
+            prevent_additional_sku_usage: prevent_additional_sku_usage.to_a
+          )
 
-        if enqueued_job
-          job_progress_tracker.increment_jobs
-          job_progress_tracker.append_repository_id(repository_id) if skip_backfill_request
-          self.enqueued_any_job = true
+          if enqueued_job
+            self.enqueued_any_job = true
+            job_progress_tracker.increment_jobs
+            job_progress_tracker.append_repository_id(repository_id) if skip_backfill_request
+          end
+        rescue => error
+          Failbot.report(error)
         end
       end
+
+      job_progress_tracker.lock_total_jobs
     end
 
     sig do
@@ -188,19 +194,25 @@ module SecurityProductsEnablement
       query_scope = security_config.repository_security_configurations.applied.where(organization_id: T.must(organization&.id))
 
       query_scope.find_each(batch_size: BATCH_SIZE) do |repo_config|
-        RepositorySecurityConfiguration.throttle_writes_with_retry { repo_config.updating! }
+        begin
+          RepositorySecurityConfiguration.throttle_writes_with_retry { repo_config.updating! }
 
-        ApplySecurityConfigurationToRepositoryJob.perform_later(
-          actor_id: T.must(actor&.id),
-          repository_id: repo_config.repository_id,
-          security_configuration_id: security_config.id,
-          override_params: publish_backfill_group_request ? { skip_backfill_request: "1" } : {}
-        )
+          ApplySecurityConfigurationToRepositoryJob.perform_later(
+            actor_id: T.must(actor&.id),
+            repository_id: repo_config.repository_id,
+            security_configuration_id: security_config.id,
+            override_params: publish_backfill_group_request ? { skip_backfill_request: "1" } : {}
+          )
 
-        job_progress_tracker.increment_jobs
-        job_progress_tracker.append_repository_id(repo_config.repository_id) if publish_backfill_group_request
-        self.enqueued_any_job = true
+          self.enqueued_any_job = true
+          job_progress_tracker.increment_jobs
+          job_progress_tracker.append_repository_id(repo_config.repository_id) if publish_backfill_group_request
+        rescue => error
+          Failbot.report(error)
+        end
       end
+
+      job_progress_tracker.lock_total_jobs
     end
 
     sig do

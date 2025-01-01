@@ -277,11 +277,7 @@ class SessionsController < ApplicationController
   end
 
   def render_new_session(proxima_admin_login: nil, emu_first_admin_login: nil) # rubocop:todo GitHub/UseRestfulActions
-    if FeatureFlag.vexi.enabled?(:login_redesign, default: false)
-      render "sessions/new", locals: { proxima_admin_login: proxima_admin_login, emu_first_admin_login: emu_first_admin_login }
-    else
-      render "sessions/new_old", locals: { proxima_admin_login: proxima_admin_login, emu_first_admin_login: emu_first_admin_login }
-    end
+    render "sessions/new", locals: { proxima_admin_login: proxima_admin_login, emu_first_admin_login: emu_first_admin_login }
   end
 
   PASSKEY_LOGIN_ERROR = "Unable to sign in with your passkey. Please sign in with your password."
@@ -702,26 +698,14 @@ class SessionsController < ApplicationController
 
     @show_captcha = @user.two_factor_sms_requires_captcha?(session, callsite: :two_factor_sms_confirm)
 
-    if FeatureFlag.vexi.enabled?(:login_redesign, default: false)
-      render "sessions/two_factor_sms_confirm"
-    else
-      render "sessions/two_factor_sms_confirm_old"
-    end
+    render "sessions/two_factor_sms_confirm"
   end
 
   def render_two_factor_prompt(type, otp = nil) # rubocop:todo GitHub/UseRestfulActions
     if type == :app
-      if FeatureFlag.vexi.enabled?(:login_redesign, default: false)
-        render "sessions/two_factor_app_prompt", locals: { otp: otp }
-      else
-        render "sessions/two_factor_app_prompt_old", locals: { otp: otp }
-      end
+      render "sessions/two_factor_app_prompt", locals: { otp: otp }
     elsif type == :sms
-      if FeatureFlag.vexi.enabled?(:login_redesign, default: false)
-        render "sessions/two_factor_sms_prompt", locals: { otp: otp }
-      else
-        render "sessions/two_factor_sms_prompt_old", locals: { otp: otp }
-      end
+      render "sessions/two_factor_sms_prompt", locals: { otp: otp }
     end
   end
 
@@ -844,11 +828,7 @@ class SessionsController < ApplicationController
     @user = User.find_by_login session[:two_factor_user]
     return render_404 unless @user && @user.has_webauthn_credential?
 
-    if FeatureFlag.vexi.enabled?(:login_redesign, default: false)
-      render "sessions/webauthn/prompt", locals: { webauthn_user: @user }
-    else
-      render "sessions/webauthn/prompt_old", locals: { webauthn_user: @user }
-    end
+    render "sessions/webauthn/prompt", locals: { webauthn_user: @user }
   end
 
   # 2FA sign-in with webauthn
@@ -933,17 +913,10 @@ class SessionsController < ApplicationController
     end
 
     # render the mobile prompt page with the challenge
-    if FeatureFlag.vexi.enabled?(:login_redesign, default: false)
-      render "sessions/github_mobile/two_factor_prompt", locals: {
+    render "sessions/github_mobile/two_factor_prompt", locals: {
       challenge: session[:gh_mobile_challenge],
       user: @user,
     }
-    else
-      render "sessions/github_mobile/two_factor_prompt_old", locals: {
-      challenge: session[:gh_mobile_challenge],
-      user: @user,
-    }
-    end
   end
 
   def github_mobile_two_factor_status # rubocop:todo GitHub/UseRestfulActions
@@ -1032,11 +1005,7 @@ class SessionsController < ApplicationController
     @user = User.find_by_login session[:two_factor_user]
     return render_404 unless @user
 
-    if FeatureFlag.vexi.enabled?(:login_redesign, default: false)
-      render "sessions/two_factor_recover_prompt"
-    else
-      render "sessions/two_factor_recover_prompt_old"
-    end
+    render "sessions/two_factor_recover_prompt"
   end
 
   def trusted_device_registration_prompt # rubocop:todo GitHub/UseRestfulActions

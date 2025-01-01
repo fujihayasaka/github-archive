@@ -7,6 +7,7 @@
 class CodeScanning::AnnotationCreator
   BATCH_SIZE = 25
 
+  sig { params(check_run: CheckRun, new_alerts: T::Array[Turboscan::Proto::DiffedAlert]).returns(Integer) }
   def create_annotations(check_run, new_alerts)
     return 0 if new_alerts.empty?
 
@@ -14,6 +15,10 @@ class CodeScanning::AnnotationCreator
     CodeScanningAnnotation.where(repository_id: check_run.repository_id, check_annotation: check_run.annotations)
                     .in_batches { |batch| alert_numbers.merge!(batch.pluck(:check_annotation_id, :alert_number).to_h) }
     annotations_by_number = check_run.annotations.group_by { |annotation| alert_numbers[annotation.id] }
+
+    # We're sorting alerts by decreasing severity so that we create annotations for more severe alerts first.
+    # This causes the most severe alerts to show up first in lists like on the summary page and the review of the advanced security bot.
+    new_alerts.sort_by! { |alert| CheckAnnotation.warning_level_to_i(CheckAnnotation.annotation_level_for_code_scanning_annotation(alert.security_severity, alert.rule_severity)) }
 
     new_annotations_count = 0
     new_alerts.each_slice(BATCH_SIZE) do |alerts_slice|

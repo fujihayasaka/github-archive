@@ -14,10 +14,12 @@ module RuleEngine
 
       sig { override.params(repository: Repository, ref_updates: T::Array[Git::Ref::Update], actor: T.nilable(Types::Actor)).returns(T::Array[RepositoryRuleConfiguration]) }
       def rules_for_ref_updates(repository, ref_updates, actor)
+        # Copilot is not available on GitHub Enterprise
+        return [] if GitHub.enterprise?
         # Passing nil for the user parameter since the actor here is a bot
         # And the copilot_swe_agent_enabled? method only needs user for policy/model checks
         return [] unless actor.is_a?(Bot) && repository.copilot_swe_agent_enabled?(actor)
-        return [] unless actor.is_a?(Bot) && actor == Apps::Privileged.integration(:copilot_swe_agent).bot
+        return [] unless actor.is_a?(Bot) && actor == Apps::Privileged.integration(:copilot_swe_agent)&.bot
 
         disallowed_refs = ref_updates.map(&:refname).reject { |ref| ref.starts_with?(COPILOT_BRANCH_PREFIX) }
 

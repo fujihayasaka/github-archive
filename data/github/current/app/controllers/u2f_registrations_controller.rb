@@ -381,11 +381,7 @@ class U2fRegistrationsController < ApplicationController
   # Renders the webauthn request UX and forms for the login page async after the cached page load
   # We only loading this fragment from the default login page (form_supports_passkeys)
   def login_fragment # rubocop:todo GitHub/UseRestfulActions
-    if FeatureFlag.vexi.enabled?(:login_redesign, default: false)
-      render partial: "sessions/webauthn/login_fragment"
-    else
-      render partial: "sessions/webauthn/login_fragment_old"
-    end
+    render partial: "sessions/webauthn/login_fragment"
   end
 
   private

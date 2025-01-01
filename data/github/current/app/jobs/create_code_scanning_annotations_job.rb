@@ -276,7 +276,7 @@ class CreateCodeScanningAnnotationsJob < ApplicationJob
       head_commit_oid: head_commit_oid,
       changes_too_large: @file_changes&.too_large?,
 
-      new_alerts: data.new_alerts,
+      new_alerts: data.new_alerts.to_a,
       new_count: data.new_count,
       new_categories: data.new_categories,
       missing_categories: data.missing_categories,

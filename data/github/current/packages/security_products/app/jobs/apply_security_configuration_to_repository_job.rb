@@ -437,10 +437,8 @@ class ApplySecurityConfigurationToRepositoryJob < ApplicationJob
   def update_job_progress_tracker
     return unless repository_owner.organization?
 
-    remaining_jobs = job_progress_tracker.decrement_jobs
-    return unless remaining_jobs.zero?
-
-    job_progress_tracker.finish
+    finished = job_progress_tracker.decrement_jobs
+    return unless finished
 
     if arguments.dig(0, :override_params, :skip_backfill_request).present?
       # The pop_repository_ids method returns nil when there are no more
