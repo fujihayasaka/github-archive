@@ -132,7 +132,8 @@ class Api::RateLimitConfiguration
   EXEMPT_RATE_LIMITS = {
     DEFAULT_FAMILY => 120_000,
     SEARCH_FAMILY  => 500,
-    ACTIONS_RUNNER_REGISTRATION_FAMILY => 40_000
+    ACTIONS_RUNNER_REGISTRATION_FAMILY => 40_000,
+    OUTSIDE_COLLABORATORS_FAMILY => 120_000
   }.freeze
 
   # Public: Provide the rate limit configuration for a specific API consumer and

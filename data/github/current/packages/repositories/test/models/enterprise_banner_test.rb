@@ -62,16 +62,22 @@ class EnterpriseBannerTest < GitHub::TestCase
 
   test "instruments create event" do
     events = assert_performed_audit_entries(count: 1, only: "enterprise_announcement.create") do
-      EnterpriseBanner.new(owner: @repo, message: "Hello world", dismissible: true).upsert_for(@repo)
+      EnterpriseBanner.new(owner: @repo, message: "Hello world", dismissible: true).upsert_for(@repo, @user)
     end
 
     expected_payload = {
-      owner: @repo.nwo,
+      actor: @user.display_login,
+      owner: @repo.name_with_display_owner,
       owner_type: "repository",
+      business: @business.name,
       business_id: @business.id,
       message: "Hello world",
       dismissibility: true,
-      expiry: nil
+      expiry: nil,
+      repo: @repo.name_with_display_owner,
+      repo_id: @repo.id,
+      org: @org.display_login,
+      org_id: @org.id,
     }
 
     assert_subset_hash expected_payload, events.first
@@ -81,33 +87,42 @@ class EnterpriseBannerTest < GitHub::TestCase
     create(:enterprise_banner, owner: @business, message: "Hello world", dismissible: true)
 
     events = assert_performed_audit_entries(count: 1, only: "enterprise_announcement.update") do
-      EnterpriseBanner.new(owner: @business, message: "Goodbye world", dismissible: true).upsert_for(@business)
+      EnterpriseBanner.new(owner: @business, message: "Goodbye world", dismissible: true).upsert_for(@business, @user)
     end
 
     expected_payload = {
+      actor: @user.display_login,
       owner: @business.name,
       owner_type: "enterprise",
+      business: @business.name,
       business_id: @business.id,
       old_message: "Hello world",
-      message: "Goodbye world"
+      message: "Goodbye world",
     }
 
     assert_subset_hash expected_payload, events.first
+    assert_nil expected_payload[:repo_id]
+    assert_nil expected_payload[:org_id]
   end
 
   test "instruments destroy event" do
     banner = create(:enterprise_banner, owner: @org, dismissible: true)
 
     events = assert_performed_audit_entries(count: 1, only: "enterprise_announcement.destroy") do
-      EnterpriseBanner.clear_for(@org)
+      EnterpriseBanner.clear_for(@org, @user)
     end
 
     expected_payload = {
-      owner: @org.name,
+      actor: @user.display_login,
+      owner: @org.display_login,
       owner_type: "organization",
-      business_id: @business.id
+      business: @business.name,
+      business_id: @business.id,
+      org: @org.display_login,
+      org_id: @org.id,
     }
 
     assert_subset_hash expected_payload, events.first
+    assert_nil expected_payload[:repo_id]
   end
 end

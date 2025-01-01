@@ -67,6 +67,11 @@ module SecretScanning
               business = T.cast(org.business, Business)
               request[:business_id] = business.id
             end
+          else
+            business = repository.business
+            business ||= Business.enterprise_managed_business_for(resource: repository)
+            business ||= GitHub.global_business if GitHub.single_business_environment?
+            request[:business_id] = business.id if business.present?
           end
 
           response = GitHub::TokenScanning::Service::Client.new(actor).scan_bytes(request)
@@ -171,6 +176,11 @@ module SecretScanning
               business = T.cast(org.business, Business)
               request[:business_id] = business.id
             end
+          else
+            business = repository.business
+            business ||= Business.enterprise_managed_business_for(resource: repository)
+            business ||= GitHub.global_business if GitHub.single_business_environment?
+            request[:business_id] = business.id if business.present?
           end
 
           response = GitHub::TokenScanning::Service::Client.new(actor).scan_push(request)

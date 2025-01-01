@@ -49,12 +49,12 @@ class Businesses::MessagesController < Businesses::BusinessController
       return redirect_to edit_announcement_enterprise_path
     end
 
-    banner.upsert_for(current_business)
+    banner.upsert_for(current_business, current_user)
     redirect_to edit_announcement_enterprise_path, notice: "The announcement was successfully published. It will be displayed to all users of this enterprise."
   end
 
   def destroy
-    EnterpriseBanner.clear_for(current_business)
+    EnterpriseBanner.clear_for(current_business, current_user)
     redirect_to edit_announcement_enterprise_path, notice: "Unpublished the announcement."
   end
 end

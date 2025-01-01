@@ -134,6 +134,22 @@ class PushProtectionServiceTest < GitHub::TestCase
       assert_equal false, result.completed
     end
 
+    test "includes business_id for EMU-owned repository", skip_enterprise: true do
+      emu_user = create(:emu)
+      emu_user_owned_repo = create(:private_repository, owner: emu_user)
+
+      GitHub::Proto::SecretScanning::Scans::V2::ScansAPIClient.any_instance.expects(:scan_bytes).returns(nil).with do |request|
+        request = T::let(request, GitHub::Proto::SecretScanning::Scans::V2::ScanBytesRequest)
+        assert_equal request.repository&.id, emu_user_owned_repo.id
+        assert_equal request.actor_id, emu_user.id
+        assert_equal request.business_id, emu_user.enterprise_managed_business.id
+        refute_equal request.business_id, 0
+        refute_nil request.business_id
+      end
+
+      SecretScanning::Services::PushProtectionService.scan_content("Hello World", emu_user_owned_repo, emu_user)
+    end
+
     test "includes delegated bypass requests in the request, if delegated bypass is enabled" do
       reviewer = create_bypass_reviewer
       exemption_resource_owner = RuleEngine::RuleSuite.create!(repository: @repo, ref_name: "refs/heads/main", before_oid: "before", after_oid: "after", actor: @user)
@@ -342,6 +358,29 @@ class PushProtectionServiceTest < GitHub::TestCase
       assert result != nil
       assert_equal 0, result.secrets.length
       assert_equal false, result.completed
+    end
+
+    test "includes business_id for EMU-owned repository", skip_enterprise: true do
+      emu_user = create(:emu)
+      emu_user_owned_repo = create(:private_repository, owner: emu_user)
+
+      ref_updates = [
+        Git::Ref::Update.new(
+          repository: @org_owned_repo,
+          refname: "refs/heads/main",
+          before_oid: GitHub::NULL_OID,
+          after_oid: "4f82b923b9b73ac1a644f25ad8786a55202b5c26",
+        )
+      ]
+      GitHub::Proto::SecretScanning::Scans::V2::ScansAPIClient.any_instance.expects(:scan_push).returns(nil).with do |request|
+        request = T::let(request, GitHub::Proto::SecretScanning::Scans::V2::ScanPushRequest)
+        assert_equal request.repository&.id, emu_user_owned_repo.id
+        assert_equal request.actor_id, emu_user.id
+        assert_equal request.business_id, emu_user.enterprise_managed_business.id
+        refute_equal request.business_id, 0
+        refute_nil request.business_id
+      end
+      SecretScanning::Services::PushProtectionService.scan_ref_updates(ref_updates, emu_user_owned_repo, emu_user)
     end
 
     test "includes delegated bypass requests in the request, if delegated bypass is enabled" do

@@ -23,8 +23,14 @@ class AuditLogSinkConfiguration < ApplicationRecord::Collab # rubocop:todo GitHu
   # Check verifies if we can connect to the endpoint successfully.
   def check(business)
     client = GitHub.driftwood_client_v1
-    res = check_query(client, business).execute
-    res["ok"] ? "ok" : res["message"]
+    begin
+      res = check_query(client, business).execute
+      res["ok"] ? "ok" : res["message"]
+    rescue Errno::ECONNREFUSED, Timeout::Error => e
+      "Error connecting: #{e.message}"
+    rescue URI::BadURIError => e
+      "Invalid URI: #{e.message}"
+    end
   end
 
   # Returns the sink URL for the given business that shows the sink's configuration page
