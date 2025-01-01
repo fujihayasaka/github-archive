@@ -31,5 +31,10 @@ class RepairPullRequestsIndexJob < Elastomer::RepairJob
       :base_repository, :head_repository, :base_user, :head_user,
       { issue: [:repository, { assignments: :assignee }, { comments: :user }, :labels] }
     ],
+    conditions: proc { |_, job|
+      if job.repo_id.present?
+        "repository_id = #{job.repo_id}"
+      end
+    },
     adapter_args: { skip_commit_info_on_failure: true }
 end

@@ -10,6 +10,8 @@ module ConditionalAccess
       include ConditionalAccess::Helpers::OutsideCollaboratorChecks
       include ConditionalAccess::Helpers::TargetFilters
 
+      include Scientist
+
       requires_ancestor { Kernel }
 
       AppliedIn = T.type_alias do
@@ -82,26 +84,7 @@ module ConditionalAccess
       #
       # Returns an Array of targets where the policy was satisfied.
       def multiple_personal_access_tokens_expiration_limit_satisfied(targets, target_provider)
-        GitHub.tracer.in_span("cap.personal_access_tokens_expiration_limit.satisfied.filtering", kind: :internal) do |span|
-          span.add_attributes({ "gh.targets_size" => targets.size })
-
-          targets.filter do |target|
-            satisfied = true
-
-            span.add_attributes({ "gh.target.id" => target.respond_to?(:id) ? target.id : nil, "gh.target.type" => target.class.name })
-
-            case target
-            when Business
-              satisfied = false if pat_expiration_limit_unsatisfied_business_ids.include?(target.id)
-            when Organization
-              satisfied = false if pat_expiration_limit_unsatisfied_org_ids.include?(target.id)
-            else
-              raise ArgumentError.new("unsupported target for conditional access")
-            end
-
-            satisfied
-          end
-        end
+        targets
       end
 
       # Internal: Is the request actor and its means of authentication
@@ -137,6 +120,20 @@ module ConditionalAccess
         @pat_expiration_limit_unsatisfied_business_ids = business_ids_restricting_pat_lifetime(expirable_access.pat_lifetime_in_days, expirable_access.pat_type)
       end
 
+      def org_expiration_science_experiment(org_id, targets)
+        usable_result = T.let(false, T.untyped)
+        science "cap.personal_access_tokens_expiration_limit.org_expiration_science_experiment_v_three" do |experiment|
+          experiment.use do
+            usable_result = pat_expiration_limit_unsatisfied_org_ids.include?(org_id)
+          end
+          experiment.try do
+            pat_expiration_limit_unsatisfied_org_ids_candidate(targets).include?(org_id)
+          end
+        end
+
+        usable_result
+      end
+
       # Internal: Find all of the actor's associated Orgs that enforce
       # an expiration policy the PAT doesn't adhere to.
       #
@@ -145,6 +142,16 @@ module ConditionalAccess
         return @pat_expiration_limit_unsatisfied_org_ids if defined?(@pat_expiration_limit_unsatisfied_org_ids)
 
         @pat_expiration_limit_unsatisfied_org_ids = organization_ids_restricting_pat_lifetime(expirable_access.pat_lifetime_in_days, expirable_access.pat_type)
+      end
+
+      def pat_expiration_limit_unsatisfied_org_ids_candidate(targets)
+        return @pat_expiration_limit_unsatisfied_org_ids_candidate if defined?(@pat_expiration_limit_unsatisfied_org_ids_candidate)
+
+        @pat_expiration_limit_unsatisfied_org_ids_candidate = organization_ids_restricting_pat_lifetime_candidate(
+          expirable_access.pat_lifetime_in_days,
+          expirable_access.pat_type,
+          targets: targets
+        )
       end
 
       # TODO move to module

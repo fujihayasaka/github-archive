@@ -3,7 +3,7 @@
 
 class Stafftools::PullRequestsController < StafftoolsController
   before_action :ensure_repo_exists
-  before_action :ensure_pull_request_exists, except: [:purge, :reindex]
+  before_action :ensure_pull_request_exists, except: [:purge, :reindex, :stop]
 
   layout "layouts/stafftools/repository/collaboration"
 
@@ -95,10 +95,27 @@ class Stafftools::PullRequestsController < StafftoolsController
     redirect_to gh_stafftools_repository_issues_path(current_repository)
   end
 
+  # Stop the currently running reindex job
+  def stop # rubocop:todo GitHub/UseRestfulActions
+    repair_job = RepairPullRequestsIndexJob.new("pull-requests", repo_id: current_repository.id)
+    if repair_job.exists? && repair_job.enabled?
+      repair_job.disable
+      flash[:notice] = "Pull request reindexing stopped"
+    end
+    redirect_to :back
+  end
+
   # Reindex the repo's pull requests for search
   def reindex # rubocop:todo GitHub/UseRestfulActions
     purge = params[:purge] == "true" ? true : false
-    current_repository.reindex_pull_requests(purge)
+    if current_user.feature_enabled?(:elastomer_use_repair_job_for_repo_reindex)
+      repair_job = RepairPullRequestsIndexJob.new("pull-requests", repo_id: current_repository.id)
+      repair_job.reset!
+      repair_job.enable
+      repair_job.start(10)
+    else
+      current_repository.reindex_pull_requests(purge)
+    end
     flash[:notice] = "Reindexing #{current_repository.pull_requests.count} pull requests ..."
     redirect_to :back
   end

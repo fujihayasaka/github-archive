@@ -9,6 +9,8 @@ module ConditionalAccess
       include ConditionalAccess::Helpers::OutsideCollaboratorChecks
       include ConditionalAccess::Helpers::TargetFilters
 
+      include Scientist
+
       requires_ancestor { Kernel }
 
       AppliedIn = T.type_alias do
@@ -86,8 +88,7 @@ module ConditionalAccess
             @legacy_pat_restricted_business_ids ||= legacy_pat_restricted_business_ids
             satisfied = false if @legacy_pat_restricted_business_ids.include?(target.id)
           when Organization
-            @legacy_pat_restricted_organization_ids ||= legacy_pat_restricted_organization_ids
-            satisfied = false if @legacy_pat_restricted_organization_ids.include?(target.id)
+            satisfied = false if legacy_pat_restricted_organizations_experiment(target.id, targets)
           else
             raise ArgumentError.new("unsupported target for conditional access")
           end
@@ -107,12 +108,31 @@ module ConditionalAccess
         business_ids_with_configuration_enabled(business_ids, Configurable::RestrictLegacyPersonalAccessTokens::KEY)
       end
 
+      def legacy_pat_restricted_organizations_experiment(org_id, targets)
+        # This policy is evaluated first¹, we can check percentage enablement here
+        # and ensure that the following policy evaluation is consistent.
+        #
+        # This will allow us to enable experiment for 100% of actors in dotcom so that memoization is consistent
+        #
+        # ¹: packages/app_security/app/models/conditional_access/api/public/filter.rb#L25
+
+        legacy_pat_restricted_organization_ids_candidate(targets).include?(org_id)
+      end
+
       # Internal: Find all of the actors associated Organizations that are
       # restricting legacy personal access tokens.
       #
       # Returns an Array.
       def legacy_pat_restricted_organization_ids
-        organization_ids_restricting_pat_access(configuration_key: Configurable::RestrictLegacyPersonalAccessTokens::KEY)
+        return @legacy_pat_restricted_organization_ids if defined?(@legacy_pat_restricted_organization_ids)
+
+        @legacy_pat_restricted_organization_ids = organization_ids_restricting_pat_access(configuration_key: Configurable::RestrictLegacyPersonalAccessTokens::KEY)
+      end
+
+      def legacy_pat_restricted_organization_ids_candidate(targets)
+        return @legacy_pat_restricted_organization_ids_candidate if defined?(@legacy_pat_restricted_organization_ids_candidate)
+
+        @legacy_pat_restricted_organization_ids_candidate = organization_ids_restricting_pat_access_candidate(configuration_key: Configurable::RestrictLegacyPersonalAccessTokens::KEY, targets: targets)
       end
 
       # Internal: Is the request actor and its means of authentication

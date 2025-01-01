@@ -74,6 +74,11 @@ module Stafftools
         def purge_before_reindex?
           search_entry? && !public_match?
         end
+
+        def active_repair?
+          repair_job = RepairPullRequestsIndexJob.new("pull-requests", repo_id: repository.id)
+          repair_job.exists? && repair_job.enabled? && !repair_job.finished?
+        end
       end
     end
   end

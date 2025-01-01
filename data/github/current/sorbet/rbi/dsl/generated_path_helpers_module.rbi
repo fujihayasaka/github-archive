@@ -16320,6 +16320,9 @@ module GeneratedPathHelpersModule
   def stop_billing_check_stafftools_user_path(*args); end
 
   sig { params(args: T.untyped).returns(String) }
+  def stop_stafftools_repository_pull_requests_path(*args); end
+
+  sig { params(args: T.untyped).returns(String) }
   def stripe_customers_stafftools_sponsors_path(*args); end
 
   sig { params(args: T.untyped).returns(String) }

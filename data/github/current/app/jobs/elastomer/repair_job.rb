@@ -50,6 +50,8 @@ module Elastomer
     STARTED_KEY = "started".freeze
     ACTIVE_KEY  = "active".freeze
     WORKER_KEY  = "workers".freeze
+    UPDATED_AT_START_KEY = "updated_after_start".freeze
+    UPPER_BOUND_KEY = "upper_bound".freeze
 
     def to_partial_path
       "stafftools/search_indexes/repair_job"
@@ -70,7 +72,22 @@ module Elastomer
 
       count.times { requeue }
       redis.hsetnx(group_key, STARTED_KEY, Time.now.iso8601)
-      GitHub.dogstats.count("search.repair.workers", count, { tags: ["index:#{index_name}"] })
+      GitHub.dogstats.gauge("search.repair.workers", count, { tags: [
+        "index:#{index_name}",
+        "group_key:#{group_key}",
+        "search_cluster:#{cluster_name}"
+      ] })
+      GitHub.dogstats.gauge("search.repair.active_jobs", active_jobs, { tags:
+        ["index:#{index_name}", "group_key:#{group_key}", "search_cluster:#{cluster_name}"]
+      })
+      GitHub.dogstats.event(
+        "Repair Job Started",
+        "Started repair job for index #{index_name} with #{count} workers", tags: [
+          "index:#{index_name}",
+          "search_cluster:#{cluster_name}",
+          "group_key:#{group_key}",
+        ]
+      )
     end
 
     # Perform the actual work of reconciling the search index with the canoncial
@@ -91,13 +108,33 @@ module Elastomer
       end
 
       return if disabled?
+      GitHub.dogstats.increment("search.repair.batch_start", { tags: [
+        "index:#{index_name}",
+        "group_key:#{group_key}",
+        "search_cluster:#{cluster_name}",
+      ] })
       repair!
     ensure
       active_jobs = redis.hget(group_key, ACTIVE_KEY).to_i
       worker_count = redis.hget(group_key, WORKER_KEY).to_i
-
-      # Only requeue if the customer-requested count is less than current active jobs
-      requeue if enabled? && !finished? && (worker_count > active_jobs)
+      should_requeue = enabled? && !finished? && (worker_count > active_jobs)
+      GitHub.dogstats.increment("search.repair.batch_complete", { tags: [
+        "index:#{index_name}",
+        "requeue:#{should_requeue}",
+        "enabled:#{enabled?}",
+        "finished:#{finished?}",
+        "has_worker_capacity:#{worker_count > active_jobs}",
+        "group_key:#{group_key}",
+        "search_cluster:#{cluster_name}",
+      ] })
+      GitHub.dogstats.gauge("search.repair.progress", progress, {
+        tags: [
+          "index:#{index_name}",
+          "group_key:#{group_key}",
+          "search_cluster:#{cluster_name}",
+        ]
+      })
+      requeue if should_requeue
     end
 
     # Perform the actual work of the repairing the search index. This method
@@ -292,6 +329,11 @@ module Elastomer
       @index_name = job_args[0] # from ActiveJob base serialized args
     end
 
+    def repo_id
+      return @repo_id if defined?(@repo_id)
+      @repo_id = job_opts[:repo_id]
+    end
+
     def job_opts
       return @job_opts if defined?(@job_opts)
       # from ActiveJob base serialized args, if present
@@ -310,7 +352,70 @@ module Elastomer
 
     def group_key
       return @group_key if defined?(@group_key)
-      @group_key = "#{self.class.name}/#{index_name}"
+
+      if repo_id.present?
+        @group_key = "#{self.class.name}/#{index_name}/repo_id_#{repo_id}"
+      else
+        @group_key = "#{self.class.name}/#{index_name}"
+      end
+    end
+
+    # The date where an index's corresponding MySQL records had to have been last updated before being repaired.
+    # Any records that have updated_at < updated_at_start will be ignored.
+    sig { returns(T.nilable(Time)) }
+    def updated_at_start
+      return unless (date = redis.hget(group_key, UPDATED_AT_START_KEY))
+
+      Time.iso8601(date)
+    end
+
+    # Returns whether or not the partial repair strategy is used for this repair job.
+    sig { returns(T::Boolean) }
+    def updated_at_start?
+      updated_at_start.present?
+    end
+
+    # Set the date where a MySQL record had to have been last updated before being repaired.
+    sig { params(date: T.nilable(Time)).void }
+    def updated_at_start=(date)
+      if date
+        if date.future?
+          raise ArgumentError, "updated_at_start date cannot be in the future"
+        end
+
+        redis.hset(group_key, UPDATED_AT_START_KEY, date.iso8601)
+      else
+        redis.hdel(group_key, UPDATED_AT_START_KEY)
+      end
+    end
+
+    # The maximum date where an index's corresponding MySQL records may have been last updated before being repaired.
+    # Any records that have updated_at > upper_bound will be ignored.
+    sig { returns(T.nilable(Time)) }
+    def upper_bound
+      return unless (date = redis.hget(group_key, UPPER_BOUND_KEY))
+
+      Time.iso8601(date)
+    end
+
+    # Returns whether or not the partial repair strategy is used for this repair job.
+    sig { returns(T::Boolean) }
+    def upper_bound?
+      upper_bound.present?
+    end
+
+    # Set the upper bound on updated_at for MySQL records to be repaired.
+    sig { params(date: T.nilable(Time)).void }
+    def upper_bound=(date)
+      if date
+        if date.future?
+          raise ArgumentError, "upper_bound date cannot be in the future"
+        end
+
+        redis.hset(group_key, UPPER_BOUND_KEY, date.iso8601)
+      else
+        redis.hdel(group_key, UPPER_BOUND_KEY)
+      end
     end
 
     def reconcilers

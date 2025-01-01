@@ -9,6 +9,8 @@ module ConditionalAccess
       include ConditionalAccess::Helpers::OutsideCollaboratorChecks
       include ConditionalAccess::Helpers::TargetFilters
 
+      include Scientist
+
       requires_ancestor { Kernel }
 
       AppliedIn = T.type_alias do
@@ -86,8 +88,7 @@ module ConditionalAccess
             @pat_restricted_business_ids ||= pat_restricted_business_ids
             satisfied = false if @pat_restricted_business_ids.include?(target.id)
           when Organization
-            @pat_restricted_organization_ids ||= pat_restricted_organization_ids
-            satisfied = false if @pat_restricted_organization_ids.include?(target.id)
+            satisfied = false if pat_restricted_organizations_experiment(target.id, targets)
           else
             raise ArgumentError.new("unsupported target for conditional access")
           end
@@ -107,12 +108,24 @@ module ConditionalAccess
         business_ids_with_configuration_enabled(business_ids, Configurable::RestrictPersonalAccessTokens::KEY)
       end
 
+      def pat_restricted_organizations_experiment(org_id, targets)
+        pat_restricted_organization_ids_candidate(targets).include?(org_id)
+      end
+
       # Internal: Find all of the actors associated Organizations that are
       # restricting personal access tokens.
       #
       # Returns an Array.
       def pat_restricted_organization_ids
-        organization_ids_restricting_pat_access(configuration_key: Configurable::RestrictPersonalAccessTokens::KEY)
+        return @pat_restricted_organization_ids if defined?(@pat_restricted_organization_ids)
+
+        @pat_restricted_organization_ids = organization_ids_restricting_pat_access(configuration_key: Configurable::RestrictPersonalAccessTokens::KEY)
+      end
+
+      def pat_restricted_organization_ids_candidate(targets)
+        return @pat_restricted_organization_ids_candidate if defined?(@pat_restricted_organization_ids_candidate)
+
+        @pat_restricted_organization_ids_candidate = organization_ids_restricting_pat_access_candidate(configuration_key: Configurable::RestrictPersonalAccessTokens::KEY, targets: targets)
       end
 
       # Internal: Is the request actor and its means of authentication

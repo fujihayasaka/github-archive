@@ -51,10 +51,30 @@ module Search
       # multiple workers to process the repair.
       #
       # count - The number of repair workers to start.
+      # updated_at_start - The number of repair workers to start.
+      # upper_bound - The number of repair workers to start.
       #
-      def start(count = 1)
+      def start(count = 1, updated_at_start = nil, upper_bound = nil)
         count = Integer(count)
-        repair_job.enable.start(count)
+        repair_job.enable
+
+        if updated_at_start.present?
+          begin
+            repair_job.updated_at_start = updated_at_start
+          rescue ArgumentError
+            return "Invalid `updated_at_start` date format, expected YYYY-MM-DD"
+          end
+        end
+
+        if upper_bound.present?
+          begin
+            repair_job.upper_bound = upper_bound
+          rescue ArgumentError
+            return "Invalid --visited-after date format, expected YYYY-MM-DD"
+          end
+        end
+
+        repair_job.start(count)
 
         GitHub.dogstats.event \
           "Repair started for: #{index_name.inspect}",

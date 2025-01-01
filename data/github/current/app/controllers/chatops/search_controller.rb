@@ -43,16 +43,23 @@ module Chatops
 
     chatop :repair,
       /repair\s+(?<command>start|stop|status|reset)\s+(?<index>\S+)/,
-      "repair <start|stop|status|reset> <index> [--count <num>] - Execute the repair command for the given index" do
+      "repair <start|stop|status|reset> <index> [--count <num>] [--days-ago <num>]- Execute the repair command for the given index" do
 
-        rpc_params = jsonrpc_params.permit(:command, :index, :count, :message_id, :"visited-after")
+        rpc_params = jsonrpc_params.permit(:command, :index, :count, :message_id, :"visited-after", :days_ago)
         opts = {
           command: rpc_params[:command],
           index_name: rpc_params[:index],
+          args: []
         }
         if opts[:command] == "start"
           count = rpc_params[:count] || 1
-          opts[:args] = [count]
+          days_ago = rpc_params[:days_ago] || nil
+          opts[:args].push(count)
+          unless days_ago.nil?
+            end_date = Time.now.utc
+            start_date = (end_date - days_ago.to_i.days).beginning_of_day
+            opts[:args].push(start_date, end_date)
+          end
         end
 
         klass = Search::Chatops::RepairIndex
