@@ -9,6 +9,7 @@ module ApplicationController::MultiTenantEnterpriseDependency
     # Authentication
     /login(/.*)?|
     /logout|
+    /switch_account|
     /sessions?(/.*)?|
     /auth/.*|
     /saml/.*|

@@ -1028,74 +1028,106 @@
                 <%= view.suspension_action %>
               <% end %>
               <% c.with_body do %>
-                <% if view.show_high_profile_signals?(current_user) %>
-                  <%= render Primer::Beta::Flash.new(scheme: :warning, full: true) do %>
-                    <%= link_to "High Profile User", "https://github.com/github/trust-safety/blob/main/docs/operations/escalation-procedures/high-profile-escalation.md", class: "Link--inTextBlock" %> - if uncertain check with Trust & Safety prior to flagging
-                    <small>
-                      <br>
-                      <%= high_profile_reason %>
-                    </small>
-                  <% end %>
-                <% end %>
-                <% if !user.suspended? %>
-                  <p>
-                    <%= user.is_a?(Organization) ? "Organization owners" : "The user" %> will be notified of the suspension by email<%= user.is_a?(Organization) ? "" : ", with a link to the appeal and reinstatement documentation for more information" %>.
-                    Includes the list of paid subscription items cancelled as a result.
-                  </p>
-                  <%= render Primer::Alpha::Select.new(
-                    name: "reason",
-                    label: "Violating Reason",
-                    id: "reason",
-                    include_blank: true,
-                    required: true,
-                    caption: "Reasons marked with ^ do not publish action to the DSA",
-                  ) do |reasons| %>
-                    <% view.tos_reasons.each do |label, value| %>
-                      <% reasons.option(label:, value:) %>
+                <% if !GitHub.enterprise? %>
+                  <% if view.show_high_profile_signals?(current_user) %>
+                    <%= render Primer::Beta::Flash.new(scheme: :warning, full: true) do %>
+                      <%= link_to "High Profile User", "https://github.com/github/trust-safety/blob/main/docs/operations/escalation-procedures/high-profile-escalation.md", class: "Link--inTextBlock" %> - if uncertain check with Trust & Safety prior to flagging
+                      <small>
+                        <br>
+                        <%= high_profile_reason %>
+                      </small>
                     <% end %>
                   <% end %>
-                  <%= render Primer::Alpha::CheckBoxGroup.new(
-                    name: "content_formats",
-                    label: "Format of Violating Content (select at least one)",
-                    id: "content_formats",
-                    caption: "What format of content did the user post/upload that violated GitHub's terms of service?",
-                    required: true,
-                    mt: 2
-                  ) do |content_format|
-                    DsaConstants::CONTENT_FORMAT_OPTIONS.each do |label, value|
-                      content_format.check_box(label:, value:)
-                    end
-                  end %>
-                  <%= render(Primer::Box.new(direction: :column, mt: 1, mb: 1)) do %>
-                    <label for="created_at">Date of Violating Content Creation</label>
-                    <%= render(Primer::Box.new(direction: :row)) do %>
-                      <%= render(Primer::Beta::Octicon.new(:calendar, size: :small)) %>
-                      <input
-                        type="date"
-                        id="created_at"
-                        name="created_at"
-                        value="<%= Date.today.strftime("%Y-%m-%d") %>"
-                        max="<%= Date.today.strftime("%Y-%m-%d") %>"
-                      >
-                    <% end %>
-                  <% end %>
-                  <%= render Primer::Alpha::TextArea.new(name: "notes", label: "Add Notes", id: "notes", caption: 'Add any additional notes here') %>
-                  <%= render Primer::Box.new(direction: :column, mt: 2) do %>
-                    <%= render Primer::Alpha::Select.new(name: "source", label: "Select a Source", id: "source") do |source| %>
-                      <% DsaConstants::SOURCE_OPTIONS.each do |label, value| %>
-                        <% source.option(label: label, value: value) %>
+                  <% if !user.suspended? %>
+                    <p>
+                      <%= user.is_a?(Organization) ? "Organization owners" : "The user" %> will be notified of the suspension by email<%= user.is_a?(Organization) ? "" : ", with a link to the appeal and reinstatement documentation for more information" %>.
+                      Includes the list of paid subscription items cancelled as a result.
+                    </p>
+                    <%= render Primer::Alpha::Select.new(
+                      name: "reason",
+                      label: "Violating Reason",
+                      id: "reason",
+                      include_blank: true,
+                      required: true,
+                      caption: "Reasons marked with ^ do not publish action to the DSA",
+                    ) do |reasons| %>
+                      <% view.tos_reasons.each do |label, value| %>
+                        <% reasons.option(label:, value:) %>
                       <% end %>
                     <% end %>
+                    <%= render Primer::Box.new(direction: :column, mt: 2) do %>
+                      <%= render Primer::Alpha::TextField.new(
+                        name: "items_reported_to_ncmec",
+                        label: "Items Reported to NCMEC",
+                        id: "items_reported_to_ncmec",
+                        caption: "Users uploading CSAM should be reported to NCMEC. How many images/videos did you report?",
+                      ) %>
+                    <% end %>
+                    <%= render Primer::Alpha::CheckBoxGroup.new(
+                      name: "content_formats",
+                      label: "Format of Violating Content (select at least one)",
+                      id: "content_formats",
+                      caption: "What format of content did the user post/upload that violated GitHub's terms of service?",
+                      required: true,
+                      mt: 2
+                    ) do |content_format|
+                      DsaConstants::CONTENT_FORMAT_OPTIONS.each do |label, value|
+                        content_format.check_box(label:, value:)
+                      end
+                    end %>
+                    <%= render(Primer::Box.new(direction: :column, mt: 1, mb: 1)) do %>
+                      <label for="created_at">Date of Violating Content Creation</label>
+                      <%= render(Primer::Box.new(direction: :row)) do %>
+                        <%= render(Primer::Beta::Octicon.new(:calendar, size: :small)) %>
+                        <input
+                          type="date"
+                          id="created_at"
+                          name="created_at"
+                          value="<%= Date.today.strftime("%Y-%m-%d") %>"
+                          max="<%= Date.today.strftime("%Y-%m-%d") %>"
+                        >
+                      <% end %>
+                    <% end %>
+                    <%= render Primer::Alpha::TextArea.new(name: "notes", label: "Add Notes", id: "notes", caption: "Add any additional notes here") %>
+                    <%= render Primer::Box.new(direction: :column, mt: 2) do %>
+                      <%= render Primer::Alpha::Select.new(name: "source", label: "Select a Source", id: "source") do |source| %>
+                        <% DsaConstants::SOURCE_OPTIONS.each do |label, value| %>
+                          <% source.option(label: label, value: value) %>
+                        <% end %>
+                      <% end %>
+                    <% end %>
+                  <% else %>
+                    <%= render "stafftools/users/unsuspend_reason_form", user: user %>
                   <% end %>
                 <% else %>
-                  <p> You are unsuspending <b><%= user.login %></b>. </p>
-                  <%= render Primer::Alpha::TextArea.new(
-                    name: "reason",
-                    label: "Provide a reason",
-                    required: true,
-                    id: "reason",
-                    caption: 'Add a reason for unsuspending the user')
-                  %>
+                  <% if !user.suspended? %>
+                    <p> Please provide a reason for the audit log. </p>
+                    <input type="hidden" name="id" value="<%= user.name %>">
+                    <dl class="form-group">
+                      <dt><label for="suspension_reason">Log reason *</label></dt>
+                      <dd>
+                        <input
+                          class="form-control"
+                          type="text"
+                          id="suspension_reason"
+                          name="reason"
+                          autofocus
+                        >
+                      </dd>
+                    </dl>
+                    <div class="form-group form-checkbox">
+                      <input type="checkbox" name="send_email" id="send_email">
+                      <label for="send_email">Send suspension email</label>
+                      <p class="note">
+                        <%= primer_octicon(:question) %>
+                        Notifies <%= user.is_a?(Organization) ? "organization owners" : "the user" %>
+                        of the suspension<%= user.is_a?(Organization) ? "" : ", and refers them to the appeal and reinstatement documentation for more information" %>.
+                        Includes the list of paid subscription items cancelled as a result.
+                      </p>
+                    </div>
+                  <% else %>
+                    <%= render "stafftools/users/unsuspend_reason_form", user: user %>
+                  <% end %>
                 <% end %>
               <% end %>
               <% c.with_button(

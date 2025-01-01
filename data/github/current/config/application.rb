@@ -424,11 +424,13 @@ module GitHub
 
     config.middleware.use PermissionCache
 
-    # This changes the trusted lookup method because we know that for both
-    # .com and enterprise we never have private space ip's in this list. This
-    # makes sure that we actually select those private ip's since we want
-    # those in an enterprise context.
-    trusted_proxies = /\A127\.0\.0\.1\z|\A::1\z|\Alocalhost\z/i
+    # This changes the trusted lookup method because we know that for
+    # .com we never have private space ip's in this list, and enterprise
+    # may use predefined private or public ip's as trusted.
+    trusted_proxies = Regexp.union(
+      GitHub.trusted_proxies.map { |proxy| /\A#{Regexp.escape(proxy)}\z/i }
+    )
+
     Rack::Request.ip_filter = lambda { |ip|
       trusted_proxies.match(ip)
     }

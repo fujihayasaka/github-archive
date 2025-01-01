@@ -77,7 +77,8 @@ module Storage
         f.request :url_encoded
         f.options.timeout = 3.hours.to_i
         f.options.open_timeout = 3.hours.to_i
-        f.options.read_timeout = 3.hours.to_i
+        # Faraday versions older than v1.0.0 don't have this option.  See https://github.ghe.com/github/octoshift/issues/9857.
+        f.options.read_timeout = 3.hours.to_i if f.options.respond_to?(:read_timeout=)
         f.options.write_timeout = 3.hours.to_i
         f.adapter(*adapter_args)
       end

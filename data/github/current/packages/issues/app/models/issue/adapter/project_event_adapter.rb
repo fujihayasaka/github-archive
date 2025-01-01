@@ -21,7 +21,7 @@ class Issue::Adapter::ProjectEventAdapter < Issue::Adapter::IssueEventAdapter
 
     project = context.projects_by_id[@issue_event.subject_id]
 
-    @project = Issue::Adapter::ProjectAdapter.new(context, project: project)
+    @project = Issue::Adapter::ProjectAdapter.new(context, project: project) if project
 
     if @event_name != REMOVED_FROM_PROJECT
       project_card = context.project_cards_by_id[@issue_event.card_id]

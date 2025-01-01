@@ -267,8 +267,8 @@ module Newsies
         #{insert_statement}
         ON DUPLICATE KEY UPDATE
           reason =     :reason,
-          unread =     IF(updated_at IS NULL || updated_at < :event_time, :unread, unread),
-          updated_at = IF(updated_at IS NULL || updated_at < :event_time, :updated_at, updated_at)
+          unread =     IF(updated_at IS NULL OR updated_at < :event_time, :unread, unread),
+          updated_at = IF(updated_at IS NULL OR updated_at < :event_time, :updated_at, updated_at)
       SQL
 
       connection.execute(sql)

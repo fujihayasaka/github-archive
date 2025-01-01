@@ -72,6 +72,37 @@ module ReactHelper
   )
     T.bind(self, T.untyped)
     respond_to do |format|
+
+      # Note that `format.html` comes *before* `format.json`.
+      # This is important. It means it will use HTML, by default, if the Accept header doesn't spell out
+      # an obvious preference. E.g. `Accept: */*` will yield HTML. But `Accept: application/json`
+      # will yield JSON. A Chrome browsers, as of 2024, sends something
+      # like `Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,<BREAK>
+      # image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7`.
+
+      format.html do
+        render_html(
+          payload,
+          app_payload_generator,
+          title,
+          page_data,
+          layout,
+          timers,
+          turbo,
+          ssr,
+          status,
+          url_override,
+          path_override,
+          variable_overwrite_fns,
+          precompute_subscription_fns,
+          custom_tags,
+          layout_locals_generator,
+          app_name,
+          origin,
+          run_async_with_defer
+        )
+      end
+
       format.json do
         if flamegraph_mode
           render_html(
@@ -102,38 +133,10 @@ module ReactHelper
             title: title
           }
 
-          if T.must(request).headers["Accept"] == "*/*"
-            # `render json:` doesn't work with preloading because preload requests
-            # don't set an Accept header. Rails produces a 400 response with no content
-            render plain: serialize(res) # rubocop:disable GitHub/RailsViewRenderLiteral
-          else
-            render json: serialize(res) # rubocop:disable GitHub/RailsViewRenderLiteral
-          end
+          render json: serialize(res) # rubocop:disable GitHub/RailsViewRenderLiteral
         end
       end
 
-      format.html do
-        render_html(
-          payload,
-          app_payload_generator,
-          title,
-          page_data,
-          layout,
-          timers,
-          turbo,
-          ssr,
-          status,
-          url_override,
-          path_override,
-          variable_overwrite_fns,
-          precompute_subscription_fns,
-          custom_tags,
-          layout_locals_generator,
-          app_name,
-          origin,
-          run_async_with_defer
-        )
-      end
     end
   end
 

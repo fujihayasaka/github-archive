@@ -199,7 +199,7 @@ class AssetScanner
   def private_cluster_asset_re
     @private_cluster_asset_re ||= begin
       return unless root_url = GitHub.storage_private_mode_url
-      %r{\A#{root_url}\/user\/(\d+)\/files\/([^\.\s]+)}
+      %r{\A#{root_url}\/user\/(\d+)\/files\/(#{GitHub::Goomba::Async::AssetLoaders::AssetLoader::GUID_REGEX})}
     end
   end
 
@@ -207,7 +207,7 @@ class AssetScanner
   # http://172.28.128.4/storage/user/123/files/guid
   def cluster_asset_re
     @cluster_asset_re ||= begin
-      %r{\A#{GitHub.storage_cluster_url}\/user\/(\d+)\/files\/([^\.\s]+)}
+      %r{\A#{GitHub.storage_cluster_url}\/user\/(\d+)\/files\/(#{GitHub::Goomba::Async::AssetLoaders::AssetLoader::GUID_REGEX})}
     end
   end
 

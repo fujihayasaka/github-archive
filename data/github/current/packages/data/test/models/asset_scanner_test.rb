@@ -24,6 +24,10 @@ module AssetScannerHelpers
     "#{GitHub.storage_cluster_url}/user/#{user_id}/files/#{guid}"
   end
 
+  def storage_url_with_jwt(user_id, guid)
+    "#{GitHub.storage_cluster_url}/user/#{user_id}/files/#{guid}?foo=bar"
+  end
+
   def cloud_asset_url(user_id, asset_id, guid)
     url = "https://x.cloud.github.com/assets/%d/%d/%s.gif" % [
       user_id, asset_id, guid]
@@ -82,6 +86,33 @@ class AssetScannerWithClusterEnabledTest < GitHub::TestCase
     ].each { |url| yield(url, user_id, guid) }
   end
 
+  def with_storage_urls_with_jwt
+    user_id = 12345
+    guid = SecureRandom.uuid
+
+    [
+      storage_url_with_jwt(user_id, guid),
+      "#{GitHub.storage_cluster_url}/user-1/repo-2/assets/#{user_id}/#{guid}?foo=bar"
+    ].each { |url| yield(url, user_id, guid) }
+  end
+
+  def check_storage_url_in_html(user_id, guid, url)
+    scanner = scan("![](#{url})")
+    assert match = scanner.matches.first, "Content does not match regex: %s\n%s" % [scanner.cluster_asset_re.inspect, scanner.doc]
+    assert_equal "#{user_id}", match.user_id
+    assert_nil match.asset_id
+    assert_equal guid, match.asset_guid
+  end
+
+  def check_storage_url(user_id, guid, url)
+    mres = AssetScanner.check_url(url)
+    refute_nil mres
+    assert mres.success?, "bad patterns: #{mres.patterns.inspect}"
+    assert_equal "#{user_id}", mres.match.user_id
+    assert_nil mres.match.asset_id
+    assert_equal guid, mres.match.asset_guid
+  end
+
   test "parses from new storage URL in html" do
     guid = SecureRandom.uuid
     scanner = scan("![](#{GitHub.url}/user-attachments/assets/#{guid})")
@@ -103,22 +134,25 @@ class AssetScannerWithClusterEnabledTest < GitHub::TestCase
 
   test "parses from storage url in html" do
     with_storage_urls do |url, user_id, guid|
-      scanner = scan("![](#{url})")
-      assert match = scanner.matches.first, "Content does not match regex: %s\n%s" % [scanner.cluster_asset_re.inspect, scanner.doc]
-      assert_equal "#{user_id}", match.user_id
-      assert_nil match.asset_id
-      assert_equal guid, match.asset_guid
+      check_storage_url_in_html(user_id, guid, url)
     end
   end
 
   test "parses from storage url" do
     with_storage_urls do |url, user_id, guid|
-      mres = AssetScanner.check_url(url)
-      refute_nil mres
-      assert mres.success?, "bad patterns: #{mres.patterns.inspect}"
-      assert_equal "#{user_id}", mres.match.user_id
-      assert_nil mres.match.asset_id
-      assert_equal guid, mres.match.asset_guid
+      check_storage_url(user_id, guid, url)
+    end
+  end
+
+  test "parses from storage url with jwt in html" do
+    with_storage_urls_with_jwt do |url, user_id, guid|
+      check_storage_url_in_html(user_id, guid, url)
+    end
+  end
+
+  test "parses from storage url with jwt" do
+    with_storage_urls_with_jwt do |url, user_id, guid|
+      check_storage_url(user_id, guid, url)
     end
   end
 

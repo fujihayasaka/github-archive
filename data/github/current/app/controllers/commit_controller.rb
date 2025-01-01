@@ -139,14 +139,6 @@ class CommitController < GitContentController
 
     begin
       respond_to do |wants|
-        wants.json do
-          if react_commit_enabled?
-            render_commit_react_app
-          else
-            head :not_acceptable
-          end
-        end
-
         wants.html do
           if react_commit_enabled?
             render_commit_react_app
@@ -163,6 +155,15 @@ class CommitController < GitContentController
             }
           end
         end
+
+        wants.json do
+          if react_commit_enabled?
+            render_commit_react_app
+          else
+            head :not_acceptable
+          end
+        end
+
         wants.diff  { diff }
         wants.patch { diff(as_patch: true) }
         wants.all   { head :not_acceptable }

@@ -1056,11 +1056,11 @@ module Seeds
     end
 
     desc "ghes", Seeds::Runner::Ghes.help.lines.first
+    long_desc Seeds::Runner::Ghes.help
     method_option :debug, type: :boolean, aliases: "-d", desc: "Enable debug logging", default: false
     method_option :size, type: :string, aliases: "-s", desc: "Size of the dataset (small, medium, large)", default: "small"
     method_option :config, type: :string, aliases: "-c", desc: "Configuration overrides as JSON", default: nil
     method_option :print_config, type: :boolean, aliases: "-p", desc: "Print the final config and exit", default: false
-    long_desc Seeds::Runner::Ghes.help
     def ghes
       Seeds::Runner::Ghes.execute(options)
     end

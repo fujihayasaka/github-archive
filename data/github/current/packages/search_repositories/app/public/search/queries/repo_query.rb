@@ -657,8 +657,6 @@ module Search
       #
       # Returns Array of String.
       def protected_account_logins
-        return [] unless @cap_filter.present?
-
         @cap_filter.unauthorized_resources(
           current_user&.resources_for_cap_filter
         ).pluck(:login)
@@ -672,7 +670,14 @@ module Search
           (@skip_permission_check || single_owner.adminable_by?(current_user))
       end
 
+      # Private: The single org is accessible to the current user based on the cap_filter
+      # This returns false also if no cap_filter is provided, which means we should not
+      # apply the owner_id optimization and instead use builder.repository_filter
+      # which creates its own cap_filter to check accessibility.
       def single_org_accessible?
+        return true if @skip_permission_check
+        return false unless @cap_filter.present?
+
         !protected_account_logins.include?(single_owner.display_login)
       end
 

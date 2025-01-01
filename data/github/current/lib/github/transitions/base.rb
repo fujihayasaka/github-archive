@@ -265,6 +265,19 @@ module GitHub
         File.basename($0, ".rb")
       end
 
+      # Returns the Migration ID (ActiveRecord ID) of the transition.
+      # The transition ID is derived from the filename of the transition class. For example, 20220101000000_some_transition.rb will return 20220101000000.
+      # This method is primarily used in GitHub::Transitions::Iterators::DatabaseTable.ghes_worker_count
+      sig { returns(T.nilable(Integer)) }
+      def migration_id
+        path = T.must(Object.const_source_location(self.class.to_s)).first
+        return if path.blank?
+
+        match = path.match(/(\d+)_\S+\.rb\z/)
+        return if match.nil?
+        match[1].to_i
+      end
+
       protected
 
       # Helper method for writing to the database. It switches to the writing

@@ -169,10 +169,43 @@ module GitHub
         sig { override.returns(Integer) }
         def worker_count
           if GitHub.enterprise?
-            ENV.fetch("GHES_TRANSITION_WORKER_COUNT", 1).to_i
+            ghes_worker_count
           else
             value = arguments[:workers] || DEFAULT_WORKER_COUNT
             [value, MAX_WORKER_COUNT].min
+          end
+        end
+
+        # This method determines the worker count for currently running transition in GHES.
+        # It reads a JSON file containing a list of Migration IDs to exclude from concurrent processing.
+        # The path to this JSON file is specified by the environment variable `GHES_TRANSITION_CONCURRENCY_EXCLUDE_LIST`.
+        # If the current Migration ID is in the exclude list, the worker count is set to 1.
+        # If the environment variable is not set or the file is not readable,
+        #   the method returns the default worker count specified by the environment variable `GHES_TRANSITION_WORKER_COUNT`,
+        #   defaulting to 1 if not set.
+        #
+        # This method uses puts instead of logger to ensure the message is printed on stdout in GHES, along side other ActiveRecord messages (ActiveRecord uses puts for logging).
+        sig { returns(Integer) }
+        def ghes_worker_count
+          exclude_list_path = ENV["GHES_TRANSITION_CONCURRENCY_EXCLUDE_LIST"]
+          default_ghes_worker_count = ENV.fetch("GHES_TRANSITION_WORKER_COUNT", 1).to_i
+
+          current_migration_id = transition&.migration_id
+          if current_migration_id.nil?
+            puts "Migration ID cannot be determined. Using the default worker count."
+            return default_ghes_worker_count
+          end
+
+          if exclude_list_path.nil? || exclude_list_path.empty?
+            puts "The GHES_TRANSITION_CONCURRENCY_EXCLUDE_LIST file is not set. Using the default worker count."
+            return default_ghes_worker_count
+          end
+
+          if File.open(exclude_list_path).grep(/#{current_migration_id}/).any?
+            puts "The current migration version #{current_migration_id} is in the GHES_TRANSITION_CONCURRENCY_EXCLUDE_LIST. Using a single worker."
+            1
+          else
+            default_ghes_worker_count
           end
         end
 

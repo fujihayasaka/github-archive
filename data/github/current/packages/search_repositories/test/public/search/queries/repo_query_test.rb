@@ -26,7 +26,7 @@ class SearchQueriesRepoQueryTest < GitHub::TestCase
   end
 
   setup do
-    @query = Search::Queries::RepoQuery.new(current_user: @defunkt, page: 1)
+    @query = Search::Queries::RepoQuery.new(current_user: @defunkt, page: 1, cap_filter: cap_authorizing_filter)
 
     example_repo :defunkt_facebox, @facebox
     example_repo :mojombo_grit, @grit
@@ -670,7 +670,7 @@ class SearchQueriesRepoQueryTest < GitHub::TestCase
       end
 
       test "generates an owner filter from org: for an admin" do
-        query = Search::Queries::RepoQuery.new(current_user: @defunkt, page: 1)
+        query = Search::Queries::RepoQuery.new(current_user: @defunkt, page: 1, cap_filter: cap_authorizing_filter)
         query.phrase = "org:avocado"
 
         expected = { constant_score: { filter: {
@@ -777,7 +777,7 @@ class SearchQueriesRepoQueryTest < GitHub::TestCase
 
       test "generates an owner filter from org: for a non-member" do
         non_member = create :user
-        query = Search::Queries::RepoQuery.new(current_user: non_member, experiment_owner_id_and_repo_id: true)
+        query = Search::Queries::RepoQuery.new(current_user: non_member, cap_filter: cap_authorizing_filter, experiment_owner_id_and_repo_id: true)
         query.phrase = "org:avocado"
 
         expected = { constant_score: { filter: {
@@ -848,7 +848,7 @@ class SearchQueriesRepoQueryTest < GitHub::TestCase
           assert_equal expected, query.build_query
         end
 
-        test "generates an invalid query if the org is not authorized" do
+        test "ignores the cap_filter" do
           query = Search::Queries::RepoQuery.new(
             current_user: @defunkt,
             cap_filter: cap_unauthorizing_filter(@avocado),
@@ -859,12 +859,11 @@ class SearchQueriesRepoQueryTest < GitHub::TestCase
           expected = { constant_score: { filter: {
             bool: { must: [
               { term: { fork: false } },
-              { term: { public: true } },
+              { term: { owner_id: @avocado.id } },
             ] },
           } } }
 
           assert_equal expected, query.build_query
-          refute query.valid_query?
         end
       end
 
@@ -1653,11 +1652,11 @@ class SearchQueriesRepoQueryTest < GitHub::TestCase
           }
         }
 
-        query_non_member = Search::Queries::RepoQuery.new(current_user: @mojombo, include_forks: true, experiment_owner_id_and_repo_id: true)
+        query_non_member = Search::Queries::RepoQuery.new(current_user: @mojombo, include_forks: true, cap_filter: cap_authorizing_filter, experiment_owner_id_and_repo_id: true)
         query_non_member.phrase = "org:avocado #{prefix}.color:red"
         assert_equal expected, query_non_member.build_query
 
-        query_anon = Search::Queries::RepoQuery.new(current_user: nil, include_forks: true, experiment_owner_id_and_repo_id: true)
+        query_anon = Search::Queries::RepoQuery.new(current_user: nil, include_forks: true, cap_filter: cap_authorizing_filter, experiment_owner_id_and_repo_id: true)
         query_anon.phrase = "org:avocado #{prefix}.color:red"
         assert_equal expected, query_anon.build_query
       end

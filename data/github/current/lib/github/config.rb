@@ -189,6 +189,7 @@ module GitHub
     }.freeze
 
     LOCAL_IP_ADDRESSES = %w(127.0.0.1 ::1).freeze
+    LOCAL_TRUSTED_PROXIES = %w(localhost 127.0.0.1 ::1).freeze
 
     # Raised on data access when a datastore is configured to be inaccessible,
     # e.g. in a secondary datacenter.
@@ -939,6 +940,10 @@ module GitHub
       end
 
       @trusted_ips
+    end
+
+    def trusted_proxies
+      LOCAL_TRUSTED_PROXIES | trusted_ips
     end
 
     def staff_user_from_env(env)
@@ -4340,6 +4345,11 @@ module GitHub
       @suspended_users_visible = true
     end
     attr_writer :suspended_users_visible
+
+    # Determine whether to show the enterprise suspend form.
+    def show_enterprise_suspend_form?
+      enterprise?
+    end
 
     # Determine whether to show the suspended/spammy alerts at the top of the
     # profile page. Enabled by default for enterprise only

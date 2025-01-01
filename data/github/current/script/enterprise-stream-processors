@@ -1,6 +1,9 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
+# Define the number of threads per processor type, defaulting to 1
+THREADS_PER_PROCESSOR = (ENV["ENTERPRISE_THREADS_PER_PROCESSOR"] || 1).to_i
+
 PROCESSOR_TYPES = [
   # Audit Logging
   "GitHub::StreamProcessors::Audit::EnterpriseDriftwoodProcessor",
@@ -54,14 +57,18 @@ if __FILE__ == $0
   # of the application.
   # The default pool size is 5 which is not enough to do this so we need to increase it.
   # Give each processor its own pool of 5 connections.
+  # If extra threads are requested, also give each processor that many extra connections.
   # Set the pool size before the require_relative below.
-  ENV["ENTERPRISE_MYSQL_POOL"] = (PROCESSOR_TYPES.length * 5).to_s
-  ENV["DEVELOPMENT_MYSQL_POOL"] = (PROCESSOR_TYPES.length * 5).to_s
+  ENV["ENTERPRISE_MYSQL_POOL"] = (PROCESSOR_TYPES.length * THREADS_PER_PROCESSOR * 5).to_s
+  ENV["DEVELOPMENT_MYSQL_POOL"] = (PROCESSOR_TYPES.length * THREADS_PER_PROCESSOR * 5).to_s
 
   require_relative "../config/environment"
   require "ruby_kafka_monkey_patch"
 
   GitHub.logger.warn "Starting Enterprise stream processesors in threaded mode..."
+
+  # Log the thread count and specify if extra threads are requested
+  GitHub.logger.warn "Starting #{PROCESSOR_TYPES.length} processor threads with #{THREADS_PER_PROCESSOR} threads per processor"
 
   # The sole purpose of this thread is to try and prevent any other thread from blocking the main process from exiting by catching the exeception that tells it to die.
   # It does this by itself being a naughty thread that doesn't exit when told to, and then hard-killing the entire process after 10 seconds.
@@ -103,34 +110,35 @@ if __FILE__ == $0
   queue = Queue.new
 
   PROCESSOR_TYPES.map(&:constantize).each do |processor_type|
-    thread = Thread.new do # rubocop:disable GitHub/ThreadUse
-      Rails.application.executor.wrap do
-        GitHub.logger.with_named_tags("code.namespace" => processor_type.name) do
-          GitHub.logger.info("Thread running")
-          processor = processor_type.new
-          begin
-            topic_checker_client = Kafka.new(seed_brokers: GitHub.environment.fetch("HYDRO_KAFKA_BROKERS", GitHub::Config::HydroConfig::DEVELOPMENT_BROKER).split(","))
-            subscribe_to = Array(processor.options[:subscribe_to])
-            GitHub.logger.with_named_tags("messaging.destination" => subscribe_to) do
-              GitHub.logger.info("Waiting on topics")
-              sleep 1.second while subscribe_to.flat_map { |pattern| topic_checker_client.topics.grep(pattern) }.empty?
-              GitHub.logger.info("Topics found")
+    THREADS_PER_PROCESSOR.times do |i|
+      thread = Thread.new do # rubocop:disable GitHub/ThreadUse
+        Rails.application.executor.wrap do
+          GitHub.logger.with_named_tags("code.namespace" => processor_type.name) do
+            GitHub.logger.info("Thread running")
+            processor = processor_type.new
+            begin
+              topic_checker_client = Kafka.new(seed_brokers: GitHub.environment.fetch("HYDRO_KAFKA_BROKERS", GitHub::Config::HydroConfig::DEVELOPMENT_BROKER).split(","))
+              subscribe_to = Array(processor.options[:subscribe_to])
+              GitHub.logger.with_named_tags("messaging.destination" => subscribe_to) do
+                GitHub.logger.info("Waiting on topics")
+                sleep 1.second while subscribe_to.flat_map { |pattern| topic_checker_client.topics.grep(pattern) }.empty?
+                GitHub.logger.info("Topics found")
+              end
+            ensure
+              topic_checker_client.close
             end
-          ensure
-            topic_checker_client.close
+            GitHub.logger.info "Starting Executor"
+            consumer = GitHub.hydro_consumer(processor.options)
+            executor = Hydro::Executor.new(processor: processor, consumer: consumer)
+            executor.run
+            GitHub.logger.info "Leaving Executor for"
+            queue.push(true)
           end
-          GitHub.logger.info "Starting Executor"
-          consumer = GitHub.hydro_consumer(processor.options)
-          executor = Hydro::Executor.new(processor: processor, consumer: consumer)
-          executor.run
-          GitHub.logger.info "Leaving Executor for"
-          # push an item on the queue stop the main thread
-          queue.push(true)
         end
       end
+      thread.abort_on_exception = true
+      thread.name = "#{processor_type.name.demodulize}_#{i}"
     end
-    thread.abort_on_exception = true
-    thread.name = processor_type.name.demodulize
   end
 
   # wait for any thread to push an item on the queue

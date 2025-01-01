@@ -2,7 +2,6 @@
 # frozen_string_literal: true
 
 class Businesses::MemberPrivilegesController < Businesses::BusinessController
-  before_action :dotcom_required, only: :update_members_can_invite_outside_collaborators
   before_action :business_owner_required
   before_action :update_protected_branches_setting_flag_required, only: [:update_members_can_update_protected_branches]
   before_action :business_not_downgraded_to_free_plan_required

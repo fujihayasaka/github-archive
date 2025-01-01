@@ -13,7 +13,7 @@ class RemoveOrgAdminJob < ApplicationJob
 
   MAX_RETRY_ATTEMPTS = 5
 
-  retry_on GitHub::Restraint::UnableToLock, wait: :polynomially_longer, attempts: MAX_RETRY_ATTEMPTS do |job, error|
+  retry_on GitHub::Restraint::UnableToLock, wait: :polynomially_longer, jitter: 0.15, attempts: MAX_RETRY_ATTEMPTS do |job, error|
     Failbot.report(
       error,
       {
