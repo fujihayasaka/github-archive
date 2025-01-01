@@ -244,13 +244,19 @@ module Storage
     MAX_ASSET_SIZE = 5.gigabytes
     MAX_MULTIPART_ASSET_SIZE = 30.gigabytes
     INCREASED_MULTIPART_ASSET_SIZE = 40.gigabytes
+    GHES_MULTIPART_ASSET_SIZE = 90.gigabytes
+    MAX_LOCAL_MIGRATION_ASSET_SIZE = 50.gigabytes
     VALID_SIZE_RANGE = (1..MAX_ASSET_SIZE).freeze
     VALID_MULTIPART_SIZE_RANGE = (1..MAX_MULTIPART_ASSET_SIZE).freeze
     VALID_INCREASED_MULTIPART_SIZE_RANGE = (1..INCREASED_MULTIPART_ASSET_SIZE).freeze
+    VALID_GHES_MULTIPART_SIZE_RANGE = (1..GHES_MULTIPART_ASSET_SIZE).freeze
+    VALID_LOCAL_MIGRATION_ASSET_SIZE_RANGE = (1..MAX_LOCAL_MIGRATION_ASSET_SIZE).freeze
 
     # Public: Determines if the asset is within max allowable size.
     #         S3 limit w/o multipart upload is 5GB
-    #         S3 limit w/ multipart upload is 30GB (or 40GB if the gh_migrator_increased_export_size FF is enabled)
+    #         S3 limit w/ multipart upload is 30GB (or 40GB if the gh_migrator_increased_export_size FF is enabled
+    #                                               and 90GB in GHES)
+    #         ClusterPolicy limit is 50GB for MigrationFiles and 5GB for all other asset types
     def storage_ensure_asset_size
       unless storage_asset_size_range.include?(size)
         errors.add(:size, "must be less than #{human_friendly_size(storage_asset_size_range.max)} and greater than zero bytes")

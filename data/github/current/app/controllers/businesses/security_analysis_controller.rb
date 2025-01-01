@@ -3,6 +3,7 @@
 
 class Businesses::SecurityAnalysisController < Businesses::BusinessController
   # Access
+  before_action :business_required
   before_action :view_permission_required, only: [:index]
   before_action :modify_permission_required, except: [:index]
   before_action :business_full_plan_required
@@ -65,6 +66,10 @@ class Businesses::SecurityAnalysisController < Businesses::BusinessController
   end
 
   private
+
+  def business_required
+    render_404 unless this_business
+  end
 
   def view_permission_required
     business_authz = SecurityProduct::Permissions::BusinessAuthz.new(this_business, actor: current_user)

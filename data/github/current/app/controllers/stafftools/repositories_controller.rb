@@ -1083,12 +1083,12 @@ class Stafftools::RepositoriesController < StafftoolsController
       redirect_to :back and return
     end
 
-    if params[:tos_reason].blank?
+    if !GitHub.enterprise? && params[:tos_reason].blank?
       flash[:error] = "Must include ToS violating reason"
       redirect_to :back and return
     end
 
-    if params[:content_formats].blank?
+    if !GitHub.enterprise? && params[:content_formats].blank?
       flash[:error] = "Must specify at least one violating content format when disabling a repository"
       redirect_to :back and return
     end
@@ -1121,7 +1121,7 @@ class Stafftools::RepositoriesController < StafftoolsController
       tos_reason: params[:tos_reason],
       content_formats: params[:content_formats],
       source: params[:source],
-      dsa_required: !params[:do_not_notify_dsa],
+      dsa_required: !GitHub.enterprise? && !params[:do_not_notify_dsa],
     )
     if enqueued
       flash[:notice] = "Repository has been enqueued to be disabled and the user will be contacted."

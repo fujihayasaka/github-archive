@@ -1055,6 +1055,34 @@ module Seeds
       Seeds::Runner::CopilotSummaries.execute(options)
     end
 
+    desc "ghes", Seeds::Runner::Ghes.help.lines.first
+    method_option :debug, type: :boolean, aliases: "-d", desc: "Enable debug logging", default: false
+    method_option :organizations, type: :numeric, aliases: "-o", desc: "Number of organizations to create", default: 1
+    method_option :users, type: :numeric, aliases: "-u", desc: "Number of users to create", default: 1
+    method_option :repositories_per_organization, type: :numeric, aliases: "-ro", desc: "Number of repositories to create for each organization", default: 1
+    method_option :repositories_per_user, type: :numeric, aliases: "-ru", desc: "Number of repositories to create for each user", default: 1
+    method_option :labels_per_repository, type: :numeric, aliases: "-l", desc: "Number of labels to create for each repository", default: 1
+    method_option :commits_per_repository, type: :numeric, aliases: "-c", desc: "Number of commits to create for each repository", default: 1
+    method_option :issues_per_repository, type: :numeric, aliases: "-i", desc: "Number of issues to create for each repository", default: 1
+    method_option :pull_requests_per_repository, type: :numeric, aliases: "-p", desc: "Number of pull requests to create for each repository", default: 1
+    method_option :comments_per_issue, type: :numeric, aliases: "-ci", desc: "Number of comments to create for each issue", default: 1
+    method_option :reviews_per_pull_request, type: :numeric, aliases: "-rpr", desc: "Number of reviews to create for each pull request", default: 1
+    method_option :review_comments_per_pull_request, type: :numeric, aliases: "-rc", desc: "Number of review comments to create for each pull request", default: 1
+    method_option :refs_per_repository, type: :numeric, aliases: "-rf", desc: "Number of refs to create for repository", default: 1
+    method_option :gists_per_user, type: :numeric, aliases: "-g", desc: "Number of gists to create for each user", default: 1
+    method_option :comments_per_gist, type: :numeric, aliases: "-cg", desc: "Number of comments to create for each gist", default: 1
+    method_option :memex_projects, type: :numeric, aliases: "-mp", desc: "Number of memex projects to create", default: 1
+    method_option :memex_project_columns, type: :numeric, aliases: "-mpc", desc: "Number of memex project columns to create", default: 1
+    method_option :memex_project_items, type: :numeric, aliases: "-mpi", desc: "Number of memex project items to create of each type", default: 1
+    method_option :milestones_per_repository, type: :numeric, aliases: "-m", desc: "Number of milestones to create for each repository", default: 1
+    method_option :issue_links, type: :numeric, aliases: "-il", desc: "Number of issue links to create for each issue", default: 1
+    method_option :issue_types, type: :numeric, aliases: "-it", desc: "Number of issue types to create for each issue", default: 1
+
+    long_desc Seeds::Runner::Ghes.help
+    def ghes
+      Seeds::Runner::Ghes.execute(options)
+    end
+
     desc "console", "start a console with seeds objects and runners loaded"
     method_option :factory_bot, type: :boolean, desc: "Extend console with Factory Bot methods.", default: true
     def console

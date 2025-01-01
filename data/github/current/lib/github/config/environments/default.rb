@@ -826,6 +826,8 @@ if GitHub.multi_tenant_enterprise?
 
   GitHub.storage_auto_localhost_replica = GitHub.environment.fetch_boolean("STORAGE_AUTO_LOCALHOST_REPLICA", true)
   GitHub.storage_cluster_enabled = GitHub.environment.fetch_boolean("STORAGE_CLUSTER_ENABLED", false)
+  GitHub.storage_cluster_private_assets_enabled = GitHub.environment.fetch_boolean("STORAGE_CLUSTER_PRIVATE_ASSETS_ENABLED", true)
+
   GitHub.storage_cluster_url = GitHub.environment["STORAGE_CLUSTER_URL"]
   GitHub.storage_private_mode_url = GitHub.environment["STORAGE_PRIVATE_MODE_URL"]
   GitHub.storage_replicate_fmt = GitHub.environment["STORAGE_REPLICATE_FMT"]

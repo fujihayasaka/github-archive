@@ -89,7 +89,9 @@ class Api::AccessControl < Egress::AccessControl
 
   role :upload_container_resources_reader do |context|
     user, upload_container = extract(context, :user, :upload_container)
-    if upload_container
+    if GitHub.storage_cluster_enabled? && !GitHub.storage_cluster_private_assets_enabled?
+      true
+    elsif upload_container
       case upload_container
       when Repository
         user && (upload_container.public? || upload_container.readable_by?(user))

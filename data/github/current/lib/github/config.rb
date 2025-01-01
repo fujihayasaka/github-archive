@@ -5472,6 +5472,16 @@ module GitHub
       !!@storage_cluster_enabled
     end
 
+    # Enables the private assets feature for the GHES storage cluster.
+    attr_writer :storage_cluster_private_assets_enabled
+    def storage_cluster_private_assets_enabled?
+      !!@storage_cluster_private_assets_enabled
+    end
+
+    def ghes_cluster_enabled?
+      enterprise? && storage_cluster_enabled?
+    end
+
     # Get the number of read-only replicas that are included
     # in a storage upload; these replicas are not required for a
     # successful cluster consensus.

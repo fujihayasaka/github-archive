@@ -494,7 +494,7 @@ module RulesEngine
             name: installation.integration.name,
             preferred_avatar_url: installation.integration.preferred_avatar_url,
             owner: installation.integration.owner.display_login,
-          }
+          } unless installation.integration.nil?
         end
 
         integrations

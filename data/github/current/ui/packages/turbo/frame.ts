@@ -11,6 +11,7 @@ import {
   isTurboFrame,
   isSameRepo,
   isSameProfile,
+  dispatchTurboRestored,
 } from './utils'
 import isHashNavigation from '@github-ui/is-hash-navigation'
 import {setTitle} from '@github-ui/document-metadata'
@@ -143,6 +144,7 @@ ssrSafeWindow?.addEventListener('popstate', () => {
       const elements = getCachedNode()?.replacedElements || []
 
       replaceElements(document, elements)
+      dispatchTurboRestored()
     },
     {once: true},
   )

@@ -56,7 +56,7 @@ module SecurityOverviewAnalytics
           test "does nothing if repository owner validation fails" do
             TenantValidationHelper.stubs(:should_handle_feature_enablement_events?).returns(false)
 
-            assert_query_counts(1) do
+            assert_query_counts(2) do
               perform_hydro_message_job({
                 repository: { id: @repo.id },
               }, schema: schema, queue: @queue)

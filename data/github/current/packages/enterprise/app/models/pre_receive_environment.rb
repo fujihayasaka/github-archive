@@ -11,7 +11,7 @@ class PreReceiveEnvironment < ApplicationRecord::Domain::PreReceive
   validates_uniqueness_of :name, case_sensitive: false
   validates_presence_of :name
   validates :name, unicode3: true
-  validates_presence_of :image_url
+  validates :image_url, presence: true, length: { maximum: 255 }
 
   enum :download_state, {
     not_started: 0,

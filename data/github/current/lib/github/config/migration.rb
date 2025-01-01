@@ -48,11 +48,13 @@ module GitHub
       def migration_file_staging_path
         @migration_file_staging_path ||= if Rails.env.test?
           Rails.root.join("test/fixtures/gh-migrator/import-export-tmp").to_s
-        elsif Rails.env.production? || GitHub.enterprise?
-          "/data/github/shared/import-export-tmp"
-        # Use tmp directory for proxima to avoid read-only container filesystem
-        elsif GitHub.multi_tenant_enterprise?
+        # Use tmp directory for proxima and review-lab to avoid read-only container filesystem
+        elsif GitHub.multi_tenant_enterprise? || GitHub.review_lab?
           "/tmp"
+        elsif GitHub.enterprise?
+          "/data/user/tmp"
+        elsif Rails.env.production?
+          "/data/github/shared/import-export-tmp"
         else
           Rails.root.join("tmp/import-export-tmp").to_s
         end

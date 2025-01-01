@@ -33,7 +33,7 @@ module Seeds
       end
 
       def allow_seeds?
-        Rails.env.development? || Rails.env.test? || ENV["STAGING_LAB_ENVIRONMENT"].to_i.positive?
+        Rails.env.development? || Rails.env.test? || ENV["STAGING_LAB_ENVIRONMENT"].to_i.positive? || GitHub.enterprise?
       end
 
       def setup
@@ -57,7 +57,7 @@ module Seeds
       private
 
       def check_setup?
-        !Rails.env.test?
+        !Rails.env.test? && !GitHub.enterprise?
       end
 
       def ensure_proper_setup!

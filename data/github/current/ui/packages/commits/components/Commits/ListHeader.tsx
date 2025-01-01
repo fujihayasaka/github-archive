@@ -156,7 +156,6 @@ export function ListHeader({repo, refInfo, path, author, contributorsUrl, since,
             variant="range"
             value={value}
             maxDate={new Date()}
-            minDate={new Date(repo.createdAt)}
             showTodayButton={true}
             showClearButton={true}
             compressedHeader={true}

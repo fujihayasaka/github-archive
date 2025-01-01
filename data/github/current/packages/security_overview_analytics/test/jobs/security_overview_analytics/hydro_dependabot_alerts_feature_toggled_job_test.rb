@@ -49,7 +49,7 @@ module SecurityOverviewAnalytics
       test "does nothing if repository owner validation fails" do
         TenantValidationHelper.stubs(:should_handle_feature_enablement_events?).returns(false)
 
-        assert_query_counts(1) do
+        assert_query_counts(2) do
           perform_hydro_message_job({
             repository_id: @repo.id,
             action: "enable"
@@ -61,7 +61,7 @@ module SecurityOverviewAnalytics
       end
 
       test "does nothing if action is not 'enable' or 'disable'" do
-        assert_query_counts(0) do
+        assert_query_counts(1) do
           assert_nothing_raised do
             perform_hydro_message_job({
               action: "digest_sent"

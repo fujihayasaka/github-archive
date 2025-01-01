@@ -37,7 +37,7 @@ class UserRolesDependencyTest < GitHub::TestCase
       @enterprise_security_manager = create(:emu, business: @emu_business)
       emu_business_security_manager_team.bulk_add_members(users: [@enterprise_security_manager])
       @emu_user = create(:emu, business: @emu_business)
-      @emu_owned_repo = create(:repository, owner: @emu_user, force_user_owned: true)
+      @emu_owned_repo = create(:private_repository, owner: @emu_user, force_user_owned: true)
       @emu_org = create(:organization, business: @emu_business)
       @emu_org_repo = create(:repository, owner: @emu_org)
 
@@ -177,16 +177,68 @@ class UserRolesDependencyTest < GitHub::TestCase
 
       EnterpriseManagedUserMailer.expects(:user_repository_unlocked).once.returns(stub(deliver_later: nil))
 
-      @emu_owner.unlock_repository(@emu_owned_repo, "EMU admin unlocking EMU owned repo")
+      tmp_events = subscribe "repo.temporary_access_granted"
+      @emu_owner.unlock_repository(@emu_owned_repo, "EMU admin enabled temporary access to user-owned repo")
+
+      assert_equal 1, tmp_events.length
+      refute_nil event = tmp_events.pop
+
+      expected_reason = "Enterprise user enabled temporary access to user-owned repo"
+      assert_equal(
+        {
+          reason: expected_reason,
+          user: @emu_user.display_login,
+          user_id: @emu_user.id,
+          actor: @emu_owner.display_login,
+          actor_id: @emu_owner.id,
+          repo: @emu_owned_repo.full_name,
+          repo_id: @emu_owned_repo.id,
+          public_repo: false,
+        },
+        event.payload,
+      )
     end
 
-    test "creates a notification when enterprise security manager unlocks an EMU user-owned repo", skip_enterprise: true do
-      GitHub.flipper[:EMU_unlock_personal_repositories].enable
-      GitHub.flipper[:EMU_show_personal_repositories].enable
+    test "does not create an audit log entry when EMU owner unlocks an EMU user-owned repo", enterprise_only: true do
+      EnterpriseMailer.expects(:user_repository_unlocked).never
 
-      EnterpriseManagedUserMailer.expects(:user_repository_unlocked).once.returns(stub(deliver_later: nil))
+      tmp_events = subscribe "repo.temporary_access_granted"
+      @unlocker.unlock_repository(@repo, "EMU admin unlocking EMU owned repo")
+      assert_equal 0, tmp_events.length
+    end
 
-      @enterprise_security_manager.unlock_repository(@emu_owned_repo, "EMU admin unlocking EMU owned repo")
+    test "creates a notification when enterprise security manager unlocks an EMU user-owned repo" do
+      if GitHub.enterprise?
+        EnterpriseManagedUserMailer.expects(:user_repository_unlocked).never
+      else
+        GitHub.flipper[:EMU_unlock_personal_repositories].enable
+        GitHub.flipper[:EMU_show_personal_repositories].enable
+        EnterpriseManagedUserMailer.expects(:user_repository_unlocked).once.returns(stub(deliver_later: nil))
+      end
+
+      tmp_events = subscribe "repo.temporary_access_granted"
+
+      repo = GitHub.enterprise? ? @repo : @emu_owned_repo
+      @enterprise_security_manager.unlock_repository(repo, "EMU user enabled temporary access to user-owned repo")
+
+      assert_equal 1, tmp_events.length
+      refute_nil event = tmp_events.pop
+      assert_equal "repo.temporary_access_granted", event.name
+
+      expected_reason = "#{GitHub.enterprise? ? "EMU" : "Enterprise"} user enabled temporary access to user-owned repo"
+      assert_equal(
+        {
+          reason: expected_reason,
+          user: repo.owner.display_login,
+          user_id: repo.owner.id,
+          actor: @enterprise_security_manager.display_login,
+          actor_id: @enterprise_security_manager.id,
+          repo: repo.nwo,
+          repo_id: repo.id,
+          public_repo: false,
+        },
+        event.payload,
+      )
     end
   end
 

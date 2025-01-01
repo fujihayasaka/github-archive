@@ -21,6 +21,7 @@ module GitHub
     DOWNLOAD_EVERYTHING_LIMIT = 6
     DOWNLOAD_EVERYTHING_LIMIT_TTL = 24.hours
     DOWNLOAD_EVERYTHING_MAX_REPO_SIZE = 1.gigabyte / 1.kilobyte # == 1GB, as this measure is in kilobytes
+    MULTIPART_SUPPORTED_STORAGE_TYPES = %w[azure s3].freeze
 
     def rate_limited?(current_user)
       return false unless GitHub.rate_limiting_enabled?
@@ -287,7 +288,7 @@ module GitHub
         size: exported_archive_size(exported_archive),
         content_type: "application/x-gzip",
         uploader_id: migration.creator_id,
-        supports_multi_part_upload: large_file?(exported_archive)
+        supports_multi_part_upload: use_multipart_upload?(exported_archive)
       )
 
       valid_file, errors = valid_migration_file?(file)
@@ -323,7 +324,9 @@ module GitHub
       [errors.empty?, errors]
     end
 
-    def large_file?(path)
+    def use_multipart_upload?(path)
+      return false unless MULTIPART_SUPPORTED_STORAGE_TYPES.include?(GitHub.migrations_blob_storage_type)
+
       File.size(path) > ::Storage::Uploadable::MAX_ASSET_SIZE
     end
 

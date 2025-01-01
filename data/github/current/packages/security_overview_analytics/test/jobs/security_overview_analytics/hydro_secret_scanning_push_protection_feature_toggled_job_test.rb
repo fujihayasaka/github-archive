@@ -51,7 +51,7 @@ module SecurityOverviewAnalytics
         refute FeatureStatusRevision.find_by(repository_id: @repo.id, date_id: @date_id)
         TenantValidationHelper.stubs(:should_handle_feature_enablement_events?).returns(false)
 
-        assert_query_counts(1) do
+        assert_query_counts(2) do
           perform_hydro_message_job({
             repository_id: @repo.id,
             feature_enabled: true

@@ -33,6 +33,12 @@ class PreReceiveEnvironmentTest < GitHub::TestCase
     assert environment.valid?
   end
 
+  test "requires an image_url of the correct length" do
+    environment = build :pre_receive_environment, name: "test env", image_url: "http://#{"e" * 255}xample.com"
+    refute_predicate environment, :valid?
+    assert_includes environment.errors[:image_url], "is too long (maximum is 255 characters)"
+  end
+
   test "name must be unique" do
     PreReceiveEnvironment.create name: "name", image_url: "http://example.com"
 

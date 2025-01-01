@@ -39,11 +39,8 @@ module GitHub
         User.all.each_with_object({}) do |user, output|
           begin
             ciphertext = user.ciphertext_for(:weak_password_check_result)
-            key_id = if ciphertext.present?
-              Base64.strict_decode64(ActiveSupport::JSON.decode(ciphertext)["h"]["i"])
-            else
-              "unknown"
-            end
+            next if ciphertext.nil?
+            key_id = Base64.strict_decode64(ActiveSupport::JSON.decode(ciphertext)["h"]["i"])
             output[key_id] ||= []
             output[key_id] << user
           rescue StandardError => e # rubocop:disable Lint/GenericRescue
@@ -150,8 +147,7 @@ module GitHub
               log(" Clearing weak password check result for #{user.login} using key ID #{key_id}...")
               ActiveRecord::Encryption.without_encryption do
                 write_to(model_class: User) do
-                  user.weak_password_check_result = nil
-                  user.save(validate: false)
+                  user.update_column(:weak_password_check_result, nil)
                 end
               end
               log("Success! cleared weak_password_check_result for #{user.login}")

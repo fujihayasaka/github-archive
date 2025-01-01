@@ -69,6 +69,20 @@ module Storage
       h
     end
 
+    # We overwrite the Policy.set_faraday_adapter to use a timeout of 3 hours (10800 seconds).
+    # This aligns with the HAProxy configuration on GHES for alambic and ensures we allow enough time for large migration files on GHES.
+    def self.set_faraday_adapter(*adapter_args)
+      @@faraday = Faraday.new do |f| # rubocop:disable GitHub/RequireExplicitInternalOrExternalFaradayClientWrapper
+        f.request :multipart
+        f.request :url_encoded
+        f.options.timeout = 3.hours.to_i
+        f.options.open_timeout = 3.hours.to_i
+        f.options.read_timeout = 3.hours.to_i
+        f.options.write_timeout = 3.hours.to_i
+        f.adapter(*adapter_args)
+      end
+    end
+
     private
 
     def upload_header

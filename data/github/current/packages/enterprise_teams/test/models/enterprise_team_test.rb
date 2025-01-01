@@ -1344,6 +1344,50 @@ class EnterpriseTeamTest < GitHub::TestCase
     end
   end
 
+  context "can_sync_to_current_organization_count?" do
+    test "returns true if enterprise_team_org_sync_bypass_limit flag is enabled" do
+      @business.enable_feature(:enterprise_team_org_sync_bypass_limit)
+      assert EnterpriseTeam.can_sync_to_current_organization_count?(@business)
+    end
+
+    test "returns true when only 3 orgs have GHAS enabled and limit is 3" do
+      EnterpriseTeam.stubs(:max_sync_organizations).returns(3)
+      # We only create 2 additional orgs because there is already 1 ghas-enabled org created in setup
+      orgs = (1..2).to_a.map { |i| create(:organization, login: "test-add-org-#{i}", business: @business) }
+
+      orgs.each do |o|
+        repo = create :private_repository, owner: o
+        repo_config = create(:repository_security_center_config, repository: repo, ghas_enabled: true)
+      end
+
+      assert EnterpriseTeam.can_sync_to_current_organization_count?(@business)
+    end
+
+    test "returns true if many repos in 1 org have GHAS enabled" do
+      EnterpriseTeam.stubs(:max_sync_organizations).returns(1)
+      (1..5).to_a.map do
+        repo = create :private_repository, owner: @ghas_organization
+        repo_config = create(:repository_security_center_config, repository: repo, ghas_enabled: true)
+      end
+
+      assert EnterpriseTeam.can_sync_to_current_organization_count?(@business)
+    end
+
+    test "returns false if too many orgs have GHAS enabled" do
+      @business.disable_feature(:enterprise_team_org_sync_bypass_limit)
+      EnterpriseTeam.stubs(:max_sync_organizations).returns(2)
+      # We only create 2 additional orgs because there is already 1 ghas-enabled org created in setup
+      orgs = (1..2).to_a.map { |i| create(:organization, login: "test-add-org-#{i}", business: @business) }
+
+      orgs.each do |o|
+        repo = create :private_repository, owner: o
+        repo_config = create(:repository_security_center_config, repository: repo, ghas_enabled: true)
+      end
+
+      refute EnterpriseTeam.can_sync_to_current_organization_count?(@business)
+    end
+  end
+
   private def create_user_with_ext_id
     if GitHub.single_business_environment?
       create :ghes_scim_user, business: @business

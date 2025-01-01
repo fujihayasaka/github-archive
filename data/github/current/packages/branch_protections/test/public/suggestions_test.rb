@@ -162,6 +162,22 @@ class RulesEngine::SuggestionsTest < GitHub::TestCase
 
   end
 
+  test "removes installations without integrations" do
+    deleted_integration = create :integration, name: "delete-me"
+    org_installation_with_write_access_and_without_an_integration =
+      make_integration_installation integration: deleted_integration,
+        target: @org,
+        permissions: { statuses: "write" }
+
+    deleted_integration.delete
+    check_integrations =
+      RulesEngine::Suggestions
+      .status_check_integrations_for(org_installation_with_write_access_and_without_an_integration.organization)
+
+    # 2 candidate installations - one with an integration, one without
+    assert_equal 1, check_integrations.length
+  end
+
   test "returns recent status checks for an repository" do
     status_checks = RulesEngine::Suggestions.recent_status_checks_for(@repo, "check")
 

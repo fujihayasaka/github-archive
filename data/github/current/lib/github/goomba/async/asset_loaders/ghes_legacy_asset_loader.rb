@@ -11,7 +11,7 @@ module GitHub::Goomba::Async::AssetLoaders
     end
 
     def is_uri_valid?(uri)
-      uri.present? && uri.host.present? && uri.host.match?(/#{storage_cluster_url_host}/) && uri.request_uri != "/"
+      uri.present? && is_host_valid?(uri) && uri.request_uri != "/"
     end
 
     def load_node_asset(node)
@@ -36,8 +36,22 @@ module GitHub::Goomba::Async::AssetLoaders
 
     private
 
+    def is_host_valid?(uri)
+      uri.host.present? && (uri.host.match?(storage_cluster_url_host) || uri.host.match?(storage_cluster_url_host_isolated_subdomain_complement))
+    end
+
     def storage_cluster_url_host
       Addressable::URI.parse(GitHub.storage_cluster_url).host
+    end
+
+    def storage_cluster_url_host_isolated_subdomain_complement
+      # If we are using isolated subdomains, we need to remove the 'media' subdomain from the host
+      if GitHub.subdomain_isolation?
+        storage_cluster_url_host.sub("media.", "")
+      # If aren't using isolated subdomain, we need to append a 'media' subdomain to the host
+      else
+        "media.#{storage_cluster_url_host}"
+      end
     end
   end
 end

@@ -162,6 +162,8 @@ export const formatKeyToError = (key: string) => key.replace(/^x-/, '').replaceA
 export const dispatchTurboReload = (reason: string) =>
   document.dispatchEvent(new CustomEvent('turbo:reload', {detail: {reason}}))
 
+export const dispatchTurboRestored = () => document.dispatchEvent(new CustomEvent('turbo:restored'))
+
 export const replaceElementAttributes = (element: HTMLElement, newElement: HTMLElement) => {
   for (const attr of element.attributes) {
     if (!newElement.hasAttribute(attr.nodeName) && attr.nodeName !== 'aria-busy') {

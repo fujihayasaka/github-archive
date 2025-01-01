@@ -15,7 +15,7 @@ module SecurityOverviewAnalytics
     def perform
       feature_to_update = :advanced_security_enabled
 
-      unless TenantValidationHelper.should_handle_feature_enablement_events?(repository.owner_id)
+      unless TenantValidationHelper.should_handle_feature_enablement_events?(repository.owner)
         GitHub.logger.info(
           "Event skipped.",
           "code.namespace": self.class.name,
@@ -37,14 +37,12 @@ module SecurityOverviewAnalytics
 
       date_id = Date.id_from_date(event_time.utc.to_date)
 
-      FeatureStatusRevision.throttle do
-        with_write do
-          FeatureStatusRevision.upsert_feature_status(
-            repository_id:,
-            date_id:,
-            payload: FeatureStatusRevision::UpdatePayload.new(feature_to_update => payload.feature_enabled)
-          )
-        end
+      FeatureStatusRevision.throttle_writes do
+        FeatureStatusRevision.upsert_feature_status(
+          repository_id:,
+          date_id:,
+          payload: FeatureStatusRevision::UpdatePayload.new(feature_to_update => payload.feature_enabled)
+        )
       end
 
       instrument_repository_updated

@@ -69,7 +69,11 @@ class Api::Internal::StorageUserFiles < Api::Internal::StorageUploadable
   get "/internal/storage/user/:user_id/files/:guid", operation_id: :internal do
     @route_owner = "@github/data-infrastructure"
 
-    return deliver_error(404) unless token_valid?
+    return deliver_error(404) unless GitHub.storage_cluster_enabled?
+
+    if GitHub.storage_cluster_private_assets_enabled?
+      return deliver_error(404) unless token_valid?
+    end
 
     file = ActiveRecord::Base.connected_to(role: :reading) { UserAsset.where(guid: params[:guid], user_id: params[:user_id].to_i).first }
     return deliver_error(404) if file.nil?
@@ -79,7 +83,6 @@ class Api::Internal::StorageUserFiles < Api::Internal::StorageUploadable
       upload_container: file.repository || file.upload_container,
       allow_integrations: false,
       allow_user_via_granular_actor: false
-
     deliver :internal_storage_hash, file, env: request.env
   end
 

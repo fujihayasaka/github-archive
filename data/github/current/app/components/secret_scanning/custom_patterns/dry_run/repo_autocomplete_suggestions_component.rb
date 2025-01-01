@@ -51,15 +51,16 @@ module SecretScanning
         def like_query
           repos_in_scope = []
 
+          owner, repo = @query.split("/")
           # load org owned repositories
           base_rel = Repository.active.where(owner_id: @authorized_orgs.map(&:id))
 
-          suggestable_org_ids = @authorized_orgs.select { |o| o.display_login.include?(@query) }
-          suggestable_repo_ids = base_rel.with_substring(:name, @query)
+          suggestable_org_ids = @authorized_orgs.select { |o| o.display_login.include?(owner) }
+          suggestable_repo_ids = repo.nil? ? base_rel.with_substring(:name, owner) : base_rel.with_substring(:name, repo)
 
           suggestions = base_rel
             .where(owner_id: suggestable_org_ids)
-            .or(suggestable_repo_ids)
+            .then { |rel| repo.nil? ? rel.or(suggestable_repo_ids) : rel.and(suggestable_repo_ids) }
             .order("id asc")
             .to_a
 

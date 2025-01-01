@@ -125,23 +125,22 @@ module SecurityOverviewAnalytics
 
         repo_names_by_owner.map do |owner_slug, repo_names|
           # Fetch any matching users
-          user_rel = ::SecurityOverviewAnalytics::Repository.none
-          user_id = if GitHub.enterprise?
-            User.where(type: "User", login: owner_slug).pluck(:id).first
+          user_owner_ids = if GitHub.enterprise?
+            User.where(type: "User", login: owner_slug).pluck(:id)
           else
-            @scope.user_accounts.where(login: owner_slug).pluck(:user_id).first
+            @scope.user_accounts.where(login: owner_slug).pluck(:user_id)
           end
 
           # Fetch any matching orgs
-          org_id = @scope.organizations.where(display_login: owner_slug).pluck(:id)
-          owner_id = org_id | user_id
+          org_owner_ids = @scope.organizations.where(display_login: owner_slug).pluck(:id)
+          repo_owner_ids = org_owner_ids | user_owner_ids
 
           if neg
-            owner_rel = rel.where.not(owner_id: owner_id)
+            owner_rel = rel.where.not(owner_id: repo_owner_ids)
             repo_rel = rel.without_substrings(:name, repo_names)
             nwo_rel = T.cast(nwo_rel.and(repo_rel.or(owner_rel)), ActiveRecord::Relation)
           else
-            owner_rel = rel.where(owner_id: owner_id)
+            owner_rel = rel.where(owner_id: repo_owner_ids)
             repo_rel = rel.with_substrings(:name, repo_names)
             nwo_rel = nwo_rel.or((repo_rel).and(owner_rel))
           end

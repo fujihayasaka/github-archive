@@ -831,7 +831,7 @@ module GitHub
         end
 
         entity = business || org
-        result["programmatic_access_type"] = Audit::AuthData.git_credential_type(stats[:credential] || "", stats[:token] || "")
+        result["programmatic_access_type"] = Audit::AuthData.git_credential_type(stats[:credential] || "", stats.delete(:token) || "")
 
         # attempt to gather the sso/saml authentication for this event
 

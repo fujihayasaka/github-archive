@@ -65,8 +65,16 @@ class MigrationFile < ApplicationRecord::Domain::Migrations
 
   def storage_asset_size_range
     if is_multipart?
-      T.must(T.must(migration).owner).feature_enabled?(:gh_migrator_increased_export_size) ? VALID_INCREASED_MULTIPART_SIZE_RANGE : VALID_MULTIPART_SIZE_RANGE
+      if GitHub.enterprise?
+        VALID_GHES_MULTIPART_SIZE_RANGE
+      elsif T.must(T.must(migration).owner).feature_enabled?(:gh_migrator_increased_export_size)
+        VALID_INCREASED_MULTIPART_SIZE_RANGE
+      else
+        VALID_MULTIPART_SIZE_RANGE
+      end
     else
+      return VALID_LOCAL_MIGRATION_ASSET_SIZE_RANGE if GitHub.ghes_cluster_enabled?
+
       VALID_SIZE_RANGE
     end
   end

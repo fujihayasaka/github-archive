@@ -27,6 +27,7 @@ class NetworkMaintenanceJob < ApplicationJob
 
   def perform(network_id, previous_status: nil)
     Failbot.push spec: "network/#{network_id}"
+    start = Time.now
 
     return unless network = ActiveRecord::Base.connected_to(role: :reading) { RepositoryNetwork.find_by_id(network_id) }
 
@@ -47,7 +48,9 @@ class NetworkMaintenanceJob < ApplicationJob
         GitHub.dogstats.increment("git_maintenance", tags: tags)
       end
     ensure
-      GitHub.logger.info("exiting git maintenance", "gh.spokes.maintenance.status" => network.maintenance_status)
+      GitHub.logger.info("exiting git maintenance",
+        "gh.spokes.maintenance.status" => network.maintenance_status,
+        "time.elapsed" => Time.now - start)
     end
 
     nil

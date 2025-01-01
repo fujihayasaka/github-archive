@@ -146,8 +146,7 @@ module User::RolesDependency
 
   # GHES admin
   def enterprise_admin_unlocking_repo?
-    return true if GitHub.enterprise? && site_admin?
-    false
+    GitHub.enterprise? && site_admin?
   end
 
   # Enterprise user unlocking user-owned repo within same business
@@ -307,7 +306,10 @@ module User::RolesDependency
         return RepositoryUnlock.create_unlock(self, repo, grant.reason, grant)
       elsif GitHub.enterprise?
         clear_cached_unlocked_repository(repo)
-        return RepositoryUnlock.create_unlock(self, repo, reason)
+        if unlock = RepositoryUnlock.create_unlock(self, repo, reason)
+          instrument_repo_unlock(unlock) unless enterprise_admin_unlocking_repo?
+          return unlock
+        end
       elsif can_unlock_user_repo?(repository: repo)
         reason = "Enterprise user enabled temporary access to user-owned repo"
         clear_cached_unlocked_repository(repo)

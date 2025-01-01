@@ -30,10 +30,10 @@ module SecurityOverviewAnalytics
       owner = ::User.find_by(id: owner_id)
       unless owner.present?
         GitHub.logger.warn(
-          "Organization not found",
+          "Owner not found",
           "code.namespace": self.name,
           "code.function": __method__,
-          "gh.org.id": owner_id
+          "gh.owner.id": owner_id,
         )
         return false
       end
@@ -43,22 +43,12 @@ module SecurityOverviewAnalytics
       Initialization.for(owner).initialized?(type: Initialization::Type::RepositoryMetadata)
     end
 
-    sig { params(owner_id: Integer).returns(T::Boolean) }
-    def self.should_handle_feature_enablement_events?(owner_id)
-      organization = ::Organization.find_by(id: owner_id)
-      unless organization.present?
-        GitHub.logger.warn(
-          "Organization not found",
-          "code.namespace": self.name,
-          "code.function": __method__,
-          "gh.org.id": owner_id
-        )
-        return false
-      end
+    sig { params(repository_owner: T.nilable(::User)).returns(T::Boolean) }
+    def self.should_handle_feature_enablement_events?(repository_owner)
+      return false if repository_owner.nil?
+      return false unless is_owner_in_scope?(repository_owner)
 
-      return false unless is_owner_in_scope?(organization)
-
-      Initialization.for(organization).initialized?(type: Initialization::Type::FeatureEnablement)
+      Initialization.for(repository_owner).initialized?(type: Initialization::Type::FeatureEnablement)
     end
 
     sig { params(repository_owner: T.nilable(::User)).returns(T::Boolean) }

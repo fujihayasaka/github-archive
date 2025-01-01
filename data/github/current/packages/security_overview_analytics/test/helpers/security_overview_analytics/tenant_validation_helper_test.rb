@@ -134,33 +134,50 @@ module SecurityOverviewAnalytics
     end
 
     context ".should_handle_feature_enablement_events?" do
+      test "returns false if owner is nil" do
+        refute(TenantValidationHelper.should_handle_feature_enablement_events?(nil))
+      end
+
+      test "returns false if input is not an organization, EMU, or Enterprise User", skip_with_all_emus: true, skip_enterprise: true do
+        user = create(:user)
+        refute(TenantValidationHelper.should_handle_feature_enablement_events?(user))
+      end
+
+      if TestEnv.test_with_all_emus? || GitHub.enterprise?
+        test "returns true if input is an EMU and GHAS is purchased" do
+          Business.any_instance.expects(:advanced_security_purchased?).returns(true)
+          user = create(:user)
+          assert(TenantValidationHelper.should_handle_feature_enablement_events?(user))
+        end
+
+        test "returns false if input is an EMU and GHAS is not purchased" do
+          Business.any_instance.expects(:advanced_security_purchased?).returns(false)
+          user = create(:user)
+          refute(TenantValidationHelper.should_handle_feature_enablement_events?(user))
+        end
+      end
+
       test "returns false if GHEC organization does not have GHAS and does not have business plus plan", skip_enterprise: true do
         Organization.any_instance.stubs(:advanced_security_purchased?).returns(false)
-        refute(TenantValidationHelper.should_handle_feature_enablement_events?(@org.id))
+        refute(TenantValidationHelper.should_handle_feature_enablement_events?(@org))
       end
 
       test "returns true if organization has advanced security purchased" do
-        assert(TenantValidationHelper.should_handle_feature_enablement_events?(@org.id))
+        assert(TenantValidationHelper.should_handle_feature_enablement_events?(@org))
       end
 
       test "returns true if organization has business plus plan" do
         Organization.any_instance.stubs(:advanced_security_purchased?).returns(false)
-        assert(TenantValidationHelper.should_handle_feature_enablement_events?(@business_plus_org.id))
-      end
-
-      test "returns false if organization does not exist" do
-        Organization.any_instance.stubs(:advanced_security_purchased?).returns(false)
-        @business_plus_org.destroy
-        refute(TenantValidationHelper.should_handle_feature_enablement_events?(@business_plus_org.id))
+        assert(TenantValidationHelper.should_handle_feature_enablement_events?(@business_plus_org))
       end
 
       test "returns false if a feature enablement initialization does not exist" do
         Initialization.any_instance.stubs(:initialized?).with(type: Initialization::Type::FeatureEnablement).returns(false)
-        refute(TenantValidationHelper.should_handle_feature_enablement_events?(@org.id))
+        refute(TenantValidationHelper.should_handle_feature_enablement_events?(@org))
       end
 
       test "returns true if a feature enablement initialization exists" do
-        assert(TenantValidationHelper.should_handle_feature_enablement_events?(@org.id))
+        assert(TenantValidationHelper.should_handle_feature_enablement_events?(@org))
       end
     end
 

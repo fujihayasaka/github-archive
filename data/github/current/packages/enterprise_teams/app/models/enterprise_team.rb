@@ -252,7 +252,7 @@ class EnterpriseTeam < ApplicationRecord::Domain::Users
   sig { params(business: Business).returns(T::Boolean) }
   def self.can_sync_to_current_organization_count?(business)
     business.feature_enabled?(:enterprise_team_org_sync_bypass_limit) ||
-    (RepositorySecurityCenterConfig.where(ghas_enabled: true, owner_type: "ORGANIZATION", business_id: business.id).distinct.count <= EnterpriseTeam.max_sync_organizations)
+    (RepositorySecurityCenterConfig.where(ghas_enabled: true, owner_type: "ORGANIZATION", business_id: business.id).distinct.count(:owner_id) <= EnterpriseTeam.max_sync_organizations)
   end
 
   # currently, there are no constraints to grant a permission over a team over any target
