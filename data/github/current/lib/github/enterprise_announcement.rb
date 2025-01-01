@@ -111,7 +111,7 @@ module GitHub
           GitHub.kv.set(
             ANNOUNCEMENT_KEY,
             announcement_json,
-            expires: Date.parse(expires_at.to_s).to_time
+            expires: DateTime.parse(expires_at.to_time.to_s)
           )
           # rubocop:enable GitHub/DoNotUseGlobalKv
         else
@@ -137,7 +137,7 @@ module GitHub
     #
     # Returns Boolean.
     def self.valid_expires_at?(expires_at)
-      Date.parse(expires_at.to_s).to_time.future?
+      DateTime.parse(expires_at.to_time.to_s).future?
     rescue ArgumentError
       false
     end

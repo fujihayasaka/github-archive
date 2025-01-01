@@ -30,6 +30,8 @@ class Api::Internal::StorageRawLfs < Api::Internal::StorageUploadable
     end
 
     if blob && blob.viewable?
+      # Setting the path allows us to send back the right content-type
+      blob.path = @raw_path
       deliver :internal_storage_hash, blob, { origin: request.env["HTTP_ORIGIN"], env: request.env }
     else
       deliver_error(404, message: "blob: #{blob.inspect}")
