@@ -368,6 +368,10 @@ module SAML
       end
 
       def validate(options)
+        if GitHub.flipper[:fail_saml_response_with_dtd].enabled? || GitHub.enterprise?
+          validate_no_dtd
+        end
+
         if !SAML.mocked[:skip_validate_signature]
           validate_has_signature
           validate_certificate(options[:idp_certificate]) if certificate_expiration_check_enabled?
@@ -404,6 +408,18 @@ module SAML
             "has_root_sig:#{has_root_sig}"
           ]
         )
+      end
+
+      # Internal: Validate that the SAML response does not contain a DOCTYPE declaration.
+      def validate_no_dtd
+        GitHub.logger.info(
+          "Running validate_no_dtd",
+          "saml.internal_subset" => document.internal_subset.present?,
+        )
+
+        if document.internal_subset.present?
+          self.errors << "SAML Response includes a document type declaration. Please adjust the response to remove it and try again."
+        end
       end
 
       # Internal: Validate the issuer of the message if present in configuration.

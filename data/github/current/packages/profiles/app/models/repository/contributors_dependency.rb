@@ -3,6 +3,7 @@
 
 module Repository::ContributorsDependency
   extend T::Sig
+  TOP_CONTRIBUTORS_LIMIT = 1_000
 
   def contributors(with_anon: false, email_limit: nil, viewer: nil, skip_private_profiles: false)
     Contributors.new(self).all(with_anon: with_anon, email_limit: email_limit, viewer: viewer, skip_private_profiles: skip_private_profiles)
@@ -31,6 +32,7 @@ module Repository::ContributorsDependency
                          "code.function": __method__)
       limit = 0
     end
+    limit = [limit, TOP_CONTRIBUTORS_LIMIT].min
 
     contribution_summaries_available = since.nil? &&
       self.feature_enabled?(:commit_contribution_summaries) &&

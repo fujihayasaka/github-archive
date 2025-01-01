@@ -140,7 +140,13 @@ module SecurityProduct
             end
           end
 
+          already_enabled = token_scanning_service.enabled?
+
           if eligible && should_enable_secret_scanning
+            dependents, error = token_scanning_service.on_enable(actor: actor, options: options)
+            Result.new(ToggledServiceCollection.create(to_sym, options).merge!(dependents), error)
+          elsif already_enabled
+            options[:renotify_only] = true
             dependents, error = token_scanning_service.on_enable(actor: actor, options: options)
             Result.new(ToggledServiceCollection.create(to_sym, options).merge!(dependents), error)
           else

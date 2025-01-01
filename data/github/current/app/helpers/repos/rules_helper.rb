@@ -12,7 +12,8 @@ module Repos::RulesHelper
   def rulesets_upsell_info(source, user)
     is_organization = source.is_a?(Organization) || (source.is_a?(Repository) && source.in_organization?)
     supports_rulesets = source.plan_supports?(:protected_branches)
-    supports_enterprise_rulesets = source.plan_supports?(:enterprise_rulesets)
+    supports_evaluate_mode = !source.is_a?(Repository) || source.in_organization?
+    supports_enterprise_rulesets = source.plan_supports?(:enterprise_rulesets) && supports_evaluate_mode
 
     owner = if source.is_a?(Organization)
       source

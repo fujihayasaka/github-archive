@@ -32,7 +32,7 @@ class Memex::ProjectDeprecationNoticeComponent < ApplicationComponent
   end
 
   def notice
-    GitHub.enterprise? ? "Projects (classic) will be sunset in GitHub Enterprise Server 3.16" : "Projects (classic) will be sunset on August 23, 2024"
+    GitHub.enterprise? ? "Projects (classic) will be sunset in GitHub Enterprise Server 3.17" : "Projects (classic) will be sunset on August 23, 2024"
   end
 
   def reopen_message

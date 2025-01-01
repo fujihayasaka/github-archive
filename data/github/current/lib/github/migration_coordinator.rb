@@ -325,7 +325,11 @@ module GitHub
     end
 
     def use_multipart_upload?(path)
-      return false unless MULTIPART_SUPPORTED_STORAGE_TYPES.include?(GitHub.migrations_blob_storage_type)
+      # On GHES, for large archives with local storage, we don't want multipart uploads.  Additionally, some GHES
+      # customers historically have set GitHub.migrations_blob_storage_type to something other than "local" to perform
+      # local exports, so we are explicitly checking that GitHub.migrations_blob_storage_type is not "s3" or "azure".
+
+      return false if GitHub.enterprise? && MULTIPART_SUPPORTED_STORAGE_TYPES.exclude?(GitHub.migrations_blob_storage_type)
 
       File.size(path) > ::Storage::Uploadable::MAX_ASSET_SIZE
     end

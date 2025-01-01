@@ -40,6 +40,19 @@ module SecurityProduct
     end
 
     def on_enable(actor:, options:)
+      renotify_only = options[:renotify_only] || false
+
+      if renotify_only
+        GlobalInstrumenter.instrument(
+          "repository_secret_scanning.enable",
+          {
+            repository_id: repository.id
+          }
+        )
+
+        return Result.new(ToggledServiceCollection.empty)
+      end
+
       # short circuit early if secret scanning is already enabled on this repo.
       return Result.new(ToggledServiceCollection.empty) unless manually_disabled?
 

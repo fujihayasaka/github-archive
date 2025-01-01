@@ -20,6 +20,9 @@ class SpokesRepairNetworkReplicaJob < ApplicationJob
     "*.lock",
     "/*/.backup_lock",
     "/*/objects/info/alternates+",
+    "/*/objects/tmp_objdir-*",
+    "/*/objects/ghq_*",
+    "/*/objects/tmp_object_git2_*",
   ]
 
   # When syncing data with remote replicas, we need to account for reduced TCP throughput.

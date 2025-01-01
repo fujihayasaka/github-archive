@@ -6,12 +6,14 @@ module SecretScanning::PushProtection
   class FileUploadDetectedSecretsComponent < ApplicationComponent
     extend T::Sig
 
-    sig { params(repository: Repository, secrets: T.nilable(T::Array[SecretScanning::Models::Secret]), limited_user_bypass_experience_only: T::Boolean).void }
-    def initialize(repository, secrets, limited_user_bypass_experience_only = false)
+    sig { params(repository: Repository, secrets: T.nilable(T::Array[SecretScanning::Models::Secret]), upload_directory: T.nilable(String), base_branch: T.nilable(String), limited_user_bypass_experience_only: T::Boolean).void }
+    def initialize(repository, secrets, upload_directory, base_branch, limited_user_bypass_experience_only = false)
       @repository = repository
       # The web experience only shows one secret at a time
       @secret = secrets[0] unless secrets.blank?
       @limited_user_bypass_experience_only = limited_user_bypass_experience_only
+      @upload_directory = upload_directory
+      @base_branch = base_branch
     end
 
     attr_reader :secret, :limited_user_bypass_experience_only

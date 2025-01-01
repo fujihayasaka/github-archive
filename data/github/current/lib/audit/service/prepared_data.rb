@@ -109,7 +109,11 @@ module Audit
       def sso_info(ei_session_owner)
         case ei_session_owner
         when Business
-          [ei_session_owner.external_provider_enabled?, ei_session_owner.async_external_provider]
+          if GitHub.single_tenant_enterprise?
+            [GitHub.auth.saml?, ei_session_owner.async_external_provider]
+          else
+            [ei_session_owner.external_provider_enabled?, ei_session_owner.async_external_provider]
+          end
         when Organization
           [ei_session_owner.saml_sso_enabled?, ei_session_owner.async_saml_provider]
         else
@@ -132,7 +136,7 @@ module Audit
           sso_enabled, async_provider = sso_info(org_entity.external_identity_session_owner) if org_entity
         end
 
-        unless sso_enabled && async_provider
+        unless sso_enabled && async_provider.present?
           data[:external_identity_username] = "" if data.has_key?(:external_identity_username)
           data[:external_identity_nameid] = "" if data.has_key?(:external_identity_nameid)
           data[:external_id] = "" if data.has_key?(:external_id)
@@ -147,6 +151,8 @@ module Audit
               data[:external_id] = ident.external_id if ident.external_id.present?
               data[:external_id] ||= ident.saml_external_id if ident.saml_external_id.present?
             end
+          else
+            data[:external_identity_nameid] = actor.saml_mapping.name_id if actor.saml_mapping.present?
           end
         end.sync
       end

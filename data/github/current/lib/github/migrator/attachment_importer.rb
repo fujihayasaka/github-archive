@@ -18,6 +18,16 @@ module GitHub
             pull_request_review_comment
           ].find { |attachable_key| attributes.has_key?(attachable_key) }
 
+          if !attachable_key
+            return log_and_create_importer_result(
+              attributes,
+              nil,
+              "Skipped import: no valid model found for attachment",
+              "attachment",
+              "skipped"
+            )
+          end
+
           attachable = model_from_source_url!(attributes[attachable_key])
           attachable = attachable.issue if attachable.is_a?(PullRequest)
 

@@ -169,7 +169,7 @@ module GitHub
         sig { override.returns(Integer) }
         def worker_count
           if GitHub.enterprise?
-            1
+            ENV.fetch("GHES_TRANSITION_WORKER_COUNT", 1).to_i
           else
             value = arguments[:workers] || DEFAULT_WORKER_COUNT
             [value, MAX_WORKER_COUNT].min

@@ -437,5 +437,21 @@ class SecurityProduct::TokenScanningTest < GitHub::IntegrationTestCase
 
       assert_hydro_published({ repository_id: @repo.id, feature_enabled: false }, schema: "github.secret_scanning.v1.SecretScanningFeatureToggled")
     end
+
+    test "only emit hydro event when the renotify_only option is set to true" do
+      SecretScanning::Features::AdvancedSecurityHelper.stubs(:advanced_security_configurable?).returns(true)
+      Repository.any_instance.stubs(:advanced_security_enabled?).returns(true)
+
+      service_manager = SecurityProduct::ServiceManager.new(@repo)
+      token_scanning = SecretScanning::Features::Repo::TokenScanning.new(@repo)
+      token_scanning.enable(actor: @user)
+      assert token_scanning.enabled?
+
+      _, err = service_manager.toggle_services(@user, services_to_enable: [[:token_scanning, { renotify_only: true }]])
+      refute err
+
+      refute_hydro_messages(schema: "token_scanning_service.v0.EnablementChange")
+      assert_hydro_published({ repository_id: @repo.id, feature_enabled: true }, schema: "github.secret_scanning.v1.SecretScanningFeatureToggled")
+    end
   end
 end

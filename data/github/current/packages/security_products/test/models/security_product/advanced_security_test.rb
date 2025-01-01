@@ -180,6 +180,52 @@ class SecurityProduct::AdvancedSecurityTest < GitHub::IntegrationTestCase
       assert token_scanning_service.enabled?
     end
 
+    test "if secret scanning is already enabled, enabling advanced security also enables secret scanning with the notify_only option" do
+      GitHub.stubs(:configuration_secret_scanning_enabled?).returns(true)
+      if GitHub.enterprise?
+        business = @business
+        user = @user
+      else
+        user = create(:emu)
+        business = user.enterprise_managed_business
+      end
+      business.mark_advanced_security_as_purchased_for_entity(actor: user)
+
+      repo = create(:private_repository, owner: user, force_user_owned: true)
+      service_manager = SecurityProduct::ServiceManager.new(repo)
+      ## Enable GHAS, enable Secret Scanning
+      _, err = service_manager.toggle_services(user, services_to_enable: [:advanced_security])
+      refute err
+      ts_feature = SecretScanning::Features::Repo::TokenScanning.new(repo)
+      ts_feature.enable(actor: user)
+      token_scanning_service = SecurityProduct::TokenScanning.new(repo)
+      advanced_security_service = SecurityProduct::AdvancedSecurity.new(repo)
+      assert token_scanning_service.enabled?
+      assert advanced_security_service.enabled?
+      ## Simulate the repo getting archived
+      _, err = service_manager.toggle_services(user, services_to_disable: [[:advanced_security, { force?: true, on_archive?: true }]])
+      refute err
+      refute token_scanning_service.enabled?
+      refute advanced_security_service.enabled?
+      ## For archived repos, token scanning feature will be disabled, since advanced security is disabled, but the config
+      ## key should still be set on the repo.
+      assert repo.config.enabled?("token_scanning.user_enabled")
+
+      _, err = service_manager.toggle_services(user, services_to_enable: [:advanced_security])
+      refute err
+
+      assert token_scanning_service.enabled?
+      assert advanced_security_service.enabled?
+      ## Since we enabled secret scanning above via the feature (SecretScanning::Features::Repo::TokenScanning),
+      ## this (EnablementChange) was never published.
+      refute_hydro_messages(schema: "token_scanning_service.v0.EnablementChange")
+      ## SecretScanningFeatureToggled was published one time- when advanced security was re-enabled. When that happened
+      ## SecretScanning::Features::Repo::TokenScanning.new(repo).enabled? started returning true
+      ## because advanced security became enabled. In this case the SecretScanningFeatureToggled message was published
+      ## to notify subscribers of the change.
+      assert_hydro_messages(count: 1, schema: "github.secret_scanning.v1.SecretScanningFeatureToggled")
+    end
+
     test "if secret scanning opt-in is enabled for the user, enabling advanced security also enables secret scanning" do
       GitHub.stubs(:configuration_secret_scanning_enabled?).returns(true)
       if GitHub.enterprise?

@@ -106,6 +106,14 @@ class RepositoryContributorsDependencyTest < GitHub::TestCase
 
       assert_empty contributors
     end
+
+    test "does not raise on very large limit" do
+      CommitContribution.create(repository: @grit, user: @mojombo, commit_count: 1)
+
+      contributors = @grit.top_contributors(limit: "99999999999999999999".to_i, viewer: @defunkt)
+
+      assert_equal 1, contributors.count
+    end
   end
 
   context "#show_first_time_contributor_banner?" do

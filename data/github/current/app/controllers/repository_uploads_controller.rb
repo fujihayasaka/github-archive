@@ -85,7 +85,9 @@ class RepositoryUploadsController < AbstractRepositoryController
 
     render "repository_uploads/processing", locals: {
       redirect_url: redirect_url(manifest),
-      manifest_id: manifest.id
+      manifest_id: manifest.id,
+      base_branch: base_branch,
+      upload_directory: manifest.directory
     }
   end
 
@@ -96,7 +98,9 @@ class RepositoryUploadsController < AbstractRepositoryController
     render SecretScanning::PushProtection::FileUploadDetectedSecretsComponent.new(
       current_repository,
       SecretScanning::Util::PushProtectionFileUploads.secrets_from_json(json_data),
-      limited_user_bypass_experience_only?
+      params[:upload_directory],
+      params[:base_branch],
+      limited_user_bypass_experience_only?,
     )
   end
 
@@ -105,7 +109,8 @@ class RepositoryUploadsController < AbstractRepositoryController
     return render_404 unless current_user_can_write_to_repo?
 
     # Navigate to the file upload page if user cancels on the push protection bypass dialog
-    return index if params[:cancel]
+    # The path for redirection includes both the original branch and directory the user was trying to upload to
+    return redirect_to repo_uploads_path(current_repository.owner_display_login, current_repository, params[:base_branch], params[:upload_directory]) if params[:cancel]
 
     if limited_user_bypass_experience_only?
       reason = SecretScanning::Models::BypassReason::WILL_FIX_LATER.to_s
@@ -124,7 +129,8 @@ class RepositoryUploadsController < AbstractRepositoryController
     end
 
     # Navigate to the upload page to allow the user to re-upload their files.
-    index
+    # The path for redirection includes both the original branch and directory the user was trying to upload to
+    redirect_to repo_uploads_path(current_repository.owner_display_login, current_repository, params[:base_branch], params[:upload_directory])
   end
 
   def destroy
