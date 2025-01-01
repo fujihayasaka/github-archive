@@ -1,0 +1,30 @@
+#!/usr/bin/env ruby
+#
+# Generates an SBOM SPDX file for a repository ID.
+# Usage: bin/rails r script/dev/generate-sbom-spdx REPOSITORY_ID
+
+require_relative "../../config/environment"
+
+require "json"
+require "dependency_graph/sbom/spdx/generator"
+
+# Set logs to STDERR so they show up in the console
+# STDOUT will be where our generated SPDX file is written
+Rails.logger = Logger.new(STDERR)
+
+repo_id = ARGV[0].to_i
+
+unless Repository.where(github_repository_id: repo_id).exists?
+  puts "Repository with GitHub repository ID #{repo_id} does not exist!"
+  exit 1
+end
+
+sbom_generator = DependencyGraph::SBOM::SPDX::Generator.new
+sbom = sbom_generator.generate(
+  repository_id: repo_id,
+  repository_name: Repository.find_by(github_repository_id: repo_id).nwo,
+  namespace_base: "https://github.com/"
+)
+
+json = JSON.pretty_generate(sbom, indent: "  ")
+puts json

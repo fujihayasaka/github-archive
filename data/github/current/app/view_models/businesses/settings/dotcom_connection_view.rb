@@ -41,7 +41,7 @@ class Businesses::Settings::DotcomConnectionView < ViewModel # rubocop:todo View
   end
 
   def can_use_download_actions?
-    GitHub.actions_enabled?
+    GitHub.actions_enabled? && !can_use_proxima?
   end
 
   def dotcom_download_actions_archive_choices

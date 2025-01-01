@@ -1,0 +1,31 @@
+#!/bin/bash
+#
+# wrapper is the main command of the Docker image for the "go" package manager adapter.
+#
+# Called by:
+# - '../script/test go', for testing. Uses Dockerfile in this directory.
+# - 'docker build --iidfile=iid . && docker run $(cat iid) run', to run the application.
+# - '../script/start_kube go 1M', when invoked by Kubernetes cron job config
+#   (see ../../config/kubernetes/workers/deployments/extract_go_packages.yaml).
+#   That config uses the root ../../Dockerfile, which contains redundant instructions
+#   for building the gopma executable in this directory.
+#
+# The working directory is assumed to contain compiled gopma{,.test} executables.
+
+case "$1" in
+  run)
+    shift
+    # The -poll flag causes the program to loop forever, so it can process
+    # new records (or backfill a chunk of 2000) with a latency of 5s,
+    # much less than even a small cron period such as 1m.
+    exec ./gopma -poll 5s -fjord_url="$FJORD_URL" -api_url="$API_URL" -v "$@"
+    ;;
+  test)
+    shift
+    exec ./gopma.test -build=false "$@"
+    ;;
+  *)
+    echo "Usage: $0 {run|test}" >&2
+    exit 1
+    ;;
+esac

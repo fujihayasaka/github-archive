@@ -1,0 +1,33 @@
+#!/bin/sh
+
+set -eu
+
+[ -f /etc/app-env ] && exit 0
+
+if [ "$(uname -s)" = "Darwin" ]; then
+  cd "$(dirname "$0")/.."
+
+  brew bundle check > /dev/null || brew bundle
+
+  if ! [ -f /usr/local/bin/docker-compose ]; then
+    echo "You must run Docker for Mac and let it install its tools."
+
+    # If the user customized their Docker appdir, `open` might not
+    # be able to find it.
+    open -a Docker 2>/dev/null || true
+    exit 1
+  fi
+
+  brew setup-nginx-conf advisory-db . config/dev/nginx.conf.erb
+fi
+
+cp -n .env.local.example .env.local || :
+
+if [ ${1:-""} = "--pristine" ]; then
+  docker-compose down --remove-orphans --volumes
+  docker-compose build --no-cache
+else
+  docker-compose build
+fi
+
+script/install-dependencies

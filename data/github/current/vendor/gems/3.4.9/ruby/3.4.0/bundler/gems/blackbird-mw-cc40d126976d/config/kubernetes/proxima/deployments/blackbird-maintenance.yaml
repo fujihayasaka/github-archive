@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: blackbird-maintenance
+    annotations:
+        # Override to run on only one cluster
+        moda.github.net/cluster-preferences: |
+            {
+              "proxima-1-%stamp%-az1":  {
+                "spec": {
+                  "replicas": 1
+                }
+              }
+            }
+spec:
+    replicas: 0 # times 6 k8s clusters
+    strategy:
+        type: Recreate
+    selector:
+        matchLabels:
+            app: blackbird-maintenance
+    template:
+        metadata:
+            labels:
+                app: blackbird-maintenance
+            annotations:
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: blackbird
+                fluentbit.io/parser: logfmt_sloppy
+        spec:
+            # The following line is to fix transient dns issues in deployed environments
+            # https://moda.githubapp.com/docs/reference/frequently-asked-questions/#i-m-seeing-a-lot-of-dns-exceptions-what-gives
+            dnsPolicy: ClusterFirst
+            containers:
+                - name: blackbird-maintenance
+                  image: blackbird-mw
+                  command: ["/blackbird-maintenance"]
+                  ports:
+                    - name: http
+                      containerPort: 8080
+                      protocol: TCP
+                  readinessProbe:
+                    initialDelaySeconds: 5
+                    timeoutSeconds: 5
+                    httpGet:
+                        path: /ready
+                        port: 8080
+                  envFrom:
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: BLACKBIRD_MW_ENV
+                      value: "production"
+                    - name: BLACKBIRD_MW_STATS_ADDR
+                      value: "$(KUBE_NODE_HOSTNAME):28125"
+                    - name: BLACKBIRD_MW_POD
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.name
+                    - name: BLACKBIRD_MW_KUBE_NAMESPACE
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.namespace
+                    - name: SHARED_KAFKA_BROKERS
+                      value: "hydro-kafka-$(KUBE_CLUSTER_STAMP)-$(KUBE_CLUSTER_STAMP).service.$(KUBE_CLUSTER_STAMP)-az1.consul:9093,hydro-kafka-$(KUBE_CLUSTER_STAMP)-$(KUBE_CLUSTER_STAMP).service.$(KUBE_CLUSTER_STAMP)-az2.consul:9093,hydro-kafka-$(KUBE_CLUSTER_STAMP)-$(KUBE_CLUSTER_STAMP).service.$(KUBE_CLUSTER_STAMP)-az3.consul:9093"
+                    - name: BLACKBIRD_KAFKA_BROKERS
+                      value: "hydro-kafka-blackbird-$(KUBE_CLUSTER_STAMP)-$(KUBE_CLUSTER_STAMP).service.$(KUBE_CLUSTER_STAMP)-az1.consul:9093,hydro-kafka-blackbird-$(KUBE_CLUSTER_STAMP)-$(KUBE_CLUSTER_STAMP).service.$(KUBE_CLUSTER_STAMP)-az2.consul:9093,hydro-kafka-blackbird-$(KUBE_CLUSTER_STAMP)-$(KUBE_CLUSTER_STAMP).service.$(KUBE_CLUSTER_STAMP)-az3.consul:9093"
+                    - name: CHATTERBOX_URL
+                      value: "https://chatterbox.githubapp.com"
+                    - name: MYSQL_SKEEMA_ENV
+                      value: "$(KUBE_CLUSTER_STAMP)-rw"
+                    - name: MYSQL_SKEEMA_ANALYTICS_ENV
+                      value: "$(KUBE_CLUSTER_STAMP)-rw"
+                    - name: BLACKBIRD_ENV
+                      value: dsa_client
+                    - name: STAMP
+                      value: "$(KUBE_CLUSTER_STAMP)"
+                    - name: RUST_LOG
+                      value: warn
+                    - name: GOMAXPROCS
+                      valueFrom:
+                        resourceFieldRef:
+                          containerName: blackbird-maintenance
+                          resource: limits.cpu
+                          divisor: 1
+                  resources:
+                    requests:
+                        cpu: 0.1
+                        memory: "1G"
+                    limits:
+                        cpu: 0.8
+                        memory: "20G"

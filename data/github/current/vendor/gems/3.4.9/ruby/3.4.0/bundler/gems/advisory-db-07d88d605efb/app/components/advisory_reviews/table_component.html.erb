@@ -1,0 +1,237 @@
+<advisory-review-list
+  data-advisory-reviews-bulk-close-url="<%= advisory_reviews_bulk_close_path %>"
+  data-advisory-reviews-bulk-assign-url="<%= advisory_reviews_bulk_assignment_path %>"
+  data-advisory-reviews-bulk-ecosystem-and-package-name-url="<%= advisory_reviews_bulk_ecosystem_and_package_name_path %>"
+  data-advisory-reviews-bulk-label-options-url="<%= advisory_reviews_bulk_label_options_path %>"
+  data-advisory-reviews-bulk-labels-url="<%= advisory_reviews_bulk_labels_path %>">
+  <multi-select data-action="multiSelectChanged:advisory-review-list#onSelectionChanged" data-attribute-for-key="data-ghsa-id">
+    <!-- This dialog is shown only to confirm actions taken by bulk select -->
+    <%= render(Primer::Alpha::Dialog.new(
+      title: "Bulk operation confirmation",
+      id: "bulk-operation-confirmation",
+      data: { action: "cancel:advisory-review-list#resetBulkOperations" }
+    )) do |d| %>
+      <% d.with_show_button(hidden: true, data: {target: "advisory-review-list.confirmationDialogShowButton"}) { "Show Dialog" } %>
+      <% d.with_body do %>
+        <p data-target="advisory-review-list.confirmationDialogContent"></p>
+      <% end %>
+        <% d.with_footer do %>
+          <%= render(Primer::ButtonComponent.new(data: { "close-dialog-id": "bulk-operation-confirmation" })) { "Cancel" } %>
+          <%= render(Primer::ButtonComponent.new(scheme: :primary, data: {target: "advisory-review-list.confirmationDialogSubmitButton"})) { "Submit" } %>
+        <% end %>
+    <% end %>
+    <div class="flash mt-3 flash-success" hidden data-target="advisory-review-list.navigationStatusFlash">
+      <span data-target="advisory-review-list.navigationStatus" ></span>
+    </div>
+    <div class="border border-dashed p-2 mb-2" data-target="advisory-review-list.operationFeedbackPane" hidden>
+      <div class="width-full">
+        <%= render Primer::Beta::Octicon.new(icon: "alert-fill", size: :small, color: :danger, hidden: true, data: {target: "advisory-review-list.operationFailureIcon"} ) %>
+        <span data-target="advisory-review-list.operationFeedback" class="white-space-pre-wrap"></span>
+      </div>
+    </div>
+    <%= render(Primer::Beta::BorderBox.new) do |border_box| %>
+      <% border_box.with_header(display: :flex) do %>
+        <div class="flex-0 pr-2">
+          <input type="checkbox" data-action="change:multi-select#multiSelectAllClick" data-target="multi-select.allSelectionCell">
+        </div>
+        <div class="flex-1 pr-2 review-table-state">
+          State
+          <%= render Primer::Alpha::ActionMenu.new(menu_id: "state-change-menu", data: { targets:"multi-select.visibleWhenMultiSelecting" }, hidden: true) do |c| %>
+            <% c.with_show_button(icon: "chevron-down", classes: "advisory-list-header-icon-button p-0", aria: { label: "open state change menu" }) %>
+            <% c.with_item(tag: :button, type: "button", data: { action: "click:advisory-review-list#closeAllClicked" }) do %>
+              Close
+            <% end %>
+          <% end %>
+        </div>
+        <div class="flex-1 pr-2 review-table-severity position-relative" id="review-table-severity-heading">
+          <% if sorting_enabled? %>
+            <a class="no-underline color-fg-inherit" href="<%= url_for(request.query_parameters.merge(sort_by: "severity", sort: change_sort_param(sort, sort_by, "severity"))) %>">
+              <%= render Primer::Beta::Octicon.new(icon: "shield", color: :muted, title: "Severity") %>
+              <%= render(IconComponent.new(icon: sort_icon(sort, sort_by, "severity"), color: sort_schema(sort_by, "severity"))) %>
+            </a>
+          <% else %>
+            <%= render Primer::Beta::Octicon.new(icon: "shield", title: "Severity") %>
+          <% end %>
+          <%= render Primer::Alpha::Tooltip.new(for_id: "review-table-severity-heading", type: :label, text: "Severity", direction: :n) %>
+        </div>
+        <div class="flex-1 pr-2 ghsa-id-column">
+          GHSA ID
+          <div data-targets="multi-select.visibleWhenMultiSelecting" hidden>Summary</div>
+        </div>
+        <div class="flex-1 pr-2">CVE ID</div>
+        <div class="flex-1 pr-2">Sources</div>
+        <div class="flex-3 pr-2" data-targets="multi-select.hiddenWhenMultiSelecting">Summary</div>
+        <div class="flex-2 pr-2" data-targets="multi-select.visibleWhenMultiSelecting" hidden>
+          Ecosystem and package
+          <details class="dropdown details-reset details-overlay d-inline pl-1">
+            <summary class="btn btn-sm btn-octicon border rounded-1 m-0 p-0" aria-haspopup="true">
+              <%= render Primer::Beta::Octicon.new(icon: "chevron-down", size: :xsmall, color: :muted) %>
+            </summary>
+            <details-menu class="SelectMenu right-0" role="menu">
+              <div class="SelectMenu-modal">
+                <header class="SelectMenu-header">
+                  <span class="SelectMenu-title">Assign ecosystem and package name</span>
+                </header>
+                <div class="SelectMenu-list">
+                  <div class="ecosystem-list overflow-auto">
+                    <% AdvisoryDB.curated_ecosystems.each do |ecosystem_filter| %>
+                      <a class="SelectMenu-item ecosystem-item no-wrap"
+                        data-targets="advisory-review-list.multiSelectIndividualEcosystems"
+                        data-action="click:advisory-review-list#multiSelectEcosystemSelection"
+                        data-ecosystem-key="<%= ecosystem_filter %>"
+                        >
+                        <%= render IconComponent.new(icon: "check", classes: "SelectMenu-icon", visibility: :hidden) %>
+                        <span class="d-inline-block mr-2">
+                          <%= render IconComponent.new(icon: "dot-fill", mr: 1, style: "color: ##{AdvisoryDB.ecosystem_color(ecosystem_filter)}") %>
+                        </span>
+                        <span class="ecosystem-label"><%= AdvisoryDB.ecosystem_label(ecosystem_filter) %></span>
+                      </a>
+                    <% end %>
+                  </div >
+                  <div>
+                    <input
+                      autocomplete="on"
+                      class="m-1 d-inline-block color-bg-default form-control float-left"
+                      type="text"
+                      placeholder="Package name, e.g. rails"
+                      data-target="advisory-review-list.multiSelectPackageNameInput"
+                      data-action="change:advisory-review-list#multiSelectEcosystemPackageNameChanged"
+                      disabled
+                    >
+                    <%= render(Primer::ButtonComponent.new(
+                      m: 1,
+                      classes: "float-left",
+                      disabled: true,
+                      data: {
+                        target: "advisory-review-list.multiSelectEcosystemApplyButton",
+                        action: "click:advisory-review-list#setEcosystemAndPackageName"
+                      })) { "Apply" } %>
+                  </div>
+                </div>
+              </div>
+            </details-menu>
+          </details>
+        </div>
+        <label-picker class="flex-1 pr-2" data-action="newLabelsSelected:advisory-review-list#setLabels">
+          Labels
+          <details class="dropdown details-reset details-overlay d-inline pl-1" data-targets="multi-select.visibleWhenMultiSelecting" data-action="toggle:label-picker#toggleOverlay" hidden>
+            <summary class="btn btn-sm btn-octicon border rounded-1 m-0 p-0" aria-haspopup="true">
+              <%= render Primer::Beta::Octicon.new(icon: "chevron-down", size: :xsmall, color: :muted) %>
+            </summary>
+            <details-menu class="SelectMenu right-0" role="menu">
+              <div class="SelectMenu-modal">
+                <div class="SelectMenu-list" data-target="advisory-review-list.labelOptions"></div>
+                <div class= "SelectMenu-item" data-target="advisory-review-list.labelOptionsLoading">
+                  Loading...
+                </div>
+                <div class= "SelectMenu-item" data-target="advisory-review-list.labelOptionsError" hidden>
+                  There was a problem loading bulk labels.
+                </div>
+              </div>
+            </details-menu>
+          </details>
+        </label-picker>
+        <% if sorting_enabled? %>
+          <a class="table-date flex-1 no-underline color-fg-inherit" href="<%= url_for(request.query_parameters.merge(sort_by: "date", sort: change_sort_param(sort, sort_by, "date"))) %>">
+            Date <%= render(IconComponent.new(icon: sort_icon(sort, sort_by, "date"), color: sort_schema(sort_by, "date"))) %>
+          </a>
+        <% else %>
+          <div class="table-date flex-1">Date</div>
+        <% end %>
+        <div class="assignment-column" data-targets="multi-select.visibleWhenMultiSelecting" hidden>
+          Assigned
+          <details class="dropdown details-reset details-overlay d-inline pl-1">
+            <summary class="btn btn-sm btn-octicon border rounded-1 m-0 p-0" aria-haspopup="true">
+              <%= render Primer::Beta::Octicon.new(icon: "chevron-down", size: :xsmall, color: :muted) %>
+            </summary>
+            <details-menu class="SelectMenu right-0" role="menu">
+              <div class="SelectMenu-modal">
+                <header class="SelectMenu-header">
+                  <span class="SelectMenu-title">Assign a curator</span>
+                </header>
+                <div class="SelectMenu-list">
+                  <% ["Unassign"].concat(AdvisoryDB::Config::ActiveCurators::CURATORS).each do |curator| %>
+                    <div class="SelectMenu-item d-flex normal-cursor">
+                      <div class="flex-1" ><%= curator %> </div>
+                      <%= render(Primer::ButtonComponent.new(mr: 2, py: 0, px: 2, classes: "flex-0", data: { action: "click:advisory-review-list#assignClicked", slot: "1", curator: curator })) { "1st" } %>
+                      <%= render(Primer::ButtonComponent.new( py: 0, px: 2, classes: "flex-0", data: { action: "click:advisory-review-list#assignClicked", slot: "2", curator: curator })) { "2nd" } %>
+                    </div>
+                  <% end %>
+                </div>
+              </div>
+            </details-menu>
+          </details>
+        </div>
+      <% end %>
+
+      <% advisory_reviews.each do |advisory_review| %>
+        <% border_box.with_row(display: :flex, test_selector: "advisory-review-row") do %>
+          <div class="pr-2 d-flex flex-0 flex-content-center">
+            <input type="checkbox" data-ghsa-id="<%= advisory_review.ghsa_id %>" data-action="change:multi-select#multiSelectClick" data-targets="multi-select.selectionCells">
+          </div>
+          <div class="d-flex flex-content-center flex-wrap flex-1 flex-basis-auto review-table-state" id="review-table-state-<%= advisory_review.ghsa_id %>">
+            <%= render(Primer::Beta::Link.new(href: advisory_reviews_path(request.query_parameters.merge(state: advisory_review.curation_state, page: nil)))) do %>
+              <%= render ReviewStateIconComponent.new(review: advisory_review) %>
+            <% end %>
+            <%= render Primer::Alpha::Tooltip.new(for_id: "review-table-state-#{advisory_review.ghsa_id}", type: :label, text: curation_state_label(advisory_review.curation_state), direction: :w) %>
+          </div>
+          <div class="d-flex flex-content-center flex-wrap flex-1 flex-basis-auto review-table-severity" id="review-table-severity-<%= advisory_review.ghsa_id %>">
+            <%= render(Primer::Beta::Link.new(href: advisory_reviews_path(request.query_parameters.merge(severity: advisory_review.severity, page: nil)))) do %>
+              <%= render AdvisoryReviews::SeverityIconComponent.new(severity: advisory_review.severity) %>
+            <% end %>
+            <%= render Primer::Alpha::Tooltip.new(for_id: "review-table-severity-#{advisory_review.ghsa_id}", type: :label, text: severity_label(advisory_review.severity), direction: :w) %>
+          </div>
+          <div class="flex-1 d-flex flex-wrap">
+            <!-- We have two "rows" in the UI, so two block divs are rendered inside this -->
+            <div class="d-flex flex-1">
+              <div class="flex-1 pr-2 ghsa-id-column">
+                <%= render(Primer::Beta::Link.new(
+                  href: advisory_review_path(advisory_review),
+                  font_weight: :bold,
+                  scheme: :primary,
+                  underline: false,
+                  test_selector: "ghsa-id"
+                )) { advisory_review.ghsa_id } %>
+              </div>
+              <div class="flex-1 pr-2 color-fg-muted" <%= test_selector("cve-id") %>>
+                <%= cve_link(advisory_review) %>
+              </div>
+              <div class="flex-1 pr-2">
+                <% source_icons(advisory_review).each do |source_icon| %>
+                  <%= render source_icon %>
+                <% end %>
+              </div>
+              <div class="flex-2 pr-2 d-flex" data-targets="multi-select.visibleWhenMultiSelecting" hidden>
+                <%= render(Primer::Beta::Truncate.new(tag: :span, classes: "flex-1 flex-render-hack", pr: 2)) { ecosystems_with_package_names(advisory_review) } %>
+              </div>
+              <%= render(Primer::Beta::Truncate.new(tag: :div, classes: "flex-3 flex-render-hack", pr: 2, data: { targets: "multi-select.hiddenWhenMultiSelecting" })) { advisory_review.title } %>
+              <div class="flex-1 pr-2">
+                <% advisory_review.labels.each do |label| %>
+                  <%= render Labels::LabelComponent.new(name: label.name, color: label.color, link: include_label_link(label.id)) %>
+                <% end %>
+              </div>
+              <div class="table-date flex-1">
+                <%= render(Primer::Beta::RelativeTime.new(datetime: advisory_review.review_requested_at, tense: :past)) %>
+              </div>
+            </div>
+            <div class="flex-break-row"></div>
+            <%= render(Primer::Beta::Truncate.new(tag: :div,
+                                                  classes: "flex-1 flex-render-hack",
+                                                  pr: 2,
+                                                  hidden: true,
+                                                  data: { targets: "multi-select.visibleWhenMultiSelecting" })
+                      ) { advisory_review.title } %>
+          </div>
+          <div class="mr-1 assignment-column flex-auto" data-targets="multi-select.visibleWhenMultiSelecting" hidden>
+            1st: <%= advisory_review.approvals.first&.user&.login || (render Primer::Beta::Octicon.new(icon: "circle-slash", size: :xsmall, color: :muted)) %> <br />
+            2nd: <%= advisory_review.approvals.second&.user&.login || (render Primer::Beta::Octicon.new(icon: "circle-slash", size: :xsmall, color: :muted)) %>
+          </div>
+        <% end %>
+      <% end %>
+
+      <% if advisory_reviews.empty? %>
+        <% border_box.with_footer(display: :flex, justify_content: :center, test_selector: "no-advisory-reviews") { "No advisory reviews to show" } %>
+      <% end %>
+    <% end %>
+  </multi-select>
+</advisory-review-list>

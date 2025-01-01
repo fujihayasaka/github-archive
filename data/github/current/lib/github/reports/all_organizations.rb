@@ -9,19 +9,19 @@ module GitHub
 
         if GitHub.enterprise?
           conditions = [
-            "id != ?
-              AND type = 'Organization'",
+            "users.id != ?
+              AND users.type = 'Organization'",
             GitHub.trusted_apps_owner_id,
           ]
         else
           conditions = [
-            "type = 'Organization'",
+            "users.type = 'Organization'",
           ]
         end
 
         CSV.generate do |csv|
           csv << header
-          Organization.where(conditions).find_each do |o|
+          Organization.active.where(conditions).find_each do |o|
             csv << [o.id, o.created_at, o.login, o.billing_email, o.admins.count,
                     o.member_count, o.teams.count, o.org_repositories.count, o.two_factor_requirement_enabled?]
           end

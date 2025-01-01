@@ -32,63 +32,8 @@ class Repos::SecretScanning::PushProtection::DelegatedBypassReviewersController 
   allow_verified_fetch only: [:create, :destroy]
 
   sig { void }
-  def index
-    if !params.key?(:repository_id)
-      log_service_error(
-        log_msg: "Repository ID params[:repository_id] not provided or not valid",
-        method_name: __method__.to_s,
-        error_message: "unprocessable entity")
-      return head :unprocessable_entity
-    end
-    if !params.key?(:user_id)
-      log_service_error(
-        log_msg: "User ID params[:user_id] not provided or not valid",
-        method_name: __method__.to_s,
-        error_message: "unprocessable entity")
-      return head :unprocessable_entity
-    end
-
-    repo = if FeatureFlag.vexi.enabled?(:repos_domain_controllers, default: false)
-      T.cast(Repositories.domain.by_id(params[:repository_id].to_i), T.nilable(Repository)) # rubocop:todo GitHub/AvoidCast
-    else
-      Repository.find_by(id: params[:repository_id])
-    end
-    if repo.nil?
-      log_service_error(
-        log_msg: "Invalid repository",
-        method_name: __method__.to_s,
-        error_message: "unprocessable entity")
-      return head :unprocessable_entity
-    end
-
-    bypass_reviewers, error_message = SecretScanning::Services::DelegatedBypassService.get_bypass_reviewers(repo, params[:user_id])
-    if error_message
-      log_service_error(
-        log_msg: "Service failed to get reviewers using repository ID",
-        method_name: __method__.to_s,
-        error_message: error_message)
-      return head :internal_server_error
-    end
-    result = [bypass_reviewers, error_message]
-    head :ok
-  end
-
-  sig { void }
   def create
-    if !params.key?(:owner_id)
-      log_service_error(
-        log_msg: "Owner ID params[:owner_id] not provided or not valid",
-        method_name: __method__.to_s,
-        error_message: "unprocessable entity")
-      return head :unprocessable_entity
-    end
-    if !params.key?(:owner_scope)
-      log_service_error(
-        log_msg: "Owner Scope params[:owner_scope] not provided or not valid",
-        method_name: __method__.to_s,
-        error_message: "unprocessable entity")
-      return head :unprocessable_entity
-    end
+    # TODO: Stop passing owner_id and owner_scope in body
     if !params.key?(:reviewer_id)
       log_service_error(
         log_msg: "Reviewer ID params[:reviewer_id] not provided or not valid",
@@ -111,11 +56,7 @@ class Repos::SecretScanning::PushProtection::DelegatedBypassReviewersController 
       return head :unprocessable_entity
     end
 
-    org = if FeatureFlag.vexi.enabled?(:repos_domain_controllers, default: false)
-      T.cast(Repositories.domain.by_id(params[:owner_id].to_i), T.nilable(Repository))&.organization # rubocop:todo GitHub/AvoidCast
-    else
-      Repository.find_by(id: params[:owner_id])&.organization
-    end
+    org = current_repository.organization
     if org.nil?
       log_service_error(
         log_msg: "Invalid repository. Must belong to an organization",
@@ -131,7 +72,7 @@ class Repos::SecretScanning::PushProtection::DelegatedBypassReviewersController 
       return head :unprocessable_entity
     end
 
-    reviewer, error_message = SecretScanning::Services::DelegatedBypassService.add_bypass_reviewer(Integer(params[:owner_id]), params[:owner_scope].to_sym, nil, Integer(params[:reviewer_id]), params[:reviewer_type], params[:user_id])
+    reviewer, error_message = SecretScanning::Services::DelegatedBypassService.add_bypass_reviewer(current_repository.id, :REPOSITORY_SCOPE, nil, Integer(params[:reviewer_id]), params[:reviewer_type], params[:user_id])
     if reviewer.nil? || error_message
       flash[:error] = error_message
       return head :internal_server_error
@@ -141,23 +82,10 @@ class Repos::SecretScanning::PushProtection::DelegatedBypassReviewersController 
 
   sig { void }
   def destroy
+    # TODO: Stop passing owner_id and owner_scope in body
     if !params.key?(:bypass_reviewer_id)
       log_service_error(
         log_msg: "Bypass Reviewer ID params[:bypass_reviewer_id] not provided or not valid",
-        method_name: __method__.to_s,
-        error_message: "unprocessable entity")
-      return head :unprocessable_entity
-    end
-    if !params.key?(:owner_id)
-      log_service_error(
-        log_msg: "Owner ID params[:owner_id] not provided or not valid",
-        method_name: __method__.to_s,
-        error_message: "unprocessable entity")
-      return head :unprocessable_entity
-    end
-    if !params.key?(:owner_scope)
-      log_service_error(
-        log_msg: "Owner Scope params[:owner_scope] not provided or not valid",
         method_name: __method__.to_s,
         error_message: "unprocessable entity")
       return head :unprocessable_entity
@@ -170,7 +98,7 @@ class Repos::SecretScanning::PushProtection::DelegatedBypassReviewersController 
       return head :unprocessable_entity
     end
 
-    error_message = SecretScanning::Services::DelegatedBypassService.remove_bypass_reviewer(Integer(params[:bypass_reviewer_id]), Integer(params[:owner_id]), params[:owner_scope], params[:user_id])
+    error_message = SecretScanning::Services::DelegatedBypassService.remove_bypass_reviewer(Integer(params[:bypass_reviewer_id]), current_repository.id, :REPOSITORY_SCOPE, params[:user_id])
 
     if error_message
       flash[:error] = error_message

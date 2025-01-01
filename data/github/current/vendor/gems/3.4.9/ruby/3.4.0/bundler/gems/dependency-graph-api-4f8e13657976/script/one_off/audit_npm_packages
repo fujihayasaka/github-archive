@@ -1,0 +1,89 @@
+#!/usr/bin/env ruby
+#                               __  __
+#   ___  _ __   ___        ___  / _|/ _|
+#  / _ \| '_ \ / _ \_____ / _ \| |_| |_
+# | (_) | | | |  __/_____| (_) |  _|  _|
+#  \___/|_| |_|\___|      \___/|_| |_|
+#
+# Audit npm packages in dependency graph to verify that they exist in npm registry
+# Usage: script/one_off/audit_npm_packages
+
+require_relative "../../config/environment"
+
+last_processed_package = ARGV[0] || 0
+checkpoint = Checkpoint.find_or_create_by(name: "audit_npm_packages")
+npm = Types::PackageManager.coerce(:npm).id
+deleted_packages = 0
+
+ActiveRecord::Base.connected_to(role: :reading) do
+  Package.where(package_manager: npm).where("name LIKE ?", "@%").in_batches(of: 100, start: checkpoint.last_checkpointed_id).each do |batch|
+    batch.each do |package|
+      package_name = package.name
+      package_id = package.id
+
+      match = package_name.match(/^(?:@([^\/]+)\/)?([^\/]+)$/)
+      scoped, name = match[1], match[2]
+
+      # Checks to see if we have a package with second portion of scoped package name
+      # If we have @angualr/forms, we are checking for presence of forms npm package in db
+      package_to_verify = Package.where(package_manager: 2, name: name).first
+
+      ActiveRecord::Base.connected_to(role: :writing) do
+        if package_to_verify.blank?
+          # If no package with second half of scoped name exists, there in nothing left to be done, skip iteration
+          puts "No package with name #{name} exists in db, so no possible clash with #{package_name} is possible.\n"
+          next
+        else
+          begin
+            # If this runs smoothly, we need to verify that package found in registry is one we want saved in db
+            importer = OneOffImporters::Npm.new(package_name: name)
+            response = importer.request
+
+            # if package in db has a repo_nwo and its build from registry repo url skip package cause we've verified package
+            if response["repository"].present?
+              github_url = nil
+
+              if response["repository"].is_a?(Hash) && response["repository"]["url"] && response["repository"]["url"].include?("github.com") && package_to_verify.repository_nwo.present?
+                github_url = response["repository"]["url"]
+              elsif response["repository"].is_a?(Array) && response["repository"][0]["url"].include?("github.com") && package_to_verify.repository_nwo.present?
+                github_url = response["repository"][0]["url"]
+              else
+                next
+              end
+
+              next if github_url.nil?
+
+              if github_url.include?(package_to_verify.repository_nwo)
+                puts "Verified that we have correct package metadata for #{name}"
+                next
+              else
+                # We have different urls for hosted package so delete current one and download package from registry
+                package_to_verify.destroy
+                deleted_packages += 1
+
+                importer.run
+              end
+            end
+
+          rescue TypeError => e
+            puts "TypeError from #{package_to_verify.name}. #{package_to_verify.inspect}"
+            raise e
+          rescue RuntimeError => e
+            # Case where registry does not have package with that name but db has
+            # We should delete package in this case from db
+            puts "#{e}: \n#{name} was not found in registry, but was in db, deleting...\n"
+
+            if e.message.include?("404")
+              package_to_verify.destroy
+              deleted_packages += 1
+            end
+          end
+
+          checkpoint.update(last_checkpointed_id: package_id)
+          puts "Checkpoint set to #{package_id}"
+        end
+      end
+    end
+  end
+  puts "Audit of NPM packages complete! #{deleted_packages} #{"package".pluralize(deleted_packages)} were deleted"
+end

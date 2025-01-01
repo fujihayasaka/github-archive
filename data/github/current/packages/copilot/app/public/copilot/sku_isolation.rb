@@ -187,6 +187,9 @@ module Copilot
 
     sig { params(key: Symbol).returns(T::Boolean) }
     def feature_enabled?(key)
+      # Copilot is not available on GHES
+      return false if GitHub.enterprise?
+
       return true if FeatureFlag.vexi.enabled?(key, user, default: false)
       return false if user.nil?
 

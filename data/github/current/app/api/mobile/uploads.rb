@@ -28,6 +28,11 @@ class Api::Mobile::Uploads < Api::App
     content_type = data["content_type"]
     repo = repository(data)
 
+    # Check repository access before proceeding to prevent information disclosure
+    if repo && !repo.pullable_by?(current_user)
+      deliver_error! 404, message: "Not Found"
+    end
+
     # Explicitly add :repository_id, in case request only contains :subject_id.
     # Storage policies and policy creators expect data to include this key explicitly.
     data["repository_id"] ||= repo&.id

@@ -1,0 +1,46 @@
+name: "CodeQL"
+
+on:
+  push:
+    branches: [ main, master, enterprise-*.*-release* ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'go', 'ruby', 'actions', 'javascript', 'c' ]
+
+    steps:
+    - name: obtain OIDC token for goproxy
+      uses: github/setup-goproxy@v1.1.0
+
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Go
+      if: ${{ matrix.language == 'go' }}
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go/go.mod'
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+        build-mode: ${{ matrix.language == 'go' && 'autobuild' || 'none' }}
+        source-root: ${{ matrix.language == 'go' && 'go' || '' }}
+        config-file: .github/codeql/codeql-${{matrix.language}}-config.yml
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3

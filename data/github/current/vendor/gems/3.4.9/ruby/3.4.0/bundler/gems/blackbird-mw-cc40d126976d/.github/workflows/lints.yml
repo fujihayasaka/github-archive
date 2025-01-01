@@ -1,0 +1,56 @@
+name: Linters
+
+on:
+  pull_request:
+    reuse-previous-outcome: true
+  merge_group:
+    reuse-previous-outcome: true
+
+# In the event that there is a new push to the head_ref (only defined on PR
+# events), cancel any running jobs because there are now obsolete, and wasting
+# resources.
+#
+# Via: https://docs.github.com/en/actions/using-jobs/using-concurrency#example-using-a-fallback-value
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write # for setup-goproxy OIDC
+  contents: read
+  packages: read
+
+jobs:
+  golangci:
+    name: Lint Go code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/setup-goproxy@v1.1.0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - uses: actions/cache@v4.2.0
+        with:
+          path: vendor
+          key: ${{ runner.os }}-go-vendor-${{ hashFiles('go.sum') }}
+
+      - run: make bootstrap
+        env:
+          CONTAINER_BUILDER_TOKEN: ${{ secrets.CONTAINER_BUILDER_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+
+      - uses: golangci/golangci-lint-action@2226d7cb06a077cd73e56eedd38eecad18e5d837
+        with:
+          version: latest
+          skip-cache: true # Required to get annotations to show up for some reason
+          args: "--timeout 5m" # NOTE: Frequent timeouts reported https://github.com/golangci/golangci-lint-action/issues/297
+
+  proto:
+    name: Check for proto changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log into ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{github.repository_owner}} --password-stdin
+      - uses: actions/checkout@v4
+      - run: script/protoc-check

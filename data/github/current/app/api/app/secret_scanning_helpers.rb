@@ -29,7 +29,8 @@ module Api::App::SecretScanningHelpers
 
     # Checks are mostly separated to ensure the user gets a good error back.
     if owner.advanced_security_products_bundled?
-      deliver_error!(404, message: "Advanced Security is disabled on this repository.") unless repo.advanced_security_enabled?
+      available = SecretScanning::Features::AdvancedSecurityHelper.advanced_security_available?(repo)
+      deliver_error!(404, message: "Advanced Security is disabled on this repository.") unless available
     else
       available = SecretScanning::Features::AdvancedSecurityHelper.secret_scanning_available?(repo)
       deliver_error!(404, message: "Secret Protection is disabled on this repository.") unless available

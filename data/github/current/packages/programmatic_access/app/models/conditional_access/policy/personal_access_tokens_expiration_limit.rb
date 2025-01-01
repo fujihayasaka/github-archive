@@ -69,7 +69,14 @@ module ConditionalAccess
           # If the actor isn't affiliated with the business, then the policy doesn't apply.
           return :yes unless T.cast(self, AppliedIn).actor.is_business_member?(target.id)
         when Organization
-          return :yes unless actor_affiliated_with_org?(T.cast(self, AppliedIn).actor, target, resource)
+          unless actor_affiliated_with_org?(T.cast(self, AppliedIn).actor, target, resource)
+            # On GHES, the enterprise-wide policy applies to all users regardless of org affiliation.
+            if GitHub.enterprise? && target.business.present?
+              return :no unless expirable_access.pat_adheres_by_targets_expiration_limit?(target)
+              return :yes
+            end
+            return :yes
+          end
         end
 
         return :no unless expirable_access.pat_adheres_by_targets_expiration_limit?(target)

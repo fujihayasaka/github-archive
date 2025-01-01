@@ -39,6 +39,7 @@ module Profiles
       ].freeze
 
       SPONSORSHIPS_LIMIT = 13
+      ORGANIZATIONS_LIMIT = 24 # Limit of how many organizations to show on profile
 
       def initialize(profile_user:, viewer:, active_tab:, skip_sponsor_preloads: false, previewing: false)
         @profile_user = profile_user
@@ -261,7 +262,13 @@ module Profiles
 
       memoize def organizations
         measure(metric: "organizations_visible_to_viewer", type: :query) do
-          profile_user.organizations_visible_to(viewer).to_a
+          profile_user.organizations_visible_to(viewer).limit(ORGANIZATIONS_LIMIT).to_a
+        end
+      end
+
+      memoize def organizations_count
+        measure(metric: "organizations_count", type: :count) do
+          profile_user.organizations_visible_to(viewer).count
         end
       end
 

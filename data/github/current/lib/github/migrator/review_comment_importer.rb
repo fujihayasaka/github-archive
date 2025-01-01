@@ -82,6 +82,14 @@ module GitHub
           "pull_request_review_comment",
           "skipped"
         )
+      rescue GitRPC::ObjectMissing => error
+        log_and_create_importer_result(
+          attributes,
+          error,
+          "Skipped import: encountered a GitRPC::ObjectMissing",
+          "pull_request_review_comment",
+          "skipped"
+        )
       rescue ActiveModel::RangeError => error
         # TODO: Remove this check and method once archive metadata validation
         # is implemented. See https://github.com/github/data-liberation/issues/344

@@ -201,8 +201,10 @@ class OauthTokensController < ApplicationController
   end
 
   def destroy
-    result = OauthAccessTokens.domain.destroy(params[:id].to_i, :web_user, entry_point: :oauth_tokens_controller_destroy)
-    return render_404 if result.is_a?(GH::Result::Error::NotFound)
+    access = OauthAccessTokens.domain.personal_token_by_user_and_id(current_user.id, params[:id].to_i)
+    return render_404 unless access
+
+    OauthAccessTokens.domain.destroy(access.id, :web_user, entry_point: :oauth_tokens_controller_destroy)
 
     if request.xhr?
       head 200

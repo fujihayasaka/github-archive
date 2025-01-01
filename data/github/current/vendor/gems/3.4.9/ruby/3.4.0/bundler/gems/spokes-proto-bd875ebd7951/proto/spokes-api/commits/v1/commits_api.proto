@@ -1,0 +1,328 @@
+syntax = "proto3";
+
+package github.spokes.commits.v1;
+
+option go_package = "github.com/github/spokes-proto/gen/go/v1/commits";
+option ruby_package = "GitHub::Spokes::Proto::Commits::V1";
+
+import "spokes-api/extensions/v1/field_options.proto";
+
+import "spokes-api/types/v1/cursor.proto";
+import "spokes-api/types/v1/object_id.proto";
+import "spokes-api/types/v1/path.proto";
+import "spokes-api/types/v1/repository.proto";
+import "spokes-api/types/v1/revision.proto";
+import "spokes-api/types/v1/request_context.proto";
+
+import "spokes-api/types/selectors/v1/object_id_selector.proto";
+import "spokes-api/types/selectors/v1/revision_selector.proto";
+import "spokes-api/types/selectors/v1/revision_and_path_selector.proto";
+import "spokes-api/types/selectors/v1/push_selector.proto";
+import "spokes-api/types/selectors/v1/fork_push_selector.proto";
+import "spokes-api/types/selectors/v1/historical_push_selector.proto";
+import "spokes-api/types/selectors/v1/universal_selector.proto";
+import "spokes-api/types/selectors/v1/quarantine_commits_selector.proto";
+import "spokes-api/types/selectors/v1/distinct_commits_selector.proto";
+import "spokes-api/types/selectors/v1/commitish_selector.proto";
+
+import "spokes-api/commits/v1/commit_item.proto";
+import "spokes-api/commits/v1/rev_list_filters.proto";
+
+// CommitsAPI contains APIs for commit-related Git operations.
+service CommitsAPI {
+    // CheckCommitReachability checks whether the selected commits are reachable from a branch or tag.
+    rpc CheckCommitReachability(CheckCommitReachabilityRequest) returns (CheckCommitReachabilityResponse);
+
+    // ListCommits returns a list of commits based on a selector.
+    rpc ListCommits(ListCommitsRequest) returns (ListCommitsResponse);
+
+    // CountCommits returns a count of commits based on a selector.
+    rpc CountCommits(CountCommitsRequest) returns (CountCommitsResponse);
+
+    // ListContributors returns a list of contributors that should be charged for Advanced Security.
+    rpc ListContributors(ListContributorsRequest) returns (ListContributorsResponse);
+
+    // AheadBehind returns a list of ahead/behind values for a list of
+    // commit tips relative to a common base commit.
+    rpc AheadBehind(AheadBehindRequest) returns (AheadBehindResponse);
+
+    // AheadBehindContains returns a list of tips which are contained in a base.
+    rpc AheadBehindContains(AheadBehindContainsRequest) returns (AheadBehindContainsResponse);
+
+    // BlameTree returns a list of oid/path pairs for the most-recent
+    // commit to change that path.
+    rpc BlameTree(BlameTreeRequest) returns (BlameTreeResponse);
+
+    // Describe returns a byte name of the commit
+    rpc Describe(DescribeRequest) returns (DescribeResponse);
+
+}
+
+
+// CheckCommitReachability checks whether the selected commits are reachablle from a branch or tag.
+message CheckCommitReachabilityRequest {
+    // repository is the repository to operate on.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.Cursor cursor = 2;
+
+    github.spokes.types.v1.RequestContext request_context = 4;
+
+    // selector is which commits to select for.
+    //
+    // A maximum of 1000 objects are allowed per request.
+    oneof selector {
+        // object_id_selector is a selector for picking individual commits by id.
+        github.spokes.types.selectors.v1.ObjectIDSelector object_id_selector = 3 [(github.spokes.extensions.v1.limit) = 1000];
+    }
+}
+
+// CheckCommitReachabilityResponse contains a list of reachable commits.
+message CheckCommitReachabilityResponse {
+    // commits contains the list of commits that are reachable
+    repeated github.spokes.types.v1.ObjectID commits = 1;
+
+    github.spokes.types.v1.Cursor next_cursor = 2;
+}
+
+// ListCommitsRequest returns a list of commits based on a selector.
+message ListCommitsRequest {
+    // repository is the repository to operate on.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.Cursor cursor = 2;
+
+    github.spokes.types.v1.RequestContext request_context = 7;
+
+    // selector is which commits to select for.
+    oneof selector {
+        // object_id_selector is a selector for picking individual commits by id.
+        github.spokes.types.selectors.v1.ObjectIDSelector object_id_selector = 3;
+        // push_selector is a selector for picking commits based on (ref, before, after) tuples.
+        github.spokes.types.selectors.v1.PushSelector push_selector = 4;
+        // universal_selector selects all commits in the repository that are reachable from any
+        // reference, including our hidden bookkeeping references.
+        github.spokes.types.selectors.v1.UniversalSelector universal_selector = 5;
+        // revision_selector is a selector for choosing the commits to list based on
+        // a Git revision (https://git-scm.com/docs/gitrevisions)
+        github.spokes.types.selectors.v1.RevisionSelector revision_selector = 6;
+        // fork_push_selector is a push to select in a fork repository.
+        github.spokes.types.selectors.v1.ForkPushSelector fork_push_selector = 8;
+        // historical_push_selector is a selector for selecting picking commits from past pushes based on (ref, before, after) tuples.
+        github.spokes.types.selectors.v1.HistoricalPushSelector historical_push_selector = 9;
+        // revision_and_path_selector is a selector for picking commits based on Git revisions for a given path.
+        // <br>DEPRECATED: this selector option will be removed in future versions of this endpoint,
+        // use `RevisionSelector` with a `Pathspec` to specify a revision at a path.
+        github.spokes.types.selectors.v1.RevisionAndPathSelector revision_and_path_selector = 10;
+        // quarantine_commits_selector selects commits in a push, when it's in quarantine.
+        github.spokes.types.selectors.v1.QuarantineCommitsSelector quarantine_commits_selector = 11;
+        // distinct_commits_selector selects commits that are unique to the target branch.
+        github.spokes.types.selectors.v1.DistinctCommitsSelector distinct_commits_selector = 12;
+    }
+
+    // Filter the commits returned by this request.
+    // <br>Incompatible with distinct_commits_selector.
+    github.spokes.commits.v1.RevListFilters filters = 13;
+}
+
+// ListCommitsResponse contains a list of commits.
+message ListCommitsResponse {
+    // commits is the commits found based on the selector.
+    repeated github.spokes.commits.v1.CommitItem commits = 1;
+
+    github.spokes.types.v1.Cursor next_cursor = 2;
+}
+
+// CountCommitsRequest returns a count of commits based on a selector.
+message CountCommitsRequest {
+    // repository is the repository to operate on.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.RequestContext request_context = 2;
+
+    // selector is which commits to select for.
+    oneof selector {
+        // object_id_selector is a selector for picking individual commits by id.
+        github.spokes.types.selectors.v1.ObjectIDSelector object_id_selector = 3;
+        // distinct_commits_selector selects commits that are unique to the target branch.
+        github.spokes.types.selectors.v1.DistinctCommitsSelector distinct_commits_selector = 4;
+        // revision_selector is a selector for choosing the commits to list based on
+        // a Git revision (https://git-scm.com/docs/gitrevisions)
+        github.spokes.types.selectors.v1.RevisionSelector revision_selector = 7;
+    }
+
+    // Filter the commits returned by this request.
+    // <br>Incompatible with distinct_commits_selector.
+    github.spokes.commits.v1.RevListFilters filters = 5;
+
+    uint64 limit = 6;
+}
+
+// CountCommitsResponse contains the count of commits based on the provided selector.
+message CountCommitsResponse {
+    uint64 count = 1;
+}
+
+// ListContributorsRequest returns a list of contributors (authors and co-authors) associated with the selected commits. Used for billing.
+message ListContributorsRequest {
+    // repository is the repository to operate on.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.Cursor cursor = 5;
+
+    github.spokes.types.v1.RequestContext request_context = 4;
+
+    oneof selector {
+        // push_selector is a selector for picking commits based on (ref, before, after) tuples.
+        github.spokes.types.selectors.v1.PushSelector push_selector = 2;
+
+        // historical_push_selector is a selector for selecting picking commits from past pushes based on (ref, before, after) tuples.
+        github.spokes.types.selectors.v1.HistoricalPushSelector historical_push_selector = 3;
+    }
+}
+
+// ListContributorsResponse contains a list of contributors (authors and co-authors) associated with the selected commits. Used for billing.
+message ListContributorsResponse {
+    // contributors contains the distinct contributors associated with the requested commits.
+    repeated Contributor contributors = 1;
+
+    github.spokes.types.v1.Cursor next_cursor = 2;
+}
+
+// Contributor contains identifying information extracted from commit metadata.
+message Contributor {
+    reserved 1;
+    // email_bytes is an author or co-author email in bytes.
+    bytes email_bytes = 2;
+    // the commit we found this contributor in.
+    github.spokes.types.v1.ObjectID commit_oid = 3;
+}
+
+// AheadBehindRequest returns a list of ahead/behind pairs for a list of
+// tip commits relative to a common base commit.
+message AheadBehindRequest {
+    // repository is the repository to operate on.
+    github.spokes.types.v1.Repository repository = 1;
+
+    // In the future, we may want to support multiple bases, so place the
+    // single-base/multi-tip request message in a selector.
+    oneof selector {
+        // base_and_tips_selector allows specifying a single base and multiple tips.
+        BaseAndTipsSelector base_and_tips_selector = 2;
+    }
+
+    github.spokes.types.v1.RequestContext request_context = 3;
+}
+
+message BaseAndTipsSelector {
+    github.spokes.types.v1.Revision base = 2;
+
+    repeated github.spokes.types.v1.Revision tips = 3;
+}
+
+// AheadBehindResponse contains a list of ahead/behind pairs.
+// * Used for the branches page.
+// * Used for checking which pull requests were merged by a push to the
+//   default branch.
+message AheadBehindResponse {
+    // ahead_behind_pairs lists the values that could be determined
+    // from the input tips.
+    repeated AheadBehindPair ahead_behind_pairs = 1;
+}
+
+// AheadBehindPair contains the ahead/behind count for a given tip
+// with respect to the common base used in the ahead/behind request.
+message AheadBehindPair {
+    // tip is the provided revision. Its ahead or behind the base by the
+    // values in this message.
+    github.spokes.types.v1.Revision tip = 1;
+    // ahead is the number of commits the tip is ahead of the base.
+    uint32 ahead = 2;
+    // behind is the number of commits the tip is behind the base.
+    uint32 behind = 3;
+}
+
+// AheadBehindContainsRequest returns a list of tips which are contained
+// in a given base (but not how far behind those tips are).
+message AheadBehindContainsRequest {
+    // repository is the repository to operate on.
+    github.spokes.types.v1.Repository repository = 1;
+
+    // In the future, we may want to support multiple bases, so place the
+    // single-base/multi-tip request message in a selector.
+    oneof selector {
+        // base_and_tips_selector allows specifying a single base and multiple tips.
+        BaseAndTipsSelector base_and_tips_selector = 2;
+    }
+
+    github.spokes.types.v1.RequestContext request_context = 3;
+}
+
+// AheadBehindContainsResponse contains a list of tips which are
+// contained in the base.
+message AheadBehindContainsResponse {
+    // tips is a list of tips which are contained in the base.
+    repeated github.spokes.types.v1.Revision tips = 1;
+}
+
+// BlameTreeRequest takes a commit, path, and recursive flag and returns
+// a list of oid/path pairs representing the most-recent commit oid to
+// touch the given path.
+message BlameTreeRequest {
+    // repository is the repository to operate on.
+    github.spokes.types.v1.Repository repository = 1;
+
+    oneof selector {
+        // blame_tree_selector specifies a starting commit, path, and recursion.
+        BlameTreeSelector blame_tree_selector = 2;
+    }
+
+    github.spokes.types.v1.RequestContext request_context = 3;
+}
+
+message BlameTreeSelector {
+    github.spokes.types.v1.Revision commit = 1;
+
+    // The path is allowed to be nil, which implies the root path "".
+    // A non-nil path must be valid.
+    github.spokes.types.v1.Path path = 2;
+
+    bool recursive = 3;
+}
+
+// BlameTreeResponse consists of a list of OID/Path pairs.
+message BlameTreeResponse {
+    repeated CommitPathPair pairs = 1;
+}
+
+// CommitPathPair stores an object ID and a path.
+message CommitPathPair {
+    github.spokes.types.v1.ObjectID oid = 1;
+
+    github.spokes.types.v1.Path path = 2;
+}
+
+// Describe generates a human-readable name for a given commitish. 
+// An optional abbreviation length can be used to configure the OID suffix to the name.
+message DescribeRequest {
+    // repository is the repository to operate on.
+    github.spokes.types.v1.Repository repository = 1;
+
+    // selector is which commit to select for.
+    oneof selector {
+        // commitish_selector selects a commit by its commitish.
+        github.spokes.types.selectors.v1.CommitishSelector commitish_selector = 2;
+    }
+
+    // length is the OID abbreviation length in the human-readable revision name. 
+    // If zero or unset, defaults to the full OID length.
+    uint32 abbrev_length = 3;
+
+    github.spokes.types.v1.RequestContext request_context = 4;
+}
+
+// DescribeResponse returns the name of the commit
+message DescribeResponse {
+    // Name of the commit 
+    bytes commit_name = 1;
+}

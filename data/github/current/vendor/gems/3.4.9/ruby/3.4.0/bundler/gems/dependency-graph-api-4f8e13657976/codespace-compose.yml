@@ -1,0 +1,57 @@
+version: 0
+idle_timeout: 240m
+codespaces:
+  github:
+    repo: github/github
+    branch: master
+    machine: xLargePremiumLinux
+    devcontainer_path: ".devcontainer/devcontainer.json"
+    network:
+      ports: # Services started by dotcom that dg-api will use
+        - 3000  # http
+        - 3306  # db
+        - 9092  # hydro
+        - 18081 # aqueduct
+        - 28081 # spokesd
+      local_ports:
+        - 80:80
+    # Set the dg-api environment variable globally so you don't have to type it every time
+    # you run script/server
+    exec: |
+      echo 'export DEPENDENCY_GRAPH_API_URL="http://localhost:9596/query"' | sudo tee -a /etc/bash.bashrc
+      echo 'export DEPENDENCY_GRAPH_API_URL="http://localhost:9596/query"' | sudo tee -a /etc/zsh/zshrc
+      cd /workspaces/github/
+  dependency-snapshots-api:
+    repo: github/dependency-snapshots-api
+    branch: main
+    machine: largePremiumLinux
+    devcontainer_path: ".devcontainer/devcontainer.json"
+    network:
+      ports:
+        - 9597
+      local_ports:
+        - 9597:9597
+    # ds-api's monolith twirp api url env var naming convention is slightly different than dg-api!
+    exec: |
+      echo "127.0.0.1 api.github.localhost" | sudo tee -a /etc/hosts
+      echo "127.0.0.1 github.localhost" | sudo tee -a /etc/hosts
+      echo 'export MONOLITH_TWIRP_URL="http://api.github.localhost:3000/internal"' | sudo tee -a /etc/bash.bashrc
+      echo 'export MONOLITH_TWIRP_URL="http://api.github.localhost:3000/internal"' | sudo tee -a /etc/zsh/zshrc
+      echo 'export SPOKES_URL="http://127.0.0.1:28081"' | sudo tee -a /etc/bash.bashrc
+      echo 'export SPOKES_URL="http://127.0.0.1:28081"' | sudo tee -a /etc/zsh/zshrc
+      cd /workspaces/dependency-snapshots-api
+  dependency-graph-api:
+    repo: github/dependency-graph-api
+    branch: master
+    machine: largePremiumLinux
+    devcontainer_path: ".devcontainer/devcontainer.json"
+    network:
+      ports: # Services started by dg-api that dotcom will use
+        - 9596 # http
+      local_ports:
+        - 9596:9596
+    # - Add some DNS entries to ensure that github.localhost resolves correctly in the dg-api Codespace
+    # - Create a file that indicates we're running in a Codespace-compose setup
+    exec: |
+      # This is running the file that is on the dg-api codespace, not where codespace-compose.yml is!
+      /workspaces/dependency-graph-api/script/configure-codespace-compose

@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package controlaccess;
+
+import "authorizer.proto";
+
+option go_package = "github.com/github/authzd/pkg/controlaccess";
+option ruby_package = "Authzd::ControlAccess";
+
+message Request {
+  repeated authorizer.Attribute attributes = 1;
+  repeated authorizer.Attribute cap_attributes = 2;
+  repeated authorizer.Attribute authz_policy_attributes = 3;
+}
+
+message Response {
+  // Provides the evaluation outcome for executed authorization pipeline
+  Result result = 1;
+}
+
+message ExecutionStep{
+  // the name of the authorization step
+  string name = 1;
+
+  // reveal existence of resources (forbid/403) or deny existence (not_found/404)
+  // indicates that the actor has some level of permission on the resource
+  bool disclose_subject_existence = 2;
+
+  // the result of evaluating the authorization step
+  authorizer.Result decision = 3;
+
+  // In the case of an error, will store the error message
+  string reason = 4;
+
+	bool halt = 5;
+}
+
+message Result {
+  // the result of evaluating the requested authorization check
+  authorizer.Result outcome = 1;
+
+  // reveal existence of resources (forbid/403) or deny existence (not_found/404)
+  // indicates that the actor has some level of permission on the resource
+  bool disclose_subject_existence = 2;
+  // bool subject_visibility = 2; // would be an enum
+  // bool subject_visible_to_actor = 2;
+
+  // internal reason (log safe)
+  string reason = 3;
+
+  // user-facing message (enforcement)
+  string message = 4;
+
+  // An array of execution steps
+  repeated ExecutionStep steps = 5;
+
+  // chunk details
+  // permissions actor has on resource
+  // decision tree/tracing metadata
+  repeated authorizer.Attribute attributes = 6;
+}
+
+service ControlAccess {
+  rpc Check(Request) returns (Response);
+}
