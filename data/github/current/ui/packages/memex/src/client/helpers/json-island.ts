@@ -108,7 +108,7 @@ export function fetchJSONIslandData<TIslandDataKey extends keyof JSONIslandData>
   elementId: TIslandDataKey,
 ): JSONIslandData[TIslandDataKey] | undefined {
   const jsonIsland = document.getElementById(elementId)
-  if (jsonIsland && jsonIsland.textContent) {
+  if (jsonIsland && jsonIsland instanceof HTMLScriptElement && jsonIsland.textContent) {
     try {
       return JSON.parse(jsonIsland.textContent) as JSONIslandData[TIslandDataKey]
     } catch {
