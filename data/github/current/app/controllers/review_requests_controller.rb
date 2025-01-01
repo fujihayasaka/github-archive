@@ -276,7 +276,7 @@ class ReviewRequestsController < AbstractRepositoryController
     return [] if re_requesting_review?
 
     ids = params.fetch(:reviewer_team_ids, []).select(&:present?).uniq
-    current_repository.teams(immediate_only: false, include_all_repo_roles: current_repository.owner&.feature_enabled?(:reviewer_teams_all_repo_role)).closed.where(id: ids)
+    current_repository.teams(immediate_only: false, include_all_repo_roles: true).closed.where(id: ids)
   end
 
   memoize def user_reviewers

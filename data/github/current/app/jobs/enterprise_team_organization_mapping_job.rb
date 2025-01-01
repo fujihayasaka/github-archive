@@ -12,7 +12,7 @@ class EnterpriseTeamOrganizationMappingJob < ApplicationJob
   retry_on_recoverable_exceptions
   retry_on GitHub::Restraint::UnableToLock, wait: 5.minutes, attempts: 10
 
-  BATCH_SIZE = 1000
+  BATCH_SIZE = 100
 
   sig { params(enterprise_team_id: Integer, organization_id: T.nilable(Integer)).void }
   def perform(enterprise_team_id, organization_id: nil)
@@ -67,7 +67,7 @@ class EnterpriseTeamOrganizationMappingJob < ApplicationJob
             organization: organization
           )
 
-          if mapping.team_id.nil? && left_to_create > 0
+          if mapping.team.nil? && left_to_create > 0
             items_to_create << {
               team: team_attributes(enterprise_team, organization),
               mapping: mapping_attributes(enterprise_team, organization)
@@ -78,7 +78,7 @@ class EnterpriseTeamOrganizationMappingJob < ApplicationJob
               "gh.enterprise_team.organization_mapping.count" => items_to_create.count
             )
             left_to_create -= 1
-          elsif mapping.team_id.nil? && left_to_create <= 0
+          elsif mapping.team.nil? && left_to_create <= 0
             GitHub.logger.info(
               "info.message" => "Max_Sync_Organizations limit reached - mapping not created for enterprise_team_organization_mapping_job",
               "gh.enterprise_team.id" => enterprise_team_id,
@@ -106,10 +106,10 @@ class EnterpriseTeamOrganizationMappingJob < ApplicationJob
         )
       end
 
-      create_teams_and_mappings(items_to_create, business: T.must(enterprise_team.business)) if items_to_create.any?
+      create_teams_and_mappings(enterprise_team_id, items_to_create, business: T.must(enterprise_team.business)) if items_to_create.any?
 
       GitHub.logger.info(
-        "info.message" => "Created team mappings for enterprise_team_organization_mapping_job",
+        "info.message" => "Created all team mappings for enterprise_team_organization_mapping_job",
         "gh.enterprise_team.id" => enterprise_team_id,
         "gh.enterprise_team.organization_mapping.count" => items_to_create.count
       )
@@ -138,37 +138,47 @@ class EnterpriseTeamOrganizationMappingJob < ApplicationJob
     )
   end
 
-  sig { params(items_to_create: T::Array[T.untyped], business: Business).void }
-  def create_teams_and_mappings(items_to_create, business:)
-    if EnterpriseTeam.enabled_for_organizations?(business:)
-      Instrumentation.suppressing do
-        ActiveRecord::Base.connected_to(role: :writing) do
-          ApplicationRecord::Domain::Users.transaction do
-            items_to_create.each_slice(BATCH_SIZE) do |batch|
-              # Create teams one by one, because we need the team_id to insert the mappings
-              created_teams = batch.map { |item| T.cast(Team.create!(item[:team]), Team) }
-              # Prepare the mappings to insert
-              mappings_to_insert = created_teams.map.with_index do |team, index|
-                batch[index][:mapping].merge(team_id: team.id)
-              end
-              # Insert the mappings
-              EnterpriseTeamOrganizationMapping.insert_all(mappings_to_insert)
-            end
-          end
-        end
-      end
-    else
+  sig { params(enterprise_team_id: Integer, items_to_create: T::Array[T.untyped], business: Business).void }
+  def create_teams_and_mappings(enterprise_team_id, items_to_create, business:)
+    Instrumentation.suppressing do
       ActiveRecord::Base.connected_to(role: :writing) do
         ApplicationRecord::Domain::Users.transaction do
           items_to_create.each_slice(BATCH_SIZE) do |batch|
             # Create teams one by one, because we need the team_id to insert the mappings
-            created_teams = batch.map { |item| T.cast(Team.create!(item[:team]), Team) }
+            created_teams = batch.map do |item|
+              GitHub.logger.info(
+                "info.message" => "Creating organization team for enterprise_team_organization_mapping_job",
+                "gh.enterprise_team.id" => enterprise_team_id,
+                "gh.organization.id" => item[:mapping][:organization_id],
+              )
+              team = T.cast(Team.create!(item[:team]), Team)
+              GitHub.logger.info(
+                "info.message" => "Created organization team for enterprise_team_organization_mapping_job",
+                "gh.enterprise_team.id" => enterprise_team_id,
+                "gh.organization.id" => team.organization_id,
+                "gh.team.id" => team.id
+              )
+              team
+            end
+
             # Prepare the mappings to insert
             mappings_to_insert = created_teams.map.with_index do |team, index|
               batch[index][:mapping].merge(team_id: team.id)
             end
-            # Insert the mappings
-            EnterpriseTeamOrganizationMapping.insert_all(mappings_to_insert)
+
+            # Insert the mappings or update team_id if mapping already exists
+            GitHub.logger.info(
+              "info.message" => "Creating batch of team mappings for enterprise_team_organization_mapping_job",
+              "gh.enterprise_team.id" => enterprise_team_id,
+              "gh.enterprise_team.organization_mapping.count" => mappings_to_insert.count
+            )
+            # rubocop:disable GitHub/UpsertAll This is necessary and perfs should be isolated on GHES, will also only happen rarely
+            EnterpriseTeamOrganizationMapping.upsert_all(mappings_to_insert, update_only: [:team_id, :updated_at, :status, :synced_at])
+            GitHub.logger.info(
+              "info.message" => "Created batch of team mappings for enterprise_team_organization_mapping_job",
+              "gh.enterprise_team.id" => enterprise_team_id,
+              "gh.enterprise_team.organization_mapping.count" => mappings_to_insert.count
+            )
           end
         end
       end
@@ -184,6 +194,15 @@ class EnterpriseTeamOrganizationMappingJob < ApplicationJob
         .enterprise_team_organization_mappings
         .includes(:team)
         .find_each do |mapping|
+          if mapping.team.nil?
+            GitHub.logger.warn(
+              "warning.message" => "Skipping security manager role sync - organization team not found",
+              "gh.enterprise_team.id" => enterprise_team.id,
+              "gh.organization.id" => mapping.organization_id,
+              "gh.team.id" => mapping.team_id
+            )
+            next
+          end
           if has_security_manager_assignment
             SecurityProduct::SecurityManagerRole.grant_to_team!(T.must(mapping.team))
           else

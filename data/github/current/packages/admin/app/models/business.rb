@@ -2349,6 +2349,17 @@ class Business < ApplicationRecord::Domain::Users
 
     users = User.where(id: user_ids).to_a
     teams = Team.where(id: team_ids).to_a
+    resolved_team_ids = teams.map(&:id)
+    missing_team_ids = team_ids - resolved_team_ids
+    if missing_team_ids.any?
+      GitHub.logger.warn(
+        "Some team IDs could not be found when adding users to organizations",
+        "code.namespace" => self.class.name,
+        "code.function" => __method__,
+        "gh.business.id" => id,
+        "gh.teams.missing_team_ids" => missing_team_ids,
+      )
+    end
     OrganizationOrchestration.add_users(actor: actor, action: action.to_s, business_id: id, organizations: organizations, teams: teams, users: users, caller_type: caller_type).execute(synchronous: synchronous_orchestration)
   end
 
@@ -2392,7 +2403,6 @@ class Business < ApplicationRecord::Domain::Users
   #
   # Returns Boolean
   def supports_unaffiliated_user_accounts?
-    return true if enterprise_server_scim_enabled?
     return false if GitHub.single_business_environment?
 
     return true if enterprise_managed_user_enabled?

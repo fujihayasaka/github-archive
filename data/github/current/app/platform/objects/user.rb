@@ -110,11 +110,15 @@ module Platform
       def email
         promises = Promise.all([@object.async_profile, @object.async_primary_user_email_role])
         promises.then do |_profile, primary_user_email_role|
-          target = primary_user_email_role&.public? ? nil : @object
+          # Public emails don't need access control - return them directly
+          if primary_user_email_role&.public?
+            next @object.publicly_visible_email(logged_in: !@context[:viewer].nil?) || ""
+          end
 
+          # Private emails require access control
           accessible = @context[:permission].access_allowed?(
             :v4_get_user_email,
-            target: target,
+            target: @object,
             resource: @object,
             current_repo: nil,
             current_org: nil,

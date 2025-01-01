@@ -63,6 +63,7 @@ class Api::AccessControl < Egress::AccessControl
     access.ensure_context :user
   end
 
+  # Only called for private emails (public emails bypass access control in the resolver)
   define_access :v4_get_user_email  do |access|
     access.ensure_context :user
     access.allow :v4_user_emailer

@@ -1820,12 +1820,11 @@ class Api::AccessControl < Egress::AccessControl
     Apps::Privileged.capable?(:internal_advisory_database, app: integration)
   end
 
-  role :v4_user_emailer, scope: %w(read:user user:email) do |context|
+  role :v4_user_emailer do |context|
     current_user, target = extract(context, :user, :target)
 
-    # in the event of an email being private, we'll require that
-    # only the actual user can read their own email
-    next true if target.nil?
+    # This role is only called for private emails now (public emails bypass access control in the resolver)
+    # Private emails can only be read by the user themselves or in specific EMU contexts
 
     if target.user? && target.is_enterprise_managed?
       # All emu primary emails (with shortcode) are private, profile emails are public within the enterprise context
@@ -1837,6 +1836,7 @@ class Api::AccessControl < Egress::AccessControl
     # Unless the request is user-to-server/PATv2 we're good to go.
     next true unless current_user.using_auth_via_granular_actor?
 
+    # For fine-grained PATs, check granular permissions
     target.resources.emails.readable_by?(current_user)
   end
 

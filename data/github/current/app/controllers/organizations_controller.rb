@@ -202,18 +202,33 @@ class OrganizationsController < ApplicationController
     end
 
     if !plan.paid? && !current_user.hammy?
-      octocaptcha = Octocaptcha.new(session, params["octocaptcha-token"], page: :org_create)
-      octocaptcha.verify
-      if !octocaptcha.solved?
-        anonymous_flash[:error] = "Unable to verify your captcha answer. " \
-          "Please try again or visit #{octocaptcha_help_url} for troubleshooting information."
-        view = Orgs::SetupView.new({
-          current_user: current_user,
-          plan: GitHub::Plan.find(original_plan_name),
-          organization: Organization.new,
-          extend_captcha_timeout: !!params[:error_loading_captcha],
-        })
-        return render "organizations/signup/new", locals: { view: view }
+      # Perform a pre-check to avoid unnecessary verification when captcha will not be shown.
+      precheck = Octocaptcha.new(session, page: :org_create, user: current_user)
+      if precheck.show_captcha?
+        octocaptcha = Octocaptcha.new(session, params["octocaptcha-token"], page: :org_create)
+        octocaptcha.verify
+        unless octocaptcha.solved?
+          if params[:error_loading_captcha]
+            GitHub.dogstats.increment("org_create_captcha.error_loading_captcha")
+            Failbot.report(
+              Octocaptcha::UnableToLoadCaptcha.new,
+              "app": "octocaptcha-errors",
+              "gh.request_id": GitHub.context[:request_id],
+              "user_agent.original": request.user_agent.to_s,
+            )
+            @octocaptcha_timeout = Octocaptcha::HIGHER_BROWSER_LOAD_TIMEOUT
+          end
+
+          anonymous_flash[:error] = "Unable to verify your captcha answer. " \
+            "Please try again or visit #{octocaptcha_help_url} for troubleshooting information."
+          view = Orgs::SetupView.new({
+            current_user: current_user,
+            plan: GitHub::Plan.find(original_plan_name),
+            organization: Organization.new,
+            extend_captcha_timeout: !!params[:error_loading_captcha],
+          })
+          return render "organizations/signup/new", locals: { view: view }
+        end
       end
     end
 

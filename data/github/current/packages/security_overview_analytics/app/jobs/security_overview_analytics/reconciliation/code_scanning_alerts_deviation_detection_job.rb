@@ -118,6 +118,7 @@ module SecurityOverviewAnalytics
         super(**arguments)
 
         @next_cursor = T.let(nil, T.nilable(String))
+        @deviations_found = T.let(false, T::Boolean)
       end
 
       sig do
@@ -195,6 +196,7 @@ module SecurityOverviewAnalytics
 
           # If we don't have a revision on this date, we need to create one.
           if revision.nil?
+            @deviations_found = true
             GitHub.dogstats.increment(
               "security_overview_analytics.reconciliation.deviation",
               tags: all_stats_tags + ["deviation:missing_revision"]
@@ -240,6 +242,7 @@ module SecurityOverviewAnalytics
 
           # If the alert has any notable deviations, we need to correct them.
           if deviations.present?
+            @deviations_found = true
             GitHub.dogstats.increment(
               "security_overview_analytics.reconciliation.deviation",
               tags: all_stats_tags + [*deviations.map { |d| "deviation:#{d}" }]
@@ -298,8 +301,11 @@ module SecurityOverviewAnalytics
           PostReconciliationRepoDeviationCountsJob.perform_with_delay(repository_id:, owner_id:, feature: "code-scanning")
         end
 
-        # Even if we didn't correct any data, recalculate our rollup anyway
-        UpdateFeatureStatusSummaryJob.enqueue(repository_id:)
+        # On GitHub.com, recalculate rollup even if we didn't correct any data
+        # On GHES, only recalculate if deviations were found
+        if !GitHub.enterprise? || @deviations_found
+          UpdateFeatureStatusSummaryJob.enqueue(repository_id:)
+        end
       end
 
       sig { returns(Reconciliation::Session) }

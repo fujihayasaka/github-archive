@@ -35,7 +35,9 @@ module Elastomer
           WHERE name = :name
           AND datacenter = :datacenter
         SQL
-        ElastomerIndexMemo.connection.delete(query)
+        ActiveRecord::Base.connected_to(role: :writing) do
+          ElastomerIndexMemo.connection.delete(query)
+        end
       end
 
       # Store an IndexConfig in the MySQL table.
@@ -62,7 +64,9 @@ module Elastomer
             `primary`    = :primary,
             `updated_at` = :updated_at
         SQL
-        ElastomerIndexMemo.connection.insert(query)
+        ActiveRecord::Base.connected_to(role: :writing) do
+          ElastomerIndexMemo.connection.insert(query)
+        end
 
         config
       end

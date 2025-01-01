@@ -511,7 +511,7 @@ module PullRequest::ReviewRequestsDependency
     repository = T.must(self.repository)
     return [] unless repository.in_organization?
     if use_type_ahead
-      scope = repository.teams(immediate_only: false, include_all_repo_roles: repository.owner&.feature_enabled?(:reviewer_teams_all_repo_role)).closed.where(organization_id: repository.organization&.id)
+      scope = repository.teams(immediate_only: false, include_all_repo_roles: true).closed.where(organization_id: repository.organization&.id)
       if search_query.empty?
         # If we have an empty search query, this means type-ahead is enabled. we will limit the query to speed up initial load,
         # as the intention is for the user to filter down further with typing a valid search.
@@ -527,10 +527,10 @@ module PullRequest::ReviewRequestsDependency
       @available_review_teams ||= {}
       @available_review_teams[filter] ||= if filter
         filter_ids = filter.map(&:id)
-        repository.teams(immediate_only: false, include_all_repo_roles: repository.owner&.feature_enabled?(:reviewer_teams_all_repo_role)).closed.
+        repository.teams(immediate_only: false, include_all_repo_roles: true).closed.
           where(organization_id: repository.organization&.id, id: filter_ids)
       else
-        repository.teams(immediate_only: false, include_all_repo_roles: repository.owner&.feature_enabled?(:reviewer_teams_all_repo_role)).closed.where(organization_id: repository.organization&.id)
+        repository.teams(immediate_only: false, include_all_repo_roles: true).closed.where(organization_id: repository.organization&.id)
       end
     end
   end
