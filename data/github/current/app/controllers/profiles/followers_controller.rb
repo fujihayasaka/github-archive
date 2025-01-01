@@ -37,10 +37,6 @@ module Profiles
       # We're shortcircuiting this for mannequins as it is causing 500s down the line
       return render_404 if this_user.mannequin?
 
-      # Make sure the browser caches AJAX responses separately from regular
-      # HTML responses.
-      response.headers["Vary"] = "X-Requested-With"
-
       instrument_hydro
 
       render_user_profile

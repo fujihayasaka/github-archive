@@ -27,7 +27,7 @@ module ApplicationController::LocalizationDependency
   def switch_locale(&block)
     # Tells varnish we want to cache 1 variation per language
     # @see https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Vary
-    response.headers["Vary"] = [response.headers["Vary"].presence, "Accept-Language"].compact.join(", ")
+    add_headers_to_vary(["Accept-Language"])
 
     user_accepted_language = request.headers["HTTP_ACCEPT_LANGUAGE"]
     chosen_locale = Localization

@@ -1140,84 +1140,102 @@ class MetricsServiceTest < GitHub::TestCase
 
   context "get_delegated_bypass_metrics" do
     fixtures do # rubocop:disable GitHub/NestedSetupTeardown
-      reviewer = create(:user)
-      @team.add_member(reviewer)
-      @team.add_repository(@repo1, :admin)
-      data = mock("data")
-      data.stubs(:bypass_reviewers)
-        .returns([GitHub::Proto::SecretScanning::Scans::V2::BypassReviewer.new(
-          id: 1,
-          owner_id: @org.id,
-          owner_scope: :ORGANIZATION_SCOPE,
-          reviewer_id: @team.id,
-          reviewer_type: :TEAM
-        )])
-      bypass_reviewers_response = stub(data: data, error: nil)
-      GitHub::TokenScanning::Service::Client.any_instance.expects(:get_bypass_reviewers).returns(bypass_reviewers_response).at_least_once
-      SecretScanning::Services::DelegatedBypassService..stubs(:can_review_bypass_request?).returns(true)
+      @frozen_date = Date.today.freeze
+      travel_to(@frozen_date) do
+        reviewer = create(:user)
+        @team.add_member(reviewer)
+        @team.add_repository(@repo1, :admin)
+        data = mock("data")
+        data.stubs(:bypass_reviewers)
+          .returns([GitHub::Proto::SecretScanning::Scans::V2::BypassReviewer.new(
+            id: 1,
+            owner_id: @org.id,
+            owner_scope: :ORGANIZATION_SCOPE,
+            reviewer_id: @team.id,
+            reviewer_type: :TEAM
+          )])
+        bypass_reviewers_response = stub(data: data, error: nil)
+        GitHub::TokenScanning::Service::Client.any_instance.expects(:get_bypass_reviewers).returns(bypass_reviewers_response).at_least_once
+        SecretScanning::Services::DelegatedBypassService.stubs(:can_review_bypass_request?).returns(true)
 
-      @repo2_exemption_request = Exemptions::ExemptionRequest.create!(
-        resource_owner: @resource_owner,
-        requester: @user,
-        resource_identifier: "ksuid",
-        repository: @repo2,
-        request_type: SecretScanning::Constants::EXEMPTION_REQUEST_TYPE,
-        created_at: Time.now - 1.day,
-        updated_at: Time.now - 1.day,
-      )
-      @exemption_request = Exemptions::ExemptionRequest.create!(
-        resource_owner: @resource_owner,
-        requester: @user,
-        resource_identifier: "ksuid",
-        repository: @repo1,
-        request_type: SecretScanning::Constants::EXEMPTION_REQUEST_TYPE,
-        created_at: Time.now - 1.day,
-        updated_at: Time.now - 1.day,
-      )
-      @old_exemption_request = Exemptions::ExemptionRequest.create!(
-        resource_owner: @resource_owner,
-        requester: @user,
-        resource_identifier: "ksuid",
-        repository: @repo1,
-        request_type: SecretScanning::Constants::EXEMPTION_REQUEST_TYPE,
-        created_at: Time.now - 7.days,
-        updated_at: Time.now - 7.days,
-      )
-      @new_exemption_request = Exemptions::ExemptionRequest.create!(
-        resource_owner: @resource_owner,
-        requester: @user,
-        resource_identifier: "ksuid",
-        repository: @repo1,
-        request_type: SecretScanning::Constants::EXEMPTION_REQUEST_TYPE,
-        created_at: Time.now + 1.day,
-        updated_at: Time.now + 1.day,
-      )
-      @archived_exemption_request = Exemptions::ExemptionRequest.create!(
-        resource_owner: @resource_owner,
-        requester: @user,
-        resource_identifier: "ksuid",
-        repository: @archived_repo,
-        request_type: SecretScanning::Constants::EXEMPTION_REQUEST_TYPE,
-        created_at: Time.now - 1.day,
-        updated_at: Time.now - 1.day,
-      )
+        @repo2_exemption_request = Exemptions::ExemptionRequest.create!(
+          resource_owner: @resource_owner,
+          requester: @user,
+          resource_identifier: "ksuid",
+          repository: @repo2,
+          request_type: SecretScanning::Constants::EXEMPTION_REQUEST_TYPE,
+          created_at: 1.day.ago,
+          updated_at: 1.day.ago,
+        )
+        @exemption_request = Exemptions::ExemptionRequest.create!(
+          resource_owner: @resource_owner,
+          requester: @user,
+          resource_identifier: "ksuid",
+          repository: @repo1,
+          request_type: SecretScanning::Constants::EXEMPTION_REQUEST_TYPE,
+          created_at: 1.day.ago,
+          updated_at: 1.day.ago,
+        )
+        @exemption_request_2 = Exemptions::ExemptionRequest.create!(
+          resource_owner: @resource_owner,
+          requester: @user,
+          resource_identifier: "ksuid",
+          repository: @repo1,
+          request_type: SecretScanning::Constants::EXEMPTION_REQUEST_TYPE,
+          created_at: 3.days.ago,
+          updated_at: 1.day.ago,
+        )
+        @expired_exemption_request = Exemptions::ExemptionRequest.create!(
+          resource_owner: @resource_owner,
+          requester: @user,
+          resource_identifier: "ksuid",
+          repository: @repo1,
+          request_type: SecretScanning::Constants::EXEMPTION_REQUEST_TYPE,
+          created_at: 8.days.ago,
+          updated_at: 8.days.ago,
+          expires_at: 1.day.ago,
+        )
+        @new_exemption_request = Exemptions::ExemptionRequest.create!(
+          resource_owner: @resource_owner,
+          requester: @user,
+          resource_identifier: "ksuid",
+          repository: @repo1,
+          request_type: SecretScanning::Constants::EXEMPTION_REQUEST_TYPE,
+          created_at: 1.day.from_now,
+          updated_at: 1.day.from_now,
+        )
+        @archived_exemption_request = Exemptions::ExemptionRequest.create!(
+          resource_owner: @resource_owner,
+          requester: @user,
+          resource_identifier: "ksuid",
+          repository: @archived_repo,
+          request_type: SecretScanning::Constants::EXEMPTION_REQUEST_TYPE,
+          created_at: 1.day.ago,
+          updated_at: 1.day.ago,
+        )
 
-      @rejected_exemption_response = Exemptions::ExemptionResponse.create!(
-        exemption_request: @old_exemption_request,
-        reviewer: reviewer,
-        status: :rejected
-      )
-      @approved_exemption_response = Exemptions::ExemptionResponse.create!(
-        exemption_request: @exemption_request,
-        reviewer: reviewer,
-        status: :approved
-      )
+        @rejected_exemption_response = Exemptions::ExemptionResponse.create!(
+          exemption_request: @expired_exemption_request,
+          reviewer: reviewer,
+          status: :rejected
+        )
+        @rejected_exemption_response_2 = Exemptions::ExemptionResponse.create!(
+          exemption_request: @exemption_request_2,
+          reviewer: reviewer,
+          status: :rejected
+        )
+        @approved_exemption_response = Exemptions::ExemptionResponse.create!(
+          exemption_request: @exemption_request,
+          reviewer: reviewer,
+          status: :approved
+        )
+      end
     end
 
     test "successful request (org)" do
       bypass_requests_count, mean_response_time, bypasses_by_request_status_counts = SecretScanning::Services::MetricsService.get_delegated_bypass_metrics(@org, @user)
       assert_equal 5, bypass_requests_count
-      assert_equal 345600, mean_response_time
+      assert_equal 172800, mean_response_time
       assert_equal 3, bypasses_by_request_status_counts.length
 
       assert_equal 1, bypasses_by_request_status_counts[0]&.count
@@ -1234,7 +1252,7 @@ class MetricsServiceTest < GitHub::TestCase
     test "successful request (business)" do
       bypass_requests_count, mean_response_time, bypasses_by_request_status_counts = SecretScanning::Services::MetricsService.get_delegated_bypass_metrics(@business, @user)
       assert_equal 5, bypass_requests_count
-      assert_equal 345600, mean_response_time
+      assert_equal 172800, mean_response_time
       assert_equal 3, bypasses_by_request_status_counts.length
 
       assert_equal 1, bypasses_by_request_status_counts[0]&.count
@@ -1251,7 +1269,7 @@ class MetricsServiceTest < GitHub::TestCase
     test "repo_ids" do
       bypass_requests_count, mean_response_time, bypasses_by_request_status_counts = SecretScanning::Services::MetricsService.get_delegated_bypass_metrics(@org, @user, repo_ids: [@repo1.id])
       assert_equal 3, bypass_requests_count
-      assert_equal 345600, mean_response_time
+      assert_equal 172800, mean_response_time
       assert_equal 3, bypasses_by_request_status_counts.length
 
       assert_equal 1, bypasses_by_request_status_counts[0]&.count
@@ -1293,7 +1311,7 @@ class MetricsServiceTest < GitHub::TestCase
     test "end_date" do
       bypass_requests_count, mean_response_time, bypasses_by_request_status_counts = SecretScanning::Services::MetricsService.get_delegated_bypass_metrics(@org, @user, end_date: Time.now.to_date)
       assert_equal 4, bypass_requests_count
-      assert_equal 345600, mean_response_time
+      assert_equal 172800, mean_response_time
       assert_equal 3, bypasses_by_request_status_counts.length
 
       assert_equal 1, bypasses_by_request_status_counts[0]&.count
@@ -1322,7 +1340,7 @@ class MetricsServiceTest < GitHub::TestCase
       test "archived is false" do
         bypass_requests_count, mean_response_time, bypasses_by_request_status_counts = SecretScanning::Services::MetricsService.get_delegated_bypass_metrics(@org, @user, repos_in_archived_state: false)
         assert_equal 4, bypass_requests_count
-        assert_equal 345600, mean_response_time
+        assert_equal 172800, mean_response_time
         assert_equal 3, bypasses_by_request_status_counts.length
 
         assert_equal 1, bypasses_by_request_status_counts[0]&.count
@@ -1342,7 +1360,7 @@ class MetricsServiceTest < GitHub::TestCase
         bypass_requests_count, mean_response_time, bypasses_by_request_status_counts = SecretScanning::Services::MetricsService.get_delegated_bypass_metrics(
           @org,
           @user,
-          bypass_request_ids: [@exemption_request.id, @old_exemption_request.id],
+          bypass_request_ids: [@exemption_request.id, @exemption_request_2.id],
           token_filters: SecretScanning::Services::MetricsService::PushProtectionTokenFilters.new(
             token_types: [],
             exclude_token_types: ["amazon_access_key"],
@@ -1353,7 +1371,7 @@ class MetricsServiceTest < GitHub::TestCase
           ),
         )
         assert_equal 2, bypass_requests_count
-        assert_equal 345600, mean_response_time
+        assert_equal 172800, mean_response_time
         assert_equal 2, bypasses_by_request_status_counts.length
 
         assert_equal 1, bypasses_by_request_status_counts[0]&.count
@@ -1365,9 +1383,9 @@ class MetricsServiceTest < GitHub::TestCase
       end
 
       test "skipped if token_filters is nil" do
-        bypass_requests_count, mean_response_time, bypasses_by_request_status_counts = SecretScanning::Services::MetricsService.get_delegated_bypass_metrics(@org, @user, bypass_request_ids: [@exemption_request.id, @old_exemption_request.id])
+        bypass_requests_count, mean_response_time, bypasses_by_request_status_counts = SecretScanning::Services::MetricsService.get_delegated_bypass_metrics(@org, @user, bypass_request_ids: [@exemption_request.id, @exemption_request_2.id])
         assert_equal 5, bypass_requests_count
-        assert_equal 345600, mean_response_time
+        assert_equal 172800, mean_response_time
         assert_equal 3, bypasses_by_request_status_counts.length
 
         assert_equal 1, bypasses_by_request_status_counts[0]&.count
@@ -1396,7 +1414,7 @@ class MetricsServiceTest < GitHub::TestCase
           ),
         )
         assert_equal 5, bypass_requests_count
-        assert_equal 345600, mean_response_time
+        assert_equal 172800, mean_response_time
         assert_equal 3, bypasses_by_request_status_counts.length
 
         assert_equal 1, bypasses_by_request_status_counts[0]&.count
@@ -1423,7 +1441,7 @@ class MetricsServiceTest < GitHub::TestCase
           ),
         )
         assert_equal 5, bypass_requests_count
-        assert_equal 345600, mean_response_time
+        assert_equal 172800, mean_response_time
         assert_equal 3, bypasses_by_request_status_counts.length
 
         assert_equal 1, bypasses_by_request_status_counts[0]&.count

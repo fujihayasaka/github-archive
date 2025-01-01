@@ -125,7 +125,6 @@ class Orgs::TeamMembersController < Orgs::Controller
 
     respond_to do |format|
       format.html do
-        response.headers["Vary"] = "X-Requested-With"
         view = create_view_model(Orgs::TeamMembers::IndexPageView, options)
         if request.xhr?
           render partial: "orgs/team_members/member_table", locals: { view: view }

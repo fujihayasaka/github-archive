@@ -174,10 +174,6 @@ class ProfilesController < ApplicationController
 
     respond_to do |format|
       format.html do
-        # Make sure the browser caches AJAX responses separately from regular
-        # HTML responses.
-        response.headers["Vary"] = "X-Requested-With, X-PJAX-Container, Turbo-Frame, Turbo-Visit"
-
         if this_user.organization?
           request.env[GitHub::TaggingHelper::PROFILE_TYPE] = "organization"
           render_organization_profile

@@ -199,18 +199,10 @@ class Repository
           map[team.id] = team.ancestor_ids
         end
 
-        ids_with_write_access = if repository.owner&.feature_enabled?(:codeowners_check_all_repo_role)
-          repository.team_ids_with_direct_privileged_access(
-            min_action: :write,
-            actor_ids_filter: ancestor_map.flatten(2),
-          )
-        else
-          repository.actor_ids(
-            type: Team,
-            min_action: :write,
-            actor_ids_filter: ancestor_map.flatten(2)
-          )
-        end
+        ids_with_write_access = repository.team_ids_with_direct_privileged_access(
+          min_action: :write,
+          actor_ids_filter: ancestor_map.flatten(2),
+        )
 
         ancestor_map.each_with_object([]) do |(team_id, ancestor_ids), has_access|
           direct_access = ids_with_write_access.include?(team_id)

@@ -186,9 +186,6 @@ class Orgs::TeamsController < Orgs::Controller
       return redirect_to user_path(this_organization)
     end
 
-    # Make sure the browser caches AJAX responses separately from regular HTML responses.
-    response.headers["Vary"] = "X-Requested-With"
-
     if this_organization.team_sync_failed?
       failed_teams = this_organization.team_sync_failed_teams.order(:name).pluck(:name).join(", ")
       flash.now[:error] = <<~MESSAGE

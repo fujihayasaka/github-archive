@@ -130,7 +130,7 @@ class ApplicationController < ActionController::Base
   before_action :request_categorization_filter
   before_action :set_user_headers
   before_action :set_rails_version_header
-  before_action :set_vary_pjax, :set_pjax_url, :set_vary_turbo
+  before_action :set_vary_pjax, :set_pjax_url, :set_vary_turbo, :set_vary_requested_with
 
   around_action :staff_platform_loader_tracker
   around_action :staff_rails_instrumentation
@@ -1392,5 +1392,19 @@ class ApplicationController < ActionController::Base
 
   def emu_required
     render_404 unless current_user.is_enterprise_managed?
+  end
+
+  # We want to ensure browsers cache ajax requests separetely from regular HTML responses.
+  # This allows us to use the same URL to serve both HTML and JSON.
+  # This header is already being added by our nginx config in https://github.com/github/github/blob/faa32626bac7dfc3b3dd028e478766c87e586a24/config/kustomize/base/production/unicorn-api/configs/nginx.conf#L58
+  # but having it here as well makes it easier to understand and also adds the same behavior to all environments (proxima/GHES).
+  def set_vary_requested_with
+    add_headers_to_vary(["X-Requested-With"])
+  end
+
+  sig { params(headers: T::Array[String]).void }
+  def add_headers_to_vary(headers)
+    existing_vary = response.headers["Vary"].to_s.split(",").map(&:strip)
+    response.headers["Vary"] = (existing_vary + headers).uniq.join(", ")
   end
 end
