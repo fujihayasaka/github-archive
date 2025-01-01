@@ -59,6 +59,17 @@ module PullRequest::PermissionsDependency
     end
   end
 
+  def closable_by?(actor)
+    async_closable_by?(actor).sync
+  end
+
+  def async_closable_by?(actor)
+    async_issue.then do |issue|
+      next false unless issue.present?
+      issue.async_closable_by?(actor)
+    end
+  end
+
   # Public: Determine if this pull request's repository is readable by the given user.
   #
   # user - a User

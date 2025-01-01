@@ -4,7 +4,7 @@ set(CMAKE_DEPENDS_LANGUAGES
   )
 # The set of files for implicit dependencies of each language:
 set(CMAKE_DEPENDS_CHECK_C
-  "/workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/deps/http-parser/http_parser.c" "/workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/deps/http-parser/CMakeFiles/http-parser.dir/http_parser.c.o"
+  "/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/deps/http-parser/http_parser.c" "/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/deps/http-parser/CMakeFiles/http-parser.dir/http_parser.c.o"
   )
 set(CMAKE_C_COMPILER_ID "GNU")
 

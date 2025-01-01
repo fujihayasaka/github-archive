@@ -1,4 +1,4 @@
-# Install script for directory: /workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/deps/pcre
+# Install script for directory: /github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/deps/pcre
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

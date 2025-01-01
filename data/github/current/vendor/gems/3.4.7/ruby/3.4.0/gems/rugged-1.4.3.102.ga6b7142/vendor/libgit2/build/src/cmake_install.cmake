@@ -1,4 +1,4 @@
-# Install script for directory: /workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/src
+# Install script for directory: /github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/src
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -38,26 +38,26 @@ if(NOT DEFINED CMAKE_CROSSCOMPILING)
 endif()
 
 if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/pkgconfig" TYPE FILE FILES "/workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/libgit2.pc")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/pkgconfig" TYPE FILE FILES "/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/libgit2.pc")
 endif()
 
 if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib" TYPE STATIC_LIBRARY FILES "/workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/libgit2.a")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib" TYPE STATIC_LIBRARY FILES "/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/libgit2.a")
 endif()
 
 if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/include" TYPE DIRECTORY FILES "/workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/include/git2")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/include" TYPE DIRECTORY FILES "/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/include/git2")
 endif()
 
 if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/include" TYPE FILE FILES "/workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/include/git2.h")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/include" TYPE FILE FILES "/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/include/git2.h")
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for each subdirectory.
-  include("/workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/deps/http-parser/cmake_install.cmake")
-  include("/workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/deps/pcre/cmake_install.cmake")
-  include("/workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/deps/ntlmclient/cmake_install.cmake")
+  include("/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/deps/http-parser/cmake_install.cmake")
+  include("/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/deps/pcre/cmake_install.cmake")
+  include("/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/deps/ntlmclient/cmake_install.cmake")
 
 endif()
 

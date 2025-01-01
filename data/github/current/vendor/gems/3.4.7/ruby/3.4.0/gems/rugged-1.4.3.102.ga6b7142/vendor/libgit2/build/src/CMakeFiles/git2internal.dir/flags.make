@@ -6,7 +6,7 @@ C_FLAGS = -D_GNU_SOURCE -fPIC -Wall -Wextra -Wno-documentation-deprecated-sync -
 
 C_DEFINES = -DSHA1DC_CUSTOM_INCLUDE_SHA1_C=\"common.h\" -DSHA1DC_CUSTOM_INCLUDE_UBC_CHECK_C=\"common.h\" -DSHA1DC_NO_STANDARD_INCLUDES=1 -D_FILE_OFFSET_BITS=64
 
-C_INCLUDES = -I/workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/src -I/workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/src -I/workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/include -I/workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/deps/http-parser -I/workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/deps/pcre -I/workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/deps/ntlmclient 
+C_INCLUDES = -I/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/src -I/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/src -I/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/include -I/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/deps/http-parser -I/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/deps/pcre -I/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/deps/ntlmclient 
 
 # Custom flags: src/CMakeFiles/git2internal.dir/xdiff/xdiffi.c.o_FLAGS = -Wno-sign-compare -Wno-unused-parameter
 

@@ -63,9 +63,25 @@ class Api::RepositoryPages < Api::App
       deliver_error!(400, message: "No artifact_url provided")
     end
 
+    ## Parse URL
     ## url will look something like this: https://pipelines.actions.githubusercontent.com/e8hcMXr68SdeQnILT3aiw94658skZ5pAwFeS5OBSOdwOCCcxkx/_apis/pipelines/1/runs/1683/artifacts?artifactName=github-pages&%24expand=SignedContent
     ## or https://yimysty-rgogc0h08.service.bpdev-us-east-1.github.net/_services/pipelines/He74m4GoMEEE8Car6quYwFF2wEqEQQBjlPBn6P0c81X4fxnT6l/_apis/pipelines/1/runs/1/artifacts?artifactName=github-pages&%24expand=SignedContent for GHES
     parsed_url = URI.parse(url)
+    segments = parsed_url.path.split("/")
+
+    # Reject URLs containing relative path traversal sequences
+    if segments.include?(".") || segments.include?("..")
+      Failbot.report(ValidateArtifactUrlError.new("Artifact url contains relative path traversal sequences\nActual #{parsed_url.path}"))
+      deliver_error!(400, message: "Invalid artifact url")
+    end
+
+    # Validate path ends with: /_apis/pipelines/{id}/runs/{id}/artifacts
+    unless parsed_url.path =~ %r{/_apis/pipelines/\d+/runs/\d+/artifacts$}
+      Failbot.report(ValidateArtifactUrlError.new("Invalid artifact url path\nExpected path ending with /_apis/pipelines/{id}/runs/{id}/artifacts\nActual #{parsed_url.path}"))
+      deliver_error!(400, message: "Invalid artifact url")
+    end
+
+    # GHES
     if GitHub.enterprise?
       if parsed_url.host != GitHub.host_name
         Failbot.report(ValidateArtifactUrlError.new("Invalid artifact url host\nExpected #{GitHub.host_name}\nActual #{parsed_url.host}"))
@@ -76,22 +92,17 @@ class Api::RepositoryPages < Api::App
         parsed_url.port = nil
         url = parsed_url.to_s
       end
+
+    # DOTCOM
     else
       unless parsed_url.host.end_with?(".actions.githubusercontent.com")
         Failbot.report(ValidateArtifactUrlError.new("Invalid artifact url host\nExpected *.actions.githubusercontent.com\nActual #{parsed_url.host}"))
         deliver_error!(400, message: "Invalid artifact url")
       end
+      # For dotcom, enforce strict segment count (8 segments total)
       # parsed_url.path is /e8hcMXr68SdeQnILT3aiw94658skZ5pAwFeS5OBSOdwOCCcxkx/_apis/pipelines/1/runs/1683/artifacts
-      split_path = parsed_url.path.split("/")
-      possible_path_error = ValidateArtifactUrlError.new("Invalid artifact url path\nExpected /*/_apis/pipelines/**\nActual #{parsed_url.path}")
-      if split_path.length != 8
-        Failbot.report(possible_path_error)
-        deliver_error!(400, message: "Invalid artifact url")
-      elsif split_path[2] != "_apis"
-        Failbot.report(possible_path_error)
-        deliver_error!(400, message: "Invalid artifact url")
-      elsif split_path[3] != "pipelines"
-        Failbot.report(possible_path_error)
+      if segments.length != 8
+        Failbot.report(ValidateArtifactUrlError.new("Invalid artifact url path segment count\nExpected 8 segments\nActual #{segments.length} segments in #{parsed_url.path}"))
         deliver_error!(400, message: "Invalid artifact url")
       end
     end
@@ -103,6 +114,9 @@ class Api::RepositoryPages < Api::App
       Failbot.report(ValidateArtifactUrlError.new("Error returned from pages-deployer\n#{resp.error}"))
       deliver_error!(400, message: "Invalid artifact url")
     end
+  rescue URI::InvalidURIError
+    Failbot.report(ValidateArtifactUrlError.new("Unable to parse artifact url: #{url}"))
+    deliver_error!(400, message: "Invalid artifact url")
   end
 
   def validate_artifact_id(artifact_id, repo)

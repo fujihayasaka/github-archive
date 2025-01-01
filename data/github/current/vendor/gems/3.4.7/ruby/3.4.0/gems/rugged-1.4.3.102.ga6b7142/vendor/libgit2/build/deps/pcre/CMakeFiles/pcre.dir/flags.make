@@ -6,5 +6,5 @@ C_FLAGS = -D_GNU_SOURCE -fPIC -Wall -Wextra -Wno-documentation-deprecated-sync -
 
 C_DEFINES = -DHAVE_CONFIG_H -DSHA1DC_CUSTOM_INCLUDE_SHA1_C=\"common.h\" -DSHA1DC_CUSTOM_INCLUDE_UBC_CHECK_C=\"common.h\" -DSHA1DC_NO_STANDARD_INCLUDES=1
 
-C_INCLUDES = -I/workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/deps/pcre -I/workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/deps/pcre -I/workspace/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/src/pcre 
+C_INCLUDES = -I/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/deps/pcre -I/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/deps/pcre -I/github/vendor/gems/3.4.7/ruby/3.4.0/gems/rugged-1.4.3.102.ga6b7142/vendor/libgit2/build/src/pcre 
 

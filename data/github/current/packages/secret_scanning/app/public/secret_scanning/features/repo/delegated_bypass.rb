@@ -54,18 +54,16 @@ module SecretScanning::Features::Repo
 
     sig { returns(T::Boolean) }
     def enabled_by_security_configuration?
-      org_feature_available = @org_owner_delegated_bypass&.feature_available? || false
-      business_feature_available = @business_owner_delegated_bypass&.feature_available? || false
-      return false unless org_feature_available || business_feature_available
-      @repo.security_configuration&.secret_scanning_delegated_bypass_enabled? || false
+      return false unless feature_available_for_org_or_business?
+
+      applied_security_configuration&.secret_scanning_delegated_bypass_enabled? || false
     end
 
     sig { returns(T::Boolean) }
     def disabled_by_security_configuration?
-      org_feature_available = @org_owner_delegated_bypass&.feature_available? || false
-      business_feature_available = @business_owner_delegated_bypass&.feature_available? || false
-      return false unless org_feature_available || business_feature_available
-      @repo.security_configuration&.secret_scanning_delegated_bypass_disabled? || false
+      return false unless feature_available_for_org_or_business?
+
+      applied_security_configuration&.secret_scanning_delegated_bypass_disabled? || false
     end
 
     # Indicates whether the given actor is allowed to view the bypass requests list
@@ -81,6 +79,23 @@ module SecretScanning::Features::Repo
     def review_fgr_enabled?
       return false unless self.feature_available?
       feature_flag_enabled_in_hierarchy?(@repo, FeatureFlags::REVIEW_BYPASS_REQUESTS_REPO_FGR)
+    end
+
+    private
+
+    sig { returns(T::Boolean) }
+    def feature_available_for_org_or_business?
+      org_feature_available = @org_owner_delegated_bypass&.feature_available? || false
+      business_feature_available = @business_owner_delegated_bypass&.feature_available? || false
+      org_feature_available || business_feature_available
+    end
+
+    sig { returns(T.nilable(SecurityConfiguration)) }
+    def applied_security_configuration
+      repo_config = @repo.repository_security_configuration
+      return nil unless repo_config&.applied?
+
+      repo_config.security_configuration
     end
   end
 end
