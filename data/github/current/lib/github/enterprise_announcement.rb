@@ -112,7 +112,7 @@ module GitHub
           EnterpriseAccounts::KV.store.set(
             ANNOUNCEMENT_KEY,
             announcement_json,
-            expires: Date.parse(expires_at.to_s).to_time
+            expires: DateTime.parse(expires_at.to_time.to_s)
           )
         else
           errors << "Announcement expiry date must be a valid date in the future"
@@ -137,7 +137,7 @@ module GitHub
     #
     # Returns Boolean.
     def self.valid_expires_at?(expires_at)
-      Date.parse(expires_at.to_s).to_time.future?
+      DateTime.parse(expires_at.to_time.to_s).future?
     rescue ArgumentError
       false
     end

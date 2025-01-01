@@ -277,7 +277,7 @@ module Repository::OrganizationsDependency
     Platform::Loaders::RepositoryTeams.load(self, immediate_only: immediate_only).then do |team_ids|
       # include_all_repo_roles: include teams that have access via all repo roles (default to false)
       if include_all_repo_roles
-        direct_all_repo_grants = self.all_repo_role_grants(:write)
+        direct_all_repo_grants = self.all_repo_role_grants(:read)
         team_ids += T.must(direct_all_repo_grants["Team"]) if direct_all_repo_grants.key?("Team")
       end
       next Team.none unless team_ids.any?

@@ -1,0 +1,23 @@
+#!/bin/bash
+# Usage: sql-grant-access
+# Grants access to users and databases not covered by the MySQL docker image
+
+set -e
+
+. script/_serverenv
+
+run_query() {
+  local query="$1"
+  shift
+  script/docker-compose exec -T db mysql -h db -p${MYSQL_ROOT_PASSWORD} -e "$query"
+}
+
+run_query "GRANT ALL ON \`${DEPLOYER_DATABASE_NAME}\`.* TO '${MYSQL_USER}'@'%';"
+run_query "GRANT ALL ON \`${PAYLOADS_DATABASE_NAME}\`.* TO '${MYSQL_USER}'@'%';"
+
+# ReadOnly user
+run_query "DROP USER IF EXISTS '${MYSQL_READ_ONLY_USER}';"
+run_query "CREATE USER '${MYSQL_READ_ONLY_USER}' IDENTIFIED BY '${MYSQL_READ_ONLY_PASSWORD}';"
+run_query "GRANT SELECT ON \`${DEPLOYER_DATABASE_NAME}\`.* TO '${MYSQL_READ_ONLY_USER}'@'%';"
+
+run_query "FLUSH PRIVILEGES;"

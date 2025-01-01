@@ -1,0 +1,69 @@
+services:
+  mysql:
+    image: 'mysql:${MYSQL_VERSION:-8.0.30}'
+    command: --port 13806 --log_error_verbosity=2 --max-connections=20100 --server-id=1 --sql_mode='STRICT_ALL_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,ONLY_FULL_GROUP_BY,NO_ENGINE_SUBSTITUTION' --enforce-gtid-consistency='ON' --gtid-mode='ON'
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: 1
+      TZ: America/Los_Angeles
+    expose:
+      - '13806'
+    ports:
+      - '127.0.0.1:13806:13806'
+    volumes:
+      - 'db-data:/var/lib/mysql'
+    healthcheck:
+      test: ['CMD', 'mysql', '-u', 'root', '-P', '13806', '-h', '127.0.0.1', '-e', 'quit']
+      interval: 1s
+      timeout: 10s
+      retries: 30
+      start_period: 10s
+
+  kafka:
+    image: 'ghcr.io/github/actions-broker/kafka-lite:1e0ffb80fc6ffbcfa263bafa43cf414d621456210dfb10641a0daa17772b700c@sha256:98506d908018225dfac27e1250b8b4660ea7285790cefd25d1a1f41d53543929'
+    expose:
+      - '9093'
+    ports:
+      - '127.0.0.1:9093:9093'
+    platform: 'linux/amd64'
+    command: |
+      /kafka-lite \
+        --listen-address 0.0.0.0:9093 \
+        --advertised-listener-address 127.0.0.1:9093 \
+        --max-message-bytes 200000000 \
+        --seed-topic cp1-iad.ingest.github.v1.PostReceive:1 \
+        --seed-topic turboghas.v0.BillableContribution:1
+    healthcheck:
+      test: ['CMD', 'netcat', '-z', '127.0.0.1', '9093']
+      interval: 1s
+      timeout: 10s
+      retries: 30
+      start_period: 10s
+    profiles:
+      - processor
+
+  aqueduct-lite:
+    image: 'ghcr.io/github/aqueduct-lite/aqueduct-lite:f1ea91f2de06e069a0a2a762a341e0e013610062@sha256:bab66a31221fff787d6de3f4be54b246e8d63e7d36a2a2a77aa2ff6b2b53214c'
+    expose:
+      - '18081'
+    platform: 'linux/amd64'
+    ports:
+      - '127.0.0.1:18081:18081'
+    depends_on:
+      - redis
+    command: bin/aqueduct-lite --redis-address redis:16379 --listen-address 0.0.0.0:18081
+    profiles:
+      - processor
+
+  redis:
+    image: redis:5.0
+    expose:
+      - '16379'
+    ports:
+      - '127.0.0.1:16379:16379'
+    command: --daemonize no --bind 0.0.0.0 --port 16379
+    profiles:
+      - processor
+
+volumes:
+  db-data:
+    driver: local

@@ -245,7 +245,7 @@ module SecurityOverviewAnalytics
 
       sig { override.returns(T::Array[T.class_of(ApplicationJob)]) }
       def fanout_jobs
-        [DependabotAlertRevisionIngestionJob]
+        [DependabotAlertRevisionIngestionJob, UpdateFeatureStatusSummaryJob]
       end
 
       protected

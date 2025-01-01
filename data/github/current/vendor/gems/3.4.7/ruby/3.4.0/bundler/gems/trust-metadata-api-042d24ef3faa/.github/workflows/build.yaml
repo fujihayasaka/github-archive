@@ -1,0 +1,45 @@
+name: "Build and test"
+
+on:
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: [main]
+  pull_request: {}
+
+# setup permissions for this build and include id-token for OIDC
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4.2.2
+      - name: OIDC Setup for GOPROXY
+        uses: github/setup-goproxy@v1.1.0
+      - name: Install Go
+        uses: actions/setup-go@v5.1.0
+        with:
+          go-version-file: go.mod
+      - name: Setup .env
+        run: make .env
+      # TODO: Remove later when docker-compose pull works for mysql:8
+      - name: Pull MySQL
+        run: docker pull mysql:8
+      - name: Start MySQL
+        run: make dev-start
+      - name: Install golang-migrate
+        run: |
+          cd $(mktemp -d)
+          curl -L https://github.com/golang-migrate/migrate/releases/download/v4.15.2/migrate.linux-amd64.tar.gz | tar xvz
+          sudo mv migrate /usr/local/bin/migrate
+      - name: Run migrations
+        run: make dev-migrate-up
+      - name: Run tests with coverage
+        run: make test
+      - name: Check Coverage Threshold
+        run: make verify-package-test-coverage

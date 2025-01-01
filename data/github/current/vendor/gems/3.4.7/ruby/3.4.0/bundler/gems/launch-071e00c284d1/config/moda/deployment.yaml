@@ -1,0 +1,141 @@
+required_builds:
+  - launch
+  - launch-docker-image
+  - launch-docker-security
+  - launch-moda-config-bundle
+  - launch-ruby
+default_branch: main
+auto_start_pipeline: production_rollout
+required_review_tasks:
+  - "deploy"
+required_review_tasks_for_force_deploy:
+  - "deploy"
+environments:
+  - name: production
+    require_pipeline: true
+    cluster_selector:
+      profile: general
+      region: iad
+    timeout: 600
+    extra_start_message: >
+      You can now swing by the [Actions Deployment Confidence Dashboard](https://app.datadoghq.com/dashboard/8nz-4rv-6gf/launch-deployment-confidence),
+      [GitHub Actions Launch dashboard](https://app.datadoghq.com/dashboard/hfr-h8q-qgw),
+      [Actions Internal Metrics Dashboard](https://app.datadoghq.com/dash/930731/github-actions-internal-metrics),
+      or the [Sentry Dashboard](https://sentry.io/organizations/github/releases/{{RELEASE_SHA}}/?environment=production&environment=production-canary&project=1844558&statsPeriod=1h)
+      for this deployment to make sure the deployment is healthy.
+    canaryable: true
+    require_canary: false
+  - name: lab
+    auto_deploy: true
+    cluster_selector:
+      profile: general
+      region: iad
+    timeout: 300
+    extra_start_message: >
+      You can now swing by the [Actions Deployment Confidence Dashboard (Lab)](https://app.datadoghq.com/dashboard/8nz-4rv-6gf/launch-deployment-confidence?tpl_var_deployed_to=lab&tpl_var_env=lab&tpl_var_launch_env=lab),
+      [GitHub Actions Launch dashboard](https://app.datadoghq.com/dashboard/hfr-h8q-qgw?tpl_var_deployed_to=lab),
+      [Actions Internal Metrics Dashboard (Lab)](https://app.datadoghq.com/dashboard/f3d-pgs-yt5/github-actions-internal-metrics?tpl_var_deployed_to=lab&tpl_var_launch_env=lab),
+      [Actions Canary (lab)](https://github.com/actions/canary/actions), or the [Sentry Lab Dashboard](https://sentry.io/organizations/github/issues/?environment=lab&project=1844558&statsPeriod=1h)
+      for this deployment to make sure the deployment is healthy.
+    canaryable: true
+    require_canary: false
+  - name: backfills
+    secret_environment: production
+    cluster_selector:
+      name: general-1-ash1-iad
+    timeout: 0
+    extra_start_message: "You can now swing by the [Sentry Backfills Dashboard](https://sentry.io/organizations/github/issues/?environment=backfills&project=1844558) to make sure the deployment is healthy."
+    extra_completed_message: "Your backfill job has finished deploying, please monitor it."
+  - name: staff-wus2-01
+    require_pipeline: true
+    cluster_selector:
+      stamp: staff-wus2-01
+    timeout: 300
+    extra_start_message: >
+      [Actions Deployment Confident Dashboard](https://app.datadoghq.com/dashboard/8nz-4rv-6gf/launch-deployment-confidence?tpl_var_stamp={{stamp}})
+      [Sentry](https://sentry.io/organizations/github/releases/{{RELEASE_SHA}}/?environment={{stamp}}&project=1844558&statsPeriod=1h)
+      [Launch Service Oriented Dashboard](https://app.datadoghq.com/dashboard/hfr-h8q-qgw?tpl_var_deployed_to={{stamp}})
+      [Actions Internal Metrics Dashboard](https://app.datadoghq.com/dash/930731/github-actions-internal-metrics?tpl_var_deployed_to={{stamp}})
+    service_mesh:
+      enabled: true
+# This top-level key allows the Moda team to automatically remove our
+# deployments on deprecated clusters - we're multi-site so we're good
+# to go and _shouldn't_ see any issues.
+#
+# see https://moda.githubapp.com/docs/moda-app-handbook/cluster-migration/#my-app-doesn-t-target-the-cluster-explicitly
+ok_for_moda_to_remove_from_deprecating_clusters: true
+notifications:
+  slack_channels:
+    - "#actions-launch-ops"
+
+# This will generate the Proxima portion of the deployment pipeline,
+# which will be appended after the production/dotcom deployment.
+# This includes every Proxima stamp except staff-wus2-01 and stamps
+# within each ring will be deployed concurrently.
+# https://thehub.github.com/epd/engineering/devops/deployment/proxima-add-new-stamp/#generated-pipelines
+proxima:
+  environment_pattern:
+    extra_start_message: >
+      [Actions Deployment Confident Dashboard](https://app.datadoghq.com/dashboard/8nz-4rv-6gf/launch-deployment-confidence?tpl_var_stamp={{stamp}})
+      [Sentry](https://sentry.io/organizations/github/releases/{{RELEASE_SHA}}/?environment={{stamp}}&project=1844558&statsPeriod=1h)
+      [Launch Service Oriented Dashboard](https://app.datadoghq.com/dashboard/hfr-h8q-qgw?tpl_var_deployed_to={{stamp}})
+      [Actions Internal Metrics Dashboard](https://app.datadoghq.com/dash/930731/github-actions-internal-metrics?tpl_var_deployed_to={{stamp}})
+    timeout: 300
+    service_mesh:
+      enabled: true
+  rollout_pattern:
+    - kind: deployment
+      config: {}
+      start_message: >
+        We are now going to deploy {{app}}/{{ref}} to proxima {{stamp}}! Please pause or cancel the pipeline after the deploy if you want more time before your pull request(s) auto merges.
+        [Actions Deployment Confident Dashboard](https://app.datadoghq.com/dashboard/8nz-4rv-6gf/launch-deployment-confidence?tpl_var_stamp={{stamp}})
+        [Sentry](https://sentry.io/organizations/github/releases/{{RELEASE_SHA}}/?environment={{stamp}}&project=1844558&statsPeriod=1h)
+        [Launch Service Oriented Dashboard](https://app.datadoghq.com/dashboard/hfr-h8q-qgw?tpl_var_deployed_to={{stamp}})
+        [Actions Internal Metrics Dashboard](https://app.datadoghq.com/dash/930731/github-actions-internal-metrics?tpl_var_deployed_to={{stamp}})
+  rings:
+    timeout: 300
+    timer_gate_duration: 300
+
+pipelines:
+  production_rollout:
+    append_proxima_stamps: true
+    thread_notifications: true
+    # Sometimes it's useful to pause the deployment and do some manual validation on early stages, 
+    # so allow up to 90 minutes before requiring users to invoke `.pipeline extend timeout`
+    timeout: 5400
+    rollback_on_timeout: true
+    rollback_in_parallel: true
+    stages:
+      - name: staff-wus2-01
+        kind: deployment
+        config:
+          environment: staff-wus2-01
+        gates:
+          - kind: timer
+            duration: 300
+        start_message: >
+          We are now going to deploy {{app}}/{{ref}} to {{environment}}! Please pause or cancel the pipeline after the deploy if you want more time before the next stage.
+      - name: canary
+        kind: canary_deployment
+        config:
+          environment: production
+          hosts: canary
+          timeout: 320
+        gates:
+          - kind: datadog
+            display_name: "Canary Health Check"
+            monitor_id: "140822488" # https://app.datadoghq.com/monitors/140822488
+            evaluation_period: 300 # Evaluate the monitor continuously for 5 minutes
+            execution_mode: single # Only validate during the canary deployment stage
+        start_message: >
+          We are now going to deploy {{app}}/{{ref}} to {{environment}}! Please pause or cancel the pipeline after the deploy if you want more time before the next stage.
+      - name: full_production
+        kind: deployment
+        config:
+          environment: production
+          timeout: 620
+        gates:
+          - kind: timer
+            duration: 300
+        start_message: >
+          We are now going to deploy {{app}}/{{ref}}! Please pause or cancel the pipeline after the deploy if you want more time before the next stage.

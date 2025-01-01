@@ -1,0 +1,61 @@
+# http://kubernetes.io/docs/user-guide/deployments/#what-is-a-deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: launch-receiver
+    annotations:
+        heaven.githubapp.com/image-placeholder: "launch"
+        heaven.githubapp.com/deploy-requirement: "true"
+        # https://github.com/github/moda-linter/blob/75731cd9f59e29883cb363020804c83d1d7f4ab8/rules/docs/env_var_already_injected_by_annotation.md
+        heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: launch-receiver
+spec:
+    selector:
+        matchLabels:
+            service: launch-receiver
+
+    # TODO allow dynamic configuration of replica size.
+    replicas: 2
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: prod-launch
+                observability.github.com/splunk_sourcetype: launch-fluentbit
+                observability.github.com/kafka_topic: launch
+        spec:
+            dnsPolicy: Default
+            containers:
+                - name: launch-receiver
+                  # The image repository and tag are substituted on deploy.
+                  image: launch
+                  # The command to run when booting the containers.
+                  command:
+                    - "launch-receiver"
+                  env: []
+                  # As per https://github.com/github/kube/blob/master/docs/handbook_files/next_steps.md#required-prestop-hook
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command: ["sleeper", "-seconds", "5"]
+                  # This port needs to match what is configured in Dockerfile.
+                  ports:
+                    - containerPort: 6824
+                    - containerPort: 6825
+                  resources:
+                    requests:
+                        # Recommendations: https://app.datadoghq.com/s/59fe6c40c/wxs-ggy-zkm
+                        cpu: "900m"
+                        memory: "200Mi"
+                    limits:
+                        # Adjust GOMAXPROCS in tandem. It's recommended the cpu limit be set to GOMAXPROCS+1.
+                        cpu: "3"
+                        memory: "500Mi"
+                  # Definitions for liveness and readiness probes can be found at
+                  # http://kubernetes.io/docs/api-reference/v1/definitions/#_v1_probe
+                  readinessProbe:
+                    initialDelaySeconds: 5
+                    timeoutSeconds: 5
+                    httpGet:
+                        path: /_ping
+                        port: 6824

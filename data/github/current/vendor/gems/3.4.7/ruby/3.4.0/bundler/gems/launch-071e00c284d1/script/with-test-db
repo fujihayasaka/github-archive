@@ -1,0 +1,302 @@
+#!/bin/bash
+#/ Usage: script/with-test-db [OPTIONS] -- COMMAND ARGS...
+#/ Starts an instance of mysql in a docker container, creates a
+#/ 'launch_test' database in it, sets up launch's schema in it,
+#/ sets $LAUNCH_TEST_DATABASE_URL to a DSN that Go can use to
+#/ connect to it, and runs COMMAND.
+#/ where OPTIONS may include:
+#/ --migrate-image IMAGE
+#/     the docker image from which skeema should be run.
+#/     default: run skeema on this machine
+#/ --skeema-env ENV
+#/     the name of the skeema environment to use.
+#/     default: test
+
+# Get the default server env, then override some values.
+. script/_serverenv
+export DB_NAME=launch_test
+export DEPLOYER_DB_NAME=launch_deployer_test
+export PAYLOADS_DB_NAME=actions_workflow_payloads_test
+
+APP_ROOT=$(git rev-parse --show-toplevel)
+
+if [ "$LAUNCH_CI" = "1" ]; then
+  MYSQL_CONTAINER_NAME=${MYSQL_CONTAINER_NAME:-launch-test-mysql8}
+  MYSQL_IMAGE_NAME=${MYSQL_IMAGE_NAME:-mysql:8.0.36}
+  export MYSQL_ROOT_PASSWORD=my-secret-pw
+  export MYSQL_PORT=5200
+
+  REDIS_CONTAINER_NAME=launch-test-redis509
+  REDIS_IMAGE_NAME=redis:5.0.9
+
+  export AZURITE_CONTAINER_NAME="azurite"
+  AZURITE_IMAGE_NAME="mcr.microsoft.com/azure-storage/azurite"
+fi
+
+main() {
+  start_mysql
+  trap stop_mysql EXIT
+  wait_for_mysql
+  set_env
+  migrate_db
+
+  start_redis
+  wait_for_redis
+  trap stop_mysql_and_redis EXIT
+
+  start_azurite
+  wait_for_azurite
+  trap stop_azurite EXIT
+
+  "$@"
+}
+
+set_env() {
+  # Tell script/test that it doesn't need to make a test db. (In other words, stop recursing.)
+  export LAUNCH_HAS_TEST_DB=y
+  # Tell script/cibuild-launch where it can link to for mysql and redis.
+  export LAUNCH_TEST_DATABASE_CONTAINER_NAME=$MYSQL_CONTAINER_NAME
+  export LAUNCH_TEST_REDIS_CONTAINER_NAME=$REDIS_CONTAINER_NAME
+  # The DSN that you can use from the host machine.
+  export LAUNCH_TEST_DATABASE_URL="root:$MYSQL_ROOT_PASSWORD@tcp(127.0.0.1:$MYSQL_PORT)/$DB_NAME?parseTime=true"
+  export LAUNCH_DEPLOYER_TEST_DATABASE_URL="root:$MYSQL_ROOT_PASSWORD@tcp(127.0.0.1:$MYSQL_PORT)/$DEPLOYER_DB_NAME?parseTime=true"
+  export ACTIONS_PAYLOADS_TEST_DATABASE_URL="root:$MYSQL_ROOT_PASSWORD@tcp(127.0.0.1:$MYSQL_PORT)/$PAYLOADS_DB_NAME?parseTime=true"
+  export LAUNCH_REDIS_URL="127.0.0.1:${LAUNCH_REDIS_PORT}"
+  # The DSN that you can use from another docker container started with "--link $LAUNCH_TEST_DATABASE_CONTAINER_NAME:mysql".
+  export LAUNCH_DEPLOYER_TEST_DATABASE_URL_IN_DOCKER="root:$MYSQL_ROOT_PASSWORD@tcp(mysql:3306)/$DEPLOYER_DB_NAME?parseTime=true"
+  export ACTIONS_PAYLOADS_TEST_DATABASE_URL_IN_DOCKER="root:$MYSQL_ROOT_PASSWORD@tcp(mysql:3306)/$PAYLOADS_DB_NAME?parseTime=true"
+  # The DSN that you can use from another docker container started with "--link $LAUNCH_TEST_DATABASE_CONTAINER_NAME:redis".
+  export LAUNCH_REDIS_URL_IN_DOCKER="redis:6379"
+  export LAUNCH_AZURITE_BLOB_URL="127.0.0.1:10000"
+  export AZURITE_BLOB_PORT=10100
+  export AZURITE_BLOB_HOST="http://127.0.0.1:$AZURITE_BLOB_PORT"
+  export AZURITE_BLOB_PORT_IN_DOCKER=10000
+  export AZURITE_BLOB_HOST_IN_DOCKER="http://azurite:$AZURITE_BLOB_PORT_IN_DOCKER"
+}
+
+migrate_db() {
+  if [ "$LAUNCH_CI" = "1" ]; then
+    if ! in_migration_image bash -c "cd schemas && skeema push \"$SKEEMA_ENV\""; then
+      docker logs --tail 20 $MYSQL_CONTAINER_NAME
+      exit 1
+    fi
+  else
+    for db in $DEPLOYER_DB_NAME $PAYLOADS_DB_NAME; do
+      script/docker-compose exec -T db mysql -u root -prootsekrit -h db -e "DROP DATABASE $db"
+    done
+    if ! script/skeema push "$SKEEMA_ENV"; then
+      script/docker-compose logs --tail 20 db
+      exit 1
+    fi
+  fi
+}
+
+in_migration_image() {
+  if [ -n "$MIGRATE_IMAGE" ]; then
+    docker run --rm \
+      --link $LAUNCH_TEST_DATABASE_CONTAINER_NAME:mysql \
+      --env MYSQL_HOST=mysql \
+      --env SKEEMA_MYSQL_USER=root \
+      --env SKEEMA_MYSQL_PASS=${MYSQL_ROOT_PASSWORD} \
+      --env SKEEMA_MYSQL_SCHEMA=launch_test \
+      "$MIGRATE_IMAGE" "$@"
+  else
+    env \
+      MYSQL_HOST=127.0.0.1 \
+      MYSQL_PORT=5200 \
+      SKEEMA_MYSQL_USER=root \
+      SKEEMA_MYSQL_PASS=${MYSQL_ROOT_PASSWORD} \
+      SKEEMA_MYSQL_SCHEMA=launch_test \
+      "$@"
+  fi
+}
+
+start_mysql() {
+  if [ "$LAUNCH_CI" = "1" ]; then
+    msg starting $MYSQL_CONTAINER_NAME...
+    if [ "$USE_CLEAN_LAUNCH_TEST_DB" = "y" ] && docker inspect $MYSQL_CONTAINER_NAME >&/dev/null; then
+      docker rm -f $MYSQL_CONTAINER_NAME >/dev/null
+    fi
+    if ! docker inspect $MYSQL_CONTAINER_NAME >&/dev/null; then
+      if ! docker create -p $MYSQL_PORT:3306 \
+              --name $MYSQL_CONTAINER_NAME \
+              --volume "$APP_ROOT/tmp/my.cnf.dev:/etc/mysql/conf.d/github.cnf" \
+              --env MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD \
+              --env MYSQL_DATABASE=$DB_NAME \
+              $MYSQL_IMAGE_NAME >/dev/null; then
+        exit 1
+      fi
+    fi
+    if ! docker start $MYSQL_CONTAINER_NAME >/dev/null; then
+      exit 1
+    fi
+  else
+    if ! script/docker-compose start db; then
+      exit 1
+    fi
+  fi
+}
+
+start_redis() {
+  if [ "$LAUNCH_CI" = "1" ]; then
+    msg starting $REDIS_CONTAINER_NAME...
+    if docker inspect $REDIS_CONTAINER_NAME >&/dev/null; then
+      docker rm -f $REDIS_CONTAINER_NAME >/dev/null
+    fi
+    if ! docker inspect $REDIS_CONTAINER_NAME >&/dev/null; then
+      if ! docker create -p $LAUNCH_REDIS_PORT:6379 \
+              --name $REDIS_CONTAINER_NAME \
+              $REDIS_IMAGE_NAME >/dev/null; then
+        exit 1
+      fi
+    fi
+    if ! docker start $REDIS_CONTAINER_NAME >/dev/null; then
+      exit 1
+    fi
+  else
+    if ! script/docker-compose start redis; then
+      exit 1
+    fi
+  fi
+}
+
+start_azurite() {
+  if [ "$LAUNCH_CI" = "1" ]; then
+    msg starting $AZURITE_CONTAINER_NAME...
+    if docker inspect $AZURITE_CONTAINER_NAME >&/dev/null; then
+      docker rm -f $AZURITE_CONTAINER_NAME >/dev/null
+    fi
+    if ! docker inspect $AZURITE_CONTAINER_NAME >&/dev/null; then
+      if ! docker create -p $AZURITE_BLOB_PORT:10000 \
+              --name $AZURITE_CONTAINER_NAME \
+              $AZURITE_IMAGE_NAME >/dev/null; then
+        exit 1
+      fi
+    fi
+    if ! docker start $AZURITE_CONTAINER_NAME >/dev/null; then
+      exit 1
+    fi
+  else
+    if ! script/docker-compose start azurite; then
+      exit 1
+    fi
+  fi
+}
+
+wait_for_azurite() {
+  msg waiting for azurite to start...
+  START_TIME=$SECONDS
+  if [ "$LAUNCH_CI" = "1" ]; then
+    if ! script/retry -- nc -zv localhost $AZURITE_BLOB_PORT &>/dev/null; then
+      docker logs --tail 20 $AZURITE_CONTAINER_NAME
+      msg "azurite did not start in time"
+      exit 1
+    fi
+  else
+    if ! script/retry script/docker-compose up azurite_init &>/dev/null; then
+      script/docker-compose logs --tail 20 azurite
+      msg "azurite did not start in time"
+      exit 1
+    fi
+  fi
+  msg azurite booted in $(($SECONDS - $START_TIME)) seconds
+}
+
+wait_for_mysql() {
+  msg waiting for mysql to start...
+  START_TIME=$SECONDS
+  if [ "$LAUNCH_CI" = "1" ]; then
+    if ! script/retry docker exec $MYSQL_CONTAINER_NAME mysql -e 'SELECT NOW()' -uroot -p"$MYSQL_ROOT_PASSWORD" &>/dev/null; then
+      docker logs --tail 20 $MYSQL_CONTAINER_NAME
+      msg "mysql did not start in time"
+      exit 1
+    fi
+  else
+    if ! script/retry script/docker-compose exec -T db mysql -u root -prootsekrit -h db -e 'SELECT NOW()' &>/dev/null; then
+      script/docker-compose logs --tail 20 db
+      msg "mysql did not start in time"
+      exit 1
+    fi
+  fi
+  msg mysql booted in $(($SECONDS - $START_TIME)) seconds
+}
+
+wait_for_redis() {
+  msg waiting for redis to start...
+  START_TIME=$SECONDS
+  if [ "$LAUNCH_CI" = "1" ]; then
+    REDIS_PING=$(script/retry docker exec $REDIS_CONTAINER_NAME redis-cli ping)
+    if [ "${REDIS_PING}" != "PONG" ]; then
+      docker logs --tail 20 $REDIS_CONTAINER_NAME
+      msg "redis did not start in time"
+      exit 1
+    fi
+  else
+    REDIS_PING=$(script/retry script/docker-compose exec -T redis redis-cli -p "$LAUNCH_REDIS_PORT" ping)
+    if [ "${REDIS_PING}" != "PONG" ]; then
+      script/docker-compose logs --tail 20 db
+      msg "redis did not start in time"
+      exit 1
+    fi
+  fi
+  msg redis booted in $(($SECONDS - $START_TIME)) seconds
+}
+
+stop_mysql() {
+  if [ "$LAUNCH_CI" = "1" ]; then
+    msg stopping $MYSQL_CONTAINER_NAME...
+    docker stop $MYSQL_CONTAINER_NAME >/dev/null
+  fi
+}
+
+stop_redis() {
+  if [ "$LAUNCH_CI" = "1" ]; then
+    msg stopping $REDIS_CONTAINER_NAME...
+    docker stop $REDIS_CONTAINER_NAME >/dev/null
+  fi
+}
+
+stop_azurite() {
+  if [ "$LAUNCH_CI" = "1" ]; then
+    msg stopping $AZURITE_CONTAINER_NAME...
+    docker stop $AZURITE_CONTAINER_NAME >/dev/null
+  fi
+}
+
+stop_mysql_and_redis() {
+  stop_mysql
+  stop_redis
+}
+
+
+msg() {
+  echo "$@" 1>&2
+}
+
+usage_and_exit() {
+  cat "$0" | grep ^#/ | cut -c4-
+  exit 1
+}
+
+SKEEMA_ENV=test
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --migrate-image)
+      MIGRATE_IMAGE=$2
+      shift; shift;;
+    --skeema-env)
+      SKEEMA_ENV=$2
+      shift; shift;;
+    --clean)
+      USE_CLEAN_LAUNCH_TEST_DB=y
+      shift;;
+    --)
+      # the rest of the args are the command to run.
+      shift; break;;
+    *)
+      usage_and_exit;;
+  esac
+done
+
+[ $# -gt 0 ] || usage_and_exit
+main "$@"

@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-server
+spec:
+  replicas: 1
+  template:
+    spec:
+      volumes:
+        - name: azurecliconfig
+          hostPath:
+            path: /azurecliconfig
+      containers:
+        - name: api-server
+          env:
+            - name: GH_OTEL_DEPLOYMENT_ENVIRONMENT
+              value: dev
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: "http://jaeger-collector.actions-usage-metrics-dev.svc:4318/v1/traces"
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "env=dev,service.name=actions-usage-metrics"
+            - name: SERVICE_PRINCIPAL_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  key: SERVICE_PRINCIPAL_CLIENT_SECRET
+                  name: service-principal-client-secret
+            - name: KUSTO_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  key: KUSTO_CONNECTION_STRING
+                  name: kusto-connection-string
+          volumeMounts:
+            - name: azurecliconfig
+              mountPath: /home/github/.azure
+      securityContext:
+        supplementalGroups:
+          - 1000 # needed to access files in ~/.azure (match codespace user/group)

@@ -1,0 +1,43 @@
+name: Check go mod tidy for changes
+on:
+  push:
+  pull_request:
+    branches:
+    - main
+
+permissions:
+  id-token: write  # for setup-goproxy OIDC
+  contents: read
+
+env:
+  GOPROXY: https://goproxy.githubapp.com/mod,https://proxy.golang.org,direct
+  GOPRIVATE: ''
+  GONOPROXY: ''
+  GONOSUMDB: github.com/github/*
+
+jobs:
+  go-mod-tidy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate with goproxy.
+        uses: github/setup-goproxy@v1.1.0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Run go mod tidy
+        run: go mod tidy -e
+
+      - name: Check for git changes
+        run: |
+          if [[ `git status --porcelain` ]]; then
+            git diff
+            echo
+            echo -e "\e[31mgo.mod is out of sync, run 'go mod tidy' and verify and check in changes\e[0m"
+            exit 1
+          fi

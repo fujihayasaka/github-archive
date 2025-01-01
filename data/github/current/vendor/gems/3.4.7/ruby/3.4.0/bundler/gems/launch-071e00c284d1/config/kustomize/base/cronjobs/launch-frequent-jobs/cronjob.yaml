@@ -1,0 +1,58 @@
+# Run frequent job(s) back-to-back on a single pod to reduce overhead.
+# Add your job below to the bash -c string.
+# Long-term these frequent tasks might move to a dedicated service. See https://github.com/github/c2c-actions-experience/issues/2987
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: launch-frequent-jobs
+    annotations:
+        heaven.githubapp.com/image-placeholder: "launch"
+        heaven.githubapp.com/deploy-requirement: "true"
+        # https://github.com/github/moda-linter/blob/75731cd9f59e29883cb363020804c83d1d7f4ab8/rules/docs/env_var_already_injected_by_annotation.md
+        heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: launch-frequent-jobs
+        moda.github.net/cluster-preferences: |
+            {
+              "general-3-va3-iad":  {
+                "spec": {
+                  "suspend": false
+                }
+              }
+            }
+spec:
+    schedule: "*/2 * * * *"
+    # suspend is overwritten for a single cluster above.
+    suspend: true
+    concurrencyPolicy: Forbid
+    jobTemplate:
+        spec:
+            ttlSecondsAfterFinished: 86400
+            backoffLimit: 1
+            # Terminate runaway pods after 10 minutes.
+            activeDeadlineSeconds: 600
+            template:
+                metadata:
+                    annotations:
+                        fluentbit.io/parser: logfmt
+                        observability.github.com/logger: fluent-bit
+                        observability.github.com/splunk_index: prod-launch
+                        observability.github.com/splunk_sourcetype: launch-fluentbit
+                        observability.github.com/kafka_topic: launch
+                spec:
+                    dnsPolicy: Default
+                    restartPolicy: Never
+                    containers:
+                        - name: launch-frequent-jobs
+                          image: launch
+                          command:
+                            - /usr/bin/tools/istio-job-wrapper
+                            - bash
+                            - -c
+                            - "job-cli jobs percentRunStartDelay --interval 2; job-cli jobs percentRunCompletionDelay --interval 2;"
+                          resources:
+                            requests:
+                                cpu: "0.5"
+                                memory: "128Mi"
+                            limits:
+                                # Adjust GOMAXPROCS in tandem. It's recommended the cpu limit be set to GOMAXPROCS+1.
+                                cpu: "3"
+                                memory: "256Mi"

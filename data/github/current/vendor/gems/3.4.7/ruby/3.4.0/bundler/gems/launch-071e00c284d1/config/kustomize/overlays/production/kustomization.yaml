@@ -1,0 +1,51 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - static-config.yaml
+  - resourcequota.yaml
+  - ../../base/cronjobs/launch-frequent-jobs
+  - ../../base/cronjobs/launch-heal-workflows
+  - ../../base/cronjobs/launch-incomplete-workflows
+  - ../../base/launch-chatops
+  - ../../base/launch-deployer
+  - ../../base/launch-hydro-consumer
+  - ../../base/launch-receiver
+  - ../../base/launch-worker
+
+components:
+# Order matters here!  components/baseline should generally come first.
+- ../../base/components/baseline
+- ../../base/components/production
+
+patches:
+  - path: patches/launch-chatops-deployment.yaml
+  - path: patches/launch-deployer-deployment.yaml
+  - path: patches/launch-frequent-jobs-cronjob.yaml
+  - path: patches/launch-heal-workflows-cronjob.yaml
+  - path: patches/launch-hydro-consumer-deployment.yaml
+  - path: patches/launch-hydro-consumer-service.yaml
+  - path: patches/launch-incomplete-workflows-cronjob.yaml
+  - path: patches/launch-receiver-deployment.yaml
+  - path: patches/launch-receiver-service.yaml
+  - path: patches/launch-worker-deployment.yaml
+  - path: patches/service-common.yaml
+    target:
+      kind: Service
+
+patchesStrategicMerge:
+  - |-
+    apiVersion: v1
+    kind: Service
+
+    metadata:
+      name: launch
+      annotations:
+        moda.github.net/dns-registration-enabled: "false"
+        moda.github.net/allowed-ips: 0.0.0.0/0
+        moda.github.net/domain-name: launch.actions.githubusercontent.com
+        moda.github.net/load-balancer-glb-scope: iad
+        moda.github.net/load-balancer-type: public-external-http
+        opaque.github.net/checks: |
+          - http:
+            url: https://launch.actions.githubusercontent.com/_ping

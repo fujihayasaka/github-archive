@@ -1,0 +1,19 @@
+#!/bin/bash
+
+set -eou pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$DIR/ensure-devcontainer.sh"
+
+echo "Generating the workflow diff"
+
+if [[ $(grep -E -c "\sNextVersion\s+=\s+StableVersion" ts/workflows/library.go) -eq 1 ]]; then
+    echo "Stable version detected so skipping updating the latest workflow template file for diff"
+else
+    NEXT_VERSION="$(sed -nr 's/\s+NextVersion\s+=\s+"(v[0-9]+(-bp[0-9]+)?)"/\1/p' ts/workflows/library.go)"
+    if [ -z "${NEXT_VERSION}" ]; then
+      >&2 echo "Could not detect NextVersion"
+      exit 1
+    fi
+    cat "ts/workflows/versions/${NEXT_VERSION}.codeql.template" >ts/workflows/references/latest_raw_template.expected_template
+fi

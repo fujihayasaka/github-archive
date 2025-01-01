@@ -1,0 +1,42 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    annotations:
+        heaven.githubapp.com/image-placeholder: dependency-graph-api
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: backfill-business-plus-orgs
+    name: backfill-business-plus-orgs
+spec:
+    concurrencyPolicy: Forbid
+    failedJobsHistoryLimit: 2
+    jobTemplate:
+        spec:
+            template:
+                metadata:
+                    annotations:
+                        fluentbit.io/parser: logfmt_sloppy
+                        observability.github.com/logger: fluent-bit
+                        observability.github.com/splunk_index: dependency-graph-api
+                spec:
+                    containers:
+                        - args:
+                            - ./script/dependency_insights/backfill_business_plus_orgs.rb
+                          command:
+                            - /usr/bin/tools/istio-job-wrapper
+                          env:
+                            - name: DOGSTATSD_HOST
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: spec.nodeName
+                          envFrom:
+                            - configMapRef:
+                                name: environment
+                            - secretRef:
+                                name: vault-secrets
+                          image: dependency-graph-api
+                          name: backfill-business-plus-orgs
+                    dnsPolicy: ClusterFirst
+                    restartPolicy: Never
+            ttlSecondsAfterFinished: 86400
+    schedule: '*/20 * * * *'
+    successfulJobsHistoryLimit: 2

@@ -1,0 +1,66 @@
+#
+# This is a skeema-verify-up-to-date GitHub Action file.
+# This is different to the skeema-diff file: it uses Skeema,
+#  but tries to go through our normal regeneration logic locally.
+# After regenerating schema files, it verifies no outstanding changes are present.
+
+name: skeema-verify-up-to-date
+
+on:
+  pull_request:
+    branches:
+    - main
+
+permissions:
+  id-token: write  # for setup-goproxy OIDC
+  contents: read
+
+env:
+  GOPROXY: https://goproxy.githubapp.com/mod,https://proxy.golang.org,direct
+  GOPRIVATE: ''
+  GONOPROXY: ''
+  GONOSUMDB: github.com/github/*
+
+jobs:
+  skeema-verify-up-to-date:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@v4
+
+    - name: Authenticate with goproxy.
+      uses: github/setup-goproxy@v1.1.0
+
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go.mod'
+        cache: true
+
+    - name: Make tools
+      run: make tools
+
+    - name: Start containers
+      env:
+        COMPOSE_FILE: "docker-compose.yml:docker-compose.mysql8.yml"
+      run: |
+        #!/usr/bin/env bash
+        source script/helpers/wait_for_db
+        docker compose up -d db dsapi_azure_storage
+        container_name=$(docker inspect -f '{{.Name}}' $(docker-compose ps -q db) | cut -c2-)
+        wait_for_db_healthy "${container_name}"
+
+    - name: Reset-db
+      run: make reset-db
+
+    - name: Run Skeema schema regeneration
+      working-directory: ./schemas
+      run: skeema pull skeema-local
+
+    - name: Check for git changes
+      run: |
+        if [[ `git status --porcelain` ]]; then
+          git diff
+          echo
+          echo -e "\e[31mYour local schema is out of sync, run 'skeema pull skeema-local' (out of codespaces) or 'skeema pull skeema-local-cs' (in codespaces) and verify and check in changes\e[0m"
+          exit 1
+        fi

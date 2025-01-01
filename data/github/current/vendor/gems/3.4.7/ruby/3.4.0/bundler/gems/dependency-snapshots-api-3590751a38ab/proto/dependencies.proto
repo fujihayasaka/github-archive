@@ -1,0 +1,127 @@
+syntax = "proto3";
+
+package github.dependency_snapshots_api;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "./proto";
+
+// The dependencies service is meant to encapsulate snapshots and only return what dependencies exist for a given set of query parameters.
+// The thinking at the time of this writing is that the caller would pass something like "give me all the interesting snapshots for this repository" (bool flag?)
+// The snapshots service would end up mashing everything together and giving an aggregate response.
+// This is currently frighteningly similar to what's in dg-api's proto, with the EXCEPTION that there is no vulnerability information in this payload.
+// A MUCH better way to do this would be to reuse some of this proto across layers, but this is complicated by the fact that ds-api doesn't talk in *quite* the
+// same way as dg-api does (e.g. an enumeration for package type, which ds-api is agnostic to).
+
+// The DependenciesService is used to get dependencies given a containing repository.
+service DependenciesService {
+  // Gets dependencies for a repository using any/all of build-time and source-code analysis.
+  rpc GetDependenciesForRepository(GetDependenciesForRepositoryRequest) returns (GetDependenciesForRepositoryResponse);
+  // Gets a list of repository IDs that contain at least one dependency matching the criteria in the request.
+  rpc RepositoriesContainingDependency(RepositoriesContainingDependencyRequest) returns (RepositoriesContainingDependencyResponse);
+  // Returns true or false depending on if the given Repository has associated Manifests.
+  rpc HasManifests(HasManifestsRequest) returns (HasManifestsResponse);
+}
+
+enum Relationship {
+  RELATIONSHIP_UNKNOWN = 0;
+  RELATIONSHIP_DIRECT = 1;
+  RELATIONSHIP_TRANSITIVE = 2;
+}
+
+message Manifest {
+  message Dependency {
+    enum Scope {
+      SCOPE_NONE = 0;
+      SCOPE_RUNTIME = 1;
+      SCOPE_DEVELOPMENT = 2;
+    }
+
+    string package_url = 1;
+    repeated string dependencies = 2;
+    Scope scope = 3;
+    Relationship relationship = 4;
+    repeated RootAncestor root_ancestors = 5;
+  }
+
+  string file_path = 1;
+
+  // Map of dependency name to individual dependency
+  map<string,Dependency> dependencies = 2;
+
+  // The ID of the snapshot this manifest was found in.
+  uint64 snapshot_id = 3;
+
+  // The name (unique identifier given by the detector) of this manifest
+  string name = 4;
+}
+
+message GetDependenciesForRepositoryRequest {
+  // GitHub (Rails model) ID, not DG ID
+  uint64 repository_id = 1;
+
+  // Should internal snapshots be included in the response?
+  bool include_internal_snapshots = 2;
+
+  // Filters the results based on the relationship of the dependency
+  optional Relationship relationship_filter = 3;
+
+  // Should we return the root ancestors of the dependencies?
+  bool include_root_ancestors = 4;
+}
+
+message GetDependenciesForRepositoryResponse {
+  // Map of manifest name to individual manifest.
+  map<string,Manifest> manifests = 1;
+  repeated Manifest all_manifests = 2;
+
+  message Snapshot {
+    message DetectorMetadata {
+      string name = 1;
+    }
+
+    DetectorMetadata detector = 1;
+    google.protobuf.Timestamp scanned = 2;
+  }
+
+  map<uint64, Snapshot> snapshots = 3;
+}
+
+message HasManifestsRequest {
+  // GitHub (Rails model) ID, not DG ID
+  uint64 repository_id = 1;
+}
+
+message HasManifestsResponse {
+  bool has_manifests = 1;
+}
+
+message RepositoriesContainingDependencyRequest {
+  string base_purl = 1;
+  string version_range = 2;
+}
+
+message RepositoriesContainingDependencyResponse {
+  // List of repository IDs
+  repeated uint64 repository_ids = 1;
+}
+
+// - ANCESTOR_RELATIONSHIP_UNKNOWN: Relationship is not known
+// - ANCESTOR_RELATIONSHIP_PARENT: The root ancestor is a parent of the transitive dependency (i.e. 1 level deep)
+// - ANCESTOR_RELATIONSHIP_ANCESTOR: The root ancestor is an ancestor of the transitive dependency (i.e. 2 or more levels deep)
+enum AncestorRelationship {
+    ANCESTOR_RELATIONSHIP_UNKNOWN = 0;
+    ANCESTOR_RELATIONSHIP_PARENT = 1;
+    ANCESTOR_RELATIONSHIP_ANCESTOR = 2;
+}
+
+message RootAncestor {
+  // The name of the root ancestor package
+  string package_name = 1;
+
+  // The version requirements of the package
+  string requirements = 2;
+
+  // Indicates what the relationship of the root ancestor is to the transitive dependency
+  AncestorRelationship relationship = 3;
+}

@@ -1,0 +1,21 @@
+# There's a confluence of VEXING things going on here.
+# 1. The istio annotation, moda.github.net/istio-ingress-enabled, cannot simply be "false".
+#    It must either be "true" or non-existent.
+# 2. The order in which kustomize patches are applied (at least in early versions of kustomize)
+#    can be unpredictable.  In other words, just because you think an annotation from an earlier
+#    patch should be present, doesn't mean that it will be.
+#    (see https://github.com/kubernetes-sigs/kustomize/pull/2971
+#     and https://github.com/kubernetes-sigs/kustomize/pull/1154)
+# 3. The kustomize patch framework's op:remove will fail if the specified annotation does not exist.
+#    (Surprsingly, op:add is *not* similarly strict for annotations that already exist.)
+#
+# For these reasons, we employ the following "add-before-remove" pattern to ensure that
+# op:remove won't fail with an "Unable to remove nonexistent key" error.
+#
+# Finally, note that non-hierarchical forward-slashes in op:path attributes must be
+# reprsented with (a rather peculiar) "~1".
+- op: add
+  path: /metadata/annotations/moda.github.net~1istio-ingress-enabled
+  value: "false"
+- op: remove
+  path: /metadata/annotations/moda.github.net~1istio-ingress-enabled

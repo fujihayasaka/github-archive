@@ -1,0 +1,81 @@
+#!/bin/bash
+# Invoked by script/server via Procfile
+
+. script/_serverenv
+
+# Use this to make our logging libraries think they are running in a TTY which gives us pretty colors ✨
+faketty() {
+  if [[ $(uname -s) == "Darwin" ]]; then
+    exec script -Fq /dev/null /bin/sh -c "$(printf '%q ' "$@")"
+  else
+    script --return --quiet -c "$(printf '%q ' "$@")" /dev/null
+  fi
+}
+
+run() {
+  if [[ -n "${LAUNCH_FAKE_TTY+x}" ]]; then
+    faketty "$@"
+  else
+    exec "$@"
+  fi
+}
+
+if [[ $(uname -s) == "Darwin" ]]; then
+  # Mac
+  addr=$(minikube -p actions-dev ssh "route -n|grep ^0.0.0.0|awk '{ print \$2 }'|sed 's/\.[^.]*$/.1/'|tr -d '\n'")
+else
+  # BPDEV/lx. Actions service is deployed in docker-in-docker and launch is on bare metal, so we have to use minikube's host ip.
+  addr=$(minikube -p actions-dev ssh cat /etc/hosts | grep host.minikube.internal | awk '{ print $1 }')
+fi
+
+if [ "$addr" == "" ]; then
+  echo "Unable to determine Actions minikube internal address, ensure Actions is running."
+  exit 1
+fi
+
+export RECEIVER_URL="http://${addr}:${RECEIVER_HTTP_PORT}"
+export RECEIVER_INTERNAL_URL=${RECEIVER_URL}
+
+case "$1" in
+--chatops)
+  export HTTP_ADDR=${ADDR}:${CHATOPS_HTTP_PORT}
+  export INTERNAL_ADDR=${HTTP_ADDR}
+  export CHATOPS_AUTH_PUBLIC_KEY=$(cat $CHATOPS_PUBLIC_KEY)
+  export CHATOPS_AUTH_BASE_URL=http://${ADDR}:${CHATOPS_HTTP_PORT}
+  exec bin/launch-chatops
+  ;;
+--deployer)
+  export INTERNAL_ADDR=${ADDR}:${DEPLOYER_INTERNAL_PORT}
+  export HTTP_ADDR=0.0.0.0:${DEPLOYER_INTERNAL_PORT}
+  export DATABASE_URL=${DEPLOYER_DATABASE_URL}
+  export READ_ONLY_DATABASE_URL=${DEPLOYER_READ_ONLY_DATABASE_URL}
+  run bin/launch-deployer
+  ;;
+--receiver)
+  export HTTP_ADDR=0.0.0.0:${RECEIVER_HTTP_PORT}
+  export INTERNAL_ADDR=${ADDR}:${RECEIVER_INTERNAL_PORT}
+  export TASK_VALUE_ROUTER_SECRETS=${RECEIVER_TASK_VALUE_ROUTER_SECRETS}
+  export GITHUB_ACTIONS_APP_IDS=${GITHUB_APP_ID}
+  export GITHUB_ACTIONS_BOT_NODE_IDS=${GITHUB_APP_BOT_NODE_ID}
+  export DATABASE_URL=${DEPLOYER_DATABASE_URL}
+  export READ_ONLY_DATABASE_URL=${DEPLOYER_READ_ONLY_DATABASE_URL}
+  run bin/launch-receiver
+  ;;
+--hydro-consumer)
+  export INTERNAL_ADDR=${ADDR}:${HYDRO_INTERNAL_PORT}
+  run bin/launch-hydro-consumer
+  ;;
+--worker)
+  export INTERNAL_ADDR=${ADDR}:${WORKER_INTERNAL_PORT}
+  export GITHUB_ACTIONS_APP_IDS=${GITHUB_APP_ID}
+  export GITHUB_ACTIONS_BOT_NODE_IDS=${GITHUB_APP_BOT_NODE_ID}
+  export DATABASE_URL=${DEPLOYER_DATABASE_URL}
+  run bin/launch-worker
+  ;;
+*)
+  echo "Usage: script/server"
+  exit 1
+  ;;
+esac
+
+# vim: sw=2 et

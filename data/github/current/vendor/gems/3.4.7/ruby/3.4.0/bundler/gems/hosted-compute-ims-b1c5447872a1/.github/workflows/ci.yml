@@ -1,0 +1,242 @@
+name: CI Validation
+
+on:
+  merge_group:
+  push:
+    branches:
+    - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  packages: read
+  contents: read
+  pull-requests: write
+
+env:
+  GO_VERSION: 1.23
+  TERM: linux
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: OIDC Setup for goproxy
+      uses: github/setup-goproxy@v1.0.1
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+    - name: Download dependencies
+      run: make download
+    - name: Build app without minikube
+      run: script/build --local
+
+  run_unit_tests:
+    name: Run unit-tests
+    runs-on: ubuntu-latest-xl
+    steps:
+    - uses: actions/checkout@v4
+    - name: OIDC Setup for goproxy
+      uses: github/setup-goproxy@v1.0.1
+    - name: Setup minikube environment
+      uses: ./.github/actions/setup-minikube-env
+      with:
+        docker-token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+    - name: Download dependencies
+      run: make download
+    - name: Install tools
+      run: make tools-ci
+    - name: Setup dependencies
+      run: script/setup
+    - name: Run tests
+      run: script/test
+    - name: Publish test results to job summary
+      run: |
+        if [ -f "tests-output.md" ]; then
+          cat tests-output.md >> $GITHUB_STEP_SUMMARY
+        fi
+      if: success() || failure()
+    - name: Write coverage report as a PR comment
+      uses: marocchino/sticky-pull-request-comment@331f8f5b4215f0445d3c07b4967662a32a2d3e31
+      if: success() || failure() && github.event_name == 'pull_request'
+      with:
+        header: test
+        recreate: true
+        path: tests-output.md
+
+  linters:
+    name: Run linters
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: OIDC Setup for goproxy
+      uses: github/setup-goproxy@v1.0.1
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+    - name: Download dependencies
+      run: make download
+    - name: Install tools
+      run: make tools-ci
+    - name: Run formatter
+      run: make fmt-check
+    - name: Run vet
+      run: make vet
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v3
+      with:
+        version: v1.62.0
+        skip-cache: true # Skip cache because we use build-in cache in actions/setup-go
+
+  buf_check:
+    name: Validate protobuf
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Generate protobuf
+      run: script/buf generate
+    - name: Detect uncommited changes
+      run: script/ci/detect_uncommitted_changes
+    - name: Protobuf format check
+      run: script/buf format --diff --exit-code
+    - name: Protobuf linter check
+      run: script/buf lint
+
+  generate_check:
+    name: Validate go-generate
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: OIDC Setup for goproxy
+      uses: github/setup-goproxy@v1.0.1
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+    - name: Download dependencies
+      run: make download
+    - name: Install tools
+      run: make tools-ci
+    - name: Regenerate mocks
+      run: make generate
+    - name: Detect uncommited changes
+      run: script/ci/detect_uncommitted_changes
+
+  dev_environment_check:
+    name: Validate dev environment
+    needs: [build, run_unit_tests, linters, buf_check, generate_check]
+    runs-on: ubuntu-latest-xl
+    env:
+      GITHUB_USER: 'dev-user'
+    steps:
+    - uses: actions/checkout@v4
+    - name: OIDC Setup for goproxy
+      uses: github/setup-goproxy@v1.0.1
+    - name: Setup minikube environment
+      uses: ./.github/actions/setup-minikube-env
+      with:
+        docker-token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Deploy dev environment
+      run: script/server
+    - name: Validate that dev environment is idempotent
+      run: script/server
+    - name: Validate that setup is idempotent
+      run: script/setup
+    - name: Validate that db-setup is idempotent and passes on retry
+      run: script/db-setup && script/db-setup
+    - name: Validate DB re-creation
+      run: script/db-setup --recreate
+    - name: Validate script/twirpcurl
+      run: |
+        script/twirpcurl ping
+        echo '{}' | script/twirpcurl admin ListCuratedImageDefinitions
+    - name: Validate script/dev-client
+      run: script/dev-client ping
+
+  run_e2e_tests:
+    name: Run e2e-tests
+    needs: [build, run_unit_tests, linters, buf_check, generate_check]
+    runs-on: ubuntu-latest-xl
+    env:
+      AZURE_SUBSCRIPTION_ID: d4ec39fa-c14d-4485-a6c1-b66698d5abf6 # GitHub - NonProd - Dev E2E - Hosted Compute IMS - 001
+    steps:
+      - name: Exit if manually run on non default branch
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          if [[ "${{ github.event.ref }}" != "refs/heads/main" ]]; then
+            echo "Manual execution is not against main, exiting."
+            exit 1
+          fi
+      - name: Check if merge queue branch
+        if: ${{ startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/') }}
+        run: |
+          echo "::warning::Integration tests are not supported yet in merge queue runs."
+          exit 1
+        continue-on-error: true
+      - uses: actions/checkout@v4
+      - name: OIDC Setup for goproxy
+        uses: github/setup-goproxy@v1.0.1
+      - name: OIDC Login to Azure
+        if: ${{ !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/') }}
+        uses: azure/login@v1
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }} #  https://github.com/github/azure-rbac/blob/25fb83b48426282ef9be738a3ab70f5639b317dd/tf/rbac/spn-hosted-compute-ims-dev.tf
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - name: Setup minikube environment
+        if: ${{ !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/') }}
+        uses: ./.github/actions/setup-minikube-env
+        with:
+          docker-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Download dependencies
+        run: make download
+      - name: Vendor dependencies
+        run: make vendor
+      - name: Install tools
+        run: make tools-ci
+      - name: Build app
+        if: ${{ !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/') }}
+        run: script/build
+      - name: Setup dependencies
+        if: ${{ !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/') }}
+        run: script/setup
+      - name: Run e2e tests in short mode
+        if: ${{ !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/') }}
+        run: script/test-e2e --short
+      - name: Publish test results to job summary
+        run: |
+          if [ -f "tests-output.md" ]; then
+            cat tests-output.md >> $GITHUB_STEP_SUMMARY
+          fi
+        if: success() || failure()
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-logs
+          path: logs
+          if-no-files-found: warn
+        if: success() || failure()
+      - name: Write coverage report as a PR comment
+        uses: marocchino/sticky-pull-request-comment@331f8f5b4215f0445d3c07b4967662a32a2d3e31
+        if: success() || failure() && github.event_name == 'pull_request'
+        with:
+          header: e2e-test
+          recreate: true
+          path: tests-output.md

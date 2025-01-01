@@ -1,0 +1,50 @@
+#!/bin/bash
+#/ Usage: script/create-github-app [--force]
+#/ with --force, the GitHub App will be recreated.
+
+set -e
+
+app_root="$(git rev-parse --show-toplevel)"
+github_app_file="$app_root/tmp/github-app"
+
+if [ -f "$github_app_file" ]; then
+  case "$1" in
+    --force)
+      export CREATE_NEW_GITHUB_APP=1
+      rm $github_app_file ;;
+    --exit-if-exists)
+      exit 0 ;;
+  esac
+fi
+
+. script/_serverenv
+
+# GITHUB_PATH is set in script/_serverenv
+if [ ! -x "$GITHUB_PATH/bin/runner" ]; then
+  echo "error: github/github not found"
+  echo "I looked in '${GITHUB_PATH}', but it does not look like a bootstrapped github working directory."
+  echo "Please 'export GITHUB_PATH=~/whatever/.../github' and run this script again."
+  exit 1
+fi
+
+GITHUB_OK=$(cd $GITHUB_PATH; bin/runner 'puts :github_ok')
+if [[ $GITHUB_OK != *"github_ok"* ]]; then
+  echo "error: unable to use bin/runner without errors"
+  echo "Please make sure that bin/console works as expected in github/github."
+  exit 1
+fi
+
+# Disable Hydro for this, we do not want to create audit-log (or other) events
+export GH_HYDRO_UNAVAILABLE=1
+
+create_github_app="$app_root/script/create-github-app.rb"
+
+pushd $GITHUB_PATH
+cat $create_github_app | bin/runner -
+
+if [[ -n "$HCS" ]]; then
+  mv -f /workspaces/github-monolith-hcs-source/tmp/launch-github-app $github_app_file
+else
+  mv -f $GITHUB_PATH/tmp/launch-github-app $github_app_file
+fi
+popd

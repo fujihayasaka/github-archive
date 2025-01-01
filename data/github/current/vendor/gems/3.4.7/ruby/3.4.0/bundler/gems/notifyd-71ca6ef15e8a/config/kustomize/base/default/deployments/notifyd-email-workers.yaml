@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: notifyd-email-workers
+    annotations:
+        heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: "email-worker"
+spec:
+    selector:
+        matchLabels:
+            app: notifyd-email-workers
+    template:
+        metadata:
+            labels:
+                app: notifyd-email-workers
+            annotations:
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: notifyd
+                fluentbit.io/parser_stdout: logfmt
+                fluentbit.io/parser_stderr: json
+        spec:
+            dnsPolicy: ClusterFirst
+            containers:
+                - name: email-worker
+                  resources:
+                    requests:
+                        cpu: 300m
+                        memory: 100Mi
+                    limits:
+                        cpu: 1000m
+                        memory: 500Mi
+                  image: notifyd
+                  command: ["/go/bin/email"]
+                  readinessProbe:
+                    exec:
+                        command: ["pgrep", "-f", "email"]
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command: ["sleep", "5"]
+                  envFrom:
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: AQUEDUCT_QUEUE
+                      value: notifyd_deliver_email
+                    - name: EXCEPTION_HTTP_EXPORTER
+                      value: "true"
+                    - name: GOMAXPROCS
+                      valueFrom:
+                        resourceFieldRef:
+                          containerName: email-worker
+                          resource: limits.cpu
+                    - name: NOTIFYD_CHECKER_TIMEOUT
+                      value: 5s
+                    - name: RETRIES_MAX_ATTEMPTS
+                      value: "5"
+                    - name: STATSD_ADDR
+                      value: "$(KUBE_NODE_HOSTNAME):28125"
+                    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                      value: http://otelcol-mesh.otelcol-production.svc.cluster.local:14318/v1/traces
+                  ports:
+                    - name: pprof
+                      containerPort: 8081
+                      protocol: TCP

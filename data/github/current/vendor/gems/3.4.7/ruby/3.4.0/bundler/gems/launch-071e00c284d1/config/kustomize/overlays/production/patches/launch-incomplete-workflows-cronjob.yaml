@@ -1,0 +1,91 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: launch-incomplete-workflows
+    annotations:
+        heaven.githubapp.com/image-placeholder: "launch"
+        heaven.githubapp.com/deploy-requirement: "true"
+        moda.github.net/cluster-preferences: |
+            {
+              "general-2-ac4-iad":  {
+                "spec": {
+                  "suspend": false
+                }
+              }
+            }
+spec:
+    schedule: "0 * * * *"
+    jobTemplate:
+        spec:
+            template:
+                metadata:
+                    annotations:
+                        fluentbit.io/parser: logfmt
+                        observability.github.com/logger: fluent-bit
+                        observability.github.com/splunk_index: prod-launch
+                        observability.github.com/splunk_sourcetype: launch-fluentbit
+                        observability.github.com/kafka_topic: launch
+                spec:
+                    containers:
+                        - name: launch-incomplete-workflows
+                          envFrom:  # order matters! Subsequent entries can override earlier entries.
+                            - secretRef:
+                                name: vault-secrets
+                            - configMapRef:
+                                name: static-config
+                          env:
+                            - name: GOMAXPROCS
+                              value: "2"
+                            - name: KUBE_POD
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: metadata.name
+                            - name: KUBE_NAMESPACE
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: metadata.namespace
+                            - name: REGION
+                              valueFrom:
+                                configMapKeyRef:
+                                    name: kube-cluster-metadata
+                                    key: region
+                            - name: LAUNCH_ENV
+                              value: production
+                            # LAUNCH_IS_MULTI_TENANT is false by default, it's added here explicitly as a reminder
+                            # to set it to "true" when manually creating configs for a new Proxima stamp.
+                            - name: LAUNCH_IS_MULTI_TENANT
+                              value: "false"
+                            - name: LAUNCH_MODE
+                              value: hosted
+                            - name: STATS_PREFIX
+                              value: launch
+                            - name: STATS_ADDR
+                              value: "$(KUBE_NODE_HOSTNAME):28125"
+                            - name: DEPLOYER_DATABASE_URL
+                              valueFrom:
+                                secretKeyRef:
+                                    name: launch-production
+                                    key: mysql-deployer-rw-db
+                            - name: DEPLOYER_DATABASE_READ_ONLY_URL
+                              valueFrom:
+                                secretKeyRef:
+                                    key: mysql-deployer-ro-db
+                                    name: launch-production
+                            - name: API_HOST
+                              value: "https://internal-api.service.$(REGION).github.net"
+                            - name: EARTHSMOKE_KEYSTORE_AZP_ORGANIZATION
+                              valueFrom:
+                                secretKeyRef:
+                                    name: launch-production
+                                    key: earthsmoke-keystore-azp-organization-production
+                            - name: GITHUB_APP_PRIVATE_KEY
+                              valueFrom:
+                                secretKeyRef:
+                                    name: launch-production
+                                    key: github-app-private-key
+                            - name: AZP_TOKEN_RESOURCE
+                              value: "0000005A-0000-8888-8000-000000000000"
+                            - name: AZP_ORG_CREATE_API_BASE_URL
+                              value: "https://pipelines.actions.githubusercontent.com"
+                            - name: TELEMETRY_ROUND_TRIPPER_ENABLE_LOGS
+                              value: "true"

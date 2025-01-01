@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: turboghas
+spec:
+  replicas: 8
+  selector:
+    matchLabels:
+      app: turboghas
+      role: twirp
+  template:
+    metadata:
+      labels:
+        app: turboghas
+        role: twirp
+      annotations:
+        observability.github.com/logger: fluent-bit
+        fluentbit.io/parser: logfmt
+        observability.github.com/splunk_index: turboghas
+    spec:
+      dnsPolicy: ClusterFirst
+      containers:
+        - name: turboghas
+          image: turboghas
+          ports:
+            - name: http
+              containerPort: 8866
+              protocol: TCP
+          env:
+            - name: STATS_ADDR
+              value: "$(KUBE_NODE_HOSTNAME):28125"
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  containerName: turboghas
+                  resource: limits.cpu
+          envFrom:
+            - configMapRef:
+                name: environment
+            - secretRef:
+                name: vault-secrets
+            - configMapRef:
+                name: kube-cluster-metadata
+          readinessProbe:
+            httpGet:
+              path: /_ping
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "250m"
+            limits:
+              memory: "256Mi"
+              cpu: "1000m"
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]

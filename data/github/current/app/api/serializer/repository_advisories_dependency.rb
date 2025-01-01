@@ -167,10 +167,10 @@ module Api::Serializer::RepositoryAdvisoriesDependency
       patched_versions: affected_product.patches,
     }
 
-    if GitHub.flipper[:vea_api_empty_values].enabled?
-      repository_advisory_affected_product_hash.merge!(vulnerable_functions: [])
-    else
+    if FeatureFlag.vexi.enabled?(:vea_api_populate_values_enabled, default: false)
       repository_advisory_affected_product_hash.merge!(vulnerable_functions: affected_product.affected_functions)
+    else
+      repository_advisory_affected_product_hash.merge!(vulnerable_functions: [])
     end
 
     repository_advisory_affected_product_hash

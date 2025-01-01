@@ -1,0 +1,35 @@
+services:
+  # MySQL Server
+  mysql-server:
+    image: mysql:8.0.36
+    platform: linux/amd64
+    container_name: tma-dev-db
+    ports:
+      - "${TMA_MYSQL_PORT}:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=${TMA_MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${TMA_MYSQL_DATABASE}
+      - MYSQL_USER=${TMA_MYSQL_USER}
+      - MYSQL_PASSWORD=${TMA_MYSQL_PASSWORD}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      # Set max_allowed_packet to 32M
+      - --max_allowed_packet=3232505856505856
+      # Set sql_mode to match the configuration used by our staging and prod clusters
+      # Get live cluster sql_mode settings by running the following chatops command in Slack:
+      # .mysql vars sql_mode <trust-metadata-api-production|trust-metadata-api-staging>
+      - --sql_mode=NO_AUTO_VALUE_ON_ZERO,STRICT_ALL_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+    healthcheck:
+      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+  # Azure Storage Emulator
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.33.0
+    container_name: "azurite"
+    hostname: azurite
+    restart: always
+    ports:
+      # The blob service listenes on port 10000
+      - "10000:10000"

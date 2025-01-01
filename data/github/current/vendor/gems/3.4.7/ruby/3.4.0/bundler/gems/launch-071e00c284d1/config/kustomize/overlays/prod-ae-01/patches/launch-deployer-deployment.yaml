@@ -1,0 +1,208 @@
+# http://kubernetes.io/docs/user-guide/deployments/#what-is-a-deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: launch-deployer
+    annotations:
+        heaven.githubapp.com/image-placeholder: "launch"
+        heaven.githubapp.com/deploy-requirement: "true"
+spec:
+    selector:
+        matchLabels:
+            service: launch-deployer
+    replicas: 2
+    template:
+        metadata:
+            # Labels are applied to all pods created by this deployment so we can
+            # tell the service load balancer where to send traffic.
+            # http://kubernetes.io/docs/user-guide/labels/
+            labels:
+                service: launch-deployer
+        spec:
+            dnsPolicy: ClusterFirst
+            containers:
+                - name: launch-deployer
+                  resources:
+                    limits:
+                      cpu: "2"
+                      memory: 2Gi
+                    requests:
+                      cpu: 1000m
+                      memory: 1Gi
+                  envFrom:  # order matters! Subsequent entries can override earlier entries.
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                    - configMapRef:
+                        name: static-config
+                  env:
+                    - name: KUBE_POD
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.name
+                    - name: KUBE_NAMESPACE
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.namespace
+                    # /_ping is on this port
+                    - name: INTERNAL_ADDR
+                      value: ":6824"
+                    - name: HTTP_ADDR
+                      value: ":6824"
+                    - name: GITHUB_GRAPHQL_SERVICE_TOKEN
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-%stamp%
+                            key: github-graphql-service-token
+                    - name: API_HOST
+                      value: "https://internal-api.service.%stamp%.github.net"
+                    - name: EARTHSMOKE_KEYSTORE_AZP_ORGANIZATION
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-%stamp%
+                            key: earthsmoke-keystore-azp-organization
+                    - name: LAUNCH_REDIS_URL
+                      value: "db-redis-launch-%stamp%.redis.cache.windows.net:6380"
+                    - name: LAUNCH_REDIS_USE_TLS
+                      value: "true"
+                    - name: LAUNCH_REDIS_USERNAME
+                      value: "default"
+                    - name: LAUNCH_REDIS_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-%stamp%
+                            key: launch-redis-secret
+                    - name: LAUNCH_CACHE_MEMORY_MAX_SIZE_BYTES
+                      value: "100663296" # 96 MiB
+                    - name: KAFKA_ROOT_CA_PATH
+                      value: "/etc/ssl/certs/cp1-iad-production-1487801205-root.pem"
+                    - name: KAFKA_BROKERS
+                      value: "hydro-kafka-%stamp%-%stamp%.service.%stamp%-az1.consul:9093,hydro-kafka-%stamp%-%stamp%.service.%stamp%-az2.consul:9093,hydro-kafka-%stamp%-%stamp%.service.%stamp%-az3.consul:9093"
+                    # The private key provisioned for the Launch GitHub App
+                    - name: GITHUB_APP_PRIVATE_KEY
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-%stamp%
+                            key: github-app-private-key
+                    # The private key provisioned for the proxima app on dotcom (Proxima Integrations org)
+                    - name: ACTIONS_RESOLVER_APP_PRIVATE_KEY
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-%stamp%
+                            key: actions-resolver-app-private-key
+                    # The master key for generating action-runner keys
+                    - name: ACTION_RUNNER_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-%stamp%
+                            key: deployer-action-runner-secret
+                    - name: TRACING_ENABLED
+                      value: "true"
+                    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                      value: "http://otelcol-mesh.otelcol-production.svc.cluster.local:14318/v1/traces"
+                    - name: GITHUB_TWIRP_HMAC_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-%stamp%
+                            key: github-twirp-hmac-secret
+                    - name: GITHUB_TWIRP_ADDR
+                      value: "https://internal-api.service.%stamp%.github.net/internal"
+                    - name: AZP_GH_APP_PRIVATE_KEY_PEM
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-%stamp%
+                            key: azp-gh-app-private-key-pem
+                    - name: AZP_FORCE_TOKEN_OVER_AAD
+                      value: "true"
+                    - name: AZP_ORG_CREATE_API_BASE_URL
+                      value: "https://pipelines.actions.githubusercontent.com/serviceDeployments/pipelinesproxeau1"
+                    - name: "PIPELINE_SCALE_UNIT_URLS"
+                      value: |
+                        https://pipelinesproxeau1.actions.githubusercontent.com
+                    - name: TOKEN_SERVICE_KEY_PEM
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-%stamp%
+                            key: token-service-key-pem
+                    - name: TOKEN_SERVICE_CERT_PEM
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-%stamp%
+                            key: token-service-cert-pem
+                    - name: AZP_ORG_REGION
+                      value: "prox%stamp_without_separators%"
+                    - name: EMULATE_PREPARED_STATEMENTS
+                      value: "true"
+                    - name: USE_UTC_FOR_MYSQL
+                      value: "true"
+                    - name: FORCE_CHARSET_FOR_MYSQL
+                      value: "true"
+                    - name: HTTP_PROXY
+                      value: "network-proxy.service.%stamp%.github.net:3128"
+                    - name: HTTPS_PROXY
+                      value: "network-proxy.service.%stamp%.github.net:3128"
+                    - name: NO_PROXY
+                      value: "github.net,github.com,*.cluster.local,*.blob.core.windows.net"
+                    - name: AQUEDUCT_APP
+                      value: "actions-production"
+                    - name: AQUEDUCT_URL
+                      value: "https://aqueduct.service.%stamp%.github.net"
+                    - name: SCHEDULE_LOOP_SLEEP_DURATION
+                      value: "30s"
+                    - name: SCHEDULE_TASKS_PER_TICK
+                      value: "15"
+                    - name: SCHEDULE_SCATTER_OFFSET_DURATION
+                      value: "240s"
+                    - name: SPOKESD_URL
+                      value: "http://spokesd.spokesd-%stamp%.svc.cluster.local:80"
+                    - name: AUTHZD_URL
+                      value: "https://authzd.service.%stamp%.github.net"
+                    - name: KREDZ_HTTP_ADDR
+                      value: "http://kredz.kredz-%stamp%.svc.cluster.local:80"
+                    - name: KREDZ_HMAC_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-%stamp%
+                            key: kredz-hmac-secret
+                    - name: BILLING_PLATFORM_URL
+                      value: "http://billing-platform.billing-platform-%stamp%.svc.cluster.local:8989"
+                    - name: BILLING_PLATFORM_HMAC_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-%stamp%
+                            key: billing-platform-hmac-secret
+                    - name: TELEMETRY_ROUND_TRIPPER_ENABLE_LOGS
+                      value: "true"
+                    - name: GOMAXPROCS
+                      value: "1"
+                    - name: LAUNCH_LOG_DEBUG
+                      value: "true"
+                    # Federated secret
+                    - name: FAILBOT_HAYSTACK_URL
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-%stamp%
+                            key: failbot-haystack-url
+                    - name: DEPLOYER_HMAC_VERIFY_SECRETS
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-%stamp%
+                            key: deployer-hmac-verify-secrets
+                    - name: AZURE_STORAGE_ACCOUNT_PREFIX
+                      value: "launch%stamp_without_separators%sa"
+                    - name: AZURE_SPN_CLIENT_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-blob-%stamp%
+                            name: launch-%stamp%
+                    - name: AZURE_SPN_CLIENT_ID
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-blob-%stamp%-client-id
+                            name: launch-%stamp%
+                    - name: AZURE_SPN_TENANT_ID
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-blob-%stamp%-tenant-id
+                            name: launch-%stamp%

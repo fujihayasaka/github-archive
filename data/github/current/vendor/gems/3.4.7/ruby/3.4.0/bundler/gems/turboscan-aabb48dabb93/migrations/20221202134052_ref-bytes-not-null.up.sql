@@ -1,0 +1,1 @@
+ALTER TABLE `ts_analyses` MODIFY COLUMN `ref_bytes` varbinary(1024) NOT NULL, ADD KEY `idx_analyses_on_repo_id_deleted_recent_ref_bytes_tool_id_created` (`repository_id`,`soft_deleted_at`,`most_recent`,`ref_bytes`,`tool_id`,`created_at`);

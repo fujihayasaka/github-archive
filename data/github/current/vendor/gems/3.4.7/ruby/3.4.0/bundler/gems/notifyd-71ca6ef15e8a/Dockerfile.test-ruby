@@ -1,0 +1,37 @@
+# Builds the notifyd api server in the build container,
+# and runs it in the test container so the tests can use it.
+FROM ghcr.io/github/gh-base-image/go-builder-focal:latest AS build
+
+WORKDIR /usr/src/notifyd
+COPY . .
+
+RUN make api ctx=local
+
+FROM ghcr.io/github/gh-base-image/ruby-builder:v3.4-focal
+
+ARG CURRENT_RUBY=3.4.1
+
+COPY ruby /usr/src/app
+WORKDIR /usr/src/app
+# Copy the go API binary
+COPY --from=build /usr/src/notifyd/bin/api /usr/bin/api
+
+# Confirm the code is requireable and buildable
+RUN rbenv global ${CURRENT_RUBY}
+ENV RUBY_VERSION $CURRENT_RUBY
+ENV RBENV_VERSION $CURRENT_RUBY
+RUN bundle install
+RUN bundle exec ruby -e "require 'notifyd-client'" -e 'puts "ok, version: #{Notifyd::VERSION}"'
+RUN gem build notifyd-client.gemspec
+
+# Run the ruby integration
+ENV NOTIFYD_BIN_PATH=/usr/bin/api
+ENV TEST_DB_URL=root@tcp(testdb:3306)/notifyd_test
+ENV PRIMARY_DB_URL=root@tcp(testdb:3306)/notifyd_test
+ENV REPLICA_DB_URL=root@tcp(testdb:3306)/notifyd_test
+ENV MONOLITH_TWIRP_API_HMAC_KEY=
+ENV APP_ENV=test
+ENV STATSD_ADDR=IGNORE
+ENV NOTIFYD_LOGGER=stdout
+
+CMD ["sh", "-c", "bin/rake"]

@@ -409,6 +409,7 @@ class Organization
     end
 
     def set_default_configurations
+      return if GitHub.single_business_environment?
       return if business_owned
 
       organization.set_fine_grained_personal_access_token_expiration_limit(

@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: ingest-packages
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "ingest-packages"
+        heaven.githubapp.com/image-placeholder: "dependency-graph-api"
+        heaven.githubapp.com/deploy-requirement: "true"
+        moda.github.net/vpa-updater-enabled: "true"
+spec:
+    replicas: 2 # make sure replica count * site count is >= the partitions for the kafka topic:
+    # https://github.com/github/hydro-schemas/blob/79c79db32270e29b22fd860402e57fb684f4f23a/topic-configuration/production/potomac/github.yaml#L1011
+    strategy:
+        type: RollingUpdate
+    selector:
+        matchLabels:
+            app: dependency-graph-api
+            role: ingest-packages
+    template:
+        metadata:
+            labels:
+                app: dependency-graph-api
+                role: ingest-packages
+        spec:
+            dnsPolicy: ClusterFirst
+            volumes:
+                - name: github-metadata
+                  hostPath:
+                    path: /etc/github/metadata.json
+            containers:
+                - name: ingest-packages
+                  image: dependency-graph-api
+                  resources:
+                    requests:
+                        cpu: 150m
+                        memory: "350Mi"
+                    limits:
+                        cpu: 3000m
+                        memory: "4Gi"
+                  command: ["./script/etl/ingest_packages"]
+                  readinessProbe:
+                    timeoutSeconds: 1
+                    tcpSocket:
+                        port: 8888
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                  volumeMounts:
+                    - mountPath: /etc/github/metadata.json
+                      name: github-metadata
+                      readOnly: true

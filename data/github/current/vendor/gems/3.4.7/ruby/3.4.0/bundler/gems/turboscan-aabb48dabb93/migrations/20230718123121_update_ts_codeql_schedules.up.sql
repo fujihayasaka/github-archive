@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run migrations/20230718123121_update_ts_codeql_schedules.go on GHES

@@ -1,0 +1,78 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    annotations:
+        heaven.githubapp.com/deploy-requirement: "true"
+        heaven.githubapp.com/image-placeholder: dependency-snapshots-api
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: api
+        moda.github.net/canary-label: canary
+        moda.github.net/canary-v2: "true"
+    name: api
+spec:
+    replicas: 2
+    selector:
+        matchLabels:
+            app: dependency-snapshots-api
+            canary: api
+            role: api
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser_stderr: json
+                fluentbit.io/parser_stdout: logfmt
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: dependency-snapshots-api
+                sidecar.istio.io/proxyCPU: 500m
+                sidecar.istio.io/proxyCPULimit: 2000m
+                sidecar.istio.io/proxyMemory: 1Gi
+                sidecar.istio.io/proxyMemoryLimit: 2Gi
+            labels:
+                app: dependency-snapshots-api
+                canary: api
+                role: api
+        spec:
+            containers:
+                - command:
+                    - ./bin/ds-api
+                    - --port
+                    - "9597"
+                  env:
+                    - name: OTEL_RESOURCE_ATTRIBUTES
+                      value: deployment.environment=production,deployed_to=$(KUBE_NODE_HOSTNAME),env=production,deployed_env=production
+                    - name: STATS_ADDR
+                      value: $(KUBE_NODE_HOSTNAME):28125
+                    - name: GOMAXPROCS
+                      value: "2"
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  image: dependency-snapshots-api
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command:
+                                - sleep
+                                - "5"
+                  name: api
+                  ports:
+                    - containerPort: 9597
+                      name: http
+                      protocol: TCP
+                  readinessProbe:
+                    httpGet:
+                        path: /_ping
+                        port: 9597
+                        scheme: HTTP
+                  resources:
+                    limits:
+                        cpu: 2
+                        memory: 1Gi
+                    requests:
+                        cpu: 1
+                        memory: 256Mi
+            dnsPolicy: ClusterFirst

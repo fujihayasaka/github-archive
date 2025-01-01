@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20201014131731_update_rules_with_tool_ids.go on GHES

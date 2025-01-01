@@ -1,0 +1,18 @@
+#!/bin/bash
+
+set -e
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+. "$DIR/ensure-devcontainer.sh"
+
+go install google.golang.org/protobuf/cmd/protoc-gen-go github.com/twitchtv/twirp/protoc-gen-twirp github.com/arthurnn/twirp-ruby/protoc-gen-twirp_ruby ./vendor/github.com/pseudomuto/protoc-gen-doc/cmd/...
+
+echo "==> running protoc ..."
+protoc -I proto --proto_path=proto --twirp_out=ts/proto --go_out=ts/proto proto/turboscan/proto/*.proto
+protoc -I proto --proto_path=proto --twirp_ruby_out=ruby/lib --ruby_out=ruby/lib proto/turboscan/proto/*.proto
+for dir in monolith-twirp-proto/*/v1; do
+  protoc -I proto --proto_path=monolith-twirp-proto --twirp_out=ts --go_out=ts "${dir}/"*.proto
+done
+
+echo "==> running protoc to generate documentation..."
+protoc  -I proto --doc_out=proto/ --doc_opt=proto/template/markdown.tmpl,README.md proto/turboscan/proto/*.proto

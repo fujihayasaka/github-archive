@@ -1,0 +1,1 @@
+DROP INDEX `index_unique_routing_settings` ON `routing_settings`;

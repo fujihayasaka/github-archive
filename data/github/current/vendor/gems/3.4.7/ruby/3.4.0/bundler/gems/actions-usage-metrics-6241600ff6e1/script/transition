@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Example: 
+# ./script/transition -operation=backfill -start-date=2021-01-01
+# ./script/transition -operation=data-import -start-date=2021-01-01 -end-date=2030-01-01
+read -a args <<< "$@"
+argsFormatted=$(printf ",'%s'" "${args[@]}")
+echo "'--', ${argsFormatted:1}"
+
+patch='[ { "op": "replace", "path": "/spec/template/spec/containers/0/args", "value": [ _ARGS_ ] } ]'
+patch="${patch//_ARGS_/$(echo "'--', ${argsFormatted:1}")}"
+
+newJob=$(kubectl patch jobs transition-template-job --dry-run=client --type=json --patch "$patch" -o json | \
+  jq 'del(.spec.selector)' | \
+  jq 'del(.spec.template.metadata.labels)')
+kubectl delete --ignore-not-found=true -n actions-usage-metrics-dev jobs/transition-template-job
+echo "$newJob"
+echo "$newJob" | kubectl apply -f -

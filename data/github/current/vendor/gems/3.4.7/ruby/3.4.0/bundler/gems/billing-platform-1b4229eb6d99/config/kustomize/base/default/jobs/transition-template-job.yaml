@@ -1,0 +1,55 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: transition-template-job
+spec:
+  template:
+    metadata:
+      labels:
+        app: transition-template-job
+        role: internal-service
+      annotations:
+        observability.github.com/logger: fluent-bit
+        fluentbit.io/parser_stdout: logfmt
+    spec:
+      containers:
+        - name: transition
+          image: billing-platform
+          envFrom:
+            - configMapRef:
+                name: environment
+            - configMapRef:
+                name: kube-cluster-metadata
+            - secretRef:
+                name: vault-secrets
+          command:
+            - /usr/bin/tools/istio-job-wrapper
+            - ./bin/transition
+          resources:
+            requests:
+                memory: 1G
+            limits:
+                memory: 2G
+          env:
+            - name: script
+              value: build
+            - name: STATS_ADDR
+              value: "$(KUBE_NODE_HOSTNAME):28125"
+            - name: APP_SHA
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['heaven.githubapp.com/sha']
+            - name: APP_REF
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['heaven.githubapp.com/ref']
+      # Set restartPolicy: Never and backoffLimit: 0 to avoid the job from
+      # being restarted in case of failure or eviction. This is important to
+      # avoid restarting a long-running transition automatically if it already
+      # made progress.
+      restartPolicy: Never
+  backoffLimit: 0
+  # Moda recommends setting activeDeadlineSeconds to any job resource. This
+  # configuration is only relevant though for the deployment of the job, but not
+  # for the execution of transitions via the transition automation.
+  activeDeadlineSeconds: 100

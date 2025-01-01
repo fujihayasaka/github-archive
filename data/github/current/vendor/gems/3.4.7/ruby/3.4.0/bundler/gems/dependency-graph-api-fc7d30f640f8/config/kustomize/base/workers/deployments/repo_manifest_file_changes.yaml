@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: repo-manifest-file-changes
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "repo-manifest-file-changes"
+        heaven.githubapp.com/image-placeholder: "dependency-graph-api"
+        heaven.githubapp.com/deploy-requirement: "true"
+        moda.github.net/vpa-updater-enabled: "true"
+spec:
+    replicas: 5
+    strategy:
+        type: RollingUpdate
+    selector:
+        matchLabels:
+            app: dependency-graph-api
+            role: repo-manifest-file-changes
+    template:
+        metadata:
+            labels:
+                app: dependency-graph-api
+                role: repo-manifest-file-changes
+            annotations:
+              proxy.istio.io/config: |
+                terminationDrainDuration: 30s
+        spec:
+            dnsPolicy: ClusterFirst
+            volumes:
+                - name: github-metadata
+                  hostPath:
+                    path: /etc/github/metadata.json
+            containers:
+                - name: repo-manifest-file-changes
+                  image: dependency-graph-api
+                  resources:
+                    requests:
+                        cpu: 150m
+                        memory: "1Gi"
+                    limits:
+                        cpu: 3000m
+                        memory: "4Gi"
+                  command: ["./script/etl/repo_manifest_file_changes"]
+                  readinessProbe:
+                    timeoutSeconds: 1
+                    tcpSocket:
+                        port: 8888
+                  env:
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - secretRef:
+                        name: vault-secrets
+                  volumeMounts:
+                    - mountPath: /etc/github/metadata.json
+                      name: github-metadata
+                      readOnly: true

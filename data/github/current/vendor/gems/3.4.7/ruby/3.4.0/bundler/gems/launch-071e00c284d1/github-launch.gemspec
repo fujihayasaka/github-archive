@@ -1,0 +1,22 @@
+# -*- encoding: utf-8 -*-
+# stub: github-launch 0.0.1 ruby ruby/lib
+
+Gem::Specification.new do |s|
+  s.name = "github-launch".freeze
+  s.version = "0.0.1".freeze
+
+  s.required_rubygems_version = Gem::Requirement.new(">= 0".freeze) if s.respond_to? :required_rubygems_version=
+  s.require_paths = ["ruby/lib".freeze]
+  s.authors = ["spraints".freeze, "parkr".freeze]
+  s.date = "1980-01-02"
+  s.files = ["proto/monolith/core/v1/account_details_api.proto".freeze, "proto/monolith/core/v1/actions_checks_api.proto".freeze, "proto/monolith/core/v1/actions_users_api.proto".freeze, "proto/monolith/core/v1/dynamic_workflow.proto".freeze, "proto/monolith/core/v1/environments_api.proto".freeze, "proto/monolith/core/v1/global_id_api.proto".freeze, "proto/monolith/core/v1/integrations_api.proto".freeze, "proto/monolith/core/v1/launch_actor.proto".freeze, "proto/monolith/core/v1/launch_actor_api.proto".freeze, "proto/monolith/core/v1/launch_identity.proto".freeze, "proto/monolith/core/v1/launch_policies_api.proto".freeze, "proto/monolith/core/v1/launch_repositories_api.proto".freeze, "proto/monolith/core/v1/launch_repository.proto".freeze, "proto/monolith/core/v1/launch_repository_visibility.proto".freeze, "proto/monolith/core/v1/plan.proto".freeze, "proto/monolith/core/v1/reason.proto".freeze, "proto/monolith/core/v1/refs_api.proto".freeze, "proto/monolith/core/v1/resolve_actions_api.proto".freeze, "proto/monolith/core/v1/workflow_details_api.proto".freeze, "proto/monolith/core/v1/workflow_run_executions_api.proto".freeze, "proto/pbtypes/checks.proto".freeze, "proto/pbtypes/deploy.proto".freeze, "proto/pbtypes/github.proto".freeze, "proto/pbtypes/launch.proto".freeze, "proto/services/artifactcache.proto".freeze, "proto/services/artifacts_exchange.proto".freeze, "proto/services/checks.proto".freeze, "proto/services/deploy.proto".freeze, "proto/services/environment.proto".freeze, "proto/services/largerrunners.proto".freeze, "proto/services/runnergroups.proto".freeze, "proto/services/runnerscalesets.proto".freeze, "proto/services/selfhostedrunners.proto".freeze, "proto/services/status.proto".freeze, "proto/services/token.proto".freeze, "ruby/lib/github-launch.rb".freeze, "ruby/lib/github-launch/artifactcache.rb".freeze, "ruby/lib/github-launch/artifacts.rb".freeze, "ruby/lib/github-launch/checks.rb".freeze, "ruby/lib/github-launch/client.rb".freeze, "ruby/lib/github-launch/deployer.rb".freeze, "ruby/lib/github-launch/environment.rb".freeze, "ruby/lib/github-launch/largerrunners.rb".freeze, "ruby/lib/github-launch/runnergroups.rb".freeze, "ruby/lib/github-launch/runnerscalesets.rb".freeze, "ruby/lib/github-launch/selfhostedrunners.rb".freeze, "ruby/lib/github-launch/types.rb".freeze, "ruby/lib/github-launch/version.rb".freeze, "ruby/proto/pbtypes/checks_pb.rb".freeze, "ruby/proto/pbtypes/checks_twirp.rb".freeze, "ruby/proto/pbtypes/deploy_pb.rb".freeze, "ruby/proto/pbtypes/deploy_twirp.rb".freeze, "ruby/proto/pbtypes/github_pb.rb".freeze, "ruby/proto/pbtypes/github_twirp.rb".freeze, "ruby/proto/pbtypes/launch_pb.rb".freeze, "ruby/proto/pbtypes/launch_twirp.rb".freeze, "ruby/proto/services/artifactcache_pb.rb".freeze, "ruby/proto/services/artifactcache_twirp.rb".freeze, "ruby/proto/services/artifacts_exchange_pb.rb".freeze, "ruby/proto/services/artifacts_exchange_twirp.rb".freeze, "ruby/proto/services/checks_pb.rb".freeze, "ruby/proto/services/checks_twirp.rb".freeze, "ruby/proto/services/deploy_pb.rb".freeze, "ruby/proto/services/deploy_twirp.rb".freeze, "ruby/proto/services/environment_pb.rb".freeze, "ruby/proto/services/environment_twirp.rb".freeze, "ruby/proto/services/largerrunners_pb.rb".freeze, "ruby/proto/services/largerrunners_twirp.rb".freeze, "ruby/proto/services/runnergroups_pb.rb".freeze, "ruby/proto/services/runnergroups_twirp.rb".freeze, "ruby/proto/services/runnerscalesets_pb.rb".freeze, "ruby/proto/services/runnerscalesets_twirp.rb".freeze, "ruby/proto/services/selfhostedrunners_pb.rb".freeze, "ruby/proto/services/selfhostedrunners_twirp.rb".freeze, "ruby/proto/services/status_pb.rb".freeze, "ruby/proto/services/status_twirp.rb".freeze, "ruby/proto/services/token_pb.rb".freeze, "ruby/proto/services/token_twirp.rb".freeze, "ruby/proto/twirp.rb".freeze]
+  s.homepage = "https://github.com/github/launch".freeze
+  s.rubygems_version = "3.6.9".freeze
+  s.summary = "Ruby client for launch services".freeze
+
+  s.installed_by_version = "3.6.9".freeze
+
+  s.specification_version = 4
+
+  s.add_runtime_dependency(%q<twirp>.freeze, ["~> 1.1".freeze])
+end

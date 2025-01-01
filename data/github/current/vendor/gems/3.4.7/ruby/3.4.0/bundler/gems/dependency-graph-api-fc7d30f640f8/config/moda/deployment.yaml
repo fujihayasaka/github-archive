@@ -1,0 +1,73 @@
+required_builds:
+  - dependency-graph-api
+  - dependency-graph-api-docker-image
+  - dependency-graph-api-moda-config-bundle
+ok_for_moda_to_remove_from_deprecating_clusters: true
+auto_start_pipeline: production_rollout
+notifications:
+  slack_channels:
+    - "#dg-ops"
+environments:
+  - name: production
+    secret_environment: production
+    canaryable: true
+    require_canary: false
+    require_pipeline: true
+    cluster_selector:
+      profile: general
+      region: iad
+    service_mesh:
+      enabled: true
+  - name: staff-wus2-01
+    secret_environment: staff-wus2-01
+    require_pipeline: true
+    cluster_selector:
+      profile: proxima
+      stamp: staff-wus2-01
+    service_mesh:
+      enabled: true
+  - name: lab
+    secret_environment: production # use production until we don't have to, since it can be annoying to maintain another env
+    auto_deploy: true
+    cluster_selector:
+      name: general-1-ash1-iad # Single site to reduce resource usage
+      site: ash1-iad
+    service_mesh:
+      enabled: true
+  - name: scripts
+    secret_environment: production
+    cluster_selector:
+      profile: general
+      region: iad
+proxima:
+  environment_pattern:
+    service_mesh:
+      enabled: true
+  rollout_pattern:
+    - kind: deployment
+      config:
+        timeout: 900
+  rings:
+    timer_gate_duration: 300
+    gates:
+      - kind: blocked
+        reason: "Please check the [api](https://app.datadoghq.com/dashboard/cmd-vkt-mii/dg-api) and [ingest](https://app.datadoghq.com/dashboard/rb9-x9p-b8f/dg-simple-ingest-dash) dashboards before continuing."
+pipelines:
+  production_rollout:
+    append_proxima_stamps: true
+    auto_start_wait: false
+    timeout: 3600
+    stages:
+      - name: staff-wus2-01
+        kind: deployment
+        config:
+          environment: staff-wus2-01
+          timeout: 600
+      - name: production
+        kind: deployment
+        config:
+          timeout: 900
+          environment: production
+        gates:
+          - kind: blocked
+            reason: "Please check the [api](https://app.datadoghq.com/dashboard/cmd-vkt-mii/dg-api) and [ingest](https://app.datadoghq.com/dashboard/rb9-x9p-b8f/dg-simple-ingest-dash) dashboards before continuing."

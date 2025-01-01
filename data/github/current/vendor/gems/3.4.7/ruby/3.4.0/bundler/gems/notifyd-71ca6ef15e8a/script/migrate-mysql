@@ -1,0 +1,58 @@
+#!/bin/bash
+# Usage: script/migrate-mysql
+#
+# Runs all database migrations and transitions that have not yet been
+# applied. Reads PRIMARY_DB_URL from the environment. If APP_ENV=development
+# or APP_ENV=test, loads the `.env` file from the repository root. If
+# APP_ENV=test, applies migrations to the database at TEST_DB_URL.
+
+set -e
+
+echo "Running migrations for ENV ${APP_ENV:-development}..."
+
+echo "Exporting environment variables..."
+export $(cat .env |grep -v "\#" | xargs)
+if [[ -f ".env.local" ]]; then
+  export $(cat .env.local |grep -v "\#" | xargs)
+fi
+
+DB_PORT=3306
+DB_USER=root
+
+if [[ -z "$DB_HOST" ]]; then
+  DB_HOST=127.0.0.1
+fi
+
+if [[ -z "$SKEEMA_PROFILE" ]]; then
+  SKEEMA_PROFILE="development"
+fi
+
+PRIMARY_DB_URL="root@tcp($DB_HOST)/notifyd_development"
+TEST_DB_URL="root@tcp($DB_HOST)/notifyd_test"
+echo "Migrating notifyd cluster..."
+GO111MODULE=on go run -mod=vendor ./cmd/migrate
+
+
+if [[ ! $SKIP_SCHEMA_DUMPS && ($APP_ENV = "" || $APP_ENV = "development") ]]; then
+  echo "Updating skeema files..."
+  pushd schema/notifyd > /dev/null
+  go run github.com/skeema/skeema@v1.4 pull $SKEEMA_PROFILE
+  go run github.com/skeema/skeema@v1.4 lint $SKEEMA_PROFILE
+  popd > /dev/null
+
+
+  echo "Generating schema/structure.sql"
+
+  column_statistics=""
+  mysqldump_ver=$(mysqldump --version | cut -d" " -f4 | cut -d"." -f1)
+
+  if (( $mysqldump_ver >= 8 )); then
+    column_statistics="--column-statistics=0"
+  fi
+  login=${MYSQL_DUMP_CONNECT_PARAMS:-"--host ${DB_HOST} --port ${DB_PORT} --user ${DB_USER}"}
+  mysqldump $login --no-data --set-gtid-purged=OFF $column_statistics notifyd_development > ./schema/structure.sql
+
+  # Append the current migration version to schema/structure.sql
+  echo "Appending migration version to schema/structure.sql"
+  mysqldump ${login} --no-create-info --compact --set-gtid-purged=OFF $column_statistics notifyd_development notifyd_schema_migrations >> ./schema/structure.sql
+fi

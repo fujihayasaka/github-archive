@@ -1,0 +1,56 @@
+#!/bin/bash
+# Examples:
+# script/query-usage GetUsageByRepoWorkflowRunner
+# script/query-usage GetJobUsage
+# script/query-usage GetRepoUsage
+# script/query-usage GetRunnerTypeUsage
+# script/query-usage GetRunnerRuntimeUsage
+
+set -e
+dir="$(dirname "$0")"
+echo "Usage: $0 [GetUsageByRepoWorkflowRunner | GetJobUsage | GetRepoUsage | GetRunnerTypeUsage | GetRunnerRuntimeUsage | GetWorkflowPerformance] [version_override e.g. v1] [date_range e.g. DATE_RANGE_TYPE_CURRENT_WEEK] [repositoryFilter e.g. 3] [offset] [limit]"
+
+if [ -z "$1" ]; then endpoint='GetUsageByRepoWorkflowRunner'; else endpoint=$1; fi
+scope="{\"enterprise_orgs\": [9919, 33435682], \"scope_type\": \"SCOPE_TYPE_ENTERPRISE\"}"
+if [ -z "$2" ]; then version='v3'; else version=$2; fi
+if [ -z "$3" ]; then date_range='DATE_RANGE_TYPE_LATEST_MONTH'; else date_range=$3; fi
+if [ -z "$4" ]; then repositoryFilter=''; else repositoryFilter=$4; fi
+if [ -z "$5" ]; then offset=0; else offset=$5; fi
+if [ -z "$6" ]; then limit=100; else limit=$6; fi
+
+if [ -z "$repositoryFilter" ]; then repositoryFilterJson=""; else repositoryFilterJson=", \"filters\":[{\"key\":\"repository_id\",\"operator\":1,\"values\":[\"$repositoryFilter\"]}]"; fi
+
+requestBody="{\"request_options\": { \"date_range\": \"$date_range\", \"scope\": $scope, \"offset\": $offset, \"limit\": $limit, \"projection_options\":{ \"version_override\":\"$version\" }$repositoryFilterJson }}"
+echo "Request Body: $requestBody"
+
+json=$($dir/hmac-curl -s -X POST aum.local:32474/twirp/actions_usage_metrics.api.v1.UsageApi/$endpoint -H "Content-Type: application/json" -d "$requestBody")
+
+echo ==============
+echo $json
+echo ==============
+
+case "$endpoint" in
+"GetUsageByRepoWorkflowRunner")
+    echo "$json" | jq -r ".items[] | [.owner_id, .repository_id, .workflow_file_path, .runner_type, .runner_runtime, .total_minutes, .workflow_executions.count, .jobs.count] | @tsv" | column -t
+    ;;
+"GetJobUsage")
+    echo "$json" | jq -r ".items[] | [.owner_id, .repository_id, .workflow_file_path, .job_name, .runner_type, .runner_runtime, .total_minutes, .job_executions] | @tsv" | column -t
+    ;;
+"GetRepoUsage")
+    echo "$json" | jq -r ".items[] | [.owner_id, .repository_id, .total_minutes, .workflows_executions.count, .workflows.count] | @tsv" | column -t
+    ;;
+"GetRunnerRuntimeUsage")
+    echo "$json" | jq -r ".items[] | [.runner_runtime, .total_minutes, .workflows_executions.count, .workflows.count] | @tsv" | column -t
+    ;;
+"GetRunnerTypeUsage")
+    echo "$json" | jq -r ".items[] | [.runner_type, .total_minutes, .workflows_executions.count, .workflows.count] | @tsv" | column -t
+    ;;
+"GetWorkflowPerformance")
+    echo "$json" | jq -r ".items[] | [.owner_id, .repository_id, .workflow_file_path, .jobs.count, .workflow_executions, .average_run_time, .failure_rate] | @tsv" | column -t
+    ;;
+*)
+    echo "Unkown endpoint $endpoint, use GetUsageByRepoWorkflowRunner | GetJobUsage | GetRepoUsage | GetRunnerTypeUsage | GetRunnerRuntimeUsage"
+    ;;
+esac
+
+if [ ! -z "$json" ]; then echo "$(echo "$json" | jq -r ".total_items") items total"; fi

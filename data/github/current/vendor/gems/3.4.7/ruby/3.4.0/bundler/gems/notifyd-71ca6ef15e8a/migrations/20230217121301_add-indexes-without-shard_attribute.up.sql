@@ -1,0 +1,1 @@
+ALTER TABLE `routing_settings` ADD CONSTRAINT `index_unique_routing_settings` UNIQUE (`topic_type`,`topic_value`,`subject_type`,`trigger`,`reason`,`meta_id`,`user_id`);

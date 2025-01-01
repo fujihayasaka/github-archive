@@ -1,0 +1,46 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: authnd-tester
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app: authnd-tester
+    strategy:
+        type: Recreate
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt_sloppy
+                observability.github.com/logger: fluent-bit
+            labels:
+                app: authnd-tester
+        spec:
+            containers:
+                - command:
+                    - ./bin/authnd-tester
+                  env:
+                    - name: STATS_ADDR
+                      value: $(KUBE_NODE_HOSTNAME):28125
+                  envFrom:
+                    - secretRef:
+                        name: vault-secrets
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - configMapRef:
+                        name: common-config
+                  image: authnd
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command:
+                                - sleep
+                                - "5"
+                  name: authnd-tester
+                  resources:
+                    limits:
+                        cpu: "1.0"
+                    requests:
+                        cpu: 50m

@@ -1,0 +1,37 @@
+#!/bin/bash
+
+set -e
+
+# The gem's target audience is github/github, so let's try to
+# keep this equal to whatever github/github is using.
+#
+# See https://github.com/github/github/blob/master/config/ruby-version
+# (the :default entry in $ruby_version) for github/github's
+# current ruby version.
+# We're also using bullseye because of: https://github.com/docker-library/ruby/issues/429#issuecomment-1708908819
+GITHUB_RUBY_VERSION=3.3.5-bullseye
+
+rm -rf tmp/cibuild-ruby
+mkdir -p tmp/cibuild-ruby
+cat >tmp/cibuild-ruby/Dockerfile <<DOCKERFILE
+FROM ruby:$GITHUB_RUBY_VERSION
+
+WORKDIR /app
+ADD Gemfile Gemfile
+ADD Gemfile.lock Gemfile.lock
+ADD github-launch.gemspec github-launch.gemspec
+ADD ruby/lib/github-launch/version.rb ruby/lib/github-launch/version.rb
+RUN gem install bundler -v 2.5.20
+RUN bundle install
+
+ADD . .
+# TODO - write some real tests; for now this just makes sure the gem can be loaded and built.
+RUN bundle exec ruby -e "require 'github-launch'" -e "puts 'ok'"
+RUN bundle exec rspec -Iruby/lib:ruby/spec --default-path ruby
+RUN gem build github-launch.gemspec
+DOCKERFILE
+
+tar cf - tmp/cibuild-ruby ruby Gemfile Gemfile.lock github-launch.gemspec | \
+  docker build -f tmp/cibuild-ruby/Dockerfile -
+
+echo OK

@@ -202,10 +202,10 @@ module Api::Serializer::SecurityAdvisoriesDependency
       first_patched_version: vulnerability.fixed_in,
     }
 
-    if GitHub.flipper[:vea_api_empty_values].enabled?
-      global_advisory_vulnerability_api_hash.merge!(vulnerable_functions: [])
-    else
+    if FeatureFlag.vexi.enabled?(:vea_api_populate_values_enabled, default: false)
       global_advisory_vulnerability_api_hash.merge!(vulnerable_functions: vulnerability.affected_functions)
+    else
+      global_advisory_vulnerability_api_hash.merge!(vulnerable_functions: [])
     end
 
     global_advisory_vulnerability_api_hash

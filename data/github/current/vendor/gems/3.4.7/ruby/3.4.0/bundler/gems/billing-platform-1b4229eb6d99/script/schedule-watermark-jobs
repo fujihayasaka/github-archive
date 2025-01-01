@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+
+help="Usage: $0 [options]
+
+Sends a watermark job request to the Aqueduct job queue which will be picked up by the request handler.
+
+Options
+  -a  Aqueduct application name
+  -q  Aqueduct queue name
+  -u  Aqueduct URL
+  -y  Year
+  -m  Month
+  -d  Day
+  -h  Hour
+  -s  Product SKU
+"
+
+# Set the default values
+app="billing-platform-development"
+queue="request-handler"
+url="http://localhost:18081"
+
+# Parse the command-line options
+while getopts ":a:q:u:y:m:d:h:s:" opt; do
+    case $opt in
+        a)
+        app="$OPTARG"
+        ;;
+        q)
+        queue="$OPTARG"
+        ;;
+        u)
+        url="$OPTARG"
+        ;;
+        y)
+        year="$OPTARG"
+        ;;
+        m)
+        month="$OPTARG"
+        ;;
+        d)
+        day="$OPTARG"
+        ;;
+        s)
+        sku="$OPTARG"
+        ;;
+        h)
+        hour="$OPTARG"
+        ;;
+        \?)
+        echo "$help"
+        exit 1
+        ;;
+    esac
+done
+
+if [ "$year" == "" ] || [ "$month" == "" ] || [ "$day" == "" ] || [ "$hour" == "" ]; then
+    >&2 echo -e "Year, Month, Day and Hour must be provided"
+    exit 1
+fi
+
+# Create the payload
+request_type="schedule-watermark-jobs"
+data="{\"Year\":$year,\"Month\":$month,\"Day\":$day,\"Hour\":$hour, \"Sku\":\"$sku\"}"
+payload="{\"Type\":\"$request_type\",\"Data\":$data}"
+hashed_payload=$(echo -n "$payload" | base64 | tr -d '[:space:]')
+
+# Send the request to the job queue
+curl \
+    --header "Content-Type:application/json" \
+    --data '{"app": "'$app'", "queue":"'$queue'", "payload":"'$hashed_payload'"}' \
+    "$url/twirp/aqueduct.api.v1.JobQueueService/Send"
+
+# New line after the curl response
+echo

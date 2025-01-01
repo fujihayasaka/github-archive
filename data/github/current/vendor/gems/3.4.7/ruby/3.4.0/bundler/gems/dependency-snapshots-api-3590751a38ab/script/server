@@ -1,0 +1,67 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# Usage: script/server [all|dotcom]
+#  - default (no args): starts ds-api server
+#  - optional "all" argument starts ds-worker, ds-api, and docker-compose based storage containers
+#  - optional "dotcom" argument starts only ds-worker and ds-api, configured to consume events from github.localhost
+#  - optional "standalone" argument starts only ds-api, configured to mock calls to Spokes
+
+cd "$(dirname "$0")/.."
+
+# run a generic build for our binaries each time we start
+# the server, to surface compile-time errors and ensure
+# least astonishing behavior wrt "hot" code updates
+script/build
+
+bin/ds-migrate all
+
+# customize the Overmind socket path to scope it
+export OVERMIND_SOCKET=/tmp/overmind.dsapi.socket
+
+# Attempt to intuit we are in a github/github codespace:
+# Is CODESPACES env var set? Is /workspaces/github directory present? Is GITHUB_REPOSITORY env var set to github/github?
+if [[ -n "$CODESPACES" ]] && [[ -d /workspaces/github ]] && [[ "$GITHUB_REPOSITORY" == "github/github" ]]; then
+  echo "github/github codespace detected"
+  SCOPE_ARG="dotcom"
+else
+  SCOPE_ARG="${1:-}"
+fi
+
+if [ -n "$SCOPE_ARG" ]; then
+  case "$SCOPE_ARG" in
+  all)
+    # bootstrap container images if missing; requires Octofactory login w/user's token
+    docker login octofactory.githubapp.com
+    if [ $? -ne 0 ]; then
+      echo >&2 "ERROR: Octofactory login failed; are you on dev VPN? Did you supply your Octofactory token for password?"
+      exit 1
+    fi
+
+    export WITH_DC=1
+    # add more custom overrides here...
+    ;;
+
+  dotcom)
+    # add more dotcom-specific custom overrides here...
+    ;;
+
+  standalone)
+    export DEV_STANDALONE_MODE=t
+    ;;
+
+  *)
+    echo >&2 "ERROR: unsupported scope argument: $SCOPE_ARG"
+    exit 1
+    ;;
+  esac
+
+  # launch parallel processes as configured above
+  overmind start -s "$OVERMIND_SOCKET" -f Procfile
+
+else
+
+  # only start API server, in foreground
+  ./bin/ds-api
+fi

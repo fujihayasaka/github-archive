@@ -1,0 +1,46 @@
+name: "Rubocop"
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  rubocop:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+
+    - name: Set up Ruby
+      uses: ruby/setup-ruby@6c79f721fa26dd64559c2700086ac852c18e0756
+      with:
+        ruby-version: 3.1
+
+    - name: Install Code Scanning integration
+      run: bundle add code-scanning-rubocop --skip-install
+
+    - name: Install dependencies
+      run: bundle install
+
+    - name: Rubocop
+      run: |
+        bundle exec rubocop --fail-level fatal --require code_scanning --format CodeScanning::SarifFormatter -o rubocop.sarif
+
+    - name: Upload Sarif output
+      uses: github/codeql-action/upload-sarif@main
+      with:
+        sarif_file: rubocop.sarif
+        wait-for-processing: true

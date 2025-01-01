@@ -1,0 +1,41 @@
+name: Go Action detection of dependencies
+on:
+  push:
+    branches:
+      - main
+permissions:
+  contents: write
+env:
+  GOPROXY: https://goproxy.githubapp.com/mod,https://proxy.golang.org,direct
+  GOPRIVATE: ''
+  GONOPROXY: ''
+  GONOSUMDB: github.com/github/*
+jobs:
+  go-action-detection:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Checkout Repository'
+        uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      # https://github.com/github/goproxy/blob/main/doc/user.md#actions
+      - name: Authenticate with goproxy.
+        run: |
+          echo "machine goproxy.githubapp.com login nobody password ${{ secrets.GOPROXY_TOKEN }}" >> $HOME/.netrc
+      - name: Submit dependencies for cmd/api
+        uses: actions/go-dependency-submission@main
+        with:
+          go-mod-path: go.mod
+          go-build-target: cmd/api/main.go
+      - name: Submit dependencies for cmd/migrate
+        uses: actions/go-dependency-submission@main
+        with:
+          go-mod-path: go.mod
+          go-build-target: cmd/migrate/main.go
+      - name: Submit dependencies for cmd/api-test
+        uses: actions/go-dependency-submission@main
+        with:
+          go-mod-path: go.mod
+          go-build-target: cmd/api-test/main.go

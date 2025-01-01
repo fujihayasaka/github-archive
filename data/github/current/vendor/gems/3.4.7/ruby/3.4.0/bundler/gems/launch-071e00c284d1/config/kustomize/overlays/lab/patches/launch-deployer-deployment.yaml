@@ -1,0 +1,276 @@
+# http://kubernetes.io/docs/user-guide/deployments/#what-is-a-deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: launch-deployer
+    annotations:
+        heaven.githubapp.com/image-placeholder: "launch"
+        heaven.githubapp.com/deploy-requirement: "true"
+        moda.github.net/canary-v2: "true"
+        moda.github.net/canary-label: "role"
+spec:
+    selector:
+        matchLabels:
+            service: launch-deployer
+            role: lab
+    replicas: 4
+    strategy:
+        type: RollingUpdate
+        rollingUpdate:
+            # Allow $spec.replicas pods to be created immediately upon deploy
+            maxSurge: "100%"
+    template:
+        metadata:
+            # Labels are applied to all pods created by this deployment so we can
+            # tell the service load balancer where to send traffic.
+            # http://kubernetes.io/docs/user-guide/labels/
+            labels:
+                service: launch-deployer
+                role: lab
+            annotations:
+                fluentbit.io/parser: logfmt
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: prod-launch
+                observability.github.com/splunk_sourcetype: launch-fluentbit
+                observability.github.com/kafka_topic: launch
+        spec:
+            dnsPolicy: Default
+            terminationGracePeriodSeconds: 300
+            volumes:
+                - name: github-metadata
+                  hostPath:
+                    path: /etc/github/metadata.json
+            containers:
+                - name: launch-deployer
+                  # The image repository and tag are substituted on deploy.
+                  image: launch
+                  # The command to run when booting the containers.
+                  command:
+                    - "launch-deployer"
+                  # As per https://github.com/github/kube/blob/master/docs/handbook_files/next_steps.md#required-prestop-hook
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command: ["sleeper", "-seconds", "5"]
+                  env:
+                    - name: KUBE_POD
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.name
+                    - name: KUBE_NAMESPACE
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.namespace
+                    - name: REGION
+                      valueFrom:
+                        configMapKeyRef:
+                            name: kube-cluster-metadata
+                            key: region
+                    # /_ping is on this port
+                    - name: INTERNAL_ADDR
+                      value: ":6824"
+                    - name: HTTP_ADDR
+                      value: ":6824"
+                    - name: API_HOST
+                      value: "https://internal-api.service.iad.github.net"
+                    - name: GHCR_API_HOST
+                      value: "https://containers-lab.pkg.github.com"
+                    - name: EARTHSMOKE_KEYSTORE_AZP_ORGANIZATION
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: earthsmoke-keystore-azp-organization-lab
+                    - name: LAUNCH_REDIS_URL
+                      value: "db-redis-launch-rw.service.github.net:6379"
+                    - name: LAUNCH_REDIS_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: launch-redis-secret
+                    - name: LAUNCH_CACHE_MEMORY_MAX_SIZE_BYTES
+                      value: "100663296" # 96 MiB
+                    - name: KAFKA_ROOT_CA_PATH
+                      value: "/etc/ssl/certs/cp1-iad-production-1487801205-root.pem"
+                    - name: KAFKA_BROKERS
+                      value: "hydro-kafka-potomac-boot-1.service.iad.github.net:9093,hydro-kafka-potomac-boot-2.service.iad.github.net:9093,hydro-kafka-potomac-boot-3.service.iad.github.net:9093"
+                    # The private key provisioned for the Launch GitHub App
+                    - name: GITHUB_APP_PRIVATE_KEY
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: github-app-private-key
+                    # The master key for generating action-runner keys
+                    - name: ACTION_RUNNER_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: deployer-action-runner-secret
+                    - name: TRACING_ENABLED
+                      value: "true"
+                    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                      value: "https://opentelemetry-collector-production.service.iad.github.net/v1/traces"
+                    - name: OTEL_EXPORTER_OTLP_TRACES_HEADERS
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: otel-exporter-otlp-traces-headers
+                    - name: AZP_ORG_CREATE_API_BASE_URL
+                      value: "https://pipelines.actions.githubusercontent.com/serviceDeployments/pipelinesghubeus20"
+                    - name: PIPELINE_SCALE_UNIT_URLS
+                      value: |
+                        https://pipelinesghubeus20.actions.githubusercontent.com
+                    - name: AZP_ORG_REGION
+                      value: "RING0"
+                    - name: GITHUB_TWIRP_HMAC_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: github-twirp-hmac-secret
+                    - name: GITHUB_TWIRP_ADDR
+                      value: "https://internal-api.service.iad.github.net/internal"
+                    - name: EMULATE_PREPARED_STATEMENTS
+                      value: "true"
+                    - name: USE_UTC_FOR_MYSQL
+                      value: "true"
+                    - name: FORCE_CHARSET_FOR_MYSQL
+                      value: "true"
+                    - name: HTTP_PROXY
+                      value: "network-proxy.service.github.net:3128"
+                    - name: HTTPS_PROXY
+                      value: "network-proxy.service.github.net:3128"
+                    - name: NO_PROXY
+                      value: "github.net,github.com,*.cluster.local,*.blob.core.windows.net"
+                    - name: AQUEDUCT_APP
+                      value: "actions-production"
+                    - name: AQUEDUCT_URL
+                      value: "https://aqueduct-gateway-production.service.iad.github.net"
+                    - name: AQUEDUCT_QUEUE_SCHEDULED_BUILDS
+                      value: "scheduled_builds-lab"
+                    - name: AQUEDUCT_QUEUE_DYNAMIC_BUILDS
+                      value: "dynamic_builds-lab"
+                    - name: SCHEDULE_LOOP_SLEEP_DURATION
+                      value: "63s"
+                    - name: SCHEDULE_TASKS_PER_TICK
+                      value: "15"
+                    - name: SCHEDULE_SCATTER_OFFSET_DURATION
+                      value: "240s"
+                    - name: SPOKESD_URL
+                      value: "https://spokesd-staging.service.iad.github.net:10033"
+                    - name: SPOKESD_CONFIG_TLS
+                      value: "true"
+                    - name: BILLING_PLATFORM_URL
+                      value: "https://billing-platform-production.service.iad.github.net"
+                    - name: SPOKESD_CERT_PEM
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: spokesd-cert-pem
+                    - name: SPOKESD_CHAIN_PEM
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: spokesd-chain-pem
+                    - name: SPOKESD_KEY_PEM
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: spokesd-key-pem
+                    - name: AUTHZD_URL
+                      value: "https://authzd-production.service.iad.github.net"
+                    - name: KREDZ_HTTP_ADDR
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: kredz-http-addr
+                    - name: KREDZ_HMAC_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: kredz-hmac-secret
+                    - name: BILLING_PLATFORM_HMAC_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: billing-platform-hmac-secret
+                    - name: TELEMETRY_ROUND_TRIPPER_ENABLE_LOGS
+                      value: "true"
+                    - name: GOMAXPROCS
+                      value: "1"
+                    - name: LAUNCH_LOG_DEBUG
+                      value: "true"
+                    # Federated secret
+                    - name: FAILBOT_HAYSTACK_URL
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: failbot-haystack-url
+                    - name: DEPLOYER_HMAC_VERIFY_SECRETS
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-lab
+                            key: deployer-hmac-verify-secrets
+                    - name: AZURE_STORAGE_ACCOUNT_COUNT
+                      value: "6"
+                    - name: AZURE_STORAGE_ACCOUNT_PREFIX
+                      value: "launchlabsa"
+                    - name: AZURE_BLOB_STORAGE_ACCOUNT_COUNT
+                      value: "6"
+                    - name: AZURE_SPN_CLIENT_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-blob-lab
+                            name: launch-lab
+                    - name: AZURE_SPN_CLIENT_ID
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-blob-lab-client-id
+                            name: launch-lab
+                    - name: AZURE_SPN_TENANT_ID
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-blob-lab-tenant-id
+                            name: launch-lab
+                    - name: ACTIONS_SERVICE_SPN_CLIENT_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-actions-s2s-lab
+                            name: launch-lab
+                    - name: ACTIONS_SERVICE_SPN_CLIENT_ID
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-actions-s2s-lab-client-id
+                            name: launch-lab
+                    - name: ACTIONS_SERVICE_SPN_TENANT_ID
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-actions-s2s-lab-tenant-id
+                            name: launch-lab
+                  # This port needs to match what is configured in Dockerfile.
+                  ports:
+                    - containerPort: 6824
+                  volumeMounts:
+                    - mountPath: /etc/github/metadata.json
+                      name: github-metadata
+                      readOnly: true
+                  resources:
+                    requests:
+                        # Recommendations: https://app.datadoghq.com/s/59fe6c40c/nyp-9iu-suc
+                        cpu: "25m"
+                        memory: "100Mi"
+                    limits:
+                        # Adjust GOMAXPROCS in tandem. It's recommended the cpu limit be set to GOMAXPROCS+1.
+                        cpu: "2"
+                        memory: "200Mi"
+                  # Definitions for liveness and readiness probes can be found at
+                  # http://kubernetes.io/docs/api-reference/v1/definitions/#_v1_probe
+                  readinessProbe:
+                    initialDelaySeconds: 5
+                    timeoutSeconds: 5
+                    httpGet:
+                        path: /_ping
+                        port: 6824
+                  envFrom:  # order matters! Subsequent entries can override earlier entries.
+                    - secretRef:
+                        name: vault-secrets
+                    - configMapRef:
+                        name: static-config

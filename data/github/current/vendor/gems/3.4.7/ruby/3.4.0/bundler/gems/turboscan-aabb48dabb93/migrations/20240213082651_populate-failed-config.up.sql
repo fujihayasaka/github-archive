@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20240213082651_populate-failed-config.go on GHES

@@ -1,0 +1,63 @@
+#!/bin/bash
+#/ Usage: script/blobconsole <command>
+#/ Attaches to an azure-cli container with credentials configured for the azurite instance.
+#/ Commands:
+#/   shell
+#/     Attaches to the container with a bash shell & az command with credentials.
+#/   list
+#/     Lists all blobs in the container with their name, container, created_at and size.
+#/   get <blob-name>
+#/     Downloads the blob with the given name to stdout.
+
+. script/_serverenv
+
+usage() {
+  cat "$0" | grep '^#/' | cut -c4-
+  exit 1
+}
+
+dc-run() {
+  entrypoint=$1
+  shift
+  script/docker-compose \
+    --log-level ERROR \
+    --ansi never \
+    --progress quiet \
+    run --entrypoint="$entrypoint" -it azurite_init "$@"
+}
+
+shell() {
+  dc-run /bin/bash
+}
+
+az-cmd() {
+  dc-run /bin/az "$@"
+}
+
+list() {
+  az-cmd storage blob list -c "$AZURE_STORAGE_CONTAINER_NAME" --query='[].{name:name,container:container,size:properties.contentLength,created_at:properties.creationTime}'
+}
+
+get() {
+  az-cmd storage blob download -c "$AZURE_STORAGE_CONTAINER_NAME" --no-progress --name "$1"
+}
+
+[ $# -eq 0 ] && usage
+
+script/start-azurite
+
+case $1 in
+  shell)
+    shell
+    ;;
+  list)
+    list
+    ;;
+  get)
+    [ $# -eq 2 ] || usage
+    get "$2"
+    ;;
+  *)
+    usage
+    ;;
+esac

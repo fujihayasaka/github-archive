@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package blackbirdmw.query.v1;
+
+option go_package = "query/v1";
+option ruby_package = "Blackbird::Query::V1";
+
+import "hydro/schemas/blackbird/v0/entities/symbol_kind.proto";
+
+// Shared between TextDocumentDefinition and TextDocumentReferences.
+message AlephLocationRequest {
+  // The symbol for which to search (absent any def: or ref: qualifiers)
+  string symbol_name = 1;
+  string commit_oid = 2;
+  string path = 3;
+  AlephPosition position = 4;
+  string repository_owner = 5;
+  string repository_name = 6;
+  uint64 repository_id = 7;
+  string ref = 8;
+  string language = 9;
+  // The kind of the symbol at the given position if known (optional).
+  hydro.schemas.blackbird.v0.entities.SymbolKind symbol_kind = 10;
+}
+
+// Shared between TextDocumentDefinition and TextDocumentReferences.
+message AlephLocationResponse {
+  repeated AlephLocation locations = 1;
+  uint64 repository_id = 2;
+  string commit_oid = 3;
+}
+
+message AlephLocation {
+  string path = 3; // The repository-relative path to the file containing this location.
+  string kind = 4; // Information about a symbol's syntactic role (can be
+                   // "function", "method", "class", and others).
+  // Same as `kind` but using the `SymbolKind` enum from hydro.
+  hydro.schemas.blackbird.v0.entities.SymbolKind symbol_kind = 14;
+  string uri = 5 [
+    deprecated = true
+  ];  // Was used only for Microsoft RichNav services.
+  bool local = 6 [
+    deprecated = true
+  ]; // Used only for Microsoft RichNav services.
+  AlephPackage pkg = 9; // Contains the repository ID and commit SHA associated with
+                        // this location.
+
+  // The raw source line, with leading and trailing whitespace removed, of the
+  // symbol.
+  string first_line = 1;
+  uint32 leading_whitespace = 10 [
+    deprecated = true
+  ]; // Included only for compatibility with the shape of Aleph data. Will always be zero.
+  uint32 trailing_whitespace = 11 [
+    deprecated = true
+  ]; // Included only for compatibility with the shape of Aleph data. Will always be zero.
+  AlephRange ident = 12;  // The symbol identifier's range
+  AlephRange extent = 13; // The symbol's full range (e.g. a function definition
+                     // including the function body)
+  // DEPRECATED: Use ident and extent instead
+  AlephRange range = 2 [
+    deprecated = true
+  ]; // Two positions delineating the start and end of a symbol location.
+
+  reserved 7, 8; // monkier, monkier_kind
+}
+
+// NOTE: These are zero-indexed.
+message AlephPosition {
+  uint32 line = 1;      // The row position (zero-indexed)
+  uint32 character = 2; // The column position (zero-indexed)
+}
+
+message AlephRange {
+  AlephPosition start = 1;
+  AlephPosition end = 2;
+}
+
+message AlephPackage {
+  uint64 repository_id = 1;
+  string commit_oid = 2;
+}

@@ -1,0 +1,50 @@
+apiVersion: octomesh.github.com/v1alpha1
+kind: ServiceMeshConfig
+metadata:
+  name: config  # name *must* be `config` and only one config per namespace
+spec:
+  authorization:
+    # create specifies whether to create default AuthorizationPolicy
+    # defaults to true
+    create: true
+
+    # strictTLS requires TLS between all workloads including from GLB.
+    #           Only set this to `true` once all clients have been migrated to
+    #           communicate with this service via the mesh or via the
+    #           Istio Ingress Gateway.
+    strictTLS: true
+
+    # inboundNamespaces is an array of namespaces that are authorized to
+    #                   communicate with this workload. Namespaces are usually
+    #                   $APPLICATION-$ENVIRONMENT
+    #                   Specify `*` to allow access from all namespaces
+    # This property is required if `create: true` is specified
+    # The following splunk query can be used to discover callers:
+    #   index=* istio_traffic_type
+    #   | where istio_traffic_type LIKE "inbound%"
+    #   | rex mode=sed field=kube_pod "s/(?:-[^-]+){2}\z//"
+    #   | where (gh_app=launch) OR (kube_pod LIKE "launch%")
+    #   | dedup user_agent gh_app kube_pod
+    #   | table user_agent gh_app kube_pod
+    #   | sort user_agent gh_app kube_pod
+    inboundNamespaces:
+      - github-%stamp%
+      - launch-%stamp%
+      - dependabot-api-%stamp%
+      - dependency-snapshots-api-%stamp%
+      - dependency-graph-platform-%stamp%
+      - opaque-%stamp%
+      - pages-deployer-%stamp%
+      - turboscan-%stamp%
+      - actions-run-service-%stamp%
+  loadBalancing:
+    # retryOnReset causes requests reset by Envoy to be retried. Most
+    #              workloads will want this to avoid spurious 503s
+    # defaults to true
+    retryOnReset: true
+
+    # useLocalityLoadBalancing will cause requests to this workload to
+    #                          be served from the same cluster as the client
+    #                          unless the local cluster has a failure.
+    # defaults to true
+    useLocalityLoadBalancing: true

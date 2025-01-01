@@ -309,7 +309,7 @@ module SecurityOverviewAnalytics
 
       sig { override.returns(T::Array[T.class_of(ApplicationJob)]) }
       def fanout_jobs
-        [CodeScanningAlertRevisionIngestionJob]
+        [CodeScanningAlertRevisionIngestionJob, UpdateFeatureStatusSummaryJob]
       end
 
       protected

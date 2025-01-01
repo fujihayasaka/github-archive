@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+
+set -e
+
+function usage() {
+    cat <<EOF
+Usage: script/dev-client [--scenario] [--image] [--only-build]
+    --only-build                    Only build the dev-client without running it
+    --scenario                      The scenario to run. Default: health
+    --image                         The image to use for the scenario. Default: "centos"
+
+    Available scenarios:
+    - health                       Check that API is up and running
+    - curated                      Create a new curated image definition, new curated image version and start image version uploading
+    - customer                     Create a new customer image definition, new customer image version and start image version uploading
+    - custom                       Run custom dev scenario. It is empty by default and can be implemented by developer in tools/dev-client/custom.go
+
+    Available images: centos, ubuntu, windows, etc
+    Run the following command to get actual list of available images:
+        az storage blob list --account-name imstestimages --container-name images --output table
+
+Examples:
+    script/dev-client health
+    script/dev-client curated
+    script/dev-client customer
+    script/dev-client custom
+    script/dev-client curated --image windows
+    script/dev-client customer --image ubuntu
+
+EOF
+}
+
+ONLY_BUILD=false
+SCENARIO=""
+IMAGE_NAME=""
+SERVER_URL="http://$(script/helpers/kube-ip):21010"
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --only-build)
+      ONLY_BUILD=true
+      shift # past argument
+      ;;
+    --image)
+        IMAGE_NAME=$2
+        shift # past argument
+        shift # past value
+        ;;
+    --help)
+        usage
+        exit 0
+        ;;
+    -*|--*)
+      echo "Unknown option $1"
+      usage
+      exit 1
+      ;;
+    *)
+      SCENARIO=$1
+      shift # past argument
+      ;;
+  esac
+done
+
+go build -o bin/dev-client ./tools/dev-client
+
+if [ "$ONLY_BUILD" = true ]; then
+    exit 0
+fi
+
+if [ -z "$SCENARIO" ]; then
+    usage
+    exit 1
+fi
+
+if [[ $SCENARIO == "health" || $SCENARIO == "ping" ]]; then
+    bin/dev-client --server-url "$SERVER_URL" --scenario "health"
+    exit 0
+fi
+
+bin/dev-client --server-url "$SERVER_URL" --scenario "$SCENARIO" --image "$IMAGE_NAME"

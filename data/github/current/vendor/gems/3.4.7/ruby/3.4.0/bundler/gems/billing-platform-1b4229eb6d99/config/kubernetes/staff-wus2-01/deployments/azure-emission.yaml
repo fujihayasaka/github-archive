@@ -1,0 +1,62 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: azure-emission
+spec:
+    replicas: 4
+    selector:
+        matchLabels:
+            app: azure-emission
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: billing
+            labels:
+                app: azure-emission
+        spec:
+            containers:
+                - command:
+                    - ./bin/queue-worker
+                  env:
+                    - name: WORKER_TYPE
+                      value: azure-emission
+                    - name: script
+                      value: build
+                    - name: STATS_ADDR
+                      value: $(KUBE_NODE_HOSTNAME):28125
+                    - name: APP_SHA
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.annotations['heaven.githubapp.com/sha']
+                    - name: APP_REF
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.annotations['heaven.githubapp.com/ref']
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  image: billing-platform
+                  name: azure-emission
+                  readinessProbe:
+                    exec:
+                        command:
+                            - cat
+                            - /tmp/consumer_healthy
+                    initialDelaySeconds: 5
+                    periodSeconds: 5
+                  resources:
+                    limits:
+                        cpu: 3
+                        memory: 4096Mi
+                    requests:
+                        cpu: 0.4
+                        memory: 1024Mi
+            dnsPolicy: ClusterFirst
+            terminationGracePeriodSeconds: 80

@@ -1,0 +1,84 @@
+environments:
+  - name: lab
+    cluster_selector:
+      profile: general
+      region: iad
+    required_builds:
+      - "actions-usage-metrics-docker-image"
+      - "actions-usage-metrics-docker-security"
+      - "actions-usage-metrics-moda-config-bundle"
+    require_pipeline: false
+    service_mesh:
+      enabled: true
+  - name: production
+    cluster_selector:
+      profile: general
+      region: iad
+    required_builds:
+      - "actions-usage-metrics-docker-image"
+      - "actions-usage-metrics-docker-security"
+      - "actions-usage-metrics-moda-config-bundle"
+    require_pipeline: true
+    service_mesh:
+      enabled: true
+  - name: staff-wus2-01
+    cluster_selector:
+      stamp: staff-wus2-01
+      profile: proxima
+    required_builds:
+      - "actions-usage-metrics-docker-image"
+      - "actions-usage-metrics-docker-security"
+      - "actions-usage-metrics-moda-config-bundle"
+    require_pipeline: true
+    service_mesh:
+      enabled: true
+
+notifications:
+  slack_channels:
+    - "#actions-usage-metrics-ops"
+
+auto_start_pipeline: production_rollout
+
+proxima:
+  environment_pattern:
+    service_mesh:
+      enabled: true
+  rollout_pattern:
+    - kind: deployment
+      start_message: We are now going to deploy {{app}}/{{ref}} to {{environment}}!
+      config:
+        timeout: 300
+
+pipelines:
+  production_rollout:
+    append_proxima_stamps: true
+    timeout: 2400
+    stages:
+      - name: lab
+        kind: deployment
+        ignore_errors: true
+        start_message: We are now going to do a best-effort deploy {{app}}/{{ref}} to {{environment}}!
+        config:
+          environment: lab
+          timeout: 300
+        gates:
+          - kind: timer
+            duration: 180
+      - name: staff-wus2-01
+        kind: deployment
+        start_message: We are now going to deploy {{app}}/{{ref}} to {{environment}}!
+        config:
+          environment: staff-wus2-01
+          timeout: 300
+        gates:
+          - kind: timer
+            duration: 60
+      - name: production
+        kind: deployment
+        start_message: We are now going to deploy {{app}}/{{ref}} to {{environment}}!
+        config:
+          environment: production
+          timeout: 300
+        gates:
+          - kind: timer
+            duration: 60

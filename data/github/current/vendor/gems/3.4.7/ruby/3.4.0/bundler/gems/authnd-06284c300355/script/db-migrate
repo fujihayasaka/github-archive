@@ -1,0 +1,40 @@
+#!/bin/bash
+root="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." >/dev/null 2>&1 && pwd )"
+cd "$root"
+
+set -e
+
+if [ -z "$1" ]; then
+  echo "Usage: script/db-migrate [environment] [options]" 1>&2
+  echo "Where [options] will be passed to skeema push as options" 1>&2
+  exit 1
+fi
+env="$1"
+shift
+
+if [ ! -f "$root/_tools/bin/skeema" ]; then
+  echo "skeema not found, installing..."
+  make tools
+fi
+
+if [[ "$GITHUB_REPOSITORY" == "github/github" ]]; then
+  # running in a Dotcom codespace or CI, do not seed over dotcom-managed schemas
+  CLUSTERS=(
+    authnd
+  )
+else
+  # anywhere else, seed all schemas that authnd needs to work
+  CLUSTERS=(
+    authnd
+    mysql1
+    collab
+    lodge
+  )
+fi
+
+for cluster in "${CLUSTERS[@]}"; do
+  echo "Migrating $cluster schema for "$env"..."
+  pushd "$root/schemas/$cluster"
+  "$root/_tools/bin/skeema" push "$@" "$env" --allow-unsafe
+  popd
+done

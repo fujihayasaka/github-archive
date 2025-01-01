@@ -1,0 +1,83 @@
+name: Update CodeQL rules and query help
+on:
+  workflow_dispatch:
+    inputs:
+      codeql-cli-workflow-run-id:
+        description: |
+          Run ID for a CodeQL CLI build workflow run (https://github.com/github/semmle-code/actions/workflows/codeql-cli.yml)
+          from which to obtain the query help SARIF artifact.
+        type: string
+        required: true
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/codeql-rules.yml'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  GH_TOKEN: ${{ secrets.DSP_CODE_SCANNING_TOKEN }}
+
+jobs:
+  rules-update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          token: ${{ secrets.DSP_CODE_SCANNING_TOKEN }}
+      - name: Fetch Main
+        run: git fetch origin main
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: Download query help SARIF
+        env:
+          GITHUB_TOKEN: ${{ secrets.DSP_CODE_SCANNING_TOKEN }}
+          RUN_ID: ${{ github.event.inputs.codeql-cli-workflow-run-id }}
+        run: |
+          # For testing, choose any recent successful build.
+          if [[ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]]; then
+            RUN_ID="$(gh run list --repo github/semmle-code \
+              --branch main --limit 20 --workflow codeql-cli.yml \
+              --json databaseId,status,event,conclusion \
+              --jq 'map(select((.event == "push" or .event == "schedule") and .status == "completed" and .conclusion == "success")) | .[0].databaseId //empty')"
+            echo "Using run ID: $RUN_ID"
+          fi
+
+          gh run download "$RUN_ID" --repo github/semmle-code --name code-scanning-query-help-sarif
+          # Read the CodeQL version from the SARIF.
+          CODEQL_VERSION="$(cat rules.sarif | jq -r '.runs[0].tool.driver.semanticVersion')"
+          echo "CODEQL_VERSION=$CODEQL_VERSION" | tee -a "$GITHUB_ENV"
+      - name: Update rules
+        run: |
+          mv rules.sarif ts/sarif/ruledata/codeql.sarif
+          script/setup && script/update-codeql-deleted-sarif
+          # Cassettes are not updated here since they are
+          # not usually expected to be affected by rule changes.
+          # If CI reports cassettes being out of date,
+          # check out the generated PR in a Codespace,
+          # run `script/setup && make cassettes`,
+          # and commit the changes.
+      - name: Configure Git
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "GitHub Actions"
+      - name: Commit changes
+        run: |
+          BRANCH_NAME="codeql-rules-${CODEQL_VERSION}-${GITHUB_RUN_ID}"
+          echo "BRANCH_NAME=$BRANCH_NAME" | tee -a "$GITHUB_ENV"
+          git checkout -b "$BRANCH_NAME"
+          git add ts/sarif/ruledata/codeql*.sarif
+          git commit -m "Update CodeQL query help for $CODEQL_VERSION"
+      - name: Create PR
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push -u origin "$BRANCH_NAME"
+          gh pr create --fill --assignee "$GITHUB_ACTOR"

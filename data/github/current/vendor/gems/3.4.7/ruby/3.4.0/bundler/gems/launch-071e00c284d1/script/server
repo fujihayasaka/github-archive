@@ -1,0 +1,123 @@
+#!/bin/bash
+#/ Usage: script/server [--no-build/fast] [--enterprise] [--debug]
+#/
+#/ Runs an instance of launch which is configured to use github.localhost.
+#/
+#/ By default, this script builds launch's binaries, too.
+#/ The --no-build (alias --fast) option disables building.
+#/ The --debug option overrides the --no-build/fast option.
+#/ (Debugging requires building debug-enabled binaries.)
+#/
+#/ The services will be available on the following ports:
+#/  chatops:  127.0.0.1:5003 (or $CHATOPS_HTTP_PORT)
+#/  deployer: 127.0.0.1:5001 (or $DEPLOYER_HTTP_PORT)
+#/  deployer: 127.0.0.1:6002 (or $DEPLOYER_GRPC_PORT)
+#/  receiver: 127.0.0.1:5004 (or $RECEIVER_HTTP_PORT)
+#/  receiver: 127.0.0.1:5005 (or $RECEIVER_INTERNAL_PORT)
+
+build_launch=true
+debug=false
+enterprise=false
+prom=false
+
+for arg; do
+  case "$arg" in
+    --no-build|--fast)
+      build_launch=false ;;
+    --debug)
+      debug=true ;;
+    --no-prom)
+      # Ignore this flag
+      echo "INFO: --no-prom is deprecated, this is now the default behavior"
+      shift ;;
+    --prom)
+      prom=true
+      shift ;;
+    --enterprise)
+      enterprise=true ;;
+    --use-aqueduct)
+      # Ignore this flag
+      echo "INFO: --use-aqueduct is deprecated, you do not have to pass this."
+      shift ;;
+    --devfabric)
+      # Ignore this flag
+      echo "INFO: --devfabric is deprecated, you do not have to pass this."
+      shift ;;
+    *)
+      cat "$0" | grep ^#/ | cut -c4-
+      exit 1 ;;
+  esac
+done
+
+step() {
+  echo "===> $*"
+}
+
+build_args=""
+if $debug; then
+  # --debug mode trumps --no-build/fast mode
+  build_launch=true
+  build_args="--debug"
+fi
+
+if ! $build_launch; then
+  for f in launch-deployer launch-receiver launch-hydro-consumer; do
+    if [ ! -f bin/$f ]; then
+      echo bin/$f is missing.
+      build_launch=true
+    fi
+  done
+fi
+
+if $build_launch; then
+  step Build launch...
+  script/build $build_args || exit $?
+fi
+
+step Generating certs...
+script/generate-server-certificates --if-missing
+
+# Start mysql first, and use the start-db script to get the mysql running check it does
+step Starting launch MySQL...
+script/start-db
+
+step Starting launch Azurite...
+script/start-azurite
+
+step Start support services...
+if $prom; then
+  script/docker-compose up -d
+else
+  script/docker-compose up -d --scale exporter=0 --scale prom=0
+fi
+
+if $enterprise; then
+  export LAUNCH_MODE=enterprise
+fi
+
+# This provides a much nicer local output
+export LAUNCH_FAKE_TTY=true
+
+step Start launch...
+. script/_serverenv
+
+# Final checks
+if [[ -z "$TOKEN_SERVICE_KEY_PEM" || -z "$TOKEN_SERVICE_CERT_PEM" ]]; then
+  echo "WARNING - no token secret found"
+fi
+
+if [[ -n "${AZP_GH_APP_CERT_INVALID+set}" ]]; then
+  echo "WARNING - using an unregistered Azure AD GH App Key - key vault access will not work until you set the azure-dev.private.pem key - see AzureProviderConfig" 1>&2;
+fi
+
+if [ "$GITHUB_APP_BOT_NODE_ID" == "" ]; then
+  echo "Partial GitHub App environment detected, please run 'script/create-github-app --force'."
+  exit 1
+fi
+
+if [ "$GITHUB_SECRETS_APP_RELAY_ID" == "" ]; then
+  echo "Partial GitHub App environment detected, please run 'script/create-github-app --force'."
+  exit 1
+fi
+
+exec forego start -t 60

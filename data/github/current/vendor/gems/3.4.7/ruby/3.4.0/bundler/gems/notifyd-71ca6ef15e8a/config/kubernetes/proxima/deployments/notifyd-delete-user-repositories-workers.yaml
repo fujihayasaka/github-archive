@@ -1,0 +1,97 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    annotations:
+        heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: delete-user-repositories-worker
+        moda.github.net/vpa-updater-enabled: "true"
+    name: notifyd-delete-user-repositories-workers
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app: notifyd-delete-user-repositories-workers
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser_stderr: json
+                fluentbit.io/parser_stdout: logfmt
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: notifyd
+            labels:
+                app: notifyd-delete-user-repositories-workers
+        spec:
+            containers:
+                - command:
+                    - /go/bin/delete-user-repositories
+                  env:
+                    - name: AQUEDUCT_QUEUE
+                      value: notifyd_delete_user_repositories
+                    - name: EXCEPTION_HTTP_EXPORTER
+                      value: "true"
+                    - name: GOMAXPROCS
+                      valueFrom:
+                        resourceFieldRef:
+                            containerName: delete-user-repositories-worker
+                            resource: limits.cpu
+                    - name: RETRIES_MAX_ATTEMPTS
+                      value: "100"
+                    - name: RETRIES_EXPONENTIAL_FACTOR
+                      value: "0"
+                    - name: RETRIES_BASE_BACKOFF
+                      value: 30m
+                    - name: STATSD_ADDR
+                      value: $(KUBE_NODE_HOSTNAME):28125
+                    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                      value: http://otelcol-mesh.otelcol-production.svc.cluster.local:14318/v1/traces
+                    - name: AQUEDUCT_PARALLEL_JOBS
+                      value: "1"
+                    - name: APP_ENV
+                      value: production
+                    - name: HTTP_PROXY
+                      value: network-proxy.service.%stamp%.github.net:3128
+                    - name: HTTPS_PROXY
+                      value: network-proxy.service.%stamp%.github.net:3128
+                    - name: NO_PROXY
+                      value: '*.github.net,*.cluster.local'
+                    - name: MULTI_TENANT_ENTERPRISE
+                      value: "true"
+                    - name: SENDER_DOMAIN
+                      value: ghe.com
+                    - name: AQUEDUCT_APP
+                      value: notifyd-production
+                    - name: AQUEDUCT_URL
+                      value: http://api.aqueduct-gateway-%stamp%.svc.cluster.local
+                    - name: KAFKA_BROKERS
+                      value: hydro-kafka-%stamp%-%stamp%.service.%stamp%-az1.consul:9093,hydro-kafka-%stamp%-%stamp%.service.%stamp%-az2.consul:9093,hydro-kafka-%stamp%-%stamp%.service.%stamp%-az3.consul:9093
+                  envFrom:
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  image: notifyd
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command:
+                                - sleep
+                                - "5"
+                  name: delete-user-repositories-worker
+                  ports:
+                    - containerPort: 8081
+                      name: pprof
+                      protocol: TCP
+                  readinessProbe:
+                    exec:
+                        command:
+                            - pgrep
+                            - -f
+                            - delete-user-repositories
+                  resources:
+                    limits:
+                        cpu: 500m
+                        memory: 500Mi
+                    requests:
+                        cpu: 75m
+                        memory: 100Mi
+            dnsPolicy: ClusterFirst

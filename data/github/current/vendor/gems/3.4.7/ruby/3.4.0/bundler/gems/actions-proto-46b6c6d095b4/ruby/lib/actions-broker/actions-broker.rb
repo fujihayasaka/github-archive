@@ -1,0 +1,1 @@
+require_relative "../../../gen/ruby/broker/dotcom/billing-owner/billing_owner_api_twirp"

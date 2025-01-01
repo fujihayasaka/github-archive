@@ -1,0 +1,47 @@
+# http://kubernetes.io/docs/user-guide/deployments/#what-is-a-deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: launch-chatops
+    annotations:
+        heaven.githubapp.com/image-placeholder: "launch"
+        heaven.githubapp.com/deploy-requirement: "true"
+spec:
+    template:
+        spec:
+            dnsPolicy: ClusterFirst
+            containers:
+                - name: launch-chatops
+                  envFrom:  # order matters! Subsequent entries can override earlier entries.
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                    - configMapRef:
+                        name: static-config
+                  env:
+                    - name: DEPLOYER_HMAC_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-%stamp%
+                            key: deployer-hmac-secret
+                    - name: GITHUB_TWIRP_HMAC_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-%stamp%
+                            key: github-twirp-hmac-secret
+                    - name: GITHUB_TWIRP_ADDR
+                      value: "https://internal-api.service.%stamp%.github.net/internal"
+                    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                      value: "http://otelcol-mesh.otelcol-production.svc.cluster.local:14318/v1/traces"
+                    - name: LAUNCH_REDIS_URL
+                      value: "db-redis-launch-%stamp%.redis.cache.windows.net:6380"
+                    - name: LAUNCH_REDIS_USE_TLS
+                      value: "true"
+                    - name: LAUNCH_REDIS_USERNAME
+                      value: "default"
+                    - name: LAUNCH_REDIS_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-%stamp%
+                            key: launch-redis-secret

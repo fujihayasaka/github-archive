@@ -1,0 +1,73 @@
+name: Build Enterprise container
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *"
+  push:
+    branches:
+      - main
+      - enterprise-*.*-release
+
+concurrency:
+  group: "${{ github.ref }}"
+  cancel-in-progress: true
+
+env:
+  Image_Tag_Prefix: "ghcr.io/github/authnd/enterprise:"
+  Testing_Tag_Prefix: "ghcr.io/github/authnd-testing/enterprise:"
+
+jobs:
+  build:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log into registries
+        run: |
+          echo "${{ secrets.CONTAINER_BUILDER_TOKEN }}" | \
+            docker login containers.pkg.github.com -u ${{github.actor}} --password-stdin
+          echo "${{ secrets.CONTAINER_BUILDER_TOKEN }}" | \
+            docker login ghcr.io -u ${{github.actor}} --password-stdin
+
+      - name: Build containers
+        run: |
+          docker build --file=Dockerfile.enterprise --tag="${{ env.Image_Tag_Prefix }}${{ github.sha }}" .
+        env:
+          GITHUB_TOKEN: ${{ secrets.CONTAINER_BUILDER_TOKEN }}
+
+      - name: Push a latest image if on a publishing branch
+        if: ${{ success() }}
+        run: |
+          # Don't attempt to push if we didn't successfully build an image.
+          if [[ "$(docker images -q ${{ env.Image_Tag_Prefix }}${{ github.sha }})" != "" ]]
+          then
+            image_tag=${{ env.Image_Tag_Prefix }}${{ github.sha }}
+            manifest_digest=$(docker push $image_tag | tail -1 | cut -f 3 -d " ")
+            docker_image_url="authnd=$image_tag@$manifest_digest"
+            echo "DOCKER_IMAGE_URL=$docker_image_url" >> $GITHUB_ENV
+          else
+            echo "Unable to find the image we were supposed to have built. Skipping the image push."
+          fi
+
+      - name: Push image to testing package
+        if: ${{ success() }}
+        run: |
+          # Don't attempt to push if we didn't successfully build an image.
+          if [[ "$(docker images -q ${{ env.Image_Tag_Prefix }}${{ github.sha }})" != "" ]]
+          then
+            testing_tag="${{ env.Testing_Tag_Prefix }}${{ github.sha }}"
+            docker tag ${{ env.Image_Tag_Prefix }}${{ github.sha }} $testing_tag
+            manifest_digest=$(docker push $testing_tag | tail -1 | cut -f 3 -d " ")
+            docker_image_url="authnd=$testing_tag@$manifest_digest"
+            echo "DOCKER_IMAGE_URL=$docker_image_url" >> $GITHUB_ENV
+          else
+            echo "Unable to find the image we were supposed to have built. Skipping the image push."
+          fi
+
+      - name: Queue an enterprise2-authnd-docker build
+        run: |
+          curl -v -X POST \
+            -u "hubot:${{ secrets.API_AUTH_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"buildable_name":"enterprise2-authnd-docker","repo":"authnd","branch_name": "${{ github.ref }}","env_vars":{"JANKY_ENV_DOCKER_IMAGE_URL": "${{ env.DOCKER_IMAGE_URL }}", "JANKY_ENV_SHA1": "${{ github.sha }}" },"force":"true","room_id":"#builds"}' \
+            "https://janky.githubapp.com/api/builds"

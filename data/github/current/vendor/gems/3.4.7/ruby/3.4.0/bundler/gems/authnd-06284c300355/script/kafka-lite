@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+set -u
+
+# don't attempt to start up kafka-lite if running in CI
+# since it should already be started as part of script/cibuild
+if [ "$(uname -s)" != "Darwin" ]; then
+  exit 0
+fi
+
+if [ "$(docker ps | grep kafka-lite)" ]; then
+  echo "stopping kafka-lite docker container"
+  docker stop kafka-lite >/dev/null 2>&1 || true && docker rm kafka-lite  >/dev/null 2>&1 || true
+fi
+
+if [ "$(docker container ls -a -f NAME=kafka-lite | grep kafka-lite)" ]; then 
+  docker container rm kafka-lite
+fi
+
+if [ ! "$(pgrep kafka-lite)" ] && [ ! "$(docker ps | grep kafka-lite)" ]; then
+  echo "==> starting up kafka-lite using docker"
+  docker run -d --name kafka-lite -p 9092:9092 ghcr.io/github/kafka-lite/kafka-lite:648019b51bffc32b6e30d90dc82fb0135b5e90dd /kafka-lite --store memory --listen-address 0.0.0.0:9092
+else
+  echo "==> kafka-lite already running"
+fi

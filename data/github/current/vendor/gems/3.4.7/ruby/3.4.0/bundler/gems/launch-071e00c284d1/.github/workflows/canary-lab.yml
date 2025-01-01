@@ -1,0 +1,129 @@
+name: Canary
+
+on:
+  deployment_status:
+
+jobs:
+  logEventInfo:
+    name: Log Event Info
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Summary
+      env:
+        DEPLOY_CREATOR: ${{ github.event.deployment.creator.login }}
+        DEPLOY_ENVIRONMENT: ${{ github.event.deployment.environment }}
+        DEPLOY_STATUS: ${{ github.event.deployment_status.state }}
+        GITHUB_SHA: ${{ github.event.deployment.sha }}
+      run: |
+        echo "Deploy creator '$DEPLOY_CREATOR'"
+        echo "Deploy environment '$DEPLOY_ENVIRONMENT'"
+        echo "Deploy status '$DEPLOY_STATUS'"
+        echo "GitHub SHA '$GITHUB_SHA'"
+    - name: Full event JSON
+      run: cat $GITHUB_EVENT_PATH
+
+  triggerLabRuns:
+    name: Trigger Lab Runs
+    if: ${{ github.event.deployment.environment == 'lab' && github.event.deployment_status.state == 'success' }}
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout canary repository
+      uses: actions/checkout@v4
+      with:
+        repository: bbq-beets/actions-canary
+        ssh-key: ${{ secrets.CANARY_KEY }}
+    - name: Trigger lab runs
+      run: |
+        set -x 
+        set -e
+        git config --global user.email "launch-actions@example.com"
+        git config --global user.name "launch actions"
+        git fetch origin
+        git pull
+        cd ./lab
+        echo -e "\nLaunch from ${{github.event_name}} event: https://github.com/github/launch/actions/runs/${{github.run_id}} " >> RUNS.md
+        git add .
+        git commit -am "Triggered from Launch"
+        git push
+        echo "CANARY_COMMIT_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
+    - name: Post to slack
+      uses: joshmgross/send-slack-message@f09a0524cd298733cbff91d765fe5754e03ca9f1
+      with:
+        message: ":spinner-octo: Starting canary runs in Lab, see `https://github.com/bbq-beets/actions-canary/commit/${{ env.CANARY_COMMIT_SHA }}` to check the status of those workflows."
+        channel: C7S87E2RW
+        slack-token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+  trigger4NinesLabRuns:
+    name: Trigger 4-Nines Lab Runs
+    if: ${{ github.event.deployment.environment == 'lab' && github.event.deployment_status.state == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+    - name: Generate a token for actions-four-nines-canary-bot
+      id: generate-token
+      uses: actions/create-github-app-token@v1
+      with:
+        app-id: 1049567
+        private-key: ${{ secrets.CANARY_BBQ_BEETS_FOUR_NINES_PK }}
+        owner: bbq-beets-four-nines
+    - name: Checkout canary repository
+      uses: actions/checkout@v4
+      with:
+        repository: bbq-beets-four-nines/actions-canary
+        token: ${{steps.generate-token.outputs.token}}
+    - name: Trigger lab runs
+      run: |
+        set -x 
+        set -e
+        git config --global user.email "launch-actions@example.com"
+        git config --global user.name "launch actions"
+        git fetch origin
+        git pull
+        cd ./lab
+        echo -e "\nLaunch from ${{github.event_name}} event: https://github.com/github/launch/actions/runs/${{github.run_id}} " >> RUNS.md
+        git add .
+        git commit -am "Triggered from Launch"
+        git push
+        echo "CANARY_COMMIT_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
+    - name: Post to slack
+      uses: joshmgross/send-slack-message@f09a0524cd298733cbff91d765fe5754e03ca9f1
+      with:
+        message: ":spinner-octo: Starting 4-nines canary runs in Lab, see `https://github.com/bbq-beets-four-nines/actions-canary/commit/${{ env.CANARY_COMMIT_SHA }}` to check the status of those workflows and dashboard https://app.datadoghq.com/dashboard/69c-2x8-gvg."
+        channel: C7S87E2RW
+        slack-token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+  triggerStaffWus201Runs:
+    name: Trigger staff-wus2-01 Runs
+    if: ${{ github.event.deployment.environment == 'staff-wus2-01' && github.event.deployment_status.state == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout canary repository
+      uses: actions/checkout@v4
+      with:
+        github-server-url: https://github.ghe.com
+        repository: github/actions-canary
+        ssh-key: ${{ secrets.CANARY_STAFFWUS201_KEY }}
+        ssh-known-hosts: ${{ vars.CANARY_STAFFWUS201_KNOWN_HOSTS }}
+        ssh-user: github
+    - name: Trigger canary runs
+      run: |
+        set -x 
+        set -e
+        git config --global user.email "launch-actions@example.com"
+        git config --global user.name "launch actions"
+        git fetch origin
+        git pull
+        cd ./on-demand
+        echo -e "\nLaunch from ${{github.event_name}} event: https://github.com/github/launch/actions/runs/${{github.run_id}} " >> RUNS.md
+        git add .
+        git commit -am "Triggered from Launch deployment"
+        git push
+        echo "CANARY_COMMIT_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
+    - name: Post to slack
+      uses: joshmgross/send-slack-message@f09a0524cd298733cbff91d765fe5754e03ca9f1
+      with:
+        message: ":spinner-octo: Starting canary runs in staff-wus2-01, see `https://github.ghe.com/github/actions-canary/commit/${{ env.CANARY_COMMIT_SHA }}` to check the status of those workflows."
+        channel: C7S87E2RW
+        slack-token: ${{ secrets.SLACK_BOT_TOKEN }}

@@ -1,0 +1,66 @@
+required_builds:
+  - dependency-snapshots-api / dependency-snapshots-api
+  - dependency-snapshots-api-docker-image / dependency-snapshots-api-docker-image
+ok_for_moda_to_remove_from_deprecating_clusters: true
+auto_start_pipeline: production_rollout
+notifications:
+  slack_channels:
+    - "#dg-ops"
+environments:
+  - name: production
+    secret_environment: production
+    canaryable: true
+    require_canary: false
+    require_pipeline: true
+    cluster_selector:
+      profile: general
+      region: iad
+    service_mesh:
+      enabled: true
+  - name: lab
+    secret_environment: production
+    auto_deploy: true
+    cluster_selector:
+      name: general-1-ash1-iad # Single site to reduce resource usage
+      site: ash1-iad
+  - name: staff-wus2-01
+    secret_environment: staff-wus2-01
+    require_pipeline: true
+    cluster_selector:
+      profile: proxima
+      stamp: staff-wus2-01
+    service_mesh:
+      enabled: true
+    proxima: true
+proxima:
+  environment_pattern:
+    service_mesh:
+      enabled: true
+  rollout_pattern:
+    - kind: deployment
+      config:
+        timeout: 300
+  rings:
+    timer_gate_duration: 300
+    gates:
+      - kind: blocked
+        reason: "Please check the [DataDog dashboard](https://app.datadoghq.com/dashboard/amb-m5t-x7w/ds-api?from_ts=1682440153301&to_ts=1682443753301&live=true) before continuing."
+pipelines:
+  production_rollout:
+    append_proxima_stamps: true
+    auto_start_wait: false
+    timeout: 1200
+    stages:
+      - name: staff-wus2-01
+        kind: deployment
+        config:
+          environment: staff-wus2-01
+          timeout: 300
+      - name: production
+        kind: deployment
+        config:
+          environment: production
+          timeout: 300
+        gates:
+          - kind: blocked
+            reason: "Please check the [DataDog dashboard](https://app.datadoghq.com/dashboard/amb-m5t-x7w/ds-api?from_ts=1682440153301&to_ts=1682443753301&live=true) before continuing."

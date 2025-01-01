@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+# This script is automatically running as a part of gh/gh Codespaces prebuild
+# It prepares all IMS resources, warm up dependencies, clean up and seed database
+
+set -e
+
+if [[ $GITHUB_REPOSITORY != "github/github" ]]; then
+    echo "The script is intended only for github/github codespace!"
+    exit 1
+fi
+
+echo "Refreshing GOPROXY auth"
+if [ -f /usr/local/share/goproxy-init.sh ]; then
+  /usr/local/share/goproxy-init.sh --override
+fi
+
+echo "Build IMS application"
+script/build
+
+echo "Deploy IMS dependencies"
+script/setup
+
+# Don't call "script/db-setup" because this script is run during codespace prebuild where azure is not available yet.
+
+echo "Enabling feature flags for dotcom integration"
+(cd /workspaces/github && bin/toggle-feature-flag enable hosted_compute_ims_stafftools)
+
+# Runner integration is disabled by default for now.

@@ -1,0 +1,27 @@
+-- Tracks a vestigial table on the authnd-production cluster.  Not used for dev/test/CI.
+CREATE TABLE `oauth_accesses` (
+	`id` int(11) NOT NULL,
+	`user_id` int(11) NOT NULL,
+	`application_id` int(11) NOT NULL,
+	`code` varchar(20) DEFAULT NULL,
+	`raw_data` blob,
+	`created_at` datetime DEFAULT NULL,
+	`description` varchar(255) DEFAULT NULL,
+	`accessed_at` datetime DEFAULT NULL,
+	`hashed_token` varbinary(44) DEFAULT NULL,
+	`token_last_eight` varchar(8) DEFAULT NULL,
+	`fingerprint` varchar(255) DEFAULT NULL,
+	`authorization_id` int(11) DEFAULT NULL,
+	`application_type` varchar(16) DEFAULT NULL,
+	`expires_at_timestamp` bigint(20) DEFAULT NULL,
+	`installation_id` bigint(20) DEFAULT NULL,
+	`installation_type` varchar(33) DEFAULT NULL,
+	`sync_timestamp` datetime NOT NULL,
+	`sync_kafka_offset` bigint(20) NOT NULL,
+	`sync_binlog_position` varchar(255) NOT NULL,
+	`sync_gtid_position` varchar(255) NOT NULL,
+	`sync_state` int(11) NOT NULL DEFAULT '0',
+	PRIMARY KEY (`id`),
+	KEY `index_oauth_accesses_on_hashed_token` (`hashed_token`),
+	KEY `index_oauth_accesses_on_authorization_id` (`authorization_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -1,0 +1,3 @@
+ALTER TABLE workflow_build_executions
+DROP infrastructure_failed,
+DROP azp_completed_at;

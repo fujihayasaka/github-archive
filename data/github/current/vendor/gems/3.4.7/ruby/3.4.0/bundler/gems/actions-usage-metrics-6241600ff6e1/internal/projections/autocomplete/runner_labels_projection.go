@@ -1,0 +1,34 @@
+package autocomplete
+
+import (
+	"github.com/Azure/azure-kusto-go/azkustodata/kql"
+	"github.com/github/actions-usage-metrics/internal/projections/common"
+	"github.com/github/actions-usage-metrics/internal/versioning"
+	"github.com/github/actions-usage-metrics/lib/twirp/proto"
+)
+
+type runnerLabelsProjection struct {
+	version versioning.Version
+	scope   *proto.Scope
+}
+
+func RunnerLabelsProjection(version versioning.Version, scope *proto.Scope) common.ProjectionInfo {
+	return runnerLabelsProjection{version, scope}
+}
+
+var _ common.Projection[AutoCompleteItem] = &runnerLabelsProjection{}
+
+func (runnerLabelsProjection) Name() common.ProjectionName   { return "ActionsRunnerLabelsAutocomplete" }
+func (p runnerLabelsProjection) Version() versioning.Version { return p.version }
+
+func (p runnerLabelsProjection) KustoTableOrView(aggInterval common.ProjectionAggregationInterval) common.KustoTableOrView {
+	return common.GetKustoTableOrView(common.RunnerLabelsTableType, common.ProjectionAggregationIntervalNone, p.version, p.scope, true)
+}
+
+func (runnerLabelsProjection) KustoQuery() *kql.Builder {
+	return kql.New("") // table is ready to just read data from, no additional query needed
+}
+
+func (p runnerLabelsProjection) KustoSummarize() *kql.Builder {
+	return kql.New("")
+}

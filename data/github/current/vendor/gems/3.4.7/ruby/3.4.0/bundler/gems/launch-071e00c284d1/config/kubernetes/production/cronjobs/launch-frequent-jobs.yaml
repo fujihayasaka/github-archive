@@ -1,0 +1,111 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    annotations:
+        heaven.githubapp.com/deploy-requirement: "true"
+        heaven.githubapp.com/image-placeholder: launch
+        heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: launch-frequent-jobs
+        moda.github.net/cluster-preferences: |
+            {
+              "general-3-va3-iad":  {
+                "spec": {
+                  "suspend": false
+                }
+              }
+            }
+    name: launch-frequent-jobs
+spec:
+    concurrencyPolicy: Forbid
+    jobTemplate:
+        spec:
+            activeDeadlineSeconds: 600
+            backoffLimit: 1
+            template:
+                metadata:
+                    annotations:
+                        fluentbit.io/parser: logfmt
+                        observability.github.com/kafka_topic: launch
+                        observability.github.com/logger: fluent-bit
+                        observability.github.com/splunk_index: prod-launch
+                        observability.github.com/splunk_sourcetype: launch-fluentbit
+                spec:
+                    containers:
+                        - command:
+                            - /usr/bin/tools/istio-job-wrapper
+                            - bash
+                            - -c
+                            - job-cli jobs percentRunStartDelay --interval 2; job-cli jobs percentRunCompletionDelay --interval 2;
+                          env:
+                            - name: GOMAXPROCS
+                              value: "2"
+                            - name: KUBE_POD
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: metadata.name
+                            - name: KUBE_NAMESPACE
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: metadata.namespace
+                            - name: REGION
+                              valueFrom:
+                                configMapKeyRef:
+                                    key: region
+                                    name: kube-cluster-metadata
+                            - name: LAUNCH_ENV
+                              value: production
+                            - name: LAUNCH_IS_MULTI_TENANT
+                              value: "false"
+                            - name: LAUNCH_MODE
+                              value: hosted
+                            - name: STATS_PREFIX
+                              value: launch
+                            - name: STATS_ADDR
+                              value: $(KUBE_NODE_HOSTNAME):28125
+                            - name: DEPLOYER_DATABASE_URL
+                              valueFrom:
+                                secretKeyRef:
+                                    key: mysql-deployer-rw-db
+                                    name: launch-production
+                            - name: DEPLOYER_DATABASE_READ_ONLY_URL
+                              valueFrom:
+                                secretKeyRef:
+                                    key: mysql-deployer-ro-db
+                                    name: launch-production
+                            - name: API_HOST
+                              value: https://internal-api.service.$(REGION).github.net
+                            - name: GITHUB_APP_PRIVATE_KEY
+                              valueFrom:
+                                secretKeyRef:
+                                    key: github-app-private-key
+                                    name: launch-production
+                            - name: EARTHSMOKE_KEYSTORE_AZP_ORGANIZATION
+                              valueFrom:
+                                secretKeyRef:
+                                    key: earthsmoke-keystore-azp-organization-production
+                                    name: launch-production
+                            - name: AZP_TOKEN_RESOURCE
+                              value: 0000005A-0000-8888-8000-000000000000
+                            - name: AZP_ORG_CREATE_API_BASE_URL
+                              value: https://pipelines.actions.githubusercontent.com
+                            - name: TELEMETRY_ROUND_TRIPPER_ENABLE_LOGS
+                              value: "true"
+                          envFrom:
+                            - secretRef:
+                                name: vault-secrets
+                            - configMapRef:
+                                name: static-config
+                          image: launch
+                          name: launch-frequent-jobs
+                          resources:
+                            limits:
+                                cpu: "3"
+                                memory: 256Mi
+                            requests:
+                                cpu: "0.5"
+                                memory: 128Mi
+                    dnsPolicy: Default
+                    restartPolicy: Never
+            ttlSecondsAfterFinished: 86400
+    schedule: '*/2 * * * *'
+    suspend: true

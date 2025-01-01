@@ -1,0 +1,1 @@
+ALTER TABLE `ts_physical_alerts` DROP KEY `idx_physical_alerts_on_repo_id_analysis_id`, ADD KEY `idx_physical_alerts_on_repo_id_analysis_id_logical_alert_id` (`repository_id`,`analysis_id`,`logical_alert_id`);

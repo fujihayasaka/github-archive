@@ -1,0 +1,42 @@
+name: 'Dotcom Gem Update Check'
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**ruby/lib/billing-platform/version.rb'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  comment_on_PR:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Comment on PR
+      uses: actions/github-script@v6
+      with:
+        script: |
+          // Get the existing PR comments.
+          const {data: comments} = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.payload.number,
+          });
+
+          // Check if the bot has already commented on the PR.
+          const commentBody = `It looks like you're updating the billing-platform-client gem version. Please make sure to update the version in
+          dotcom as well by following the steps [here](https://github.com/github/billing-platform/blob/main/docs/reference/project/version-change-checklist.md#dotcom-changes).`
+          const botComment = comments.find(comment => comment.body === commentBody)
+
+          if (context.payload.pull_request.head.repo.full_name !== 'github/billing-platform') {
+            console.log('Not attempting to write comment on PR from a fork')
+          }
+          else if (!botComment) {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.number,
+              body: commentBody
+            })
+          }

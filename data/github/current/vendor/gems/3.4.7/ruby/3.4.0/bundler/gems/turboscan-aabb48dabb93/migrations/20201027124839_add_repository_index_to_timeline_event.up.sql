@@ -1,0 +1,1 @@
+ALTER TABLE `ts_timeline_events` DROP KEY `idx_timeline_events_on_analysis_id`, ADD KEY `idx_timeline_events_on_analysis_id` (`analysis_id`,`repository_id`), ADD KEY `idx_timeline_events_on_repository_id_logical_id` (`repository_id`,`logical_alert_id`);

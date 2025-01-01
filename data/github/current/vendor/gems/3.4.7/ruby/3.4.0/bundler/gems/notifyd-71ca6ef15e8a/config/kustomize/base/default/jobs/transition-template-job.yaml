@@ -1,0 +1,38 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: transition-template-job
+spec:
+  template:
+    metadata:
+      labels:
+        app: notifyd
+        role: internal-service
+      annotations:
+        observability.github.com/logger: fluent-bit
+        fluentbit.io/parser_stdout: logfmt
+        fluentbit.io/parser_stderr: json
+    spec:
+      dnsPolicy: ClusterFirst
+      containers:
+        - name: transition
+          image: notifyd
+          envFrom:
+            - configMapRef:
+                name: kube-cluster-metadata
+            - secretRef:
+                name: vault-secrets
+          env:
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  containerName: transition
+                  resource: limits.cpu
+            - name: STATSD_ADDR
+              value: "$(KUBE_NODE_HOSTNAME):28125"
+          command:
+            - /go/bin/transition-job
+      restartPolicy: Never
+  backoffLimit: 0
+  activeDeadlineSeconds: 100
+

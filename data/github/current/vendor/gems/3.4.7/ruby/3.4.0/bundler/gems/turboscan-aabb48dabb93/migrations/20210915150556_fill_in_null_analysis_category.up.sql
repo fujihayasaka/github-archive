@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20210915150556_fill_in_null_analysis_category.go on GHES

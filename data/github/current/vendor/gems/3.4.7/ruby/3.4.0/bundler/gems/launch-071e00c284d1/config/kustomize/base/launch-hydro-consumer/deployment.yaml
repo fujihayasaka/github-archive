@@ -1,0 +1,124 @@
+# http://kubernetes.io/docs/user-guide/deployments/#what-is-a-deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: launch-hydro-consumer
+    annotations:
+        heaven.githubapp.com/image-placeholder: "launch"
+        heaven.githubapp.com/deploy-requirement: "true"
+        # https://github.com/github/moda-linter/blob/75731cd9f59e29883cb363020804c83d1d7f4ab8/rules/docs/env_var_already_injected_by_annotation.md
+        heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: launch-hydro-consumer
+spec:
+    selector:
+        matchLabels:
+            service: launch-hydro-consumer
+    # Make sure that the number of replicas is <= to the partitions for the kafka topic: https://github.com/github/hydro-schemas/blob/master/topic-configuration/production/potomac/kafka-topics.yaml
+    # We deploy to multiple clusters, each cluster would have 1 worker
+    replicas: 1
+    template:
+        metadata:
+            # Labels are applied to all pods created by this deployment so we can
+            # tell the service load balancer where to send traffic.
+            # http://kubernetes.io/docs/user-guide/labels/
+            labels:
+                service: launch-hydro-consumer
+            annotations:
+                fluentbit.io/parser: logfmt
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: prod-launch
+                observability.github.com/splunk_sourcetype: launch-fluentbit
+                observability.github.com/kafka_topic: launch
+        spec:
+            dnsPolicy: Default
+            volumes:
+                - name: github-metadata
+                  hostPath:
+                    path: /etc/github/metadata.json
+            containers:
+                - name: launch-hydro-consumer
+                  # The image repository and tag are substituted on deploy.
+                  image: launch
+                  # The command to run when booting the containers.
+                  command:
+                    - "launch-hydro-consumer"
+                  env:
+                    - name: KUBE_POD
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.name
+                    - name: KUBE_NAMESPACE
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.namespace
+                    - name: REGION
+                      valueFrom:
+                        configMapKeyRef:
+                            name: kube-cluster-metadata
+                            key: region
+                    - name: KAFKA_BROKERS
+                      value: "hydro-kafka-potomac-boot-1.service.iad.github.net:9093,hydro-kafka-potomac-boot-2.service.iad.github.net:9093,hydro-kafka-potomac-boot-3.service.iad.github.net:9093"
+                    - name: KAFKA_GROUP
+                      value: "launch-hydro-consumer-production"
+                    - name: KAFKA_VERSION
+                      value: "1.1.1"
+                    - name: KAFKA_CERT_PATH
+                      value: "/etc/ssl/certs/cp1-iad-production-1487801205-root.pem"
+                    - name: KAFKA_TLS_ENABLED
+                      value: "true"
+                    - name: TRACING_ENABLED
+                      value: "true"
+                    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                      value: "https://opentelemetry-collector-production.service.iad.github.net/v1/traces"
+                    - name: EMULATE_PREPARED_STATEMENTS
+                      value: "true"
+                    - name: USE_UTC_FOR_MYSQL
+                      value: "true"
+                    - name: FORCE_CHARSET_FOR_MYSQL
+                      value: "true"
+                    - name: HTTP_PROXY
+                      value: "network-proxy.service.github.net:3128"
+                    - name: HTTPS_PROXY
+                      value: "network-proxy.service.github.net:3128"
+                    - name: NO_PROXY
+                      value: "github.net,github.com,*.cluster.local"
+                    - name: TELEMETRY_ROUND_TRIPPER_ENABLE_LOGS
+                      value: "true"
+                    - name: INTERNAL_ADDR
+                      value: ":6824"
+                    - name: LAUNCH_REDIS_URL
+                      value: "db-redis-launch-rw.service.github.net:6379"
+                    - name: GITHUB_TWIRP_ADDR
+                      value: "https://internal-api.service.$(REGION).github.net/internal"
+                    - name: GOMAXPROCS
+                      value: "2"
+                    - name: LAUNCH_LOG_DEBUG
+                      value: "true"
+                  envFrom:  # order matters! Subsequent entries can override earlier entries.
+                    - secretRef:
+                        name: vault-secrets
+                  # As per https://github.com/github/kube/blob/master/docs/handbook_files/next_steps.md#required-prestop-hook
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command: ["sleeper", "-seconds", "5"]
+                  ports:
+                    - containerPort: 6824
+                  volumeMounts:
+                    - mountPath: /etc/github/metadata.json
+                      name: github-metadata
+                      readOnly: true
+                  resources:
+                    requests:
+                        # Recommendations: https://app.datadoghq.com/s/59fe6c40c/548-9we-ry7
+                        cpu: "49m"
+                        memory: "200Mi"
+                    limits:
+                        # Adjust GOMAXPROCS in tandem. It's recommended the cpu limit be set to GOMAXPROCS+1.
+                        cpu: "3"
+                        memory: "500Mi"
+                  readinessProbe:
+                    initialDelaySeconds: 5
+                    timeoutSeconds: 5
+                    httpGet:
+                        path: /_ping
+                        port: 6824

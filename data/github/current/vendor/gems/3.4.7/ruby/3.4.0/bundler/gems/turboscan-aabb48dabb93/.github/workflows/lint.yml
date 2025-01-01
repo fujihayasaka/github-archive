@@ -1,0 +1,38 @@
+name: "Run linters"
+
+on:
+  push:
+    branches-ignore:
+      - gh-readonly-queue/**
+  merge_group:
+    reuse-previous-outcome: true
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+env:
+  GH_TOKEN: ${{ secrets.DSP_CODE_SCANNING_TOKEN }}
+
+jobs:
+  lint:
+    runs-on: self-hosted
+    steps:
+      - name: Login to Docker Registry
+        run: |
+          echo "${{ secrets.CONTAINER_BUILDER_TOKEN }}" | docker login ghcr.io --username gh-containers-bot --password-stdin
+          echo "${{ secrets.OCTOFACTORY_TOKEN }}" | docker login octofactory.githubapp.com --username "${{ secrets.OCTOFACTORY_USER }}" --password-stdin || true
+
+      - name: Checkout repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+
+      - name: Run make lint
+        shell: bash
+        run: |
+          ./script/dev-run env CI=1 make lint
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@9e8d0789d4a0fa9ceb6b1738f7e269594bdd67f0
+        with:
+          sarif_file: ./golangci-lint.sarif

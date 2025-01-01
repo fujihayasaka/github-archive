@@ -1,0 +1,127 @@
+name: "CodeQL"
+run-name: ${{ github.event.inputs.code_scanning_run_name }}
+on: dynamic
+
+env:
+  CODE_SCANNING_REF: ${{ github.event.inputs.code_scanning_ref }}
+  CODE_SCANNING_IS_ANALYZING_DEFAULT_BRANCH: ${{ github.event.inputs.code_scanning_is_analyzing_default_branch }}
+  CODE_SCANNING_WORKFLOW_FILE: ${{ github.event.inputs.code_scanning_workflow_file }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+      security-events: write
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: python
+            category: /language:python
+            build-mode: none
+            runner: '["ubuntu-latest"]'
+          - language: java-kotlin
+            category: /language:java-kotlin
+            build-mode: autobuild
+            runner: '["ubuntu-latest"]'
+          - language: ruby
+            category: /language:ruby
+            build-mode: none
+            runner: '["ubuntu-latest"]'
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+        build-mode: ${{ matrix.build-mode }}
+        dependency-caching: ${{ runner.environment == 'github-hosted' }}
+        queries: "" # Default query suite
+        config: |
+          default-setup:
+            org:
+              model-packs: [ ${{ github.event.inputs.code_scanning_codeql_packs }} ]
+          threat-models: [  ]
+    - name: Setup proxy for registries
+      id: proxy
+      uses: github/codeql-action/start-proxy@v3
+      with:
+        registries_credentials: ${{ secrets.GITHUB_REGISTRIES_PROXY }}
+        language: ${{ matrix.language }}
+
+    - name: Autobuild
+      uses: github/codeql-action/autobuild@v3
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      env:
+        CODEQL_PROXY_HOST: ${{ steps.proxy.outputs.proxy_host }}
+        CODEQL_PROXY_PORT: ${{ steps.proxy.outputs.proxy_port }}
+        CODEQL_PROXY_CA_CERTIFICATE: ${{ steps.proxy.outputs.proxy_ca_certificate }}
+      with:
+        category: ${{ matrix.category }}
+## AUTO-ADJUST VALIDATION RUN ONLY
+    - name: Record Successful outcome
+      uses: actions/github-script@v7
+      id: outcomes
+      env:
+        MATRIX_LANGUAGE: ${{ matrix.language }}
+      with:
+        script: |
+          core.setOutput(process.env.MATRIX_LANGUAGE.replaceAll("-", "_"), "OK");
+
+    outputs:
+      python: ${{ steps.outcomes.outputs.python }}
+      java_kotlin: ${{ steps.outcomes.outputs.java_kotlin }}
+      ruby: ${{ steps.outcomes.outputs.ruby }}
+
+
+  adjust:
+    name: Adjust Configuration
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    needs: analyze
+    if: ${{ needs.analyze.outputs.python != 'OK' || needs.analyze.outputs.java_kotlin != 'OK' || needs.analyze.outputs.ruby != 'OK' }}
+    steps:
+      - name: Rebuild configuration
+        env:
+          CODE_SCANNING_OUTCOME_python: ${{ needs.analyze.outputs.python }}
+          CODE_SCANNING_OUTCOME_java_kotlin: ${{ needs.analyze.outputs.java_kotlin }}
+          CODE_SCANNING_OUTCOME_ruby: ${{ needs.analyze.outputs.ruby }}
+
+        uses: actions/github-script@v7
+        with:
+          script: |
+            newLangs = []
+            if (process.env.CODE_SCANNING_OUTCOME_python === 'OK') {
+              newLangs.push("python")
+            }
+            if (process.env.CODE_SCANNING_OUTCOME_java_kotlin === 'OK') {
+              newLangs.push("java-kotlin")
+            }
+            if (process.env.CODE_SCANNING_OUTCOME_ruby === 'OK') {
+              newLangs.push("ruby")
+            }
+
+            if (newLangs.length === 0) {
+                console.log("No languages were successfully analyzed. Exiting.")
+                process.exit(1)
+            }
+
+            resp = await github.request("PATCH /repos/{owner}/{repo}/code-scanning/default-setup/adjust", {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              languages: newLangs,
+              workflow_run_id: ${{ github.run_id }},
+            });
+            console.log(resp.status);

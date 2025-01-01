@@ -1,0 +1,73 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    annotations:
+        moda.github.net/cluster-preferences: |-
+            {
+              "general-1-ash1-iad": {
+                "spec": {
+                  "suspend": false
+                }
+              }
+            }
+        turboscan.github.net/single-cluster: "true"
+    name: turboscan-repo-deleter
+spec:
+    concurrencyPolicy: Forbid
+    jobTemplate:
+        spec:
+            activeDeadlineSeconds: 3590
+            template:
+                metadata:
+                    annotations:
+                        fluentbit.io/parser: logfmt
+                        observability.github.com/logger: fluent-bit
+                        observability.github.com/splunk_index: turboscan
+                    labels:
+                        app: turboscan
+                        role: repo-deleter
+                spec:
+                    containers:
+                        - command:
+                            - /app/script/istio-job-wrapper
+                            - /app/bin/turboscan
+                            - cronjobs
+                            - exec
+                            - repo-deleter
+                            - --limit=1000
+                            - --deadline=55
+                            - --delete
+                          env:
+                            - name: STATS_ADDR
+                              value: $(KUBE_NODE_HOSTNAME):28125
+                            - name: KAFKA_GROUP
+                              value: turboscan-consumer-prod
+                            - name: GOMAXPROCS
+                              valueFrom:
+                                resourceFieldRef:
+                                    containerName: turboscan
+                                    resource: limits.cpu
+                          envFrom:
+                            - configMapRef:
+                                name: environment
+                            - configMapRef:
+                                name: background-environment
+                            - configMapRef:
+                                name: kube-cluster-metadata
+                            - secretRef:
+                                name: vault-secrets
+                          image: turboscan
+                          name: turboscan
+                          resources:
+                            limits:
+                                cpu: 1000m
+                                memory: 4Gi
+                            requests:
+                                cpu: 1000m
+                                memory: 1Gi
+                    dnsPolicy: ClusterFirst
+                    restartPolicy: OnFailure
+            ttlSecondsAfterFinished: 60
+    schedule: 0 * * * *
+    suspend: true

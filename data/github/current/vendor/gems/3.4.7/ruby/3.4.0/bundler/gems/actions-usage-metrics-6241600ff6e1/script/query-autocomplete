@@ -1,0 +1,51 @@
+#!/bin/bash
+# Examples:
+# script/query-autocomplete 9919 GetUsageByRepoWorkflowRunner v1 DATE_RANGE_TYPE_CURRENT_WEEK
+# script/query-autocomplete 9919 GetJobUsage "" DATE_RANGE_TYPE_LATEST_MONTH
+# script/query-autocomplete 9919 GetRepoUsage "" DATE_RANGE_TYPE_PREVIOUS_MONTH
+# script/query-autocomplete 9919 GetRunnerTypeUsage "" DATE_RANGE_TYPE_LAST_30_DAYS
+# script/query-autocomplete 9919 GetRunnerRuntimeUsage "" DATE_RANGE_TYPE_LAST_90_DAYS
+
+set -e
+dir="$(dirname "$0")"
+echo "Usage: $0 [search] [GetWorkflows | GetJobs] [owner_id] [repo_id] [version_override e.g. v1] [limit]"
+
+if [ -z "$1" ]; then search=''; else search=$1; fi
+if [ -z "$2" ]; then endpoint='GetWorkflows'; else endpoint=$2; fi
+if [ -z "$3" ]; then org=1; else org=$3; fi
+if [ -z "$4" ]; then scope="{\"owner_id\": $org, \"scope_type\": \"SCOPE_TYPE_ORG\"}"; else scope="{\"owner_id\": $org, \"repository_id\": $4, \"scope_type\": \"SCOPE_TYPE_REPO\"}"; fi
+if [ -z "$5" ]; then version='v3'; else version=$5; fi
+if [ -z "$6" ]; then limit=10; else limit=$6; fi
+
+echo "scope: $scope, endpoint: $endpoint, version_override: $version, limit: $limit"
+
+if [ -z "$4" ]; then offset=0; else offset=$2; fi
+
+case "$endpoint" in
+"GetWorkflows")
+  query="workflow_query"
+  result="workflows"
+  resultProp="file_name"
+  ;;
+"GetJobs")
+  query="jobs_query"
+  result="jobs"
+  resultProp="job_name"
+  ;;
+"GetRunnerLabels")
+  query="runner_labels_query"
+  result="runner_labels"
+  resultProp="runner_label"
+  ;;
+*)
+  echo "Unkown endpoint $endpoint, use GetWorkflows | GetJobs"
+  ;;
+esac
+
+json=$($dir/hmac-curl -s -X POST aum.local:32474/twirp/actions_usage_metrics.api.v1.UsageApi/$endpoint -H "Content-Type: application/json" -d "{ \"request_options\": { \"search\": \"$search\", \"scope\": $scope, \"limit\": $limit, \"projection_options\":{ \"version_override\":\"$version\" }}}")
+
+echo ==============
+echo $json
+echo ==============
+
+echo "$json" | jq -r ".$result[] | [.$resultProp] | @tsv" | column -t

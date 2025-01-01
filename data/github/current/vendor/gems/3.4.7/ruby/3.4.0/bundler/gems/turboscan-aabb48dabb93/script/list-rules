@@ -1,0 +1,23 @@
+#!/bin/bash
+
+set -euo pipefail
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+if [[ ! -x "$(which jq)" ]]; then
+  echo >&2 "requires an installation of jq."
+  exit 1
+fi
+
+jq --slurp '
+  [
+    .[].runs[] |
+    .tool.driver.name as $driver |
+    [.tool.extensions[]?.rules[].id, .tool.driver.rules[].id] |
+    .[] |
+    {driver: $driver, id: .}
+  ] |
+  flatten |
+  reduce .[] as $o ({}; .[$o.driver] += [$o.id]) |
+  with_entries(.value |= sort)
+' "${DIR}/../ts/sarif/ruledata"/*

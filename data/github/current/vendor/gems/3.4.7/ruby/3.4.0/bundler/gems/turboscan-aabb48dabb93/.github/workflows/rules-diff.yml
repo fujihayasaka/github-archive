@@ -1,0 +1,63 @@
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ts/sarif/ruledata/**
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  rules-diff:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          fetch-depth: 2
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: Build Rule Diff Tool
+        run: |
+          make ./bin/rulediff
+      - name: Detect Changes
+        id: detect-changes
+        uses: mathiasvr/command-output@34408ea3d0528273faff3d9e201761ae96106cd0
+        with:
+          run: |
+            echo "## Hello humans"
+            echo
+            echo "Recommended checks for both the PR author and reviewer:"
+            echo "1. Is the help version changing to something newer rather than older?"
+            echo "2. Does the version in the PR title match the version actually being used? Check the \`x -> y\` line in the output below to see."
+            echo "3. Do the changes to the help look sensible?"
+            echo "4. Do the CI checks about not removing rules pass? See \`Check embedded rules\`. If you need to update \`codeql-deleted.sarif\`, see \`script/update-codeql-deleted-sarif\`."
+            echo "5. Add a heart reaction to this message if the PR looks good!"
+            echo
+            echo "## Rule Changes"
+            git log --diff-merges=on --max-count=1 --name-only --pretty="format:" | grep --extended-regexp "^ts/sarif/ruledata/" | while read -r changed_file; do
+              echo "<details>"
+              echo "<summary>./$changed_file</summary>"
+              echo
+              echo "\`\`\`golang"
+              ./bin/rulediff --before <(git show "HEAD^:$changed_file") --after <(git show "HEAD:$changed_file")
+              echo "\`\`\`"
+              echo "</details>"
+              echo
+            done
+      - name: Post Comment
+        uses: actions/github-script@v7
+        env:
+          COMMENT_CONTENT: ${{ steps.detect-changes.outputs.stdout }}
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: process.env["COMMENT_CONTENT"].length > 65536 ? "The diff is too large to post in an issue comment. Please see the job output to find out what was changed." : process.env["COMMENT_CONTENT"],
+            })

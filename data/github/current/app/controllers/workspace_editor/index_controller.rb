@@ -186,15 +186,9 @@ class WorkspaceEditor::IndexController < WorkspaceEditor::ControllerBase
     }
   end
 
-  sig { returns(AssetBundlesHelper) }
-  memoize def asset_bundles_helper
-    AssetBundlesHelper.new(current_user)
-  end
-
   sig { params(worker: String).returns(String) }
   def find_worker_path(worker)
-    name = asset_bundles_helper.expand_bundle_name(worker)
-    web_worker_path(name)
+    web_worker_url(worker)
   end
 
   def base_pull_request_data

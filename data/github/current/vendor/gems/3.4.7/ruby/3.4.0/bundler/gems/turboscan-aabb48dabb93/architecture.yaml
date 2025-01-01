@@ -1,0 +1,29 @@
+services:
+  - name: turboscan
+    catalog: github/turboscan
+    deployed_to: deploy_targets.moda
+connections:
+  - name: kafka-lite
+    proxy: services.kafka-lite
+flows:
+  - id: upload_sarif
+    name: Upload a SARIF file
+    team: github/code-scanning
+    sequence:
+      - source: browser
+        target: services.github
+        description: User submits SARIF file to API
+      - source: services.github
+        target: services.turboscan
+        connection: connections.kafka-lite
+        description: Creates check run and sends SARIF file to turboscan
+      - source: services.github
+        target: mySQL
+        description: Reads/writes to mysql
+      - source: services.turboscan
+        target: services.github
+        connection: connections.kafka-lite
+        description: Extracts alerts from SARIF file and returns results to github
+      - source: services.turboscan
+        target: mySQL
+        description: Reads/writes to turboscan mysql

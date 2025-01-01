@@ -1,0 +1,43 @@
+#!/bin/bash
+
+while getopts s:o:k: flag
+
+do
+  case "${flag}" in
+    s) SERVICE_NAME=${OPTARG};;
+    o) DLV_OPTIONS=${OPTARG};;
+    k) KILL_RUNNING_DLV="yes";
+  esac
+done
+
+if [[ -z "$SERVICE_NAME" && -z "$DLV_OPTIONS" && -z "$KILL_RUNNING_DLV" ]]; then
+  echo "Options: -s <service name> -o <delve options> -k yes"
+  echo "Examples:"
+  echo "  Attach to 'launch-worker' with additional delve option '--accept-multiclient'"
+  echo "    debugger-ctrl -s launch-worker -o '--accept-multiclient'"
+  echo "  Kill any existing running delve process"
+  echo "    debugger-ctrl -k yes"
+  exit 0
+fi
+
+if [ -n "$KILL_RUNNING_DLV" ]; then
+  echo "Killing running dlv debugger instances"
+  kill $(pidof dlv)
+  exit 0
+fi
+
+if [ -z "$SERVICE_NAME" ]; then
+  echo "-s / SERVICE_NAME is not defined"
+  exit 1
+fi
+
+# try get the process id
+PID=`pidof $SERVICE_NAME`
+
+if [ -z "$PID" ]; then
+  echo "process with name '$SERVICE_NAME' not found"
+  exit 1
+fi
+
+# start debugger
+dlv --listen=:44711 --headless=true $DLV_OPTIONS --api-version=2 attach $PID

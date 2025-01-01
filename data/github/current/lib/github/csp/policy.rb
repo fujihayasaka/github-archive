@@ -12,10 +12,10 @@ module GitHub::CSP::Policy
   #
   # Return 'self' unless an asset host, on a different subdomain, is
   # configured.
-  CDN_SOURCE = if GitHub.asset_host_url.blank? || !GitHub.subdomain_isolation?
-    "'self'"
+  CDN_SOURCES = if GitHub.asset_host_url.blank? || !GitHub.subdomain_isolation?
+    ["'self'"]
   else
-    GitHub.asset_host_url
+    [GitHub.asset_host_url]
   end
 
 
@@ -40,7 +40,9 @@ module GitHub::CSP::Policy
   # Allowed script URL allowlist.
   #
   # All hosts that we load scripts from needs to be part of this list.
-  SCRIPT_SOURCES = [CDN_SOURCE].freeze
+  SCRIPT_SOURCES = [
+    *CDN_SOURCES
+  ].freeze
 
   # Allowed object URL allowlist.
   #
@@ -54,7 +56,7 @@ module GitHub::CSP::Policy
   # All hosts that we load styles from needs to be part of this list.
   STYLE_SOURCES = [
     SecureHeaders::PolicyManagement::UNSAFE_INLINE,
-    CDN_SOURCE,
+    *CDN_SOURCES,
   ].freeze
 
   # Alternative img-src configuration for multi tenant enterprise (report-only)
@@ -62,7 +64,7 @@ module GitHub::CSP::Policy
     SecureHeaders::PolicyManagement::SELF,
     SecureHeaders::PolicyManagement::DATA_PROTOCOL,
     SecureHeaders::PolicyManagement::BLOB_PROTOCOL,
-    CDN_SOURCE,
+    *CDN_SOURCES,
     "*.#{GitHub.host_name}",
     GitHub.og_image_generator_base_url,
     ExploreFeed::CustomerStory::CUSTOMER_STORIES_FEED_URL,
@@ -79,7 +81,7 @@ module GitHub::CSP::Policy
       SecureHeaders::PolicyManagement::SELF,
       SecureHeaders::PolicyManagement::DATA_PROTOCOL,
       SecureHeaders::PolicyManagement::BLOB_PROTOCOL,
-      CDN_SOURCE,
+      *CDN_SOURCES,
       GitHub.alambic_assets_host,
       GitHub.storage_cluster_host,
       GitHub.image_proxy_url,
@@ -117,7 +119,7 @@ module GitHub::CSP::Policy
   #
   # All hosts that we load audio and video from needs to be part of this list.
   if GitHub.multi_tenant_enterprise?
-    media_sources = [CDN_SOURCE]
+    media_sources = [*CDN_SOURCES]
   else
     media_sources = GitHub.video_asset_allowlist
   end
@@ -135,7 +137,7 @@ module GitHub::CSP::Policy
   #
   # All hosts that we load fonts needs to be part of this list.
   FONT_SOURCES = [
-    CDN_SOURCE,
+    *CDN_SOURCES,
   ].freeze
 
   # Third party connect sources.
@@ -168,6 +170,7 @@ module GitHub::CSP::Policy
     GitHub.api_host_name,
 
     THIRD_PARTY_CONNECT_SOURCES,
+    *CDN_SOURCES # Needed to allow sourcemaps to load in browser devtools.
   ].flatten.uniq.compact
 
   CONNECT_SOURCES << GitHub.memory_alpha_url if !GitHub.multi_tenant_enterprise?
@@ -222,7 +225,7 @@ module GitHub::CSP::Policy
   ASSETS_PATH = "/assets/".freeze
 
   WORKER_SOURCES = [
-    CDN_SOURCE,
+    *CDN_SOURCES,
     "#{GitHub.host_name}#{WORKER_CDN_PATH}",
     *("#{GitHub.host_name}#{WEBPACK_PATH}" if Rails.env.development?),
     *("#{GitHub.host_name}#{VITE_PATH}" if Rails.env.development?),

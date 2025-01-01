@@ -1,0 +1,48 @@
+name: Test Ruby Client
+
+on:
+  push:
+    branches: [main]
+  pull_request: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Ruby
+      uses: ruby/setup-ruby@a2bbe5b1b236842c1cb7dd11e8e3b51e0a616acc
+      with:
+        ruby-version: '3.3'
+    - name: Install dependencies
+      run: |
+        cd ruby/trust-metadata-api
+        gem install bundler
+        bundle install
+    - name: Run tests
+      run: |
+        cd ruby/trust-metadata-api
+        bundle install
+        bundle exec rake test
+    - name: Run type checks
+      run: |
+        cd ruby/trust-metadata-api
+        bundle install
+        bundle exec srb tc
+    - name: Verify gem RBIs are up-to-date
+      run: |
+        cd ruby/trust-metadata-api
+        bundle exec tapioca gem --verify
+    - name: Verify gem annotations up-to-date
+      run: |
+        cd ruby/trust-metadata-api
+        bundle exec tapioca annotations
+
+        untracked_rbi_files=$(git status --porcelain 2>/dev/null  | grep ".rbi" || true)
+        if [ -n "$untracked_rbi_files" ]; then
+          echo "Sorbet annotation files are out-of-date. Run 'bundle exec tapioca annotations' in 'cd ruby/trust-metadata-api' and commit the changes."
+          exit 1
+        fi

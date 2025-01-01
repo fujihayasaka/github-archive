@@ -1,0 +1,43 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    annotations:
+        turboghas.github.net/single-cluster: "true"
+    name: turboghas-metrics
+spec:
+    concurrencyPolicy: Forbid
+    jobTemplate:
+        spec:
+            activeDeadlineSeconds: 82800
+            template:
+                metadata:
+                    annotations:
+                        fluentbit.io/parser: logfmt
+                        observability.github.com/logger: fluent-bit
+                        observability.github.com/splunk_index: turboghas
+                    labels:
+                        app: turboghas
+                        role: internal-service
+                spec:
+                    containers:
+                        - command:
+                            - metrics
+                          env:
+                            - name: STATS_ADDR
+                              value: $(KUBE_NODE_HOSTNAME):28125
+                            - name: GOMAXPROCS
+                              value: "1"
+                          envFrom:
+                            - configMapRef:
+                                name: environment
+                            - configMapRef:
+                                name: kube-cluster-metadata
+                            - secretRef:
+                                name: vault-secrets
+                          image: turboghas
+                          name: turboghas
+                    dnsPolicy: ClusterFirst
+                    restartPolicy: Never
+            ttlSecondsAfterFinished: 60
+    schedule: '0 3 * * *'
+    suspend: true

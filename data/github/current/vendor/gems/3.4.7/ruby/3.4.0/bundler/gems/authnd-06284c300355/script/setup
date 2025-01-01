@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+#/ Usage: script/setup [--local] [--reset] [--force]
+#/ Sets up dependencies for running authnd.
+#/
+#/  --local
+#/      run the dependencies directly on the machine (defaults to using docker)
+#/  --reset
+#/      recreates all authnd-related docker containers and volumes. also
+#/      deletes any vendored subprojects.
+#/  --force
+#/      forces the db container to restart, even if it's running
+#/
+
+root="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." >/dev/null 2>&1 && pwd )"
+cd "$root"
+
+set -e
+
+source "script/helpers/_utils.sh"
+
+echo "Setting up authnd..."
+
+MYSQL_PATH=$(find_mysql)
+local=false
+force=false
+reset=false
+
+while [ $# -gt 0 ]; do
+  key="$1"
+  shift
+
+  case "$key" in
+    --local)
+      local=true
+      ;;
+    --force)
+      force=true
+      ;;
+    --reset)
+      reset=true
+      ;;
+    *)
+      cat "$0" | grep ^#/ | cut -c4-
+      exit 1 ;;
+  esac
+done
+
+if [[ $CODESPACES == "true" ]]; then
+  echo "Running setup for codespaces"
+  # never use docker in codespaces
+  local=true
+fi
+
+if $local; then
+  if $reset; then
+    echo "Cannot reset when '--local' is also specified." 1>&2
+    exit 1
+  fi
+
+  echo "Checking for MySQL instance..."
+  if ! $MYSQL_PATH -uroot -P 3306 --protocol=tcp -e "SELECT 1" >/dev/null 2>&1; then
+    echo "MySQL instance is not running on port 3306." 1>&2
+    fatal "Using '--local' requires that you have a MySQL instance configured and running on port 3306"
+  else
+    echo "MySQL instance already running."
+  fi
+else
+  echo "Starting dependencies using docker..."
+  if $reset && ! $force; then
+    echo "Cannot reset unless '--force' is also specified." 1>&2
+    exit 1
+  fi
+
+  if $reset; then
+    echo "[docker] Stopping support services"
+    docker-compose down -v || true
+    echo "[docker] Deleting volume authnd_data"
+    docker volume rm -f authnd_data >/dev/null
+  fi
+
+  echo "[docker] Starting support services"
+  docker-compose up -d
+  echo "[docker] Polling database for connectivity..."
+  script/wait-for-db
+fi
+
+development_skeema_name=development
+test_skeema_name=test
+test_proxima_skeema_name=test-proxima
+if $local; then
+  development_skeema_name=development-default-port
+  test_skeema_name=test-default-port
+  test_proxima_skeema_name=test-proxima-default-port
+fi
+
+echo "Configuring hooks"
+git config core.hooksPath hooks/
+
+echo "Creating and migrating databases..."
+script/db-migrate $development_skeema_name
+script/db-migrate $test_skeema_name
+script/db-migrate $test_proxima_skeema_name
+
+if [[ "$CODESPACES" == "true" ]] && [[ "$GITHUB_REPOSITORY" == "github/github" ]]; then
+  echo "skipping enterprise-development setup in dotcom codespace"
+else
+  script/db-migrate enterprise-development
+fi
+
+echo "Finished authnd setup"

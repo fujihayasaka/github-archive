@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+
+set -e
+
+echo "Deploying unit-tests dependencies"
+script/setup
+
+echo "Preparing database for unit-tests"
+MY_SQL_DATABASE=hosted_compute_ims_test script/db-setup --recreate 1> /dev/null
+
+TESTS_TIMEOUT="300s"
+if [[ ($GITHUB_ACTIONS || $CI) ]]; then
+    echo "Running unit tests in CI"
+    echo "# Unit tests" > tests-output.md
+    go test -race -timeout $TESTS_TIMEOUT -p 20 -json -cover -v $(go list ./... | grep -v e2e) | tee "tests-output-raw.json" && GOTEST_EXIT_CODE=$? || GOTEST_EXIT_CODE=$?
+    cat "tests-output-raw.json" | tparse -all -format=markdown >> tests-output.md
+    (exit $GOTEST_EXIT_CODE) # Fail only if exit code is not 0
+else
+    echo "Running unit tests"
+    go test -race -timeout $TESTS_TIMEOUT -p 20 $SUITE_PARAM $(go list ./... | grep -v e2e) 
+fi

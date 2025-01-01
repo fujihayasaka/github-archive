@@ -1,0 +1,193 @@
+<html>
+<head>
+    <title>Mock GitHub Mobile Auth</title>
+</head>
+<body>
+    <div id="phone-wrapper">
+      <div class="faker-phone">
+        <div style="height: calc(100% - 40px); background: #fff; padding: 30px 10px 10px 10px; position:relative;">
+          <h4 style="text-align: center; margin: 0;">Mock GitHub Mobile Auth Client</h4>
+          <div style="display: flex; justify-content: center; align-items: center; height: 100%;">
+            <button onclick="fetchStatus()">Refresh</button>
+          </div>
+          <div class="approve-dialog" id="approve-dialog">
+            <div class="approve-dialog-inner">
+              <h4 style="color: white; margin: 0">New Sign In Request</h4>
+              <p id="email" style="color: grey; margin-top: 5px; margin-bottom: 10px; font-size: 12px;"></p>
+              <p id="device-display-name-parent" style="color: white; margin-top: 5px; margin-bottom: 0px; font-size: 12px; display:none;">Requested from device: <span id="device-display-name"></span></p>
+              <p id="device-ip-parent" style="color: white; margin-top: 5px; margin-bottom: 10px; font-size: 12px; display:none;">Requested from IP: <span id="device-ip"></span></p>
+              <p id="created-at-parent" style="color: white; margin-top: 5px; margin-bottom: 10px; font-size: 12px; display:none;">Created at: <span id="created-at"></span></p>
+              <input id="challenge-input" class="challenge-input" placeholder="Confirm digits" />
+              <div style="display: flex; justify-content: center; align-items: center;">
+                <button id="reject" style="color: red;" onclick="complete(false)">Reject</button>
+                <button id="approve" style="color: blue" onclick="complete(true)">Approve</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+        promptInfo = null;
+        function complete(approval) {
+          const challenge = document.getElementById('challenge-input').value;
+          document.getElementById('challenge-input').value = ""
+          fetch('/complete_device_auth', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              ...promptInfo,
+              approval: !!approval,
+              challenge: challenge
+            })
+          })
+            .then(function (response) {
+              return response.json();
+            })
+            .then(function (data) {
+              document.getElementById('approve-dialog').style.display = 'none';
+              if (!data.success) {
+                if (promptInfo.challengeRequired) {
+                  alert('Incorrect challenge');
+                } else {
+                  alert('Something went wrong. Please try again.');
+                }
+              }
+            })
+            .catch(function (err) {
+              console.log('error: ' + err);
+            });
+        }
+
+        function fetchStatus() {
+          fetch('/find_active_device_auth')
+            .then(function (response) {
+              return response.json();
+            })
+            .then(function (data) {
+              if (data.showPrompt) {
+                promptInfo = data.promptInfo;
+                document.getElementById('approve-dialog').style.display = 'flex';
+                if (promptInfo.challengeRequired) {
+                  document.getElementById('challenge-input').style.display = 'block';
+                } else {
+                  document.getElementById('challenge-input').style.display = 'none';
+                }
+                if (promptInfo.email) {
+                  document.getElementById('email').innerText = promptInfo.email;
+                }
+                if (promptInfo.deviceDisplayName) {
+                  document.getElementById('device-display-name').innerText = promptInfo.deviceDisplayName;
+                  document.getElementById('device-display-name-parent').style.display = 'block';
+                }
+                if (promptInfo.deviceIp) {
+                  document.getElementById('device-ip').innerText = promptInfo.deviceIp;
+                  document.getElementById('device-ip-parent').style.display = 'block';
+                }
+                if (promptInfo.createdAt) {
+                  document.getElementById('created-at').innerText = promptInfo.createdAt;
+                  document.getElementById('created-at-parent').style.display = 'block';
+                }
+              } else {
+                document.getElementById('approve-dialog').style.display = 'none';
+              }
+            })
+            .catch(function (err) {
+              console.log('error: ' + err);
+            });
+        }
+
+        window.addEventListener('load', function () {
+          fetchStatus()
+        });
+    </script>
+</body>
+</html>
+
+<style>
+  body {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+  }
+
+  #phone-wrapper {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .faker-phone {
+    position: relative;
+    background: #2d3436;
+    width: calc(76px * 4);
+    height: calc(138px * 4);
+    padding: 60px 15px 70px;
+    border-radius: 35px;
+    box-sizing: border-box;
+
+    &::before {
+      content: '';
+      position: absolute;
+      top: 27px;
+      left: 50%;
+      margin-left: -25px;
+      width: 50px;
+      height: 6px;
+      border-radius: 3px;
+      background: #000;
+      opacity: .7;
+    }
+
+    &::after {
+      content: '';
+      position: absolute;
+      bottom: 15px;
+      left: 50%;
+      margin-left: -22px;
+      height: 40px;
+      width: 40px;
+      background: rgba(0, 0, 0, .5);
+      border: 2px solid rgba(0, 0, 0, .8);
+      border-radius: 100%;
+    }
+  }
+
+  .approve-dialog {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    width: 100%;
+    position: absolute;
+    left:0;
+    top:0;
+    background: #2d343675;
+    display: none;
+  }
+  .approve-dialog-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid black;
+    border-radius: 5px;
+    padding: 10px 15px;
+    background-color: #000;
+  }
+
+  .challenge-input {
+    width: 100%;
+    height: 30px;
+    border: 1px solid black;
+    border-radius: 5px;
+    margin-bottom: 10px;
+    padding: 0 10px;
+    display: none;
+  }
+</style>

@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+set -e
+
+function usage() {
+    cat <<EOF
+Usage: script/start-cronjob <job_name>
+
+    Available jobs:
+    - replication
+
+Examples:
+    script/start-cronjob replication
+EOF
+}
+
+JOB_NAME="$1"
+if [[ -z $JOB_NAME ]]; then
+    usage
+    exit 1
+fi
+
+KUBE_NAMESPACE="hosted-compute-ims"
+KUBE_JOB_DEFINITION_NAME="ims-$JOB_NAME-job"
+KUBE_JOB_NAME="$KUBE_JOB_DEFINITION_NAME-$(date +%H%M%S)"
+LOGS_FILE="logs/$KUBE_JOB_NAME.log"
+
+echo "Starting job $KUBE_JOB_NAME"
+kubectl create job $KUBE_JOB_NAME --from cronjob/$KUBE_JOB_DEFINITION_NAME --namespace $KUBE_NAMESPACE
+
+echo "Waiting for job completion"
+kubectl wait --for=condition=complete job/$KUBE_JOB_NAME --namespace $KUBE_NAMESPACE
+
+echo "Saving logs to '$LOGS_FILE'"
+mkdir -p $(dirname $LOGS_FILE)
+kubectl logs job/$KUBE_JOB_NAME --namespace $KUBE_NAMESPACE > $LOGS_FILE

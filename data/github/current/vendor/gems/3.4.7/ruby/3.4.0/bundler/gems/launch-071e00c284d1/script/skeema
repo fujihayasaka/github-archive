@@ -1,0 +1,35 @@
+#!/bin/bash
+
+set -e
+set -o nounset
+
+if [ "${LAUNCH_CI:-0}" = "1" ]; then
+  exec skeema "$@"
+fi
+
+# linux vs mac WHO IS BETTER
+if ! which md5 >&/dev/null; then
+  md5() {
+    md5sum | awk '{print $1}'
+  }
+fi
+
+IMAGE=launch-skeema
+IMAGEDIR=config/tools/skeema
+TAG=$(find $IMAGEDIR -type f | sort | xargs cat | md5)
+
+needs_image=false
+docker inspect $IMAGE:$TAG   >&/dev/null || needs_image=true
+docker inspect $IMAGE:latest >&/dev/null || needs_image=true
+if $needs_image; then
+  if ! docker build -t $IMAGE:$TAG $IMAGEDIR >& tmp/setup-skeema.log; then
+    cat tmp/setup-skeema.log
+    echo Skeema could not be compiled. See logs above for details.
+    exit 1
+  fi
+  docker tag $IMAGE:$TAG $IMAGE:latest
+fi
+
+# Only mount the "schemas" dir so that it doesn't complain about
+# traversing a bunch of subdirs that don't have a host and schema.
+exec script/docker-compose run skeema "$@"

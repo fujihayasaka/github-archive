@@ -1,0 +1,130 @@
+#!/bin/bash
+# shellcheck disable=SC2120
+
+# This script should be automatically in the path by newly built codespaces thanks to:
+#   "features": {
+#     "ghcr.io/github/features/dev-vpn:1": {}
+#   },
+# After people have moved to newer codespaces, consider deleting this file.
+
+VPN_IMAGE='ghcr.io/github/codespaces-vpn:v2'
+VPN_CONTAINER='codespaces-vpn'
+
+exit-with-msg () {
+    echo "$1" && exit 1
+}
+
+help () {
+
+    docker run --rm "$VPN_IMAGE" "${1:-help}" --help | sed -E \
+        -e 's/vpn/dev-vpn/' \
+        -e 's/VPN_USER/GITHUB_USER/' \
+        -e 's/VPN_PASS/GITHUB_PASS/'
+}
+
+nameserver () {
+
+    local RESOLV='/etc/resolv.conf'
+    local RESOLV_VPN="$RESOLV.vpn"
+    local RESOLV_ORIGINAL="$RESOLV.original"
+
+    case "$1" in
+
+        --set)
+            local VPN_NAMESERVER; VPN_NAMESERVER="$(docker exec -it "$VPN_CONTAINER" vpn nameserver)" || {
+                exit-with-msg 'not connected to dev vpn, connect first with dev-vpn connect'
+            }
+            sudo cp "$RESOLV" "$RESOLV_ORIGINAL"
+            sed -E "s/^\s*(nameserver).*/\1 $VPN_NAMESERVER/" "$RESOLV" | sudo tee "$RESOLV_VPN" > /dev/null && sudo cp "$RESOLV_VPN" "$RESOLV"
+            sudo rm "$RESOLV_VPN";;
+
+        --reset)
+            [[ -f $RESOLV_ORIGINAL ]] && sudo cp "$RESOLV_ORIGINAL" "$RESOLV" && sudo rm "$RESOLV_ORIGINAL";;
+
+        *)
+            exit-with-msg 'unrecognized argument, supported arguments are --set, and --reset';;
+    esac
+
+    return 0
+}
+
+connect () {
+
+    local PASS_THRU_ARGS=()
+
+    while (( "$#" )); do case "$1" in
+        --help)     help connect && return 0;;
+        *)          PASS_THRU_ARGS+=("$1");;
+    esac; shift; done
+
+    disconnect
+
+    docker run \
+        -d \
+        --rm \
+        --network=host \
+        --cap-add=NET_ADMIN \
+        --device=/dev/net/tun \
+        --name "$VPN_CONTAINER" \
+        -e VPN_USER="$GITHUB_USER" \
+        -e VPN_PASS="$GITHUB_PASS" \
+        "$VPN_IMAGE" start > /dev/null
+
+    if docker exec -it "$VPN_CONTAINER" vpn connect "${PASS_THRU_ARGS[@]}" && nameserver --set && status; then
+        echo 'vpn connected'
+    else
+        exit-with-msg 'vpn connection failed'
+    fi
+}
+
+disconnect () {
+    docker rm -f "$VPN_CONTAINER" >/dev/null 2>&1
+    nameserver --reset
+}
+
+status () {
+
+    local PASS_THRU_ARGS=()
+    local CONTAINER_ONLY=false
+
+    while (( "$#" )); do case "$1" in
+        --help)         help status && return 0;;
+        --container)    CONTAINER_ONLY=true;;
+        *)              PASS_THRU_ARGS+=("$1");;
+    esac; shift; done
+
+    [[ -z "$(docker ps -aqf "name=$CONTAINER")" ]] && echo 'vpn not connected, connect with dev-vpn connect' && return 1
+    [[ $CONTAINER_ONLY == true ]] && return 0
+
+    docker exec -it "$VPN_CONTAINER" vpn status "${PASS_THRU_ARGS[@]}"
+}
+
+logs () {
+
+    local PASS_THRU_ARGS=()
+
+    while (( "$#" )); do case "$1" in
+        --help) help logs && return 0;;
+        *)      PASS_THRU_ARGS+=("$1");;
+    esac; shift; done
+
+    status --container || exit-with-msg 'vpn not connected, connect with dev-vpn connect'
+
+    docker exec -it "$VPN_CONTAINER" vpn logs "${PASS_THRU_ARGS[@]}"
+}
+
+vpn () {
+
+    case "$1" in
+        '' | help | --help)     help && exit 0;;
+        connect)                CMD=connect;;
+        disconnect)             CMD=disconnect;;
+        status)                 CMD=status;;
+        logs)                   CMD=logs;;
+        *)                      echo -e "\nunrecognized command $1" && help && exit 1;;
+    esac
+
+    $CMD "${@:2}"
+}
+
+vpn "$@"

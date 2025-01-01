@@ -1,0 +1,30 @@
+# typed: ignore
+# frozen_string_literal: true
+
+require "rake/clean"
+require "dotenv"
+require "minitest/test_task"
+
+Minitest::TestTask.create(:test) do |t|
+  t.test_globs = ["test/**/*_test.rb"]
+  t.warning = false
+  t.test_prelude do
+    Dotenv.load("../.env.local", "../.env")
+  end
+end
+
+desc "Run tests"
+task default: :test
+
+desc "Generate the RBI definitions for our gem"
+task rbi: "rbi/annotations/notifyd.rbi"
+
+directory "rbi/annotations"
+task "rbi/annotations/notifyd.rbi" do |t|
+  files = Rake::FileList.new("sorbet/rbi/dsl/notifyd/**/*client.rbi")
+  rbis = ["# typed: true"]
+  rbis += files.flat_map { |f| File.readlines(f).drop(1) }
+
+  File.write(t.name, rbis.join)
+end
+CLEAN.include "rbi/annotations/notifyd.rbi"

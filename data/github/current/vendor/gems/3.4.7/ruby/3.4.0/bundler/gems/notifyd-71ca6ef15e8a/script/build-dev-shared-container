@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+
+set -e
+
+source <(docker run --rm ghcr.io/github/gh-base-image/gh-base-focal cat /bin/tools/build-toolkit)
+
+cd "$(dirname "$0")/.."
+
+PROJECT="notifyd"
+
+# Get feature flags that are required, and generate a label for the image
+readarray -t feature_flags_arr < <(jq -r -c '.[]' ./dotcom-codespaces-development/feature-flags.json)
+function joinBy { local IFS="$1"; shift; echo "$*"; }
+joinedFeatureFlags=$(joinBy , ${feature_flags_arr[*]})
+
+build_args="--progress=plain --label com.github.hcs.feature-flags=$joinedFeatureFlags"
+
+echo '%%%FOLD {docker build Dockerfile stage 1 (create build container) }%%%'
+
+# run the docker build for the build stage
+get_env Dockerfile.dev build
+DOCKER_BUILD_ARGS="$build_args" docker_build || {
+    echo >&2 "Docker build failed. Stopping build."
+    exit 1
+}
+
+echo '%%%END FOLD%%%'
+
+echo '%%%FOLD {docker build Dockerfile stage 2 (create runtime container) }%%%'
+
+# run the docker build for the run stage
+get_env $DOCKERFILE run
+DOCKER_BUILD_ARGS="$build_args" docker_build || {
+    echo >&2 "Docker build failed. Stopping build."
+    exit 1
+}
+
+echo '%%%END FOLD%%%'
+
+echo "All done."

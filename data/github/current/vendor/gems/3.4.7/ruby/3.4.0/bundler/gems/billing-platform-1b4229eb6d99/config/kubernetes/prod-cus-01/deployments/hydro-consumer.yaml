@@ -1,0 +1,61 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: hydro-consumer
+spec:
+    replicas: 2
+    selector:
+        matchLabels:
+            app: hydro-consumer
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: billing
+            labels:
+                app: hydro-consumer
+        spec:
+            containers:
+                - command:
+                    - ./bin/consumer
+                  env:
+                    - name: HYDRO_CONSUMER_GROUP_ID
+                      value: billing-platform-production-consumer-prod-cus-01
+                    - name: script
+                      value: build
+                    - name: STATS_ADDR
+                      value: $(KUBE_NODE_HOSTNAME):28125
+                    - name: APP_SHA
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.annotations['heaven.githubapp.com/sha']
+                    - name: APP_REF
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.annotations['heaven.githubapp.com/ref']
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  image: billing-platform
+                  name: hydro-consumer
+                  readinessProbe:
+                    exec:
+                        command:
+                            - cat
+                            - /tmp/consumer_healthy
+                    initialDelaySeconds: 5
+                    periodSeconds: 5
+                  resources:
+                    limits:
+                        cpu: 3
+                        memory: 4096Mi
+                    requests:
+                        cpu: 0.4
+                        memory: 1024Mi
+            dnsPolicy: ClusterFirst

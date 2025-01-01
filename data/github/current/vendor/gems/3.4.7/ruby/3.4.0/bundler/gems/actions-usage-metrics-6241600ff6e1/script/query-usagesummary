@@ -1,0 +1,24 @@
+#!/bin/bash
+# Examples:
+# script/query-usagesummary 1 DATE_RANGE_TYPE_CURRENT_WEEK
+# script/query-usagesummary 1 DATE_RANGE_TYPE_LATEST_MONTH
+# script/query-usagesummary 1 DATE_RANGE_TYPE_PREVIOUS_MONTH
+# script/query-usagesummary 1 DATE_RANGE_TYPE_LAST_30_DAYS
+# script/query-usagesummary 1 DATE_RANGE_TYPE_LAST_90_DAYS
+
+set -e
+dir="$(dirname "$0")"
+echo "Usage: $0 [owner_id] [repo_id] [version_override e.g. v1] [date_range] [repository filter] [metrics type]"
+
+if [ -z "$1" ]; then org=1; else org=$1; fi
+if [ -z "$2" ]; then scope="{\"owner_id\": $org, \"scope_type\": \"SCOPE_TYPE_ORG\"}"; else scope="{\"owner_id\": $org, \"repository_id\": $2, \"scope_type\": \"SCOPE_TYPE_REPO\"}"; fi
+if [ -z "$3" ]; then version='v3'; else version=$3; fi
+if [ -z "$4" ]; then date_range='DATE_RANGE_TYPE_LATEST_MONTH'; else date_range=$4; fi
+if [ -z "$5" ]; then repositoryFilter=''; else repositoryFilter=$5; fi
+if [ -z "$6" ]; then metrics_type='METRICS_TYPE_JOB'; else metrics_type=$6; fi
+if [ -z "$repositoryFilter" ]; then repositoryFilterJson=""; else repositoryFilterJson=", \"filters\":[{\"key\":\"repository_id\",\"operator\":1,\"values\":[\"$repositoryFilter\"]}]"; fi
+
+echo "scope: $scope, date_range: $date_range, version_override: $version"
+
+json=$($dir/hmac-curl -s -X POST aum.local:32474/twirp/actions_usage_metrics.api.v1.UsageApi/GetUsageSummary -H "Content-Type: application/json" -d "{\"request_options\": { \"date_range\": \"$date_range\", \"scope\": $scope, \"projection_options\":{ \"version_override\":\"$version\" }$repositoryFilterJson}, \"metrics_type\":\"$metrics_type\"}")
+echo "$json"

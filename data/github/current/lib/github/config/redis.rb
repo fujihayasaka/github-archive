@@ -173,6 +173,8 @@ module GitHub
       attr_writer :simulate_rate_limiter_redis_down
 
       # Public: A client for a redis cluster configured with persistence.
+      # TODO: https://github.com/github/monolith-systems/issues/408
+      #       rename this once job locking is migrated to new_job_coord_redis
       def job_coordination_redis
         @job_coordination_redis ||= if GitHub.job_coordination_redis_disabled?
           DisabledRedis.new
@@ -183,6 +185,19 @@ module GitHub
         end
       end
       attr_writer :job_coordination_redis
+
+      # TODO: https://github.com/github/monolith-systems/issues/408
+      #       rename this once job locking is migrated here
+      def new_job_coord_redis
+        @new_job_coord_redis ||= if GitHub.job_coordination_redis_disabled?
+          DisabledRedis.new
+        elsif GitHub.single_or_multi_tenant_enterprise?
+          ::Redis.new(read_redis_config("config/redis2.yml"))
+        else
+          ::Redis::Distributed.new(read_distributed_redis_config("config/redis_job_coord.yml"))
+        end
+      end
+      attr_writer :new_job_coord_redis
 
       def redis_config
         if GitHub.simulate_job_coordination_redis_down?
@@ -200,7 +215,7 @@ module GitHub
             client = ::Redis::Namespace.new(:rate_limiter, redis: ::Redis.new(read_redis_config("config/redis2.yml")))
             SingleShardDistributedRedis.new(client, "api")
           else
-            DistributedRedis.new(read_distributed_redis_config("config/redis_rate_limiter.yml"), "api")
+            DistributedRedis.new(read_replicated_redis_config("config/redis_rate_limiter.yml"), "api")
           end
       end
       attr_writer :rate_limiter_redis
@@ -220,12 +235,24 @@ module GitHub
             client = ::Redis::Namespace.new(:rate_limiter, redis: ::Redis.new(read_redis_config("config/redis2.yml")))
             SingleShardDistributedRedis.new(client, "monolith")
           else
-            DistributedRedis.new(read_distributed_redis_config("config/monolith_redis_rate_limiter.yml"), "monolith")
+            DistributedRedis.new(read_replicated_redis_config("config/monolith_redis_rate_limiter.yml"), "monolith")
           end
       end
       attr_writer :monolith_rate_limiter_redis
 
       def read_distributed_redis_config(file)
+        file   = "#{GitHub::AppEnvironment.root}/#{file}" unless file[0..0] == "/"
+        data   = ERB.new(File.read(file)).result
+        config = YAML.load(data)[GitHub::AppEnvironment.env]
+        servers = config["servers"]
+        timeout = config["timeout"] || DEFAULT_TIMEOUT
+
+        servers.map do |url|
+          node_config = merge_redis_config(url: url, timeout: timeout)
+        end
+      end
+
+      def read_replicated_redis_config(file)
         file   = "#{GitHub::AppEnvironment.root}/#{file}" unless file[0..0] == "/"
         data   = ERB.new(File.read(file)).result
         config = YAML.load(data)[GitHub::AppEnvironment.env]

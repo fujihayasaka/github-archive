@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20210615094143_local_to_global_rules.go on GHES

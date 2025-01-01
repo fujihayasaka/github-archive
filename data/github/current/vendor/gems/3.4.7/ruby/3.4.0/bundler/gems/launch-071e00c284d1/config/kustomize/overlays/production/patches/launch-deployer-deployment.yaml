@@ -1,0 +1,256 @@
+# http://kubernetes.io/docs/user-guide/deployments/#what-is-a-deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: launch-deployer
+    annotations:
+        heaven.githubapp.com/image-placeholder: "launch"
+        heaven.githubapp.com/deploy-requirement: "true"
+        moda.github.net/canary-v2: "true"
+        moda.github.net/canary-label: "role"
+spec:
+    selector:
+        matchLabels:
+            service: launch-deployer
+            role: production
+    replicas: 5
+    template:
+        metadata:
+            labels:
+                service: launch-deployer
+                role: production
+        spec:
+            containers:
+                - name: launch-deployer
+                  envFrom:  # order matters! Subsequent entries can override earlier entries.
+                    - secretRef:
+                        name: vault-secrets
+                    - configMapRef:
+                        name: static-config
+                  env:
+                    - name: KUBE_POD
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.name
+                    - name: KUBE_NAMESPACE
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.namespace
+                    - name: REGION
+                      valueFrom:
+                        configMapKeyRef:
+                            name: kube-cluster-metadata
+                            key: region
+                    # /_ping is on this port
+                    - name: INTERNAL_ADDR
+                      value: ":6824"
+                    - name: HTTP_ADDR
+                      value: ":6824"
+                    - name: API_HOST
+                      value: "https://internal-api.service.$(REGION).github.net"
+                    - name: GHCR_API_HOST
+                      value: "https://ghcr.io"
+                    # Which database to connect to
+                    - name: DATABASE_URL
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: mysql-deployer-rw-db
+                    - name: READ_ONLY_DATABASE_URL
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: mysql-deployer-ro-db
+                    - name: EARTHSMOKE_KEYSTORE_AZP_ORGANIZATION
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: earthsmoke-keystore-azp-organization-production
+                    - name: LAUNCH_REDIS_URL
+                      value: "db-redis-launch-rw.service.github.net:6379"
+                    - name: LAUNCH_REDIS_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: launch-redis-secret
+                    # Federated secret
+                    - name: FAILBOT_HAYSTACK_URL
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: failbot-haystack-url
+                    - name: KAFKA_ROOT_CA_PATH
+                      value: "/etc/ssl/certs/cp1-iad-production-1487801205-root.pem"
+                    - name: KAFKA_BROKERS
+                      value: "hydro-kafka-potomac-boot-1.service.iad.github.net:9093,hydro-kafka-potomac-boot-2.service.iad.github.net:9093,hydro-kafka-potomac-boot-3.service.iad.github.net:9093"
+                    # The private key provisioned for the Launch GitHub App
+                    - name: GITHUB_APP_PRIVATE_KEY
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: github-app-private-key
+                    - name: GITHUB_TWIRP_HMAC_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: github-twirp-hmac-secret
+                    - name: GITHUB_TWIRP_ADDR
+                      value: "https://internal-api.service.$(REGION).github.net/internal"
+                    # The master key for generating action-runner keys
+                    - name: ACTION_RUNNER_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: deployer-action-runner-secret
+                    - name: TRACING_ENABLED
+                      value: "true"
+                    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                      value: "https://opentelemetry-collector-production.service.iad.github.net/v1/traces"
+                    - name: OTEL_EXPORTER_OTLP_TRACES_HEADERS
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: otel-exporter-otlp-traces-headers
+                    - name: AZP_TOKEN_RESOURCE
+                      value: "0000005A-0000-8888-8000-000000000000"
+                    - name: AZP_ORG_CREATE_API_BASE_URL
+                      value: "https://pipelines.actions.githubusercontent.com"
+                    - name: "PIPELINE_SCALE_UNIT_URLS"
+                      value: |
+                        https://pipelinesghubeus4.actions.githubusercontent.com
+                        https://pipelinesghubeus23.actions.githubusercontent.com
+                        https://pipelinesghubeus8.actions.githubusercontent.com
+                        https://pipelinesghubeus22.actions.githubusercontent.com
+                        https://pipelinesghubeus21.actions.githubusercontent.com
+                        https://pipelinesghubeus25.actions.githubusercontent.com
+                        https://pipelinesghubeus13.actions.githubusercontent.com
+                        https://pipelinesghubeus3.actions.githubusercontent.com
+                        https://pipelinesghubeus26.actions.githubusercontent.com
+                        https://pipelinesghubeus10.actions.githubusercontent.com
+                        https://pipelinesghubeus2.actions.githubusercontent.com
+                        https://pipelinesghubeus5.actions.githubusercontent.com
+                        https://pipelinesghubeus24.actions.githubusercontent.com
+                        https://pipelinesghubeus7.actions.githubusercontent.com
+                        https://pipelinesghubeus15.actions.githubusercontent.com
+                        https://pipelinesghubeus11.actions.githubusercontent.com
+                        https://pipelinesghubeus14.actions.githubusercontent.com
+                        https://pipelinesghubeus12.actions.githubusercontent.com
+                        https://pipelinesghubeus9.actions.githubusercontent.com
+                        https://pipelinesghubeus6.actions.githubusercontent.com
+                        https://pipelinesghubeus1.actions.githubusercontent.com
+                    - name: EMULATE_PREPARED_STATEMENTS
+                      value: "true"
+                    - name: USE_UTC_FOR_MYSQL
+                      value: "true"
+                    - name: FORCE_CHARSET_FOR_MYSQL
+                      value: "true"
+                    - name: HTTP_PROXY
+                      value: "network-proxy.service.github.net:3128"
+                    - name: HTTPS_PROXY
+                      value: "network-proxy.service.github.net:3128"
+                    - name: NO_PROXY
+                      value: "github.net,github.com,*.cluster.local,*.blob.core.windows.net"
+                    - name: AQUEDUCT_APP
+                      value: "actions-production"
+                    - name: AQUEDUCT_URL
+                      value: "https://aqueduct-gateway-production.service.iad.github.net"
+                    - name: SCHEDULE_LOOP_SLEEP_DURATION
+                      value: "26s"
+                    - name: SCHEDULE_TASKS_PER_TICK
+                      value: "183"
+                    - name: SCHEDULE_SCATTER_OFFSET_DURATION
+                      value: "240s"
+                    - name: BILLING_PLATFORM_URL
+                      value: "https://billing-platform-production.service.iad.github.net"
+                    - name: SPOKESD_URL
+                      value: "https://spokesd-production.service.iad.github.net:10013"
+                    - name: SPOKESD_CONFIG_TLS
+                      value: "true"
+                    - name: SPOKESD_CERT_PEM
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: spokesd-cert-pem
+                    - name: SPOKESD_CHAIN_PEM
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: spokesd-chain-pem
+                    - name: SPOKESD_KEY_PEM
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: spokesd-key-pem
+                    - name: AUTHZD_URL
+                      value: "https://authzd-production.service.iad.github.net"
+                    - name: KREDZ_HTTP_ADDR
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: kredz-http-addr
+                    - name: KREDZ_HMAC_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: kredz-hmac-secret
+                    - name: BILLING_PLATFORM_HMAC_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: billing-platform-hmac-secret
+                    - name: TELEMETRY_ROUND_TRIPPER_ENABLE_LOGS
+                      value: "true"
+                    - name: LAUNCH_CACHE_MEMORY_MAX_SIZE_BYTES
+                      value: "100663296" # 96 MiB
+                    - name: GOMAXPROCS
+                      value: "7"
+                    - name: LAUNCH_LOG_DEBUG
+                      value: "true"
+                    - name: DEPLOYER_HMAC_VERIFY_SECRETS
+                      valueFrom:
+                        secretKeyRef:
+                            name: launch-production
+                            key: deployer-hmac-verify-secrets
+                    - name: AZURE_STORAGE_ACCOUNT_PREFIX
+                      value: "launchdotcomsa"
+                    - name: AZURE_BLOB_STORAGE_ACCOUNT_COUNT
+                      value: "6"
+                    - name: AZURE_SPN_CLIENT_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-blob
+                            name: launch-production
+                    - name: AZURE_SPN_CLIENT_ID
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-blob-client-id
+                            name: launch-production
+                    - name: AZURE_SPN_TENANT_ID
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-blob-tenant-id
+                            name: launch-production
+                    - name: ACTIONS_SERVICE_SPN_CLIENT_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-actions-s2s
+                            name: launch-production
+                    - name: ACTIONS_SERVICE_SPN_CLIENT_ID
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-actions-s2s-client-id
+                            name: launch-production
+                    - name: ACTIONS_SERVICE_SPN_TENANT_ID
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn-launch-actions-s2s-tenant-id
+                            name: launch-production
+                  resources:
+                    requests:
+                        # Recommendations: https://app.datadoghq.com/s/59fe6c40c/73u-q6f-6dz
+                        cpu: "2970m"
+                        memory: "2000Mi"
+                    limits:
+                        # Adjust GOMAXPROCS in tandem. It's recommended the cpu limit be set to GOMAXPROCS+1.
+                        cpu: "8"
+                        memory: "4000Mi"

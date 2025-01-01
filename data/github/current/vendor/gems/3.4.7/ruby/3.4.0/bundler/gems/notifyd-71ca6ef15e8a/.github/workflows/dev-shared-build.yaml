@@ -1,0 +1,64 @@
+name: Build Shared Dev Container
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '0 0 * * *'
+
+jobs:
+  notifyd-docker-dev-shared:
+    runs-on: ubuntu-latest-xl
+    steps:
+      - name: Get version of notifyd in use by github/github if scheduled build
+        id: get-version
+        if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        run: |
+          version_response=$(curl -s -H "Authorization: token ${{ secrets.CONTAINER_BUILDER_TOKEN}}" https://api.github.com/repos/github/github/contents/config/notifyd-version)
+          version=$(echo $version_response | jq -r '.content' | base64 --decode)
+          echo "github/github master is using ${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout (schedule)
+        uses: actions/checkout@v4
+        if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        with:
+          ref: ${{ steps.get-version.outputs.version }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        if: ${{ github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
+
+      - name: Log into registry
+        run: |
+          echo "${{ secrets.CONTAINER_BUILDER_TOKEN }}" | docker login containers.pkg.github.com -u ${{ github.actor }} --password-stdin
+          echo "${{ secrets.CONTAINER_BUILDER_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build shared dev container
+        run: script/build-dev-shared-container
+        env:
+          GITHUB_TOKEN: ${{ secrets.CONTAINER_BUILDER_TOKEN }}
+          RUNTIME_IMAGE_TAG: ${{ github.sha }}
+
+      - name: Push image to GitHub registry
+        run: |
+          echo "Docker images"
+          docker images
+
+          echo "Tagging"
+          # tag into shared-dev or shared-dev-testing namespace
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            docker_repo=ghcr.io/github/shared-dev/notifyd
+          else
+            docker_repo=ghcr.io/github/shared-dev-testing/notifyd
+          fi
+          docker_tag=${docker_repo}:${{ github.sha }}
+          docker tag ghcr.io/github/notifyd/notifyd ${docker_tag}
+          
+          echo "Pushing ${docker_tag}"
+          docker push ${docker_tag}
