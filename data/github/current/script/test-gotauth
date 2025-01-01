@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -e
+
+SKIP_ACCESS_TESTS=false
+RUN_CHARACTERIZATION_TEST=false
+
+while getopts ":c:s" opt; do
+  case $opt in
+    c)
+      RUN_CHARACTERIZATION_TEST=true
+      ;;
+    s)
+      SKIP_ACCESS_TESTS=true
+      ;;
+    \?)
+      echo "Invalid option: -$OPTARG" >&2
+      exit 1
+      ;;
+  esac
+done
+
+TEST_PATTERNS_ACCESS=(
+  "test/lib/git_auth/*_access*"
+  "test/lib/git_auth/access_s*"
+)
+
+TEST_PATTERNS_CHARACTERIZATION=(
+  test/lib/git_auth/access_characterization_test.rb
+)
+
+TESTS=""
+
+if [ "$SKIP_ACCESS_TESTS" = false ]; then
+  TESTS="${TEST_PATTERNS_ACCESS[*]}"
+fi
+
+if [ "$RUN_CHARACTERIZATION_TEST" = true ]; then
+  TESTS="$TESTS ${TEST_PATTERNS_CHARACTERIZATION[*]}"
+fi
+
+EXPANDED_TESTS=""
+for pattern in $TESTS; do
+  for file in $pattern; do
+    EXPANDED_TESTS="$EXPANDED_TESTS $file"
+  done
+done
+TESTS=$EXPANDED_TESTS
+
+echo running tests: "$TESTS"
+
+# shellcheck disable=SC2086
+TEST_GOTAUTH=1 FM_LITE_SYNC_ENABLED=1 ./bin/rails test $TESTS

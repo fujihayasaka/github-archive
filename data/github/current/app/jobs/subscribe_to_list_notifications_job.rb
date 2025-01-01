@@ -1,0 +1,30 @@
+# typed: true
+# frozen_string_literal: true
+
+# Public: Use this job to call GitHub.newsies.subscribe_to_list asynchronously.
+#
+# Example:
+#
+#  > user = User.find_by_login("jonmagic")
+#  > repo = Repository.with_name_with_owner("github/linguist")
+#  > response = GitHub.newsies.subscribe_to_list(user, repo)
+#  > if response.failed?
+#  >   SubscribeToListNotificationsJob.perform_later(user.id, repo.id)
+#  > end
+#
+class SubscribeToListNotificationsJob < ApplicationJob
+  queue_as :notifications
+
+  class RetryableError < RuntimeError ; end
+  retry_on RetryableError
+
+  retry_on_dirty_exit
+
+  def perform(user_id, repository_id)
+    return unless user = User.find_by(id: user_id)
+    return unless repository = Repository.find_by(id: repository_id)
+
+    response = Newsies::ListSubscription.throttle_writes { GitHub.newsies.subscribe_to_list(user, repository) }
+    raise RetryableError if response.failed?
+  end
+end

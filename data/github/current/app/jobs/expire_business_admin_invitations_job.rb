@@ -1,0 +1,27 @@
+# typed: true
+# frozen_string_literal: true
+
+class ExpireBusinessAdminInvitationsJob < ApplicationJob
+  schedule interval: 1.day
+
+  queue_as :invalidate_expired_invites
+  retry_on_dirty_exit
+
+  exempt_from_tenant_context_requirement
+
+  BATCH_SIZE = 100
+
+  def perform
+    ActiveRecord::Base.connected_to(role: :reading) do
+      BusinessAdministratorInvitation.recently_expired.find_in_batches(batch_size: BATCH_SIZE) do |batch|
+        with_write do
+          batch.each do |invitation|
+            BusinessAdministratorInvitation.throttle do
+              invitation.expire
+            end
+          end
+        end
+      end
+    end
+  end
+end

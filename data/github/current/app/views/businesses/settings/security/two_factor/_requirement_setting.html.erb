@@ -1,0 +1,102 @@
+<%# erblint:counter DeprecatedComponentsCounter 1 %>
+<% members_without_2fa_allowed = view.business.members_without_2fa_allowed? %>
+
+<%= render(Primer::Beta::Subhead.new(hide_border: true)) do |component| %>
+  <% component.with_heading(tag: :h3) do %>Two-factor authentication<% end %>
+<% end %>
+<p>
+  Enabling two-factor authentication adds another level of security for your enterprise and organizations.
+  <%= link_to \
+    "Learn more about enforcing policies for security settings",
+    "#{GitHub.help_url}/github/setting-up-and-managing-your-enterprise/enforcing-security-settings-in-your-enterprise-account#requiring-two-factor-authentication-for-organizations-in-your-enterprise-account",
+    class: "Link--inTextBlock" %>.
+</p>
+
+<%= form_tag enterprise_two_factor_requirement_path(this_business), method: :patch do |f| %>
+  <div class="form-checkbox">
+    <%= render "businesses/settings/security/two_factor/requirement_checkbox",
+          business: this_business,
+          view: view %>
+
+    <p class="note">
+      <%# add that we don't remove OCs after https://github.com/github/authorization/issues/4526 %>
+      <% if members_without_2fa_allowed %>
+        Enterprise administrators and organization members who do not have
+        two-factor authentication enabled on their personal account
+        will be asked to enable it when accessing the enterprise or any of its organizations. <br>
+        Requiring two-factor authentication will not remove them from the enterprise account. <br>
+        <%= outside_collaborators_verbiage(this_business).capitalize %> who do not have 2FA will be removed and notified.
+      <% else %>
+        Enterprise administrators, organization members, and <%= outside_collaborators_verbiage(this_business) %> who do not have
+        two-factor authentication enabled on their personal account
+        will be removed from the enterprise account and will receive an
+        email notifying them about the change.
+      <% end %>
+    </p>
+
+    <% if GitHub.auth.two_factor_org_requirement_allowed? %>
+      <%= render(Primer::Beta::Button.new(id: "view-your-organizations-current-configurations-two-factor",
+        classes: "Link--inTextBlock", my: 2, tag: :a, scheme: :link, href: enterprise_organizations_path)) do %>
+          View organizations' two-factor authentication policy
+      <% end %>
+    <% end %>
+  </div>
+
+  <% if view.business.can_disallow_two_factor_methods? %>
+    <div class="form-checkbox ml-4 js-two-factor-secure-methods"
+      <%= "hidden" unless view.two_factor_requirement_enabled? || this_business.updating_two_factor_requirement? %>
+    >
+      <%= render "businesses/settings/security/two_factor/secure_methods_checkbox",
+            business: this_business,
+            view: view %>
+
+      <p class="note">
+        Users can only use secure two-factor methods: passkeys, security keys, authenticator apps, and the GitHub
+        mobile app.
+        <%= link_to \
+          "Learn more about two-factor authentication",
+          docs_url("authentication/about-two-factor"),
+          class: "Link--inTextBlock"
+        %>.
+      </p>
+    </div>
+
+    <%= render(Primer::Alpha::Banner.new(
+        scheme: :warning, icon: :alert, my: 2, hidden: true,
+        classes: "js-business-two-factor-requirement-warning-banner",
+        test_selector: "2fa-requirement-warning-banner",
+      )) do %>
+        <span class="text-normal">
+          <b><%= pluralize(this_business.number_of_orgs_with_two_factor_requirement_disabled, "organization") %></b>
+          <%= this_business.number_of_orgs_with_two_factor_requirement_disabled == 1 ? "does" : "do" %>
+          not require two-factor authentication. People in these organizations without two-factor authentication will be required to set it up to re-gain access.
+
+          <%= link_to \
+            "View organizations' two-factor authentication policies.",
+            enterprise_organizations_path(view.business, query: "two_factor_policy:disabled"),
+            class: "Link--inTextBlock"
+            %>
+        </span>
+    <% end %>
+  <% end %>
+
+  <div class="clearfix">
+    <% if !view.disable_submit_button? && view.two_factor_requirement_needs_confirmation? %>
+      <%= render "businesses/settings/security/two_factor/requirement_confirmation", business: this_business %>
+    <% else %>
+      <%= render Primer::ButtonComponent.new(
+          type: :submit,
+          disabled: view.disable_submit_button?,
+          float: :left,
+          mr: 4,
+        ) do %>Save<% end %>
+    <% end %>
+
+    <% if view.two_factor_requirement_form_disabled? %>
+      <span class="note d-inline-block pt-1 mt-1 clearfix">
+        <%= primer_octicon(:question) %>
+        <%= view.disabled_form_reason %>
+      </span>
+    <% end %>
+  </div>
+<% end %>

@@ -1,0 +1,204 @@
+<%= render Primer::Beta::Heading.new(tag: :h1, classes: "h2").with_content("Security") %>
+
+<%= render(Primer::Beta::NavList.new(
+    selected_item_id: @selected_tab,
+    p: 2,
+    test_selector: "security-center-alert-centric-views-nav-component",
+  )) do |component| %>
+  <% component.with_heading(title: "Security navigation", heading_level: 2, classes: "sr-only") %>
+
+  <% component.with_item(
+    label: TabNames::OVERVIEW_DASHBOARD,
+    selected_by_ids: :overview_dashboard,
+    href: security_center_overview_dashboard_path(org: @organization),
+  ) do |item| %>
+    <% item.with_leading_visual_icon(icon: :pulse) %>
+  <% end %>
+
+  <% component.with_item(
+    label: TabNames::RISK,
+    selected_by_ids: :risk,
+    href: security_center_risk_path(org: @organization),
+  ) do |item| %>
+    <% item.with_leading_visual_icon(icon: :shield) %>
+  <% end %>
+
+  <% component.with_item(
+    label: TabNames::COVERAGE,
+    selected_by_ids: :coverage,
+    href: security_center_coverage_path(org: @organization),
+  ) do |item| %>
+    <% item.with_leading_visual_icon(icon: :meter) %>
+  <% end %>
+
+  <% component.with_group(test_selector: TRENDS_TAB_GROUP_TEST_SELECTOR) do |group| %>
+    <% group.with_heading(title: "Metrics") %>
+
+    <% group.with_item(
+      label: TabNames::TRENDS_ENABLEMENT,
+      selected_by_ids: :adoption_report,
+      href: security_center_metrics_enablement_path(org: @organization),
+    ) do |item| %>
+      <% item.with_leading_visual_icon(icon: :meter) %>
+    <% end %>
+
+    <% if render_code_scanning_metrics_tab? %>
+      <% group.with_item(
+        label: TabNames::TRENDS_CODE_SCANNING,
+        href: security_center_metrics_codeql_path(org: @organization),
+        selected_by_ids: :code_scanning_metrics
+      ) do |item| %>
+        <% item.with_leading_visual_icon(icon: :graph) %>
+      <% end %>
+    <% end %>
+
+    <% if render_secret_scanning_metrics_tab? %>
+      <% group.with_item(
+        label: TabNames::TRENDS_SECRET_SCANNING,
+        href: security_center_secret_scanning_metrics_path(org: @organization),
+        selected_by_ids: :secret_scanning_metrics
+      ) do |item| %>
+        <% item.with_leading_visual_icon(icon: :graph) %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if render_any_feature_tab? %>
+    <%
+      # Here to satisfy test_js_classes_are_referenced_in_both_js_and_non_js_source_code
+      # The class names are built with interpolation below
+      feature_type_js_classes = %w[
+        js-code-scanning-count
+        js-dependabot-alerts-count
+        js-secret-scanning-count
+        js-secret-scanning-default-count
+        js-secret-scanning-experimental-count
+      ]
+    %>
+    <% component.with_group(
+        classes: "js-security-center-tab-count-container",
+        "data-url": security_center_tab_counts_path(@organization),
+        test_selector: "security-center-nav-section-alerts"
+      ) do |group| %>
+      <% group.with_heading(title: "Alerts") %>
+
+      <% SecurityCenter::NavComponent::SECURITY_FEATURE_TABS_ORDER.each do |feature_type| %>
+        <% if render_feature_tab?(feature_type) %>
+          <% if split_feature_tab?(feature_type) %>
+            <% group.with_item(expanded: true) do |item| %>
+              <% item.with_leading_visual_icon(icon: get_nav_tab_icon(feature_type)) %>
+              <%= render(Primer::Box.new(display: :flex, justify_content: :space_between)) do %>
+                <%= get_nav_tab_name(feature_type) %>
+              <% end %>
+              <% SECURITY_FEATURE_TAB_SPLITS[feature_type].each do |split_feature_type| %>
+                <% item.with_item(
+                  label: get_nav_tab_name(split_feature_type),
+                  selected_by_ids: split_feature_type.to_sym,
+                  href: get_nav_tab_path(split_feature_type),
+                  test_selector: "security-center-alerts-#{split_feature_type}-nav",
+                ) do |item_count| %>
+                  <% item_count.with_trailing_visual_text(
+                    render(Primer::Beta::Counter.new(count: nil, classes: "js-#{split_feature_type.dasherize}-count"))
+                  ) %>
+                <% end %>
+              <% end %>
+            <% end %>
+          <% else %>
+            <% group.with_item(
+              label: get_nav_tab_name(feature_type),
+              selected_by_ids: feature_type.to_sym,
+              href: get_nav_tab_path(feature_type),
+              test_selector: "security-center-alerts-#{feature_type}-nav",
+            ) do |item| %>
+              <% item.with_leading_visual_icon(icon: get_nav_tab_icon(feature_type)) %>
+              <% item.with_trailing_visual_text(
+                render(Primer::Beta::Counter.new(count: nil, classes: "js-#{feature_type.dasherize}-count"))
+              ) %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+    <% end %>
+  <% end %>
+
+  <% if render_secret_scanning_delegated_bypass? %>
+    <% component.with_group(test_selector: BYPASS_REQUESTS_GROUP_TEST_SELECTOR) do |group| %>
+      <% group.with_heading(title: "Requests") %>
+
+      <% group.with_item(
+        label: TabNames::SECRET_SCANNING_BYPASS_REQUESTS,
+        selected_by_ids: :organization_secret_scanning_bypass_requests,
+        href: organization_secret_scanning_bypass_requests_path(org: @organization),
+      ) do |item| %>
+        <% item.with_leading_visual_icon(icon: :key) %>
+        <% item.with_trailing_visual_text(render(GitHub::BatchDeferredContentComponent.new(url: organization_secret_scanning_bypass_requests_counts_path(org: @organization), inputs: { type: "secret-scanning"}))) %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <%= helpers.render_nothing_if_database_fails do %>
+    <% if render_security_campaigns? %>
+      <% component.with_group do |group| %>
+        <% title = "Campaigns" %>
+        <% if campaigns_creation_enabled? %>
+          <%= button = render(Primer::Beta::IconButton.new(
+            mr: 1,
+            icon: :plus,
+            scheme: :invisible,
+            position: :absolute,
+            inactive: campaigns_limit_reached?,
+            right: 0,
+            top: 0,
+            "aria-label": create_campaigns_buttons_label,
+            data: {"show-dialog-id": SecurityCampaigns::CampaignTemplates::DIALOG}))
+          %>
+          <% title = safe_join([title, button]) %>
+        <% end %>
+        <% group.with_heading(title: title, position: :relative) %>
+
+
+        <% security_campaigns.each do |security_campaign| %>
+          <% group.with_item(href: security_center_security_campaign_path(org: @organization, number: security_campaign.number), selected_by_ids: "security_campaign_#{security_campaign.number}".to_sym) do |item| %>
+            <%= security_campaign.name %>
+            <% item.with_trailing_visual_text(
+              render(GitHub::BatchDeferredContentComponent.new(url: security_center_security_campaigns_counts_path(org: @organization), inputs: { number: security_campaign.number }))
+            ) %>
+          <% end %>
+        <% end %>
+
+        <% if render_closed_campaigns? %>
+          <% group.with_item(href: security_center_closed_security_campaigns_path(org: @organization), selected_by_ids: :security_campaign_closed_campaigns) do |item| %>
+            <% item.with_leading_visual_icon(icon: :archive) %>
+            <%= "Closed campaigns" %>
+            <% item.with_trailing_visual_text(
+              render(Primer::Beta::Counter.new(count: closed_campaigns_count, limit: 5_000, hide_if_zero: true))
+            ) %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+<% end %>
+
+<% if campaigns_creation_enabled? %>
+  <% if campaigns_limit_reached? %>
+    <%= render(Primer::Alpha::Dialog.new(
+      id: SecurityCampaigns::CampaignTemplates::DIALOG,
+      title: "Cannot create new security campaigns",
+      subtitle: create_campaigns_buttons_label,
+    )) %>
+  <% elsif security_campaigns.empty? && closed_campaigns_count.zero? %>
+    <%= render(Primer::Beta::BorderBox.new(mx: 1, mr: 3)) do |component| %>
+      <% component.with_body do %>
+        <%= render(Primer::Beta::Text.new(font_size: :small)) do %>
+          <%= render(SecurityCenter::CreateCampaignDialogComponent.new(org: @organization, show_button: true))%>
+          to help teams remediate code scanning alerts with the help of Copilot Autofix.
+        <% end %>
+      <% end %>
+    <% end %>
+  <% else %>
+    <%= render(SecurityCenter::CreateCampaignDialogComponent.new(org: @organization, show_button: false))%>
+  <% end %>
+<% end %>

@@ -1,0 +1,146 @@
+<p>
+  Some of this information will be displayed on your marketplace listing once it's published. See
+  <a class="Link--inTextBlock" href="https://docs.github.com/en/site-policy/github-terms/github-marketplace-developer-agreement" target="_blank" rel="noopener noreferrer">
+    development documentation for more details.
+  </a>
+</p>
+
+<hr class="bleed-flush compact">
+
+<%= render(Primer::Box.new(font_weight: :semibold, font_size: 4, border: :bottom, pb: 1, mb: 2)) do %>
+  EU Digital Services Act Compliance
+<% end %>
+
+<% if listing.paid? && !listing.dsa_compliant? %>
+  <%= render Primer::Alpha::Banner.new(scheme: :warning, description: "Paid apps without DSA compliance info provided by February 1st, 2025 will be de-listed until requirements are met.") %>
+<% end %>
+
+<p class="fgColor-muted text-small mt-2">
+  Under the EU Digital Services Act, GitHub must collect and display information for paid app publishers classified as
+  traders. If you don’t process payments on GitHub Marketplace, this doesn't apply. For traders, business ID, address,
+  domain, and country will be publicly displayed on your listing. Learn more about
+  <a class="Link--inTextBlock" target="_blank" rel="noopener noreferrer"
+     href="https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=OJ:L:2022:277:FULL&from=EN">DSA compliance</a>.
+</p>
+
+<%= form_for listing, url: marketplace_listing_security_compliance_update_path(listing.slug), method: :put do |form| %>
+  <marketplace-security-compliance-trader-self-certification>
+    <div class="mb-3">
+      <%= render Primer::Alpha::RadioButtonGroup.new(
+        name: "marketplace_listing[trader_self_certification]",
+        label: "Trader Self-Certification *",
+        data: {
+          action: "change:marketplace-security-compliance-trader-self-certification#renderTraderInputs",
+        },
+        ) do |component| %>
+        <% component.radio_button(label: "I do operate as a trader under EU regulations", value: "trader", checked: listing.trader?) %>
+        <% component.radio_button(label: "I do not operate as a trader under EU regulations", value: "non_trader", checked: listing.non_trader?) %>
+      <% end %>
+      <p class="fgColor-muted text-small mt-2">Declare your status under EU Digital Services Act. European Commission (EC) <a class="Link--inTextBlock" href="https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=CELEX:52021XC1229(05)" target="_blank" rel="noopener noreferrer">notice</a> on what constitutes a trader. See Section 2.2. "Concept of Trader".</p>
+    </div>
+
+    <div data-target="marketplace-security-compliance-trader-self-certification.traderInputs" style="<%= trader_inputs_style %>">
+      <%= render(Primer::Box.new(display: :flex, mb: 3)) do %>
+        <%= render Primer::Alpha::TextField.new(
+          name: "marketplace_listing[trader_address]",
+          label: "Business Address *",
+          caption: "Company address and country. Individual traders can use a P.O. Box.",
+          autocomplete: "off",
+          value: listing.trader_address,
+          full_width: false,
+        ) %>
+      <% end %>
+
+      <%= render(Primer::Box.new(display: :flex, align_items: :flex_end, classes: "gap-2", mb: 3)) do %>
+        <%= render Primer::Alpha::Select.new(
+            name: "marketplace_listing[trader_id_type]",
+            label: "Business ID *",
+            value: id_type_value,
+            data: {
+              target: "marketplace-security-compliance-trader-self-certification.traderIdType",
+              action: "change:marketplace-security-compliance-trader-self-certification#renderTraderIdInput",
+            },
+            full_width: false,
+        ) do |c| %>
+          <% c.option(label: "ID type", value: "") %>
+          <% c.option(label: "DUNS Number", value: "duns", selected: id_type_value == "duns") %>
+          <% c.option(label: "VAT Number", value: "vat", selected: id_type_value == "vat") %>
+          <% c.option(label: "EIN Number", value: "ein", selected: id_type_value == "ein") %>
+          <% c.option(label: "Other unique identifier (specify)", value: "other", selected: id_type_value == "other") %>
+        <% end %>
+
+        <%= render Primer::Alpha::TextField.new(
+          name: "marketplace_listing[trader_id_type_other]",
+          label: "Business ID Type",
+          placeholder: "Specify unique identifier",
+          autocomplete: "off",
+          value: other_id_type_value,
+          full_width: false,
+          visually_hide_label: true,
+          data: {
+            target: "marketplace-security-compliance-trader-self-certification.traderIdOtherInput"
+          },
+          style: "#{other_id_type_style}",
+        ) %>
+
+        <%= render Primer::Alpha::TextField.new(
+          name: "marketplace_listing[trader_id]",
+          label: "Business ID",
+          autocomplete: "off",
+          value: listing.trader_id,
+          full_width: false,
+          visually_hide_label: true,
+        ) %>
+      <% end %>
+
+      <div class="mb-3">
+        <%= render(Primer::Beta::Text.new(tag: :div, font_weight: :semibold, mb: 2)) { "Attestation of EU Law Compliance *" } %>
+        <%= render Primer::Alpha::CheckBox.new(
+          name: "marketplace_listing[has_eu_compliance_attestation]",
+          label: "I agree to comply with applicable EU regulations in operating my app",
+          checked: listing.has_eu_compliance_attestation?,
+        ) %>
+        <p class="fgColor-muted text-small mt-2">
+          This certification applies to products and services offered through your GitHub Marketplace listing.
+          For guidance on DSA compliance, consult Article 30 and 31 of the EU
+          <a class="Link--inTextBlock" href="https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=OJ:L:2022:277:FULL&from=EN" target="_blank" rel="noopener noreferrer">
+            Digital Services Act
+          </a>.
+        </p>
+      </div>
+    </div>
+  </marketplace-security-compliance-trader-self-certification>
+
+  <%= render(Primer::Box.new(font_weight: :semibold, font_size: 4, border: :bottom, pb: 1, mb: 2)) { "Security" } %>
+
+  <%= render(Primer::Box.new(display: :flex, direction: :column, classes: "gap-2")) do %>
+    <div>
+      <%= render Primer::Alpha::TextField.new(
+        name: "marketplace_listing[privacy_policy_url]",
+        label: "Privacy Policy URL *",
+        caption: "Describe your app’s data practices.",
+        autocomplete: "off",
+        value: listing.privacy_policy_url,
+        full_width: false,
+      ) %>
+    </div>
+
+    <div>
+      <%= render Primer::Alpha::TextField.new(
+        name: "marketplace_listing[tos_url]",
+        label: "Terms of Service URL *",
+        caption: "Provide information on your app’s content moderation policies, intended uses and limitations.",
+        autocomplete: "off",
+        value: listing.tos_url,
+        full_width: false,
+      ) %>
+    </div>
+  <% end %>
+
+
+  <hr class="bleed-flush compact">
+
+  <%= render Primer::Beta::Button.new(type: :submit, scheme: :primary) do %>
+    Save listing details
+  <% end %>
+<% end %>

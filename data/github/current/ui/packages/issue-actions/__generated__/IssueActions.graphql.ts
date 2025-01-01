@@ -1,0 +1,40 @@
+/**
+ * @generated SignedSource<<6e18354d4331d079772ad4a4f488c418>>
+ * @lightSyntaxTransform
+ * @nogrep
+ */
+
+/* tslint:disable */
+/* eslint-disable */
+// @ts-nocheck
+
+import { ReaderFragment } from 'relay-runtime';
+import { FragmentRefs } from "relay-runtime";
+export type IssueActions$data = {
+  readonly " $fragmentSpreads": FragmentRefs<"IssueActionsState">;
+  readonly " $fragmentType": "IssueActions";
+};
+export type IssueActions$key = {
+  readonly " $data"?: IssueActions$data;
+  readonly " $fragmentSpreads": FragmentRefs<"IssueActions">;
+};
+
+const node: ReaderFragment = {
+  "argumentDefinitions": [],
+  "kind": "Fragment",
+  "metadata": null,
+  "name": "IssueActions",
+  "selections": [
+    {
+      "args": null,
+      "kind": "FragmentSpread",
+      "name": "IssueActionsState"
+    }
+  ],
+  "type": "Issue",
+  "abstractKey": null
+};
+
+(node as any).hash = "2d5dba4e9b26988ef6d02616663b6de0";
+
+export default node;

@@ -1,0 +1,120 @@
+# typed: true
+# frozen_string_literal: true
+
+require "test_helper"
+
+module SecretScanning::Features::Org
+  class OrgPushProtectionTest < GitHub::TestCase
+    include SecretScanning::Features::FeatureFlagHelper
+
+    setup do
+      @user = create(:user)
+      @org = create(:organization)
+      @push_protection = SecretScanning::Features::Org::PushProtection.new(@org)
+      SecretScanning::Features::Org::TokenScanning.any_instance.stubs(:feature_available?).returns(true)
+      @org.stubs(:advanced_security_purchased?).returns(true)
+    end
+
+    context "initialize" do
+      test "good input" do
+        refute SecretScanning::Features::Org::PushProtection.new(@org).nil?
+      end
+    end
+
+    context "feature_available?" do
+      test "returns true if all conditions are met" do
+        assert @push_protection.feature_available?
+      end
+
+      test "false if token scanning unavailable" do
+        SecretScanning::Features::Org::TokenScanning.any_instance.stubs(:feature_available?).returns(false)
+
+        refute @push_protection.feature_available?
+      end
+
+      # This test also covers the case for the feature flag being disabled
+      test "false if advanced security is unavailable" do
+        GitHub.flipper[FeatureFlags::PUSH_PROTECTION_FOR_FPR].disable
+        @org.stubs(:advanced_security_purchased?).returns(false)
+        refute @push_protection.feature_available?
+      end
+
+      test "true if feature flag is enabled" do
+        GitHub.flipper[FeatureFlags::PUSH_PROTECTION_FOR_FPR].enable
+        @org.stubs(:advanced_security_purchased?).returns(false)
+        assert @push_protection.feature_available?
+      end
+    end
+
+    context "enable for new repos" do
+      test "user enabled" do
+        @push_protection.enable_for_new_repos(actor: @user)
+
+        assert @push_protection.enabled_for_new_repos?
+      end
+
+      test "user disabled" do
+        @push_protection.enable_for_new_repos(actor: @user)
+        @push_protection.disable_for_new_repos(actor: @user)
+
+        refute @push_protection.enabled_for_new_repos?
+      end
+
+
+      test "disabled if feature unavailable" do
+        SecretScanning::Features::Org::TokenScanning.any_instance.stubs(:feature_available?).returns(false)
+        @push_protection.enable_for_new_repos(actor: @user)
+
+        refute @push_protection.enabled_for_new_repos?
+      end
+
+
+      test "disabled if feature unavailable because advanced security is not purchased" do
+        GitHub.flipper[FeatureFlags::PUSH_PROTECTION_FOR_FPR].disable
+        @org.stubs(:advanced_security_purchased?).returns(false)
+        @push_protection.enable_for_new_repos(actor: @user)
+
+        refute @push_protection.enabled_for_new_repos?
+      end
+    end
+
+    context "custom messsage enabled" do
+      test "user enabled" do
+        @push_protection.enable_custom_message(actor: @user)
+        assert @push_protection.custom_message_enabled?
+      end
+
+      test "user disabled" do
+        @push_protection.enable_custom_message(actor: @user)
+        @push_protection.disable_custom_message(actor: @user)
+        refute @push_protection.custom_message_enabled?
+      end
+
+      test "disabled if Push Protection unavailable" do
+        SecretScanning::Features::Org::TokenScanning.any_instance.stubs(:feature_available?).returns(false)
+        @push_protection.enable_custom_message(actor: @user)
+        refute @push_protection.custom_message_enabled?
+      end
+    end
+
+    context "custom message active" do
+      test "true if feature enabled and message is set" do
+        @push_protection.enable_custom_message(actor: @user)
+        @org.set_push_protection_custom_message("custom msg", @user)
+        assert @push_protection.custom_message_active?
+      end
+
+      test "false if feature disabled" do
+        @push_protection.disable_custom_message(actor: @user)
+        @org.set_push_protection_custom_message("custom msg", @user)
+        refute @push_protection.custom_message_active?
+      end
+
+      test "false if message is empty" do
+        @push_protection.enable_custom_message(actor: @user)
+        @org.set_push_protection_custom_message("", @user)
+        refute @push_protection.custom_message_active?
+      end
+    end
+  end
+end

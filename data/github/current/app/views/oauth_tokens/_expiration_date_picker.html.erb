@@ -1,0 +1,99 @@
+<% error = error_for(access, :custom_expires_at, human_field: "Custom expiration") %>
+<% description_id = "description_#{SecureRandom.hex(6)}" %>
+<% allow_no_expiration = !ProgrammaticAccess.user_type?(access) || current_user.feature_enabled?(:infinite_fg_pat_lifetime) %>
+<% target_expiration_limit = local_assigns[:target_expiration_limit] %>
+<% default_selected_item = expiration_timeframe_default_selected_value(access: access, target_expiration_limit: target_expiration_limit) %>
+
+<dl id="token-expiration" class="form-group required<%= " errored" if error %>">
+  <dt class="input-label">
+    <%= f.label(:default_expires_at, "Expiration", { id: "expiration-label" }) %>
+  </dt>
+  <% display_exempt_banner = local_assigns[:target_limit_exempts_actor] && target_expiration_limit %>
+  <dd id="expiration-limit-exemption-banner-container" <%="hidden" unless display_exempt_banner %>>
+    <% if current_user.feature_enabled?(:fg_pat_expiration_lifecycle_enforcement) %>
+      <%= render Primer::Alpha::Banner.new(scheme: :warning, dismiss_scheme: :none, mb: 3) do |component| %>
+          <div id="expiration-limit-exemption-banner-content">
+            <% if local_assigns[:target_limit_exempts_actor] %>
+              <% pat_type = access.pat_type || ProgrammaticAccessTokenType::Classic %>
+              The <%= local_assigns[:target_and_type_with_expiration] %> requires a maximum lifetime of <%= pluralize(target_expiration_limit, 'day') %> for <%= pat_type.name %>. As an enterprise administrator you are <strong>exempted</strong> from this requirement.
+            <% end %>
+          </div>
+      <% end %>
+    <% end %>
+  </dd>
+  <dd class="d-inline-block mr-2">
+    <% if current_user.feature_enabled?(:fg_pat_expiration_lifecycle_enforcement) %>
+      <%= render(Primer::Alpha::ActionMenu.new(select_variant: :single, dynamic_label: true, classes: "js-new-default-token-expiration-select", form_arguments: { builder: f, name: "default_expires_at" })) do |menu| %>
+        <% menu.with_show_button do |button| %>
+          <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+          Expiration
+        <% end %>
+        <% expiration_timeframes(allow_none: allow_no_expiration, exempts_actor: local_assigns[:target_limit_exempts_actor], target_expiration_limit: target_expiration_limit, target_and_type_with_expiration: local_assigns[:target_and_type_with_expiration]).each do |text, value, data| %>
+          <% data = data || {} %>
+
+          <%# insert a blank custom item before "custom" if there is no target_expiration limit so we can auto add a new expiration item based on resource owner via Javascript %>
+          <% if value == "custom" && target_expiration_limit.nil? %>
+            <% menu.with_item(label: "", classes: "js-new-default-token-expiration-item js-new-default-token-expiration-item-custom-limit", active: false, description_scheme: :inline, hidden: true, data: { custom_limit: true }) do |item| %>
+              <% item.with_description {} %>
+            <% end %>
+          <% end %>
+
+          <% menu.with_item(label: text, classes: "js-new-default-token-expiration-item", active: value == default_selected_item, item_id: value, description_scheme: :inline, data: { value: value, human_date: data["data-human-date"], custom_limit: data["data-custom-limit"] }) do |item| %>
+            <% item.with_description do %>
+              <% if target_and_type = data["data-target"] %>
+                Limit set by <%= target_and_type %>
+              <% elsif description = data["data-description"] %>
+                <%= description %>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% else %>
+      <%= f.select(
+        :default_expires_at,
+        options_for_select(expiration_timeframes(allow_none: allow_no_expiration, target_expiration_limit: target_expiration_limit), access.default_expires_at),
+        {},
+        { "class" => "js-default-token-expiration-select", "aria-labelledby" => "expiration-label" })
+      %>
+    <% end %>
+  </dd>
+
+  <% if error %>
+    <dd class="error" id="<%= description_id %>">
+      <%= error %>
+    </dd>
+  <% end %>
+
+  <dd id="custom-expires-wrapper" class="d-inline-block" <%=" hidden" if access.default_expires_at != "custom" %>>
+    <%=
+      f.date_field(
+        :custom_expires_at,
+        {
+          "class" => "form-select",
+          "aria-labelledby" => "expiration-label",
+          "min" => 1.day.from_now.to_date,
+          "max" => target_expiration_limit.present? ? Date.current + target_expiration_limit.days : 1.year.from_now.to_date,
+          "value" => access.custom_expires_at&.strftime("%Y-%m-%d")
+        }
+      )
+    %>
+  </dd>
+
+  <dd id="expiration-helper-note" class="d-inline-block" <%=" hidden" if access.default_expires_at == "custom" %>>
+    <p class="note">
+      <% if current_user.feature_enabled?(:fg_pat_expiration_lifecycle_enforcement) %>
+        <%= new_date_picker_expiration_helper_note(default_selected_item) %>
+      <% else %>
+        <%= expiration_helper_note(access) %>
+      <% end %>
+    </p>
+  </dd>
+
+  <dd id="no-expiration-warning" class="mt-3" <%=" hidden" if access.default_expires_at != "none" || current_user.is_first_emu_owner? %>>
+    <p class="flash flash-warn">
+      GitHub strongly recommends that you set an expiration date for your token to help keep your information secure.
+      <a class="Link--inTextBlock" rel="noopener noreferrer" href="<%= GitHub.blog_url %>/changelog/2021-07-26-expiration-options-for-personal-access-tokens/" target="_blank">Learn more</a><%# erblint:disable GitHub::Accessibility::AvoidGenericLinkText %>
+    </p>
+  </dd>
+</dl>

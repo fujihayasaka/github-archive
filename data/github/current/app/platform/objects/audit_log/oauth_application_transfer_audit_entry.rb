@@ -1,0 +1,120 @@
+# typed: true
+# frozen_string_literal: true
+
+module Platform
+  module Objects
+    module AuditLog
+      class OauthApplicationTransferAuditEntry < Platform::Objects::AuditLog::Base
+        description "Audit log entry for a oauth_application.transfer"
+
+        visibility :under_development
+        minimum_accepted_scopes ["read:user", "admin:org", "admin:enterprise"]
+
+
+        # Determine whether the viewer can access this object via the API (called internally).
+        # This is where Egress checks for OAuth scopes and GitHub Apps go.
+        # Returns `true`, `false`, or `Promise` resolving to `true` or `false`
+        def self.async_api_can_access?(permission, audit_entry)
+          permission.async_api_can_access_audit_entry?(audit_entry)
+        end
+
+        # Determine whether the viewer can see this object (called internally).
+        # Returns `true`, `false`, or `Promise` resolving to `true` or `false`
+        def self.async_viewer_can_see?(permission, audit_entry)
+          permission.async_viewer_can_see_audit_entry?(audit_entry)
+        end
+
+        implements_node_with_document_id(prefix: "OATAE")
+        implements Platform::Interfaces::AuditLog::AuditEntry
+        implements Platform::Interfaces::AuditLog::OauthApplicationAuditEntryData
+        implements Platform::Interfaces::AuditLog::OrganizationAuditEntryData
+
+        field :is_full_trust, Boolean, null: true, visibility: :internal, description: "Whether this was a full trust OAuth application."
+        def is_full_trust
+          @object.get(:full_trust) == "true"
+        end
+
+        field :rate_limit, Integer, null: true, description: "The rate limit of the OAuth application."
+        def rate_limit
+          @object.get(:rate_limit)
+        end
+
+        field :state, Platform::Enums::AuditLog::OauthApplicationTransferAuditEntryState, null: true, description: "The state of the OAuth application."
+        def state
+          state_key = @object.get(:state)
+          ::OauthApplication.states.invert[state_key]
+        end
+
+        field :callback_url, Platform::Scalars::URI, null: true, description: "The callback URL of the OAuth application."
+        def callback_url
+          @object.get(:callback_url)
+        end
+
+        field :application_url, Platform::Scalars::URI, null: true, description: "The application URL of the OAuth application."
+        def application_url
+          @object.get(:application_url)
+        end
+
+        field :receiver_name, String, null: true, description: "The username of the receiver of the OAuth application."
+        def receiver_name
+          @object.get(:transfer_to)
+        end
+
+        field :receiver_database_id, Integer, null: true, visibility: :internal, description: "The database ID of the receiver of the OAuth application."
+        def receiver_database_id
+          @object.get(:transfer_to_id)
+        end
+
+        field :receiver, Platform::Unions::AuditLog::OauthApplicationTransferAuditEntryAccount, null: true, description: "The receiver of the OAuth application."
+        def receiver
+          Loaders::ActiveRecord.load(::User, @object.get(:transfer_to_id))
+        end
+
+        field :sender_name, String, null: true, description: "The username of the user or organization sending the OAuth application."
+        def sender_name
+          @object.get(:transfer_from)
+        end
+
+        field :sender_database_id, Integer, null: true, visibility: :internal, description: "The database ID of the sender of the OAuth application."
+        def sender_database_id
+          @object.get(:transfer_from_id)
+        end
+
+        field :sender, Platform::Unions::AuditLog::OauthApplicationTransferAuditEntryAccount, null: true, description: "The user or organization sending the OAuth application."
+        def sender
+          Loaders::ActiveRecord.load(::User, @object.get(:transfer_from_id))
+        end
+
+        field :requesting_user_login, String, null: true, description: "The username of the user requesting the transfer."
+        def requesting_user_login
+          @object.get(:requester)
+        end
+
+        field :requesting_user_database_id, Integer, null: true, visibility: :internal, description: "The database ID of the user requesting the transfer."
+        def requesting_user_database_id
+          @object.get(:requester_id)
+        end
+
+        field :requesting_user, Platform::Objects::User, null: true, description: "The user requesting the transfer."
+        def requesting_user
+          Loaders::ActiveRecord.load(::User, @object.get(:requester_id))
+        end
+
+        field :responding_user_login, String, null: true, description: "The username of the user responding to the transfer request."
+        def responding_user_login
+          @object.get(:responder)
+        end
+
+        field :responding_user_database_id, Integer, null: true, visibility: :internal, description: "The database ID of the user responding to the transfer request."
+        def responding_user_database_id
+          @object.get(:responder_id)
+        end
+
+        field :responding_user, Platform::Objects::User, null: true, description: "The user responding to the transfer request."
+        def responding_user
+          Loaders::ActiveRecord.load(::User, @object.get(:responder_id))
+        end
+      end
+    end
+  end
+end

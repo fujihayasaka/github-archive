@@ -1,0 +1,144 @@
+<div class="site-admin-subhead ruleless">
+  <h2 class="site-admin-subhead-heading">
+    Azure Models
+  </h2>
+</div>
+
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+  <% component.with_header do |h| %>
+    <% h.with_title(tag: :h2) do %>
+      Models Access
+    <% end %>
+  <% end %>
+
+  <% component.with_row do %>
+    <div class="d-flex flex-justify-between flex-items-center">
+      <div class="pr-2">
+        <div class="d-flex flex-items-start flex-items-center">
+          <label for="user_can_access" class="mr-2">
+            Can this user access GitHub Models?
+          </label>
+        </div>
+        <p class="note">
+          <%= access_result.reason || "Yes, this user has access" %>
+          (<%= auths_count %> Models auth attempts)
+        </p>
+      </div>
+      <div class="d-flex flex-justify-end position-relative">
+        <%= render Primer::Beta::Octicon.new(
+          icon: (access_result.accessible? ? "check-circle-fill" : "x-circle-fill"),
+          color: (access_result.accessible? ? :success : :danger),
+        )%>
+      </div>
+    </div>
+  <% end %>
+<% end %>
+
+<br>
+
+<% if blocks.any? %>
+  <%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+    <% component.with_header do |h| %>
+      <% h.with_title(tag: :h2) do %>
+        Models Blocks
+      <% end %>
+    <% end %>
+
+    <% blocks.each do |block| %>
+      <% component.with_row do %>
+        <div class="d-flex flex-justify-between flex-items-center">
+          <div class="pr-2">
+            <div class="d-flex flex-items-start flex-items-center">
+              <label for="blocked_by" class="mr-2" <%= test_selector("models-blocks-#{block.id}-name") %>>
+                <%= "Blocked by @#{block.actor} on #{block.created_at.strftime("%b %-d, %Y")}" %>
+              </label>
+            </div>
+            <p class="note" <%= test_selector("models-blocks-#{block.id}-note") %>>
+              <%= block.reason %>
+            </p>
+          </div>
+          <div class="d-flex flex-justify-end position-relative" <%= test_selector("models-blocks-#{block.id}") %>>
+            <%= render(Primer::Beta::Label.new(scheme: block.active? ? :danger : :warning)) { block.active? ? "Active" : "Revoked" } %>
+          </div>
+        </div>
+      <% end %>
+    <% end %>
+  <% end %>
+  <br>
+<% end %>
+
+
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+  <% component.with_header do |h| %>
+    <% h.with_title(tag: :h2) do %>
+      <%= blocked ? "Allow" : "Block" %> Models Access
+    <% end %>
+  <% end %>
+
+  <% component.with_row do %>
+    <div class="js-details-container Details mb-3">
+      <%= render Primer::Beta::Button.new(href: "#", scheme: :danger, classes: "float-right js-details-target", "aria-expanded": "false") do %>
+        <%= blocked ? "Allow" : "Block" %> Access
+      <% end %>
+      <p class="mt-2">
+        <%= blocked ? "This will remove the administrative block for this user." : "This will block Models access for this user." %>
+        See <%= link_to "this document", "https://github.com/github/models/blob/main/docs/adrs/01-db-backed-abuse-blocks.md", class: "Link--inTextBlock" %>
+        for guidance on adding and removing blocks.
+      </p>
+
+      <div class="inline-confirm mt-4">
+        <% if !blocked && this_user.hammy? %>
+          <%= render(Primer::Alpha::Banner.new(scheme: :danger)) do %>
+            This user has been marked <%= link_to "hammy", "https://github.com/github/glossary/blob/42d44aba4899538bca18df33d90771fe13a244ca/README.md#hammy-hamflagged-whitelisted-account", class: "Link--inTextBlock" %>.
+            Be cautious about blocking this user unless you are doing so to prevent or respond to a Models incident.
+          <% end %>
+        <% end %>
+
+        <%= form_tag stafftools_user_azure_models_block_path(this_user.display_login), method: :put do %>
+          <dl class="form-group" id="user_block_notes_container">
+
+            <dt class="mt-3">
+              <label for="user_block_reason">Reason</label>
+            </dt>
+            <dd>
+              <%= select_tag(
+                :reason,
+                options_for_select(AzureModels::Block.reasons),
+                required: true,
+                include_blank: true,
+                class: "form-control input-block js-prevent-keyboard-submit",
+                id: "user_block_reason"
+              ) %>
+            </dd>
+
+            <dt class="mt-3">
+              <label for="additional_information">Additional Information</label>
+            </dt>
+            <dd>
+              <input
+                type="text"
+                id="user_block_additional_information"
+                name="additional_information"
+                class="form-control input-block js-prevent-keyboard-submit"
+                placeholder="Link to issue or ICM, or add other supporting information.">
+            </dd>
+
+            <input
+              type="text"
+              id="user_block_action"
+              name="user_block_action"
+              class="d-none"
+              value="<%= blocked ? "allow" : "block" %>">
+
+            <div class="form-actions mt-2">
+              <%= render(Primer::Beta::Button.new(id: "block_btn", scheme: :danger, type: :submit)) do |c| %>
+                <%= blocked ? "Allow" : "Block" %> Models Access
+              <% end %>
+            </div>
+          </dl>
+        <% end %>
+      </div>
+    </div>
+  <% end %>
+<% end %>
+

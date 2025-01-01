@@ -1,0 +1,83 @@
+<%= render(Copilot::Purchase::CheckoutSectionComponent.new(heading: "Billing information")) do |component| %>
+  <% component.with_children do %>
+    <% if selected_account.organization? %>
+      <% if selected_account.org_is_on_standard_tos? %>
+        <%= render Billing::Settings::BillingInformationLinkingComponent.new(
+          actor: user,
+          target: selected_account,
+          display_title: false,
+          form_loaded_from: "GITHUB_COPILOT_PURCHASE_FLOW",
+          return_to_path: copilot_plan_purchase_path(organization: selected_account),
+          no_redirect: true,
+          autocheck_link_checkbox: org_has_no_linked_info_but_user_has_saved_info?
+        ) %>
+      <% else %>
+        <%= render(Primer::Box.new(display: :flex, justify_content: :space_between, col: 12)) do %>
+          <%= render(Copilot::Purchase::AccountAvatarComponent.new(account: selected_account, show_account_info: false, use_owner: true)) %>
+          <%= render(Primer::Box.new(display: :flex, direction: :column, col: 6, pl: 4)) do %>
+            <%= render(Primer::Box.new(display: :flex, justify_content: :space_between)) do %>
+              <%= render(Primer::Box.new) do %>
+                <%= render(Primer::Beta::Text.new(tag: :p, mb: 0, font_weight: :bold)) { billing_contact.entity_name } %>
+                <%= render(Primer::Beta::Text.new(tag: :p, mb: 0, color: :muted, font_size: 6)) do %>
+                  <%= billing_contact.address1 %>
+                  <%= billing_contact.address2 if billing_contact.address2 %>
+                <% end %>
+                <%= render(Primer::Beta::Text.new(tag: :p, mb: 0, color: :muted, font_size: 6)) do %>
+                  <%= city_region_post_code %>
+                <% end %>
+                <%= render(Primer::Beta::Text.new(tag: :p, mb: 0, color: :muted, font_size: 6)) do %>
+                  <% country %>
+                <% end %>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% else %>
+      <%= render(Primer::Box.new(display: :flex, justify_content: :space_between, col: 12, classes: 'js-edit-user-personal-profile-wrapper', hidden: flash[:address_validation_error].present?)) do %>
+        <%= render(Copilot::Purchase::AccountAvatarComponent.new(account: selected_account, show_account_info: false, use_owner: true)) %>
+        <%= render(Primer::Box.new(display: :flex, direction: :column, col: 6, pl: 4)) do %>
+          <%= render(Primer::Box.new(display: :flex, justify_content: :space_between)) do %>
+            <%= render(Primer::Box.new) do %>
+              <%= render(Primer::Beta::Text.new(tag: :p, mb: 0, font_weight: :bold)) { billing_contact.entity_name } %>
+              <%= render(Primer::Beta::Text.new(tag: :p, mb: 0, color: :muted, font_size: 6)) do %>
+                <%= billing_contact.address1 %>
+                <%= billing_contact.address2 if billing_contact.address2 %>
+              <% end %>
+              <%= render(Primer::Beta::Text.new(tag: :p, mb: 0, color: :muted, font_size: 6)) do %>
+                <%= city_region_post_code %>
+              <% end %>
+              <%= render(Primer::Beta::Text.new(tag: :p, mb: 0, color: :muted, font_size: 6)) do %>
+                <% country %>
+              <% end %>
+            <% end %>
+            <%= render Primer::Beta::Button.new(
+              size: :medium,
+              font_size: 6, classes: "js-edit-linked-billing-info"
+            ).with_content("Edit") %>
+          <% end %>
+        <% end %>
+      <% end %>
+      <div class="js-name-address-collection-wrapper" <%= "hidden" unless flash[:address_validation_error].present? %>>
+        <% if flash[:address_validation_error] %>
+          <%= render(Primer::Alpha::Banner.new(full: false, full_when_narrow: false, dismiss_scheme: :remove, scheme: :danger, my: 3, test_selector: "address-validation-error-flash")) do %>
+            <%= flash[:address_validation_error] %>
+          <% end %>
+        <% end %>
+        <div style="max-width: 600px;">
+          <%= primer_form_with model: selected_account.trade_screening_record, url: billing_settings_update_payment_information_enterprise_path(selected_account), html: { class: "js-name-address-collection" }, method: :put do |fields| %>
+            <%= render(
+              Billing::Settings::BusinessEditPaymentInformationForm.new(
+                fields,
+                business: selected_account,
+                return_to: copilot_plan_purchase_path(enterprise: selected_account),
+                show_form: false
+              )
+            ) %>
+            <%= csrf_hidden_input_for "/account/stash_billing_information", method: :post, class: "js-stash-billing-info-csrf" %>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+  <% end %>
+<% end %>

@@ -1,0 +1,116 @@
+import {debounce} from '@github/mini-throttle'
+import type {Dispatch, PropsWithChildren} from 'react'
+import {createContext, useContext, useEffect, useMemo} from 'react'
+
+import {CopilotChatManager} from './copilot-chat-manager'
+import type {CopilotChatAction, CopilotChatState} from './copilot-chat-reducer'
+import type {CopilotChatOrg} from './copilot-chat-types'
+import {copilotFeatureFlags} from './copilot-feature-flags'
+import {copilotLocalStorage} from './copilot-local-storage'
+import {useGetChatState} from './ObservableChatContext'
+
+const CopilotChatManagerContext = createContext<CopilotChatManager | null>(null)
+
+export interface CopilotChatManagerProviderProps {
+  apiURL: string
+  state: CopilotChatState
+  dispatch: Dispatch<CopilotChatAction>
+  ssoOrganizations: CopilotChatOrg[]
+  realIp?: string
+  hasCEorCBAccess?: boolean
+}
+
+export function CopilotChatManagerProvider({
+  apiURL,
+  state,
+  dispatch,
+  ssoOrganizations,
+  children,
+  realIp,
+  hasCEorCBAccess,
+}: PropsWithChildren<CopilotChatManagerProviderProps>) {
+  const getChatState = useGetChatState()
+  const manager = useMemo(
+    () => new CopilotChatManager(dispatch, apiURL, ssoOrganizations, getChatState, realIp, hasCEorCBAccess),
+    [dispatch, apiURL, ssoOrganizations, getChatState, realIp, hasCEorCBAccess],
+  )
+
+  useEffect(() => {
+    if (!state.chatIsOpen) return
+
+    const fetchCurrentTopic = async () => {
+      if (state.selectedThreadID && state.messages.length > 0 && !state.currentTopic) {
+        const currentThreadTopic = copilotLocalStorage.getSelectedTopic(state.selectedThreadID)
+        const numberId = Number(currentThreadTopic)
+        if (currentThreadTopic && !isNaN(numberId)) {
+          await manager.fetchCurrentRepo(numberId)
+        } else {
+          manager.clearCurrentTopic()
+        }
+      }
+    }
+    void fetchCurrentTopic()
+  }, [state.selectedThreadID, manager, state.messages.length, state.currentTopic, state.chatIsOpen])
+
+  useEffect(() => {
+    const fetchContextPage = async () => {
+      const hash = window.location.hash
+      const pathName = window.location.pathname
+      const url = window.location.hash ? `${pathName}${hash}` : pathName
+      const urlParts = url.slice(1).split('/')
+      if (urlParts.length < 2) {
+        return
+      }
+
+      const owner = urlParts[0]
+      const repo = urlParts[1]
+
+      if (!owner || !repo) {
+        return
+      }
+
+      await manager.fetchImplicitContext(url, owner, repo)
+    }
+
+    const voidFetch = () => {
+      void fetchContextPage()
+    }
+
+    const debouncedFetch = debounce(voidFetch, 500)
+
+    function watchHistoryEvents() {
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      const {replaceState} = window.history
+
+      window.history.replaceState = function (...args) {
+        replaceState.apply(window.history, args)
+        window.dispatchEvent(new Event('replaceState'))
+      }
+
+      // eslint-disable-next-line @eslint-react/web-api/no-leaked-event-listener
+      window.addEventListener('popstate', debouncedFetch)
+      // eslint-disable-next-line @eslint-react/web-api/no-leaked-event-listener
+      window.addEventListener('replaceState', debouncedFetch)
+
+      return () => {
+        window.removeEventListener('popstate', debouncedFetch)
+        window.removeEventListener('replaceState', debouncedFetch)
+      }
+    }
+
+    if (copilotFeatureFlags.implicitContext && state.chatIsOpen) {
+      debouncedFetch()
+      watchHistoryEvents()
+    }
+  }, [manager, state.chatIsOpen])
+
+  return <CopilotChatManagerContext.Provider value={manager}>{children}</CopilotChatManagerContext.Provider>
+}
+
+export function useChatManager() {
+  const context = useContext(CopilotChatManagerContext)
+  if (!context) {
+    throw new Error('useChatManager must be used within a CopilotChatManagerProvider')
+  }
+  return context
+}

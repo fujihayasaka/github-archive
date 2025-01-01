@@ -1,0 +1,161 @@
+<%= render(Primer::Beta::Subhead.new) do |component| %>
+  <% component.with_heading(tag: :h2) do %>
+    Private registries
+    <% if user_feature_enabled?(:lifecycle_label_name_updates) %>
+      <%= render(Primer::Experimental::BetaLabel.new(vertical_align: :middle)) %>
+    <% else %>
+      <%= render(Primer::Beta::Label.new(scheme: :success, vertical_align: :middle)) { "Beta" } %>
+    <% end %>
+  <% end %>
+<% end %>
+
+<% if !GitHub.enterprise? %>
+  <% if can_use_private_registries? %>
+    <%= render(Primer::Alpha::Banner.new(scheme: :default, dismiss_scheme: :none, mb: 3, test_selector: "private-registries-enabled-banner")) do |banner| %>
+      <% banner.with_action_content do %>
+        <%= render(Primer::Beta::Button.new(tag: :a, href: feature_flag_url, target: "_blank")) do |button| %>
+          <% button.with_leading_visual_icon(icon: "link-external") %>
+          Manage feature flag
+        <% end %>
+      <% end %>
+      The private registries feature is <strong>enabled</strong> for this organization.
+    <% end %>
+  <% else %>
+    <%= render(Primer::Alpha::Banner.new(scheme: :warning, dismiss_scheme: :none, mb: 3, test_selector: "private-registries-disabled-banner")) do |banner| %>
+      <% banner.with_action_content do %>
+        <%= render(Primer::Beta::Button.new(tag: :a, href: feature_flag_url, target: "_blank")) do |button| %>
+          <% button.with_leading_visual_icon(icon: "link-external") %>
+          Manage feature flag
+        <% end %>
+      <% end %>
+      The private registries feature is <strong>not enabled</strong> for this organization.
+    <% end %>
+  <% end %>
+
+  <% if !can_use_org_secrets? %>
+    <%= render(Primer::Alpha::Banner.new(scheme: :warning, dismiss_scheme: :none, my: 3, test_selector: "private-registries-org-secrets-disabled-banner")) do %>
+      Organizations on the legacy plan cannot use organization secrets.
+    <% end %>
+  <% end %>
+
+  <% if can_use_org_secrets? && !can_use_secrets_for_private_repos? %>
+    <%= render(Primer::Alpha::Banner.new(scheme: :default, dismiss_scheme: :none, mb: 3, test_selector: "private-registries-secrets-for-private-repos-disabled-banner")) do %>
+      Secrets cannot be used by <%= enterprise? ? "private and internal" : "private" %> repositories under this organization's plan.
+    <% end %>
+  <% end %>
+<% end %>
+
+<% if configuration_rows.any? %>
+  <% configuration_rows.each do |row| %>
+    <%= render(Primer::Beta::BorderBox.new(padding: :condensed, test_selector: "private-registries-config-#{row[:configuration_id]}")) do |box| %>
+      <% box.with_row(display: :flex, align_items: :baseline) do %>
+        <span class="flex-auto text-mono" <%= test_selector "secret-name" %>>
+          <%= row[:secret_name] %>
+        </span>
+        <% if row[:missing_secret] %>
+          <%= render(Primer::Beta::Label.new(scheme: :danger, test_selector: "missing-secret-label")) { "Missing Kredz secret" } %>
+        <% end %>
+      <% end %>
+      <% box.with_row do %>
+        <div class="summary clearfix">
+          <dl>
+            <dt>Registry type</dt>
+            <dd <%= test_selector "registry-type" %>>
+              <%= row[:registry_type] %>
+            </dd>
+          </dl>
+          <dl>
+            <dt>URL</dt>
+            <dd <%= test_selector "url" %>>
+              <%= row[:url] %>
+            </dd>
+          </dl>
+          <% if row[:username] %>
+            <dl>
+              <dt>Username</dt>
+              <dd <%= test_selector "username" %>>
+                <%= row[:username] %>
+              </dd>
+            </dl>
+          <% end %>
+          <dl>
+            <dt>Created at</dt>
+            <dd <%= test_selector "created-at" %>>
+              <%= timestamp(row[:created_at]) %>
+            </dd>
+          </dl>
+          <dl>
+            <dt>Updated at</dt>
+            <dd <%= test_selector "updated-at" %>>
+              <%= timestamp(row[:updated_at]) %>
+            </dd>
+          </dl>
+          <dl>
+            <dt>Secret visibility</dt>
+            <dd <%= test_selector "secret-visibility" %>>
+              <%= row[:secret_visibility] %>
+            </dd>
+          </dl>
+          <dl>
+            <dt>Secret created_at</dt>
+            <dd <%= test_selector "secret-created-at" %>>
+              <%= timestamp(row[:secret_created_at]) if row[:secret_created_at] %>
+            </dd>
+          </dl>
+          <dl>
+            <dt>Secret updated at</dt>
+            <dd <%= test_selector "secret-updated-at" %>>
+              <%= timestamp(row[:secret_updated_at]) if row[:secret_updated_at] %>
+            </dd>
+          </dl>
+        </div>
+      <% end %>
+    <% end %>
+  <% end %>
+<% else %>
+  <%= render(Primer::Beta::Blankslate.new(border: true)) do |c| %>
+    <% c.with_heading(tag: :h3) do %>
+      This organization does not have any private registry configurations.
+    <% end %>
+  <% end %>
+<% end %>
+
+<% if orphaned_secret_rows.any? %>
+  <h3 class="mt-5 mb-3">Orphaned secrets</h3>
+  <%= render(Primer::Alpha::Banner.new(scheme: :warning, dismiss_scheme: :none, my: 3, test_selector: "private-registries-orphaned-secrets-banner")) do %>
+    This organization has secrets that are missing a corresponding private registry configuration.
+  <% end %>
+
+  <% orphaned_secret_rows.each do |row| %>
+    <%= render(Primer::Beta::BorderBox.new(padding: :condensed, test_selector: "private-registries-orphaned-secret-#{row[:name]}")) do |box| %>
+      <% box.with_row(display: :flex, align_items: :baseline) do %>
+        <span class="flex-auto text-mono" <%= test_selector "secret-name" %>>
+          <%= row[:name] %>
+        </span>
+        <%= render(Primer::Beta::Label.new(scheme: :danger, test_selector: "orphaned-secret-label")) { "Orphaned Kredz secret" } %>
+      <% end %>
+      <% box.with_row do %>
+        <div class="summary clearfix">
+          <dl>
+            <dt>Secret visibility</dt>
+            <dd <%= test_selector "visibility" %>>
+              <%= row[:visibility] %>
+            </dd>
+          </dl>
+          <dl>
+            <dt>Secret created_at</dt>
+            <dd <%= test_selector "created-at" %>>
+              <%= timestamp(row[:created_at]) %>
+            </dd>
+          </dl>
+          <dl>
+            <dt>Secret updated at</dt>
+            <dd <%= test_selector "updated-at" %>>
+              <%= timestamp(row[:updated_at]) %>
+            </dd>
+          </dl>
+        </div>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

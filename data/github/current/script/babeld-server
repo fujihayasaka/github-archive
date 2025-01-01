@@ -1,0 +1,62 @@
+#!/bin/bash
+
+if [ -n "$CODESPACES" ]; then
+  bindaddr=""
+else
+  bindaddr="--bind-addr 127.0.0.1"
+fi
+
+if [ -n "$MULTI_TENANT_ENTERPRISE" ]; then
+  mt_flag="--multi-tenant"
+else
+  mt_flag=""
+fi
+
+if [[ "$DX_EDGE" = true ]] && [[ "$DX_FEATURE_SUBPROJECT_CONTAINERS" = true ]] && [[ -z "$LOCAL_BABELD_PATH" ]]; then
+  [ ! -e $(pwd)/tmp/babeld/ssh_host_key.dev ] && mkdir -p $(pwd)/tmp/babeld && ssh-keygen -N "" -m PEM -t rsa -f $(pwd)/tmp/babeld/ssh_host_key.dev
+
+  SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+  source $SCRIPT_DIR/dx/lib/subproject-containers
+
+  IMAGE=ghcr.io/github/babeld/babeld
+  SUBPROJECT_VERSION=$(subproject_version "babeld")
+  echo "babeld version $SUBPROJECT_VERSION"
+
+  start_subproject --name=babeld -ti\
+  -v /$(pwd)/tmp/babeld:/tmp/babeld \
+  -e API_INTERNAL_BABELD_HMAC_KEY="octocat" \
+  $IMAGE:$SUBPROJECT_VERSION \
+  "./babeld" \
+  $bindaddr \
+  $mt_flag \
+  --ssh-host-key-file /tmp/babeld/ssh_host_key.dev
+else
+  BABELD_BIN="vendor/babeld/babeld"
+  # Set LOCAL_BABELD_PATH to opt out of docker flow (for babeld developers)
+  # Set either directly to the vendored bin, ie:
+  #    LOCAL_BABELD_PATH=/workspaces/github/vendor/babeld/bin/babeld ./script/server
+  # Or when cycling outside of github/github, some other path:
+  #    LOCAL_BABELD_PATH=/workspaces/babeld/bin/babeld ./script/server
+  if [[ -n "$LOCAL_BABELD_PATH" ]]; then
+    BABELD_BIN = $LOCAL_BABELD_PATH
+  fi
+
+  # This is necessary so babeld can talk to github internal
+  # api on localhost
+  export API_INTERNAL_BABELD_HMAC_KEY="octocat"
+
+  until [ -x $BABELD_BIN ]; do
+    if [ "$BABELD_BIN" != "1" ]; then
+      echo "Run 'script/build-babeld' to setup babeld."
+      BABELD_BIN=1
+    fi
+    sleep 60
+  done
+
+  cd $(dirname $BABELD_BIN)
+
+  trap 'kill $PID' EXIT HUP INT QUIT PIPE TERM
+  ./$(basename $BABELD_BIN) ${bindaddr} ${mt_flag} --ssh-host-key-file ./ssh_host_key.dev --ssh-dss-host-key-file ./dss_host_key.dev "$@" &
+  PID=$!
+  wait
+fi

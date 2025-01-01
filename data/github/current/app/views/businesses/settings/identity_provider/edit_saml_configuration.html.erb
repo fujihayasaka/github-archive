@@ -1,0 +1,50 @@
+<% view = Businesses::Settings::SecurityView.new \
+  business: this_business, current_user: current_user, params: params %>
+
+<% page_info title: "SAML single sign-on",
+             selected_link: :edit_saml_configuration,
+             stafftools: edit_enterprise_saml_provider_path(this_business) %>
+
+<%= render Primer::Box.new(col: 12, test_selector: "business_edit_saml_configuration") do %>
+  <%= render layout: "businesses/layout",
+    locals: {
+      business: this_business,
+      title: "SAML single sign-on",
+      container_attributes: "itemscope itemtype='http://schema.org/Business'"
+  } do %>
+    <div class="mb-3">
+      <a href="<%= enterprise_single_sign_on_configuration_path(this_business) %>"> &larr; Back to single sign-on configuration</a>
+    </div>
+
+    <%= form_for(:saml, url: settings_saml_provider_enterprise_path(this_business), return_to: enterprise_single_sign_on_configuration_path(this_business),
+      method: :put, html: { class: "js-business-saml-provider-settings-form", novalidate: true, "data-turbo": "false"}) do |f| %>
+      <input type="hidden" name="saml-currently-enabled" class="js-business-saml-currently-enabled" value="<%= view.saml_settings_saved? ? 1 : 0 %>">
+      <%# enable-saml-checkbox hidden input is here so that disablingBusinessSaml() in app/assets/modules/github/businesses.ts is always false. This edit page is not used to disable SAML.%>
+      <input type="hidden" checked id="enable-saml-checkbox" type="checkbox" name="enable-saml-checkbox" class="js-business-enable-saml">
+      <p <%= test_selector "add_saml_configuration_info_message" %>>
+        After you require SAML authentication, members of the <%= this_business.name %> enterprise
+        must authenticate with your SAML identity provider (IdP) to access any of the enterprise's
+        organizations. Supported IdPs include <%= view.supported_idps %>.
+        <%= render(Primer::Beta::Link.new(
+            underline: true,
+            href: "#{GitHub.help_url}/admin/managing-iam/using-saml-for-enterprise-iam/configuring-saml-single-sign-on-for-your-enterprise"
+          )) { "Learn more about SAML single sign-on" }
+        %>.
+      </p>
+
+      <%= render "businesses/settings/security/saml_form", f: f, view: view, bootstrap_flow: false %>
+
+      <%= render Primer::Beta::Button.new(
+        id: "save-saml-settings",
+        name: "save_settings",
+        value: "1",
+        classes: "js-business-saml-submit js-business-saml-save-submit",
+        type: :submit,
+        schema: :primary,
+        disabled: view.saml_test_failure? || !view.saml_test_success?,
+        disable_with: "Save SAML settings"
+      ) do %>Save SAML settings<% end %>
+    <% end %>
+  <% end %>
+<% end %>
+

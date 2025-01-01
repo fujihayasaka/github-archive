@@ -1,0 +1,44 @@
+<%= render(Primer::Alpha::Banner.new(scheme: :warning, mb: 3)) do %>
+  <% if reason == :copilot_enabled %>
+    Copilot is already enabled for this <%= normalized_account_type %>.
+    <% if is_business? %>
+      <% if is_standalone_business? %>
+        You can manage policies
+      <% else %>
+        You can manage licenses for your organizations
+      <% end %>
+      at your enterprise's
+    <% else %>
+      Manage Copilot on your organization's
+    <% end %>
+     <%= render(Primer::Beta::Link.new(href: settings_path, underline: true)) { "settings page" } %>.
+  <% elsif reason == :has_trial %>
+    <% if is_business? && !is_standalone_business? %>
+      All organization in this account have access to GitHub Copilot via trial. Contact the sales team or select a different enterprise account.
+    <% elsif is_organization? %>
+      <%
+        copilot_org = Copilot::Organization.new(selected_account)
+        copilot_trial = copilot_org.business_trial
+      %>
+      This account has access to a GitHub Copilot <%= copilot_trial.copilot_plan.capitalize %> trial for another <%= pluralize(copilot_trial.days_left, "day") %>. Contact the sales team or select a different organization.
+    <% end %>
+  <% elsif reason == :copilot_disabled_by_parent %>
+    This organization's enterprise has disabled Copilot access. Contact your enterprise administrator to enable it.
+  <% elsif reason == :has_legacy_plan %>
+    GitHub Copilot is not available for accounts on legacy billing plans.
+    Review your pricing plan to get access to this feature. For more information, <%= render(Primer::Beta::Link.new(href: Copilot::COPILOT_BILLING_DOCUMENTATION, underline: true)) { "read the billing documentation" } %>.
+  <% elsif reason == :not_billable %>
+    Update your payment method information to enable GitHub Copilot.
+  <% elsif reason == :owned_by_parent %>
+    This organization is managed by an enterprise account. To enable GitHub Copilot for this organization,
+    <% if account_is_adminable_by_user? %>
+      <% if Copilot::Business.new(@selected_account.business).copilot_enabled? %>
+        <%= render(Primer::Beta::Link.new(underline: true, href: settings_copilot_enterprise_path(@selected_account.business))) { "visit your enterprise settings page" } %>.
+      <% else %>
+        select this organization's parent enterprise using the account switcher below.
+      <% end %>
+    <% else %>
+      contact your enterprise administrator.
+    <% end %>
+  <% end %>
+<% end %>

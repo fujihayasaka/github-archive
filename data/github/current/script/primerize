@@ -1,0 +1,107 @@
+#! /bin/bash
+
+set -euo pipefail
+
+cd "${0%/*}"/..
+
+github_workspace_root="$PWD"
+primer_workspace_root="../primer"
+
+setup_primer_workspaces() {
+  if [ ! -d "$primer_workspace_root" ]; then
+    mkdir -p $primer_workspace_root
+  fi
+}
+
+setup_primer_react() {
+  cd $primer_workspace_root
+
+  if [ ! -d "react" ]; then
+    gh repo clone primer/react
+  else
+    cd react
+    git pull origin main
+    cd ..
+  fi
+
+  cd react
+  script/setup
+
+  cd $github_workspace_root
+
+  if [[ $(which node) ]]; then
+    endemic_packages=$(node script/primerize_helpers/print-prc-endemic-packages.mjs || echo "");
+  else
+    endemic_packages="";
+    echo "Could not lock endemic package versions because no node executable could be found"
+  fi
+
+  # Install PRC from local path as well as "endemic" packages, i.e. packages that only
+  # PRC depends on. This effectively locks these packages to the versions that are
+  # already installed in dotcom, which should hopefully prevent surprises.
+  npm install /workspaces/primer/react/packages/react $endemic_packages
+
+  # Make diffs smaller by pretending nothing has changed in node_modules.
+  git update-index --assume-unchanged $(git ls-files node_modules/@primer/react)
+}
+
+link_primer_package() {
+  pushd "$github_workspace_root/npm-workspaces/primer" > /dev/null
+  echo "Running npm link $1 in $github_workspace_root/npm-workspaces/primer"
+  npm link $1
+  popd > /dev/null
+}
+
+unlink_primer_package() {
+  pushd "$github_workspace_root/npm-workspaces/primer" > /dev/null
+  npm unlink $1
+  popd > /dev/null
+}
+
+reset_primer_react() {
+  if [[ $(which node) ]]; then
+    node script/primerize_helpers/remove-prc-endemic-packages.mjs || true
+  else
+    echo "Could not remove endemic packages because no node executable could be found"
+  fi
+
+  prc_version=$(jq -r '.dependencies."@primer/react"' npm-workspaces/primer/package.json)
+  npm install @primer/react@$prc_version
+  npm uninstall @primer/react
+  npm install @primer/react@$prc_version -w npm-workspaces/primer
+  # sleep 1
+  git checkout package-lock.json node_modules/@primer/react
+  npm install
+  git update-index --no-assume-unchanged $(git ls-files node_modules/@primer/react)
+}
+
+case "${1:---help}:${2:-primer/react}" in
+  "setup:workspace" )
+    code --add $primer_workspace_root
+    exit 0
+  ;;
+  "setup:primer/react" )
+    echo "Setting up primer/react"
+    setup_primer_workspaces
+    setup_primer_react
+    exit 0
+    ;;
+  "start:primer/react" )
+    cd $primer_workspace_root/react/packages/react
+    npx rollup -c -w --no-watch.clearScreen
+    ;;
+  "reset:primer/react" )
+    echo "Resetting primer/react"
+    reset_primer_react
+    git checkout -- "$github_workspace_root/npm-workspaces/primer"
+    npm i
+    exit 0
+    ;;
+  * )
+    echo "Usage: $(basename $0) [setup|start|reset] [repo]"
+    echo "       $(basename $0) setup primer/react"
+    echo "       $(basename $0) setup workspace       [Add the Primer folder to your VSCode workspace]"
+    echo "       $(basename $0) start primer/react    [Start the rebuild watcher for primer/react]"
+    exit 0
+    ;;
+esac

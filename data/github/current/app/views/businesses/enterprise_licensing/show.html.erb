@@ -1,0 +1,66 @@
+<% if this_business.feature_enabled?(:enterprise_licensing_feedback_survey) %>
+    <%= render Licensing::FeedbackLinkComponent.new(
+      business_slug: this_business.slug,
+      survey_id: "enterprise-licensing-admins-feedback-survey",
+      mb: 3,
+    ) do |component| %>
+      <% component.with_heading(tag: :h3, font_size: 4) do %>
+        Can you give us some feedback?
+      <% end %>
+      <% component.with_description do %>
+        Tell us how you're using enterprise licensing. <%= render(Primer::Beta::Link.new(href: Licensing::FeedbackLinkComponent::FEEDBACK_SCHEDULING_URL, underline: true)) { "Book some time" } %> with us to share how you're using enterprise licensing and share any feedback you may have.
+      <% end %>
+    <% end %>
+  <% end %>
+
+<%
+  if this_business.customer&.billed_via_billing_platform?
+    title = "Licensing"
+    selected_link = :business_licensing
+  else
+    title = "Enterprise licensing"
+    selected_link = :enterprise_licensing
+  end
+
+  page_info title: title,
+    selected_link: selected_link,
+    stafftools: stafftools_enterprise_path(this_business) %>
+<%= render layout: "businesses/layout",
+  locals: {
+    business: this_business,
+    title: title,
+  } do %>
+
+  <% view = Businesses::EnterpriseLicensing::ShowView.new(business: this_business, viewer: current_user) %>
+  <% is_copilot_only = this_business.copilot_licensing_enabled? && this_business.seats_plan_basic? %>
+
+  <%= render Billing::Settings::EnterpriseWithOutstandingInvoicesPleasePayComponent.new(business: this_business, current_user: current_user) %>
+
+  <% if this_business.feature_enabled?(:ghe_sales_serve_renewals) && !Billing::Settings::EnterpriseContractGlobalExpirationBannerComponent.new(business: this_business, current_user: current_user).render? %>
+    <%= render Billing::Settings::EnterpriseContractEarlyExpirationBannerComponent.new(business: this_business, current_user: current_user) %>
+    <%= render Billing::Settings::EnterpriseContractStatusBannerComponent.new(business: this_business, current_user: current_user) %>
+  <% end %>
+
+  <div data-hpc>
+    <%= render "businesses/enterprise_licensing/copilot_standalone_licenses", view: view if enterprise_copilot_licensing_enabled?(this_business) %>
+
+    <% if !is_copilot_only %>
+      <%= render_react_partial(
+        name: "licensing-enterprise-overview",
+        ssr: true,
+        props: {
+          enterpriseContactUrl: ent_contact_url,
+          ghe: ghe_overview_react_payload(business: this_business, preopen_seat_management: params[:manage_seats] == 'true'),
+          slug: this_business.slug,
+        }
+      ) %>
+    <% end %>
+
+    <%= render "businesses/enterprise_licensing/advanced_security", view: view %>
+
+    <% if !is_copilot_only && (this_business.metered_ghes_eligible? || !this_business.metered_plan?) %>
+      <%= render "businesses/enterprise_licensing/enterprise_server_licenses", view: view %>
+      <%= render "businesses/enterprise_licensing/enterprise_server_instances", view: view %>
+    <% end %>
+  </div>
+<% end %>

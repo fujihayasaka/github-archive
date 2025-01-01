@@ -1,0 +1,184 @@
+#!/usr/bin/env ruby
+
+# frozen_string_literal: true
+
+require "net/http"
+require "json"
+require "fileutils"
+require "open3"
+
+KUSTAINER_PORT = 42000
+
+def execute_management_command(command)
+  uri = URI("http://localhost:#{KUSTAINER_PORT}/v1/rest/mgmt")
+  request = Net::HTTP::Post.new(uri.path, { "Content-Type" => "application/json" })
+  request.body = { csl: command }.to_json
+
+  response = http = Net::HTTP.start(uri.host, uri.port, use_ssl: false) do |http|
+    http.request(request)
+  end
+  response.body
+end
+
+def table_exists?(table_name)
+  result = execute_management_command(".show tables")
+  JSON
+    .parse(result)["Tables"]
+    .flat_map { |t| t["Rows"] }
+    .map { |r| r[0] }
+    .include?(table_name)
+end
+
+def drop_table(table_name)
+  execute_management_command(".drop table #{table_name}")
+end
+
+def create_table(table_name)
+
+  dotcom_fields = [
+    "timestamp:datetime",
+    "http_method:string",
+    "api_route:string",
+    "subject_name:string",
+    "actor_name:string",
+    "subject_type:string",
+    "subject_id:long",
+    "actor_type:string",
+    "actor_id:long",
+    "auth_type:string",
+    "request_org_id:long",
+    "current_user:string",
+    "current_user_id:long",
+    "integration_id:long",
+    "integration_installation_id:long",
+    "oauth_application_id:long",
+    "is_primary_rate_limited:bool",
+    "total_request_count:long",
+    "rate_limited_request_count:long",
+    "latest_request_timestamp:datetime"
+  ]
+
+  proxima_fields = [
+    "timestamp:datetime",
+    "http_method:string",
+    "api_route:string",
+    "subject_name:string",
+    "actor_name:string",
+    "subject_type:string",
+    "subject_id:long",
+    "actor_type:string",
+    "actor_id:long",
+    "auth_type:string",
+    "request_org_id:long",
+    "current_user:string",
+    "current_user_id:long",
+    "integration_id:long",
+    "integration_installation_id:long",
+    "oauth_application_id:long",
+    "is_primary_rate_limited:bool",
+    "tenant_id:long",
+    "total_request_count:long",
+    "rate_limited_request_count:long",
+    "latest_request_timestamp:datetime"
+  ]
+
+  if ARGV.include?("--proxima")
+    fields = proxima_fields
+  else
+    fields = dotcom_fields
+  end
+
+  command = ".create table #{table_name} (#{fields.join(", ")})"
+  execute_management_command(command)
+end
+
+def ingest_data_into_table(table_name)
+  data_file_path = "script/seeds/data/api_insights/#{table_name}.csv"
+
+  unless File.exist?(data_file_path)
+    log("Data file not found: #{data_file_path}")
+    return false
+  end
+
+  execute_management_command <<~COMMAND
+    .ingest inline into table #{table_name} <|
+    #{File.read(data_file_path)}
+  COMMAND
+end
+
+def start_kustainer
+  kustainer_dir = "/workspaces/github/.kustainer"
+  FileUtils.mkdir_p(kustainer_dir)
+
+  log("Starting Kustainer...")
+  system("docker run -e ACCEPT_EULA=Y -m 4G -d -p #{KUSTAINER_PORT}:8080 -t -v #{kustainer_dir}:/kusto/tmp/Kusto.Personal --name kustainer mcr.microsoft.com/azuredataexplorer/kustainer-linux:latest")
+end
+
+def kustainer_is_ready?
+  uri = URI("http://localhost:#{KUSTAINER_PORT}")
+  response = Net::HTTP.get_response(uri)
+  response.code.to_i < 400 # This will accept 302s and 200s, but not 400s or 500s
+end
+
+def wait_until_kustainer_is_ready
+  log("Waiting for Kustainer to be ready...")
+
+  20.times do |retries|
+    log("Attempt #{retries + 1}: Checking if Kustainer is ready...")
+    if kustainer_is_ready?
+      log("Kustainer is ready.")
+      return
+    end
+    sleep 1
+  end
+
+  log("Kustainer is not ready after 20 attempts.")
+  exit 1
+end
+
+def kustainer_is_running?
+  system("docker ps | grep -q kustainer")
+end
+
+def kustainer_exists?
+  system("docker ps -a | grep -q kustainer")
+end
+
+def log(message)
+  puts "#{Time.now.utc.strftime("%Y-%m-%dT%H:%M:%S.%5N")}Z: #{message}"
+end
+
+if kustainer_is_running?
+  log("Kustainer is already running.")
+else
+  if kustainer_exists?
+    log("Kustainer exists but is not running. Starting Kustainer...")
+    system("docker start kustainer")
+  else
+    log("Kustainer does not exist. Starting Kustainer...")
+    start_kustainer
+  end
+end
+
+wait_until_kustainer_is_ready
+
+table_name = "APIINSIGHTS_stats_v1"
+
+if ARGV.include?("--reset")
+  log("Dropping table #{table_name}...")
+  drop_table(table_name)
+  log("Table #{table_name} dropped.")
+end
+
+if table_exists?(table_name)
+  log("Table #{table_name} already exists.")
+  exit 0
+end
+
+log("Creating table #{table_name}...")
+create_table(table_name)
+log("Table #{table_name} created.")
+
+log("Ingesting data into table #{table_name}...")
+ingest_data_into_table(table_name)
+log("Data ingested into table #{table_name}.")

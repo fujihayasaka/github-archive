@@ -1,0 +1,81 @@
+<% page_info title: "Deleted organizations", selected_link: :deleted_organizations %>
+
+<%= render layout: "stafftools/stafftools" do %>
+  <%= render Primer::Beta::Subhead.new do |component| %>
+    <% component.with_heading(tag: :h2) do %>
+      Deleted organizations
+    <% end %>
+  <% end %>
+
+  <%= render Stafftools::SimpleSearchFormComponent.new(
+    query_label: "Search organizations",
+    form_url: stafftools_deleted_organizations_path
+  ) %>
+
+  <% if deleted_orgs.any? %>
+    <%= render Primer::Beta::BorderBox.new(padding: :condensed) do |component| %>
+      <% deleted_orgs.each do |org| %>
+        <% component.with_row(clearfix: true) do %>
+          <div class="d-flex flex-items-center" <%= test_selector "li-deleted-org-#{org.id}" %>>
+            <%= avatar_for org, 20, class: :avatar %>
+            <div class="flex-auto ml-2">
+              <% if org.profile_name.present? %>
+                <span class="text-semibold"><%= org.profile_name %></span> &ndash;
+              <% end %>
+              <span class="text-mono"><%= org.login %></span>
+              <% if org.legal_hold %>
+                <%= render(Primer::Beta::Label.new(
+                    scheme: :danger,
+                    ml: 1
+                  )) { "Legal hold" } %>
+              <% end %>
+            </div>
+            <%= render Stafftools::Organizations::RestoreOrganizationDialogComponent.new(
+              organization: org,
+              business: org.business,
+              return_to: stafftools_deleted_organizations_path,
+            ) %>
+            <%= render Stafftools::Organizations::PurgeOrganizationDialogComponent.new(
+              organization: org,
+              with_show_button: true
+            ) %>
+          </div>
+          <div class="flex-auto mt-1">
+            <span>Deleted <%= time_ago_in_words_js org.soft_deleted_organization.created_at %></span>
+            <span>
+              &middot;
+              <%= render(
+                Primer::Beta::Link.new(
+                  href: stafftools_audit_log_path(
+                    query: driftwood_ade_query?(current_user) ? org.audit_log_kql_query : org.audit_log_query
+                  ),
+                  test_selector: "deleted-org-#{org.id}-audit-log-link"
+                )
+              ) { "Search audit logs" } %>
+            </span>
+            <% if GitHub.billing_enabled? %>
+              <span>
+                &middot;
+                <%= render(
+                  Primer::Beta::Link.new(
+                    href: stafftools_deleted_account_transactions_path(deleted_user_id: org.id, deleted_handle: org.login),
+                    test_selector: "deleted-org-#{org.id}-payment-history-link"
+                  )
+                ) { "Payment history" } %>
+              </span>
+            <% end %>
+          </div>
+        <% end %>
+      <% end %>
+    <% end %>
+    <div class="paginate-container">
+      <%= will_paginate deleted_orgs %>
+    </div>
+  <% else %>
+    <%= render Primer::Beta::Blankslate.new do |c| %>
+      <% c.with_heading(tag: :h2) do %>
+        No deleted organizations to show.
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

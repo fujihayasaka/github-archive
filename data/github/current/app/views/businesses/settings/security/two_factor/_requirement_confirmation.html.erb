@@ -1,0 +1,167 @@
+<%
+  users_with_two_factor_disabled = business.affiliated_users_with_two_factor_disabled
+  users_with_two_factor_disabled_to_display = users_with_two_factor_disabled.first(100)
+  affiliated_users_with_two_factor_disabled = business.affiliated_users_with_two_factor_disabled
+  outside_collaborators_with_two_factor_disabled = business.outside_collaborators_with_two_factor_disabled
+  members_owners_admins_with_two_factor_disabled = affiliated_users_with_two_factor_disabled - outside_collaborators_with_two_factor_disabled
+  users_with_two_factor_disabled_to_display = members_owners_admins_with_two_factor_disabled.first(100)
+  outside_collaborators_with_two_factor_disabled_to_display = outside_collaborators_with_two_factor_disabled.first(100)
+  members_without_2fa_allowed = business.members_without_2fa_allowed?
+%>
+
+<input id="two-factor-business-name" type="hidden" name="business_name" value="<%= business.name %>">
+
+<% if business.can_disallow_two_factor_methods? %>
+  <%
+    if business.two_factor_requirement_enabled?
+      dialog_title = "Are you sure you want to remove the two-factor authentication for all organizations in #{business.name}?"
+      button_scheme = :danger
+    else
+      dialog_title = "Are you sure you want to require two-factor authentication for all organizations in #{business.name}?"
+      button_scheme = :primary
+    end
+  %>
+
+  <%= render layout: "shared/details_dialog", locals: {
+      button_text: "Save",
+      button_class: "btn js-business-two-factor-submit-button float-left mr-4",
+      disabled: true,
+      details_class: "d-inline-block js-business-two-factor-confirmation-dialog",
+      title: dialog_title,
+    } do %>
+      <div class="m-2">
+        <div class="ml-2 my-2 js-business-two-factor-confirmation-dialog-body">
+          <%#
+            Based on the changes the current state and the user has made to the checkboxes, we need to dyamically
+            update the contents of the confirmation dialog.  So we render all of them as hidden spans and dynamically
+            unhide then prior to showing the dialog with JS.
+
+            The title of the dialog in updated directly in the Typescript code because it is a string, not HTML content.
+          %>
+
+          <%# disabling requirement entirely (default if secure methods feature disabled and require enabled) %>
+          <span id="tfrc-disabling-requirement" <%= "hidden" unless business.two_factor_requirement_enabled? %>>
+            <p>Two-factor authentication will no longer be required to access any organization's resources in the <%= business.name %> enterprise.</p>
+            <p>Organizations that previous had set two-factor authentication requirements will keep those requirements.</p>
+            <p>Users' two-factor authentication methods will not be affected.</p>
+          </span>
+
+          <%# enabling requirement w/ secure methods %>
+          <span id="tfrc-enabling-requirement-with-secure-methods" hidden>
+            <p>Users will be required to set up two-factor authentication using a secure method in order to access organizations.</p>
+          </span>
+
+          <%# enabling requirement w/o secure methods (default if secure methods feature disabled and requirement disabled) %>
+          <span id="tfrc-enabling-requirement-without-secure-methods" <%= "hidden" if business.two_factor_requirement_enabled? %>>
+            <p>Users will be required to set up two-factor authentication in order to access organizations.</p>
+          </span>
+
+          <%# disabling secure methods for existing requirement %>
+          <span id="tfrc-disabling-secure-methods-only" hidden>
+            <p>Secure methods of two-factor authentication will no longer be required to access any organization's resources in the <%= business.name %> enterprise.</p>
+            <p>Organizations that previous required secure two-factor authentication methods will keep those requirements.</p>
+            <p>Users' two-factor authentication methods will not be affected.</p>
+          </span>
+
+          <%# enabling secure methods for existing requirement %>
+          <span id="tfrc-enabling-secure-methods-only" hidden>
+            <p>Users will be required to set up two-factor authentication using a secure method in order to access organizations.</p>
+          </span>
+        </div>
+
+        <%= render Primer::Beta::Button.new(
+          type: :submit,
+          block: true,
+          scheme: button_scheme,
+          mt: 2,
+          w: :auto,
+          float: :right,
+          classes: "js-business-two-factor-confirmation-dialog-button",
+          "data-disable-invalid": "",
+          "data-disable-with": ""
+        ) do %>
+          Confirm
+        <% end %>
+      </div>
+    <% end %>
+<% else %>
+  <%= render layout: "shared/details_dialog", locals: {
+        button_text: "Save",
+        button_class: "btn js-business-two-factor-submit-button float-left mr-4",
+        details_class: "d-inline-block",
+        title: "Confirm two-factor requirement policy",
+      } do %>
+    <div class="Box-body scrollable-overlay">
+      <p>
+        <% if members_without_2fa_allowed %>
+          Requiring two-factor authentication will not remove any
+
+          <% if GitHub.single_business_environment? %>
+            users from organizations and repositories in
+          <% else %>
+            enterprise administrators or organization members from
+          <% end %>
+            the enterprise, however they will need to enable 2FA to access resources owned by the enterprise or any of its organizations.
+            <br>
+            <%= outside_collaborators_verbiage(this_business).capitalize %> who do not have 2FA will be removed and notified.
+        <% else %>
+          Requiring two-factor authentication will remove any
+          <% if GitHub.single_business_environment? %>
+            users from organizations and repositories in
+          <% else %>
+            enterprise administrators, organization members, and <%= outside_collaborators_verbiage(business) %> from
+          <% end %>
+            the enterprise who have not enabled it on their
+            <%= "personal" unless GitHub.single_business_environment? %> accounts.
+        <% end %>
+      </p>
+      <% if members_without_2fa_allowed %>
+        <%# stop separating members to stay vs OCs for removal after https://github.com/github/authorization/issues/4526 %>
+        <%# this should in the end be a single list w/ all affiliated users, none of whom get removed %>
+        <p class="<%= members_without_2fa_allowed ? "color-fg-attention" : "color-fg-danger" %>">
+          <%= pluralize members_owners_admins_with_two_factor_disabled.count, "member" %>
+          <% if members_without_2fa_allowed %>
+            will need to enable 2FA
+          <% else %>
+            will be removed from <%= "organizations and repositories in" if GitHub.single_business_environment? %> the enterprise
+          <% end %>
+        </p>
+        <%= render partial: "businesses/settings/security/two_factor/requirement_confirmation_affected_users_list", locals: { users: users_with_two_factor_disabled_to_display } %>
+
+        <p class="color-fg-danger mt-2">
+          <%= pluralize outside_collaborators_with_two_factor_disabled.count, outside_collaborators_verbiage(this_business).singularize %>
+          will be removed from <%= "organizations and repositories in" if GitHub.single_business_environment? %> the enterprise
+        </p>
+        <%= render partial: "businesses/settings/security/two_factor/requirement_confirmation_affected_users_list", locals: { users: outside_collaborators_with_two_factor_disabled_to_display } %>
+      <% else %>
+        <p class="color-fg-danger mt-2">
+          <%= pluralize affiliated_users_with_two_factor_disabled.count, "user" %>
+          will be removed from <%= "organizations and repositories in" if GitHub.single_business_environment? %> the enterprise
+        </p>
+        <%= render partial: "businesses/settings/security/two_factor/requirement_confirmation_affected_users_list", locals: { users: affiliated_users_with_two_factor_disabled } %>
+      <% end %>
+    </div>
+    <div class="Box-footer">
+      <label>
+        Enter the enterprise name to confirm
+        <input name="verify" type="text" class="form-control input-block mt-1" pattern="<%= case_insensitive_pattern business.name %>" required autofocus>
+      </label>
+      <input type="hidden" name="two_factor_required" value="enabled">
+      <%= render Primer::Beta::Button.new(
+        type: :submit,
+        block: true,
+        scheme: (members_without_2fa_allowed && !outside_collaborators_with_two_factor_disabled.any? ? :primary : :danger),
+        label_wrap: true,
+        mt: 2,
+        "data-disable-invalid": "",
+        "data-disable-with": ""
+      ) do %>
+        <% if members_without_2fa_allowed %>
+          Remove <%= pluralize_without_number outside_collaborators_with_two_factor_disabled.count, outside_collaborators_verbiage(this_business).singularize %> & require two-factor authentication
+        <% else %>
+          Remove <%= pluralize_without_number affiliated_users_with_two_factor_disabled.count, "user" %> & require two-factor authentication
+        <% end %>
+      <% end %>
+    </div>
+  <% end %>
+<% end %>

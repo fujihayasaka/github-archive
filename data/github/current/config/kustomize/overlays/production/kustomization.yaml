@@ -1,0 +1,549 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+    - unicorn/
+    - unicorn-api/
+    - unicorn-performance/
+    - unicorn-api-graphql/
+    - unicorn-api-graphql-performance/
+    - unicorn-gitauth-api/
+    - unicorn-gitauth-api-performance/
+    - unicorn-internal-api/
+    - ../../base/commonBase
+    - ../../base/production
+    - ../../base/commonBase/feature-flag-update-processor/feature-flag-update-processor-3
+
+components:
+  - ../../base/istio-perf-eng
+  - ../../base/metric-attribution
+
+images:
+    - name: octofactory.service.private-us-east-1.github.net/moda-artifacts-docker/docker-nginx
+      digest: sha256:47957b8c0f58b73ab5fb6a4f10215671e7120e2cb38316cfbfc1fb2cc6fe1e1f
+configMapGenerator:
+    - name: elasticsearch
+      behavior: merge
+      literals:
+        - AUDITLOGSEARCH3_URL=https://auditlogsearch3-ssl.service.iad.github.net
+        - COMMIT_SEARCH_1_URL=https://commit-search-1.service.iad.github.net
+        - GENERAL_SEARCH_1_URL=https://general-search-1.service.iad.github.net
+        - GITHUBSEARCH6_URL=https://githubsearch6-ssl.service.iad.github.net
+replicas:
+    - name: actions-usage-relay
+      count: 4
+    # The unicorn-gitauth-api replicas are set in the patch ./patches/deployments/unicorn-gitauth-api.yaml
+    # The replicas directive cannot filter on labels at this time, so setting it here would set it
+    # for unicorn-gitauth-api-performance as well (which we don't want)
+    # - name: unicorn-gitauth-api
+    #   count: NOT_SET_HERE
+patchesJson6902:
+    - target:
+        kind: Deployment
+        name: unicorn-api
+      patch: |-
+        - op: add
+          path: /spec/template/metadata/labels/sidecar.istio.io~1inject
+          value: "true"
+        - op: add
+          path: /spec/template/metadata/labels/istio.io~1rev
+          value: "stable"
+        - op: replace
+          path: /spec/template/spec/dnsPolicy
+          value: "ClusterFirst"
+        - op: add
+          path: /spec/template/metadata/labels/scheduling-size
+          value: "large"
+        - op: replace
+          path: /metadata/annotations/heaven.githubapp.com~1cluster-preferences
+          value: |-
+            {
+              "dotcom-9-va3-iad": {
+                "spec": {
+                  "template": {
+                    "spec": {
+                      "topologySpreadConstraints":[{
+                        "maxSkew": 2,
+                        "topologyKey": "kubernetes.io/hostname",
+                        "whenUnsatisfiable": "ScheduleAnyway",
+                        "labelSelector": {
+                          "matchLabels": {
+                            "scheduling-size": "large"
+                          }
+                        }
+                      }]
+                    }
+                  }
+                }
+              },
+              "dotcom-8-va3-iad": {
+                "spec": {
+                  "replicas": 196,
+                  "template": {
+                    "spec": {
+                      "containers": [
+                        {
+                          "name": "unicorn",
+                          "env": [
+                            {
+                              "name": "GH_UNICORN_WORKER_COUNT",
+                              "value": "11"
+                            }
+                          ],
+                          "resources": {
+                            "requests": {
+                              "cpu": 7,
+                              "memory": "18Gi"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+    - target:
+        kind: Deployment
+        name: unicorn-api-graphql
+      patch: |-
+        - op: remove
+          path: /spec/template/metadata/annotations/traffic.sidecar.istio.io~1excludeOutboundPorts
+        - op: add
+          path: /spec/template/metadata/labels/scheduling-size
+          value: "large"
+        - op: replace
+          path: /metadata/annotations/heaven.githubapp.com~1cluster-preferences
+          value: |-
+            {
+              "dotcom-9-va3-iad": {
+                "spec": {
+                  "template": {
+                    "spec": {
+                      "topologySpreadConstraints":[{
+                        "maxSkew": 2,
+                        "topologyKey": "kubernetes.io/hostname",
+                        "whenUnsatisfiable": "ScheduleAnyway",
+                        "labelSelector": {
+                          "matchLabels": {
+                            "scheduling-size": "large"
+                          }
+                        }
+                      }]
+                    }
+                  }
+                }
+              }
+            }
+    - target:
+        kind: Deployment
+        name: unicorn-api-graphql-performance
+      patch: |-
+        - op: replace
+          path: /metadata/annotations/heaven.githubapp.com~1cluster-preferences
+          value: ""
+        - op: remove
+          path: /spec/template/metadata/annotations/traffic.sidecar.istio.io~1excludeOutboundPorts
+        - op: remove
+          path: /spec/template/metadata/labels/istio.io~1rev
+        - op: replace
+          path: /spec/template/metadata/labels/sidecar.istio.io~1inject
+          value: "false"
+        - op: replace
+          path: /spec/template/spec/dnsPolicy
+          value: Default
+
+    - target:
+        kind: Service
+        name: unicorn-api-graphql-performance
+      patch: |-
+        - op: replace
+          path: /metadata/annotations/heaven.githubapp.com~1cluster-preferences
+          value: ""
+        - op: add
+          path: /metadata/annotations/octomesh.github.com~1paused
+          value: "true"
+    - target:
+        kind: Service
+        name: unicorn-api-performance
+      patch: |-
+        - op: replace
+          path: /metadata/annotations/heaven.githubapp.com~1cluster-preferences
+          value: ""
+        - op: add
+          path: /metadata/annotations/octomesh.github.com~1paused
+          value: "true"
+    - target:
+        kind: Deployment
+        name: unicorn-api-graphql-performance
+      patch: |-
+        - op: replace
+          path: /metadata/annotations/heaven.githubapp.com~1cluster-preferences
+          value: ""
+    - target:
+        kind: Service
+        name: unicorn-api-graphql-performance
+      patch: |-
+        - op: replace
+          path: /metadata/annotations/heaven.githubapp.com~1cluster-preferences
+          value: ""
+        - op: add
+          path: /metadata/annotations/octomesh.github.com~1paused
+          value: "true"
+    - target:
+        kind: Service
+        name: unicorn-api-performance
+      patch: |-
+        - op: replace
+          path: /metadata/annotations/heaven.githubapp.com~1cluster-preferences
+          value: ""
+    - target:
+        kind: Deployment
+        name: unicorn-api-graphql-performance
+      patch: |-
+        - op: replace
+          path: /metadata/annotations/heaven.githubapp.com~1cluster-preferences
+          value: ""
+    - target:
+        kind: Deployment
+        name: unicorn-internal-api
+      patch: |-
+        # If you're decreasing this value, make sure to also update the
+        # corresponding `acl site_dead` configuration in the kube-dotcom-ingress
+        # repo
+        # (https://github.com/github/kube-dotcom-ingress/blob/main/config/helm/production/haproxytech-ingress-dotcom-unicorn-internal-api.yaml)
+        # and deploy that change first. Reach out to #service-mesh for guidance.
+        - op: replace
+          path: /spec/replicas
+          value: 60
+        - op: add
+          path: /metadata/annotations/heaven.githubapp.com~1deploy-requirement
+          value: true
+        - op: add
+          path: /metadata/annotations/moda.github.net~1allow-missing-ready-pods
+          value: "3"
+        - op: add
+          path: /spec/strategy/rollingUpdate/maxUnavailable
+          value: 3
+        - op: add
+          path: /spec/template/spec/containers/1/env/-
+          value:
+            name: GH_HOSTNAME
+            value: github.com
+        - op: add
+          path: /metadata/annotations/moda.github.net~1canary-v2
+          value: "true"
+        - op: add
+          path: /metadata/annotations/moda.github.net~1canary-replicas
+          value: 6
+        - op: add
+          path: /metadata/annotations/moda.github.net~1canary-label
+          value: "role"
+        - op: replace
+          path: /spec/template/spec/containers/1/resources/requests/cpu
+          value: 11
+        - op: replace
+          path: /spec/strategy/rollingUpdate/maxSurge
+          value: "35%"
+        - op: add
+          path: /spec/template/spec/containers/1/env/-
+          value:
+            name: OTEL_MESH_ENABLED
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.labels['sidecar.istio.io/inject']
+        - op: add
+          path: /spec/template/metadata/labels/scheduling-size
+          value: "large"
+        - op: replace
+          path: /metadata/annotations/heaven.githubapp.com~1cluster-preferences
+          value: |-
+            {
+              "dotcom-9-va3-iad": {
+                "spec": {
+                  "template": {
+                    "spec": {
+                      "topologySpreadConstraints":[{
+                        "maxSkew": 2,
+                        "topologyKey": "kubernetes.io/hostname",
+                        "whenUnsatisfiable": "ScheduleAnyway",
+                        "labelSelector": {
+                          "matchLabels": {
+                            "scheduling-size": "large"
+                          }
+                        }
+                      }]
+                    }
+                  }
+                }
+              }
+            }
+    - target:
+        kind: Service
+        name: unicorn-internal-api
+      patch: |-
+        - op: add
+          path: /metadata/annotations/haproxy.org~1check-interval
+          value: "5s"
+        - op: add
+          path: /metadata/annotations/kubernetes.io~1ingress.class
+          value: "haproxytech-unicorn-internal-api"
+        - op: add
+          path: /metadata/annotations/haproxy.org~1load-balance
+          value: "leastconn"
+        - op: add
+          path: /metadata/annotations/haproxy.org~1backend-config-snippet
+          value: |-
+            option redispatch 1
+            option httpchk
+            http-check connect
+            http-check send meth GET uri /site/sha ver HTTP/1.1 hdr host github.com
+
+    - target:
+        kind: Job
+        name: transition-template-job
+      patch: |-
+        - op: add
+          path: /spec/template/spec/containers/1/env/-
+          value:
+            name: GH_HOSTNAME
+            value: github.com
+        - op: add
+          path: /spec/template/spec/containers/1/env/-
+          value:
+            name: SMTP_HOST
+            value: smtp.service.github.net
+        - op: replace
+          path: /spec/template/spec/containers/1/resources/requests/cpu
+          value: 2
+        - op: replace
+          path: /spec/template/spec/containers/0/env/0/value
+          value: "https://query-analyzer-production.service.iad.github.net"
+    - target:
+        kind: Namespace
+        name: base-namespace
+      patch: |-
+        - op: replace
+          path: /metadata/name
+          value: github-production
+        - op: replace
+          path: "/metadata/labels/github.com~1name"
+          value: github-production
+    - target:
+        kind: Deployment
+        name: code-scanning-alert-event-processor
+      patch: |-
+        - op: add
+          path: /spec/template/spec/containers/0/env/-
+          value:
+            name: GH_HOSTNAME
+            value: github.com
+    - target:
+        kind: Deployment
+        name: code-scanning-processed-analysis-processor
+      patch: |-
+        - op: add
+          path: /spec/template/spec/containers/0/env/-
+          value:
+            name: GH_HOSTNAME
+            value: github.com
+    - target:
+        kind: ResourceQuota
+        name: pod-object-count
+      patch: |-
+        - op: replace
+          path: /metadata/namespace
+          value: github-production
+    - target:
+        kind: Deployment
+        name: billing-platform-actions-usage-relay
+      patch: |-
+        - op: replace
+          path: /spec/replicas
+          value: 2
+    - target:
+        kind: ConfigMap
+        name: elasticsearch
+      patch: |-
+        - op: add
+          path: /metadata/annotations
+          value:
+            moda.github.net/canary-v2: "true"
+    - target:
+        kind: ConfigMap
+        name: observability-config
+      patch: |-
+        - op: add
+          path: /metadata/annotations
+          value:
+            moda.github.net/canary-v2: "true"
+    - target:
+        kind: ConfigMap
+        name: unicorn-api-nginx-conf
+      patch: |-
+        - op: add
+          path: /metadata/annotations/moda.github.net~1canary-v2
+          value: "true"
+    - target:
+        kind: ConfigMap
+        name: unicorn-gitauth-api-nginx-conf
+      patch: |-
+        - op: add
+          path: /metadata/annotations
+          value:
+            moda.github.net/canary-v2: "true"
+    - target:
+        kind: ConfigMap
+        name: unicorn-internal-api-nginx-conf
+      patch: |-
+        - op: add
+          path: /metadata/annotations
+          value:
+            moda.github.net/canary-v2: "true"
+    - target:
+        kind: ConfigMap
+        name: unicorn-nginx-conf-stafftools-fe
+      patch: |-
+        - op: add
+          path: /metadata/annotations
+          value:
+            moda.github.net/canary-v2: "true"
+    - target:
+        kind: ConfigMap
+        name: unicorn-nginx-conf
+      patch: |-
+        - op: add
+          path: /metadata/annotations
+          value:
+            moda.github.net/canary-v2: "true"
+    - target:
+        kind: Deployment
+        name: unicorn
+      patch: |-
+        - op: add
+          path: /metadata/annotations/heaven.githubapp.com~1deploy-requirement
+          value: true
+        - op: add
+          path: /spec/template/spec/containers/2/env/-
+          value:
+            name: SMTP_HOST
+            value: smtp.service.github.net
+        - op: add
+          path: /spec/template/spec/containers/2/env/-
+          value:
+            name: GH_HOSTNAME
+            value: github.com
+        - op: add
+          path: /spec/template/metadata/labels/scheduling-size
+          value: "large"
+        - op: replace
+          path: /metadata/annotations/heaven.githubapp.com~1cluster-preferences
+          value: |-
+            {
+              "dotcom-9-va3-iad": {
+                "spec": {
+                  "template": {
+                    "spec": {
+                      "topologySpreadConstraints":[{
+                        "maxSkew": 2,
+                        "topologyKey": "kubernetes.io/hostname",
+                        "whenUnsatisfiable": "ScheduleAnyway",
+                        "labelSelector": {
+                          "matchLabels": {
+                            "scheduling-size": "large"
+                          }
+                        }
+                      }]
+                    }
+                  }
+                }
+              },
+              "dotcom-8-va3-iad": {
+                "metadata": {
+                  "annotations": {
+                    "moda.github.net/canary-replicas": "10"
+                  }
+                },
+                "spec": {
+                  "replicas": 160,
+                  "template": {
+                    "spec": {
+                      "containers": [
+                        {
+                          "name": "unicorn",
+                          "env": [
+                            {
+                              "name": "GH_UNICORN_WORKER_COUNT",
+                              "value": "11"
+                            }
+                          ],
+                          "resources": {
+                            "requests": {
+                              "cpu": 7,
+                              "memory": "19Gi"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+    - target:
+        version: v1
+        kind: Deployment
+        name: unicorn-performance
+      patch: |-
+        - op: remove
+          path: /spec/template/metadata/labels/scheduling-size
+        - op: replace
+          path: /metadata/annotations/heaven.githubapp.com~1cluster-preferences
+          value: ""
+    - target:
+        version: v1
+        kind: Deployment
+        name: unicorn-api-graphql-performance
+      patch: |-
+        - op: remove
+          path: /spec/template/metadata/labels/scheduling-size
+patches:
+- target:
+    kind: Deployment
+    name: unicorn-api-graphql-performance
+  path: ./patches/remove-sidecar-resource-annotations.yaml
+- target:
+    kind: Deployment
+    name: unicorn-gitauth-api-performance
+  path: ./patches/remove-sidecar-resource-annotations.yaml
+- target:
+    kind: Deployment
+    name: unicorn-api-graphql
+  path: ./patches/remove-sidecar-resource-annotations.yaml
+- target:
+    kind: Deployment
+    name: unicorn-performance
+  path: ./patches/net-and-tcp-configuration.yaml
+- path: ./patches/services/unicorn-gitauth-api.yaml
+  target:
+    labelSelector: "kustomizeOverlayName=base__commonBase__unicorn-gitauth-api"
+    kind: Service
+    version: v1
+    name: unicorn-gitauth-api
+- path: ./patches/deployments/unicorn-gitauth-api.yaml
+  target:
+    labelSelector: "kustomizeOverlayName=base__commonBase__unicorn-gitauth-api"
+    kind: Deployment
+    group: apps
+    version: v1
+    name: unicorn-gitauth-api
+- path: ./patches/deployments/unicorn-gitauth-api-common.yaml
+  target:
+    kind: Deployment
+    name: unicorn-gitauth-api
+    group: apps
+    version: v1
+- path: ./patches/services/unicorn-gitauth-api-common.yaml
+  target:
+    kind: Service
+    name: unicorn-gitauth-api
+    version: v1

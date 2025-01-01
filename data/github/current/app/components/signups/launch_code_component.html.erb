@@ -1,0 +1,147 @@
+<%# Cleanup Notes: All styles for this component are in app/assets/stylesheets/bundles/signup/launch_code.scss. When the newly branded signup flow is shipped in https://github.com/github/new-user-experience/issues/166, we should be able to clean up styles in app/assets/stylesheets/bundles/signup/general.scss %>
+
+<%
+  helpers.page_info(
+    title: "Launch code",
+    class: "header-overlay",
+    full_height: true,
+  )
+%>
+
+<div
+  data-color-mode="<%= color_theme %>"
+  data-light-theme="light"
+  data-dark-theme="dark"
+  class="launch-code-container"
+  <%= test_selector("launch-code-component") %>
+>
+  <%= render(Primer::Box.new) do %>
+    <%= render(Primer::Beta::Text.new(
+      font_size: 3,
+      font_weight: :bold,
+    ).with_content("Confirm your email address")) %>
+
+    <% if email.email %>
+      <div class="mt-2">
+        <%= render(Primer::Beta::Text.new) do %>
+          We have sent a code to <%= render(Primer::Beta::Text.new(font_weight: :bold).with_content(email.email)) %>
+        <% end %>
+      </div>
+    <% end %>
+
+    <% if show_launch_code? %>
+      <div class="mt-3 mb-3">
+        <%= render(Primer::Beta::Text.new(font_weight: :bold).with_content("Enter code")) %>
+      </div>
+    <% else %>
+      <p>Click the link inside to start using GitHub :)</p>
+    <% end %>
+
+    <% if show_launch_code? %>
+      <div <%= test_selector("launch-code-input") %>>
+        <launch-code data-pattern="[0-9]">
+          <%= form_with(url: account_verifications_path, data: { target: "launch-code.form" }) do |f| %>
+            <% hidden_fields_params.each do |key, value| %>
+              <%= hidden_field_tag key, value %>
+            <% end %>
+
+            <fieldset>
+              <div class="d-flex flex-justify-around gap-1">
+                <% launch_code_length.times do |index| %>
+                  <label for="launch-code-<%= index %>" class="sr-only">
+                    Digit <%= index + 1 %> of the launch code
+                  </label>
+                  <input
+                    id="launch-code-<%= index %>"
+                    type="text"
+                    autocomplete="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    name="launch_code[]"
+                    class="form-control f2 code-input-field"
+                    maxlength="1"
+                    size="1"
+                    pattern="[0-9]"
+                    autocomplete="off"
+                    aria-labelledby="launch-code-description"
+                    data-targets="launch-code.inputs"
+                    data-action="
+                      paste:launch-code#handlePaste
+                      keyup:launch-code#handleKeyNavigation
+                      input:launch-code#handleKeyInput
+                    "
+                    required
+                    <% if index == 0 %>autofocus<% end %>
+                  >
+                <% end %>
+              </div>
+            </fieldset>
+
+            <div data-target="launch-code.result" role="alert">
+              <% if error.present? %>
+                <div class="mt-4 warning-text" <%= test_selector("verification-error") %>>
+                  <%= error %>
+                </div>
+              <% end %>
+            </div>
+
+            <%= render(Primer::Beta::Button.new(
+              type: :submit,
+              block: true,
+              mt: 3,
+              pt: 3,
+              pb: 3,
+              font_size: 5,
+              classes: "continue-button"
+            )) do %>
+              Continue
+              <%= render(Primer::Beta::Octicon.new(:"chevron-right", size: :small)) %>
+            <% end %>
+          <% end %>
+        </launch-code>
+      </div>
+    <% end %>
+
+    <div class="mt-4">
+      Didn't get your email?
+      <%= form_with(
+      url: resend_verification_path,
+      method: :post,
+      class: "d-inline"
+      ) do |f| %>
+        <%= render Primer::Beta::Button.new(
+          type: :submit,
+          scheme: :link,
+          underline: true,
+          font_weight: :normal
+        ) do %>
+          Resend the code
+        <% end %>
+      <% end %>
+      or
+      <%= render(Primer::Beta::Link.new(href: update_email_path, underline: true)) { "update your email address" } %>.
+    </div>
+
+    <% if resent %>
+      <div class="mt-4 mb-4 success-text">
+        <%= render(Primer::Beta::Octicon.new(:"check-circle", size: :small)) %>
+        <%= render(Primer::Beta::Text.new.with_content("Email was resent")) %>
+      </div>
+    <% end %>
+
+    <% if Rails.env.development? && email.present? %>
+      <div class="js-warp-hide color-secondary-text">
+        Psst, Hubber:
+        <% if email.verification_token %>
+          in local development, you can use this launch code to verify your email:
+          <span class="branch-name"><%= email.verification_token %></span>
+        <% else %>
+          if you wait a second and reload this page, you should see the launch code to verify your email address
+          in local development.
+        <% end %>
+      </div>
+    <% end %>
+  <% end %>
+
+  <%= render Signups::TermsOfServiceComponent.new %>
+</div>

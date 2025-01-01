@@ -1,0 +1,173 @@
+<%# `view` is an instance of
+  Orgs::SecuritySettings::TwoFactorEnforcementConfirmationView %>
+
+<%# stop removing OCs w/ members_without_2fa_allowed after https://github.com/github/authorization/issues/4526 %>
+<%
+  removal_count = members_without_2fa_allowed ? outside_collabs_without_2fa_count : view.users_with_two_factor_disabled_count
+  removal_preview = view.users_with_two_factor_disabled
+%>
+
+<input id="two-factor-org-name" type="hidden" name="org_name" value="<%= view.organization.safe_profile_name %>">
+
+<% if view.organization.can_disallow_two_factor_methods? %>
+  <%
+    if view.organization.two_factor_requirement_enabled?
+      dialog_title = "Are you sure you want to remove the two-factor authentication for all users in #{view.organization.safe_profile_name}?"
+      button_scheme = :danger
+    else
+      dialog_title = "Are you sure you want to require two-factor authentication for all users in #{view.organization.safe_profile_name}?"
+      button_scheme = :primary
+    end
+  %>
+
+  <%= render layout: "shared/details_dialog", locals: {
+      button_text: "Save",
+      button_class: "btn js-org-two-factor-submit-button float-left mr-4",
+      disabled: true,
+      details_class: "d-inline-block js-org-two-factor-confirmation-dialog",
+      title: dialog_title,
+    } do %>
+      <div class="m-2">
+        <div class="ml-2 my-2 js-org-two-factor-confirmation-dialog-body">
+          <%#
+            Based on the changes the current state and the user has made to the checkboxes, we need to dyamically
+            update the contents of the confirmation dialog.  So we render all of them as hidden spans and dynamically
+            unhide them prior to showing the dialog with JS.
+
+            The title of the dialog in updated directly in the Typescript code because it is a string, not HTML content.
+          %>
+
+          <%# disabling requirement entirely (default if secure methods feature disabled and require enabled) %>
+          <span id="tfrc-disabling-requirement" <%= "hidden" unless view.organization.two_factor_requirement_enabled? %>>
+            <p>Two-factor authentication will no longer be required to access any resources in the <%= view.organization.safe_profile_name %> organization.</p>
+            <p>Users' two-factor authentication methods will not be affected.</p>
+          </span>
+
+          <%# enabling requirement w/ secure methods %>
+          <span id="tfrc-enabling-requirement-with-secure-methods" hidden>
+            <p>Users will be required to set up two-factor authentication using a secure method in order to access the <%= view.organization.safe_profile_name %> organization.</p>
+          </span>
+
+          <%# enabling requirement w/o secure methods (default if secure methods feature disabled and requirement disabled) %>
+          <span id="tfrc-enabling-requirement-without-secure-methods" <%= "hidden" if view.organization.two_factor_requirement_enabled? %>>
+            <p>Users will be required to set up two-factor authentication in order to access the <%= view.organization.safe_profile_name %> organization.</p>
+          </span>
+
+          <%# disabling secure methods for existing requirement %>
+          <span id="tfrc-disabling-secure-methods-only" hidden>
+            <p>Secure methods of two-factor authentication will no longer be required to access any organization's resources in the <%= view.organization.safe_profile_name %> organization.</p>
+            <p>Users' two-factor authentication methods will not be affected.</p>
+          </span>
+
+          <%# enabling secure methods for existing requirement %>
+          <span id="tfrc-enabling-secure-methods-only" hidden>
+            <p>Users will be required to set up two-factor authentication using a secure method in order to access the <%= view.organization.safe_profile_name %> organization.</p>
+          </span>
+        </div>
+
+        <% if members_without_2fa_allowed && removal_count > 0 %>
+          <div class="ml-2 my-2">
+            <p class="fgColor-danger">
+              <b><%= removal_count %> <%= "outside collaborator".pluralize(removal_count) %></b> will be removed from the
+              <b><%= view.organization.safe_profile_name %></b> organization and notified.
+            </p>
+            <label>
+              Enter this organization's name to confirm
+              <input type="text"
+                    class="form-control input-block mt-1"
+                    name="confirmation"
+                    pattern="<%= case_insensitive_pattern(view.organization.safe_profile_name) %>"
+                    required
+                    autofocus>
+            </label>
+          </div>
+        <% end %>
+
+        <input type="hidden" name="two_factor_requirement" value="on">
+        <%= render Primer::Beta::Button.new(
+          type: :submit,
+          block: true,
+          scheme: button_scheme,
+          mt: 2,
+          w: :full,
+          classes: "js-org-two-factor-confirmation-dialog-button",
+          "data-disable-invalid": "",
+          "data-disable-with": ""
+        ) do %>
+          Confirm
+        <% end %>
+      </div>
+    <% end %>
+<% else %>
+  <%= render layout: "shared/details_dialog", locals: {
+    button_text: "Save",
+    button_class: "btn ml-3",
+    details_class: "d-none js-confirm-2fa-modal",
+    dialog_class: "overflow-auto",
+    title: "Confirm two-factor enforcement",
+  } do %>
+    <div class="Box-body">
+      <p>
+        Requiring two-factor authentication will remove all
+        <%# say we don't remove OCs after https://github.com/github/authorization/issues/4526 %>
+        <%= members_without_2fa_allowed ? outside_collaborators_verbiage(view.organization) : "users" %>
+        in the <strong><%= view.organization.display_login %></strong> organization
+        who have not enabled it on their personal accounts.
+      </p>
+
+      <p class="color-fg-danger mb-0">
+        <strong>
+          <%= pluralize(removal_count, "user", "users") %>
+          will be removed from this organization
+        </strong>
+      </p>
+    </div>
+    <ul class="list-style-none overflow-auto flex-auto">
+      <% removal_preview.each do |user| %>
+      <li class="Box-row">
+        <%= avatar_for(user, 30, :class => "avatar") %>
+        <span class="ml-1"><%= user.display_login %></span>
+        <% if user.safe_profile_name != user.display_login %>
+        <span class="ml-1 color-fg-muted text-small text-normal"><%= user.safe_profile_name %></span>
+        <% end %>
+        <% if view.prevented_from_removal_due_to_enterprise_team?(user) %>
+        <%= render(Primer::Beta::Octicon.new(:"alert-fill", color: :danger, ml: 2)) %>
+        <span class="color-fg-danger text-small text-normal">(managed by enterprise team)</span>
+        <% end %>
+        <% if view.show_private_forks_count_for?(user) %>
+        <span class="text-normal color-fg-muted float-right mt-1">and <%= pluralize(view.private_forks_count_for(user), "private fork", "private forks") %></span>
+        <% end %>
+      </li>
+      <% end %>
+    </ul>
+
+    <div class="Box-footer">
+      <label>
+        Enter this organization's name to confirm
+        <input type="text"
+              class="form-control input-block mt-1"
+              name="confirmation"
+              pattern="<%= case_insensitive_pattern(view.organization.display_login) %>"
+              required
+              autofocus>
+      </label>
+      <input type="hidden" name="two_factor_requirement" value="on">
+      <%= render Primer::Beta::Button.new(
+          type: :submit,
+          block: true,
+          scheme: (members_without_2fa_allowed && !view.organization.outside_collaborators_with_two_factor_disabled.any? ? :primary : :danger),
+          label_wrap: true,
+          mt: 2,
+          "data-disable-invalid": "",
+          "data-disable-with": ""
+        ) do %>
+          <% if members_without_2fa_allowed %>
+            Remove <%= pluralize_without_number removal_count, outside_collaborators_verbiage(view.organization).singularize %> &amp; require two-factor authentication
+          <% else %>
+            Remove <%= pluralize_without_number removal_count, "users" %> &amp; require two-factor authentication
+          <% end %>
+        <% end %>
+    </div>
+  <% end %>
+<% end %>
+

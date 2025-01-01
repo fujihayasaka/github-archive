@@ -1,0 +1,59 @@
+<%# erblint:counter DeprecatedComponentsCounter 1 %>
+<%# rubocop:disable Lint/InstanceVariable %>
+<%# locals: (can_create_applications:) %>
+
+<% page_info responsive: false, title: "#{h current_context.display_login} - OAuth applications", selected_link: :applications_settings %>
+
+<%= render layout: "orgs/settings/layout" do %>
+  <% unless @pending_transfers.blank? %>
+    <% if GitHub.flipper[:banner_migration].enabled?(current_user) %>
+      <%= render(Primer::Alpha::Banner.new(scheme: :warning, icon: "alert")) do %>
+        <strong><%= current_context %></strong> has <%= @pending_transfers.count %> pending application transfer <%= pluralize_without_number(@pending_transfers.count, 'request') %>. You can review those below.
+      <% end %>
+    <% else %>
+      <%= render(Primer::Beta::Flash.new(scheme: :warning, icon: "alert")) do %>
+        <strong><%= current_context %></strong> has <%= @pending_transfers.count %> pending application transfer <%= pluralize_without_number(@pending_transfers.count, 'request') %>. You can review those below.
+      <% end %>
+    <% end %>
+    <h4>Pending transfer requests</h4>
+    <ul class="table-list org-transfer-requests">
+      <% @pending_transfers.each do |transfer| -%>
+        <%= render :partial => 'oauth_applications/application_transfer_row', :object => transfer %>
+      <% end -%>
+    </ul>
+  <% end %>
+
+  <div class="settings-next">
+    <%= render Primer::Beta::Subhead.new do |component| %>
+      <% component.with_heading(tag: :h2, font_size: 3) do %>OAuth apps<% end %>
+      <% if can_create_applications && !@applications.empty? %>
+        <% component.with_actions do %>
+          <%= link_to_new_oauth_app("New OAuth app") -%>
+        <% end %>
+      <% end %>
+    <% end %>
+  </div>
+
+  <% if @applications.empty? && can_create_applications %>
+
+    <%=render Primer::Beta::Blankslate.new(spacious: :spacious) do |component| %>
+      <% component.with_visual_icon(icon: :person) %>
+      <% component.with_heading(tag: :h2).with_content("No Organization Owned Apps") %>
+      <% component.with_description { "Do you want to develop an App that uses the GitHub API? Register an App to generate OAuth tokens." } %>
+      <% component.with_primary_action(href: new_oauth_application_path).with_content("New OAuth app") %>
+      <% component.with_secondary_action(href: GitHub.developer_help_url, target: "_blank").with_content("GitHub API") %>
+    <% end %>
+
+  <% else %>
+
+    <div class="gutter clearfix">
+      <% @applications.each do |app| -%>
+        <%= render :partial => 'oauth_applications/developer_application_row', :object => app %>
+      <% end -%>
+    </div>
+
+    <div class="paginate-container">
+      <%= will_paginate @applications %>
+    </div>
+  <% end %>
+<% end %>

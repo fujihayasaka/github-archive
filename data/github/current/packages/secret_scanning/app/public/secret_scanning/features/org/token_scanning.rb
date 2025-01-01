@@ -1,0 +1,65 @@
+# typed: true # rubocop:todo Sorbet/StrictSigil
+# frozen_string_literal: true
+
+module SecretScanning::Features::Org
+  class TokenScanning
+    include SecretScanning::Features::FeatureFlagHelper
+    SECRET_SCANNING_NEW_REPOS_KEY = "secret_scanning.new_repos_enable"
+
+    def initialize(org)
+      raise ArgumentError, "Invalid type: expected Organization but got #{org.class.name}" if !org.is_a?(Organization)
+
+      @org = org
+    end
+
+    # Indicates whether the Token Scanning feature as a whole is available to the current organization
+    def feature_available?
+      # global config check
+      # should be on by default for dotcom and needs to be enabled for enterprise
+      return false unless GitHub.configuration_secret_scanning_enabled?
+
+
+      # billing/license check (applies to both GHES and dotcom)
+      return true if @org.advanced_security_purchased?
+
+      # Eventually, true will be the default return value here
+      return true if feature_flag_enabled?(@org, FeatureFlags::READ_PUBLIC_REPO_ALERTS)
+
+      false
+    end
+
+    # Indicates whether Token Scanning is enabled for the current org
+    def enabled?
+      self.feature_available?
+    end
+
+    def can_enable_for_new_repos?
+      true
+    end
+
+    def enable_secret_scanning_for_new_repos(actor:)
+      @org.config.enable(SECRET_SCANNING_NEW_REPOS_KEY, actor)
+    end
+
+    def disable_secret_scanning_for_new_repos(actor:)
+      @org.config.delete(SECRET_SCANNING_NEW_REPOS_KEY, actor)
+    end
+
+    def secret_scanning_enabled_for_new_repos?
+      return false unless self.feature_available?
+
+      @org.config.enabled?(SECRET_SCANNING_NEW_REPOS_KEY)
+    end
+
+    # Returns the admins to notify about secret scanning alerts for the org.
+    # Also includes security managers.
+    def get_admins_to_notify
+      admins = @org.admins.to_a
+      security_managers = SecurityProduct::SecurityManagers.new(@org)
+      security_manager_user_ids = Team.user_ids_for(security_managers.teams.map { |team| team.id })
+      security_manager_user_ids.concat(security_managers.directly_assigned_user_ids)
+      admins += User.where(id: security_manager_user_ids)
+      admins
+    end
+  end
+end

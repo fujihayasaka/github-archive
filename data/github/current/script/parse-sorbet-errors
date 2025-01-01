@@ -1,0 +1,120 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "optparse"
+require "serviceowners"
+
+class SorbetErrorParser
+  attr_reader :srb_output, :errors, :error_groups, :options, :serviceowners
+
+  def initialize(options = {})
+    @options = options
+    @serviceowners = Serviceowners::Main.new
+  end
+
+  def run
+    @srb_output = `srb t 2>&1`.split("\n")
+    @errors = srb_output.map do |line|
+      parse_error(line)
+    end.compact
+
+    if options[:filter]
+      @errors = errors.select do |error|
+        service = serviceowners.spec_for_path(error[:filepath])&.service&.name || "unowned"
+
+        service.to_s == options[:filter]
+      end
+    end
+
+    @error_groups = errors.group_by { |error| error[:error_code] }
+
+    if options[:code]
+      print_details_for_error_code
+    else
+      print_summary
+    end
+  end
+
+  private
+
+  def print_summary
+    puts "=================== SUMMARY ====================="
+    puts "error_code (no of errors) -- example error"
+    puts "================================================="
+    error_groups.keys.sort_by do |code|
+      -1 * error_groups[code].count
+    end.each do |code|
+      errors = error_groups[code]
+      puts "#{code} (#{errors.count}) -- #{errors.first[:message]}"
+      if options[:details]
+        details = details_for_errors(errors)
+        details.keys.sort_by { |key| -1 * details[key].count }.each do |key|
+          puts "    |- #{key} (#{details[key].count})"
+        end
+      end
+    end
+    puts "======== TOTAL ERROR COUNT: #{error_groups.sum { |_, errors| errors.count }} ==========="
+  end
+
+  def print_details_for_error_code
+    code = options[:code]
+    errors = error_groups[code]
+    if errors
+      puts "======== Found #{errors.count} errors: https://srb.help/#{code} ========"
+      if options[:details]
+        details = details_for_errors(errors)
+        details.keys.sort_by { |key| -1 * details[key].count }.each do |key|
+          puts "#{key} (#{details[key].count})"
+          print_errors(details[key])
+          puts "---------------------------------------"
+        end
+      else
+        print_errors(errors)
+      end
+    else
+      puts "No errors found for error code: #{code}"
+    end
+  end
+
+  def parse_error(line)
+    /^(?<filepath>.+):(?<line_no>\d+): (?<message>.+) https:\/\/srb\.help\/(?<error_code>\d+)$/.match(line)
+  end
+
+  def details_for_errors(errors)
+    errors.group_by do |error|
+      serviceowners.spec_for_path(error[:filepath])&.service&.name || "unowned"
+    end
+  end
+
+  def print_errors(errors)
+    errors.each do |error|
+      puts "#{error[:filepath]}:#{error[:line_no]}: #{error[:message]}"
+    end
+  end
+end
+
+if __FILE__ == $0
+  options = {}
+  OptionParser.new do |opts|
+    opts.banner = "Usage: bin/parse-sorbet-errors.rb [options]"
+
+    opts.on("-c", "--code CODE", "Filter errors associated with a single code") do |code|
+      options[:code] = code
+    end
+
+    opts.on("-d", "--details", "Print serviceowner details") do
+      options[:details] = true
+    end
+
+    opts.on("-f", "--filter SERVICEOWNER", "Scope errors to a single serviceowner") do |service|
+      options[:filter] = service.delete_prefix("github/")
+    end
+
+    opts.on("-h", "--help", "Prints this help") do
+      puts opts
+      exit 1
+    end
+  end.parse!
+
+  SorbetErrorParser.new(options).run
+end

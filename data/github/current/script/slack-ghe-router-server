@@ -1,0 +1,42 @@
+#!/bin/bash
+
+# Usage: script/slack-ghe-router-server
+# Start the github/slack GHE router if the repository has been cloned in the Codespace and the .env.ghe file exists,
+# or no-op otherwise.
+
+set -e
+
+if [ -f /workspaces/slack/.env.ghe-router ] && [ -f /workspaces/slack/.env.ghe ] && [ -f /workspaces/slack/.env.integrations ]; then
+  if [ -f /workspaces/slack/.env.slack ]; then
+    cd /workspaces/slack && \
+      set -o allexport && source .env.integrations && set +o allexport && \
+      set -o allexport && source .env.ghe && set +o allexport && \
+      set -o allexport && source .env.slack && set +o allexport && \
+      set -o allexport && source .env.ghe-router && set +o allexport && \
+      CHATOPS_CLIENT_INSTANCE=slack-ghe-router \
+      BASE_URL="https://${GITHUB_USER}-slack-ghe-router.ngrok.io" \
+      npm run watch-serve-debug
+
+  elif [ -f /workspaces/slack/.env.teams ]; then
+    cd /workspaces/slack && \
+      set -o allexport && source .env.integrations && set +o allexport && \
+      set -o allexport && source .env.ghe && set +o allexport && \
+      set -o allexport && source .env.teams && set +o allexport && \
+      set -o allexport && source .env.ghe-router && set +o allexport && \
+      CHATOPS_CLIENT_INSTANCE=teams-ghe-router \
+      BASE_URL="https://${GITHUB_USER}-teams-ghe-router.ngrok.io" \
+      npm run watch-serve-debug
+
+  else
+    echo "Neither .env.slack nor .env.teams exists in /workspaces/slack, sleeping."
+    echo "If you want to run the GHE router for github/slack, first run 'bin/setup-slack-repo -m',"
+    echo "then 'overmind restart slack-ghe-router'."
+    sleep infinity
+  fi
+
+else
+  echo "Either .env.ghe-router, .env.integrations, or .env.ghe does not exist in /workspaces/slack, sleeping."
+  echo "If you want to run the GHE router for github/slack, first run 'bin/setup-slack-repo -m',"
+  echo "then 'overmind restart slack-ghe-router'."
+  sleep infinity
+fi

@@ -1,0 +1,82 @@
+#!/bin/bash
+
+# Usage: script/slack-web
+# Start the github/slack web server if the repository has been cloned in the Codespace, or no-op otherwise.
+
+set -e
+
+if test -d /workspaces/slack; then
+  if [ -f /workspaces/slack/.env.dotcom ] && [ -f /workspaces/slack/.env.integrations ]; then
+    if [ -f /workspaces/slack/.env.teams ]; then
+      echo "Using .env.dotcom and .env.teams for github/slack web server..."
+      cd /workspaces/slack && \
+        set -o allexport && source .env.integrations && set +o allexport && \
+        set -o allexport && source .env.dotcom && set +o allexport && \
+        set -o allexport && source .env.teams && set +o allexport && \
+        CHATOPS_CLIENT_INSTANCE=teams \
+        APP_ID=${TEAMS_APP_ID} \
+        GITHUB_CLIENT_ID=${TEAMS_GITHUB_CLIENT_ID} \
+        GITHUB_CLIENT_SECRET=${TEAMS_GITHUB_CLIENT_SECRET} \
+        PRIVATE_KEY=${TEAMS_PRIVATE_KEY} \
+        npm run watch-ts-serve-debug
+    elif [ -f /workspaces/slack/.env.slack ]; then
+      echo "Using .env.dotcom and .env.slack for github/slack web server..."
+      cd /workspaces/slack && \
+        set -o allexport && source .env.integrations && set +o allexport && \
+        set -o allexport && source .env.dotcom && set +o allexport && \
+        set -o allexport && source .env.slack && set +o allexport && \
+        CHATOPS_CLIENT_INSTANCE=slack \
+        npm run watch-ts-serve-debug
+    else
+      echo "No .env.slack or .env.teams file found, sleeping."
+      echo "If you want to run the github/slack server, first run 'bin/setup-slack-repo' for Slack"
+      echo "or 'bin/setup-slack-repo -t' for Teams, then 'overmind restart slack-web'."
+      sleep infinity
+    fi
+
+  elif [ -f /workspaces/slack/.env.ghe ] && [ -f /workspaces/slack/.env.ghe-web ] && [ -f /workspaces/slack/.env.integrations ]; then
+    if [ -f /workspaces/slack/.env.teams ]; then
+      echo "Using .env.ghe and .env.teams for github/slack web server..."
+      cd /workspaces/slack && \
+        set -o allexport && source .env.integrations && set +o allexport && \
+        set -o allexport && source .env.ghe && set +o allexport && \
+        set -o allexport && source .env.ghe-web && set +o allexport && \
+        set -o allexport && source .env.teams && set +o allexport && \
+        CHATOPS_CLIENT_INSTANCE=teams \
+        BASE_URL="https://${GITHUB_USER}-teams-ghe.ngrok.io" \
+        TEAMS_GLOBAL_ROUTING_FF=true \
+        APP_ID=${TEAMS_APP_ID} \
+        GITHUB_CLIENT_ID=${TEAMS_GITHUB_CLIENT_ID} \
+        GITHUB_CLIENT_SECRET=${TEAMS_GITHUB_CLIENT_SECRET} \
+        PRIVATE_KEY=${TEAMS_PRIVATE_KEY} \
+        npm run watch-ts-serve-debug
+    elif [ -f /workspaces/slack/.env.slack ]; then
+      echo "Using .env.ghe and .env.slack for github/slack web server..."
+      cd /workspaces/slack && \
+        set -o allexport && source .env.integrations && set +o allexport && \
+        set -o allexport && source .env.ghe && set +o allexport && \
+        set -o allexport && source .env.ghe-web && set +o allexport && \
+        set -o allexport && source .env.slack && set +o allexport && \
+        CHATOPS_CLIENT_INSTANCE=slack \
+        BASE_URL="https://${GITHUB_USER}-slack-ghe.ngrok.io" \
+        npm run watch-ts-serve-debug
+    else
+      echo "No .env.slack or .env.teams file found, sleeping."
+      echo "If you want to run the github/slack server, first run 'bin/setup-slack-repo -m' for Slack"
+      echo "or 'bin/setup-slack-repo -m -t' for Teams, then 'overmind restart slack-web'."
+      sleep infinity
+    fi
+
+  else
+    echo "Neither .env.dotcom + .env.integrations, nor .env.ghe + .env.ghe-web + .env.integrations file(s) found, sleeping."
+    echo "If you want to run the github/slack server, first run 'bin/setup-slack-repo' for dotcom mode"
+    echo "or 'bin/setup-slack-repo -m' for multi-tenant mode, then 'overmind restart slack-web'."
+    sleep infinity
+  fi
+
+else
+  echo "github/slack repository has not been cloned, sleeping."
+  echo "If you want to run the github/slack server, first run 'bin/setup-slack-repo',"
+  echo "then 'overmind restart slack-web'."
+  sleep infinity
+fi

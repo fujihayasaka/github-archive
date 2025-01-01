@@ -1,0 +1,196 @@
+<%# erblint:counter DeprecatedComponentsCounter 1 %>
+<%# erblint:counter ButtonComponentMigrationCounter 1 %>
+<%
+  members_without_2fa_allowed = view.organization.members_without_2fa_allowed?
+  outside_collabs_without_2fa_count = view.tmp_collaborators_with_two_factor_disabled_count
+%>
+
+<%= render Primer::Beta::Subhead.new do |component| %>
+  <% component.with_heading(tag: :h2) do %>Two-factor authentication<% end %>
+<% end %>
+
+<% if view.organization.can_disallow_two_factor_methods? %>
+  <p>
+    Two-factor authentication adds another level of security for your organization.
+    <%= link_to \
+      "Learn more about requiring two-factor authentication in your organization.",
+      docs_url("organizations/preparing-to-require-two-factor-authentication"),
+      class: "Link--inTextBlock",
+      :target => "_blank",
+      :rel => "noopener noreferrer" %>
+  </p>
+
+  <%= form_tag settings_org_two_factor_enforcement_update_path(view.organization),
+    :class => "mt-3 two-factor-enforcement-form", :method => :put do %>
+
+    <div class="form-checkbox">
+      <%= render "orgs/security_settings/two_factor/requirement_checkbox", view: view %>
+
+      <p class="note">
+        <%# add that we don't remove OCs after https://github.com/github/authorization/issues/4526 %>
+        Organization members who do not have two-factor authentication enabled will be unable to access resources owned by the <strong><%= view.organization.safe_profile_name %></strong> organization, but will remain a member of <strong><%= view.organization.safe_profile_name %></strong> until they update their settings.
+
+        Outside collaborators who do not have two-factor authentication enabled will be removed from the organization and notified.
+        <%= link_to \
+          "View organization membership",
+          org_people_path(view.organization, "query": Orgs::People::OutsideCollaboratorsView::TWO_FACTOR_DISABLED_QUERY),
+          class: "Link--inTextBlock",
+          :target => "_blank",
+          :rel => "noopener noreferrer" %> to see which users will be impacted.
+      </p>
+
+      <% if view.two_factor_requirement_checkbox_disabled? %>
+        <span class="color-fg-muted note d-inline-block pt-1 mt-1 clearfix">
+          <% reason = view.disabled_form_reason %>
+          <%= primer_octicon(reason[:icon]) %>
+          <%= reason[:reason] %>
+        </span>
+      <% end %>
+    </div>
+
+    <div class="form-checkbox ml-4 js-two-factor-secure-methods" <%= "hidden" unless view.two_factor_requirement_enabled? || view.organization.enforcing_two_factor_requirement? %>>
+      <%= render "orgs/security_settings/two_factor/secure_methods_checkbox", view: view %>
+
+      <p class="note">
+        Users can only use secure two-factor methods: authenticator apps, passkeys, security keys, and the GitHub mobile app.
+        <%= link_to \
+          "Learn more about two-factor authentication",
+          docs_url("authentication/about-two-factor"),
+          class: "Link--inTextBlock",
+          :target => "_blank",
+          :rel => "noopener noreferrer"
+        %>.
+      </p>
+
+      <% if view.two_factor_secure_methods_checkbox_disabled? %>
+        <span class="color-fg-muted note d-inline-block pt-1 mt-1 clearfix">
+          <% reason = view.disabled_form_reason %>
+          <%= primer_octicon(reason[:icon]) %>
+          <%= reason[:reason] %>
+        </span>
+      <% end %>
+    </div>
+
+    <%
+      all_other_users_without_2fa_count = view.users_with_two_factor_disabled_count - outside_collabs_without_2fa_count
+      all_other_users_without_2fa_count = all_other_users_without_2fa_count < 0 ? 0 : all_other_users_without_2fa_count
+      org_has_users = all_other_users_without_2fa_count > 0
+      org_has_outside_collaborators = outside_collabs_without_2fa_count > 0
+      members_link = link_to \
+            "members",
+            org_people_path(view.organization, "query": Orgs::People::OutsideCollaboratorsView::TWO_FACTOR_DISABLED_QUERY),
+            class: "Link--inTextBlock",
+            :target => "_blank",
+            :rel => "noopener noreferrer"
+      oc_link = link_to \
+            "outside collaborators",
+            org_outside_collaborators_path(view.organization, "query": Orgs::People::OutsideCollaboratorsView::TWO_FACTOR_DISABLED_QUERY),
+            class: "Link--inTextBlock",
+            :target => "_blank",
+            :rel => "noopener noreferrer"
+    %>
+
+    <%= render(Primer::Alpha::Banner.new(
+        scheme: org_has_outside_collaborators ? :danger : :warning,
+        icon: org_has_outside_collaborators ? :stop : :alert,
+        my: 2,
+        hidden: true,
+        classes: "js-org-two-factor-requirement-warning-banner",
+        test_selector: "2fa-requirement-warning-banner",
+      )) do %>
+        <span class="text-normal">
+          <% if org_has_users && org_has_outside_collaborators %>
+            <b><%= all_other_users_without_2fa_count %> <%= "member".pluralize(all_other_users_without_2fa_count) %></b>
+            and <b><%= outside_collabs_without_2fa_count %> <%= "outside collaborator".pluralize(outside_collabs_without_2fa_count) %></b>
+            do not have two-factor authentication configured. Outside collaborators without two-factor authentication will be removed from the organization and notified.
+            See which <%= members_link %> or <%= oc_link %> do not have two-factor authentication set up.
+          <% elsif org_has_users && !org_has_outside_collaborators %>
+            <b><%= all_other_users_without_2fa_count %> <%= "member".pluralize(all_other_users_without_2fa_count) %></b>
+            <%= all_other_users_without_2fa_count > 1 ? "do" : "does" %> not have two-factor authentication configured.
+            Members without two-factor authentication will be required to set it up <%= members_without_2fa_allowed ? "to regain access to" : "before rejoining" %> the organization.
+            See which <%= members_link %> do not have two-factor authentication set up.
+          <% elsif !org_has_users && org_has_outside_collaborators %>
+            <b><%= outside_collabs_without_2fa_count %> <%= "outside collaborator".pluralize(outside_collabs_without_2fa_count) %></b>
+            <%= outside_collabs_without_2fa_count > 1 ? "do" : "does" %> not have two-factor authentication configured.
+            Outside collaborators without two-factor authentication will be removed from the organization and notified.
+            See which <%= oc_link %> do not have two-factor authentication set up.
+          <% else %>
+            Existing members will <%= members_without_2fa_allowed ? "lose access to organization resources" : "be removed from the organization" %>
+            if they disable two-factor authentication. Outside collaborators will be removed from the organization if they disable two-factor authentication.
+          <% end %>
+        </span>
+      <% end %>
+
+    <div class="clearfix">
+      <% if !view.disable_submit_button? && view.two_factor_requirement_needs_confirmation? %>
+        <%= render "orgs/security_settings/two_factor/requirement_confirmation",
+        view: view,
+        members_without_2fa_allowed: members_without_2fa_allowed,
+        outside_collabs_without_2fa_count: outside_collabs_without_2fa_count %>
+      <% else %>
+        <%= render Primer::Beta::Button.new(
+          type: :submit,
+          ml: 3,
+          mr: 4,
+          disabled: view.two_factor_enforcement_form_disabled? || view.enforcing_two_factor_requirement?,
+          "aria-label": "Save organization two factor requirement"
+        ) do "Save" end %>
+      <% end %>
+    </div>
+  <% end %>
+<% else %>
+  <p>
+    Requiring an additional authentication method adds another level of
+    security for your organization.
+  </p>
+
+  <%= form_tag settings_org_two_factor_enforcement_update_path(view.organization),
+    :class => "mt-3 two-factor-enforcement-form", :method => :put do %>
+
+    <div class="form-checkbox">
+
+      <%= render "orgs/security_settings/two_factor/requirement_checkbox", view: view %>
+      <%= render Primer::Beta::Flash.new(
+        scheme: members_without_2fa_allowed ? :default : :warning,
+        mt: 2
+      ) do %>
+        <%# add that we don't remove OCs after https://github.com/github/authorization/issues/4526 %>
+        <% if members_without_2fa_allowed %>
+          Members<% if GitHub.billing_enabled? %> and billing managers<% end %> who do not have
+          two-factor authentication enabled for their personal account
+          will be asked to enable it when accessing the enterprise or any of its organizations. <br>
+          Requiring two-factor authentication will not remove them from the enterprise account. <br>
+          <%= outside_collaborators_verbiage(view.organization).capitalize %> who do not have 2FA will be removed and notified.
+        <% else %>
+          Members<% if GitHub.billing_enabled? %>, billing managers, and <%= outside_collaborators_verbiage(view.organization) %><% end %> who do not have
+          two-factor authentication enabled for their personal account
+          will be removed from the organization and will receive an
+          email notifying them about the change.
+        <% end %>
+        <%= link_to "Learn more about 2FA.", "#{GitHub.help_url}/articles/configuring-two-factor-authentication", class: "Link--inTextBlock" %>
+      <% end %>
+
+    </div>
+
+    <div class="clearfix">
+      <button type="submit"
+        class="btn js-2fa-save-button ml-3 mr-4"
+        <%= 'disabled' if view.two_factor_requirement_form_disabled? || view.enforcing_two_factor_requirement? %>>
+        Save
+      </button>
+      <% if view.two_factor_requirement_form_disabled? %>
+        <div class="color-fg-muted note d-inline-block pt-1 mt-1 clearfix">
+          <%= primer_octicon(:question) %>
+          <%= view.disabled_form_reason %>
+        </div>
+      <% end %>
+    </div>
+    <% if (!members_without_2fa_allowed || view.organization.outside_collaborators.any?) && view.two_factor_requirement_disabled_and_needs_confirmation? %>
+    <%= render "orgs/security_settings/two_factor/requirement_confirmation",
+        view: view,
+        members_without_2fa_allowed: members_without_2fa_allowed,
+        outside_collabs_without_2fa_count: outside_collabs_without_2fa_count %>
+    <% end %>
+  <% end %>
+<% end %>
+

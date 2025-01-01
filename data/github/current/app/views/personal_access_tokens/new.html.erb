@@ -1,0 +1,81 @@
+<% page_info :title => "New Fine-grained Personal Access Token", :selected_link => :access_tokens %>
+<% content = capture do %>
+  <% beta_version = PersonalAccessTokensController::BETA_VERSION %>
+  <%= render Primer::Beta::Subhead.new do |component| %>
+    <% component.with_heading(tag: :h2) do %>
+      <span>New fine-grained personal access token</span>
+      <% if user_feature_enabled?(:lifecycle_label_name_updates) %>
+        <%= render Primer::Experimental::BetaLabel.new(ml: 1) %>
+      <% else %>
+        <%= render(Primer::Beta::Label.new(label: beta_version.capitalize, title: "Label: #{beta_version.capitalize}", ml: 1, scheme: :success, vertical_align: :middle))  { beta_version.capitalize } %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <p>Create a fine-grained, repository-scoped token suitable for personal API use and for using Git over HTTPS.</p>
+
+  <%= form_for token, :url => settings_user_access_tokens_path, :html => {:"aria-label" => "personal access token", class: "js-integrations-install-form js-user-programmatic-access-form"} do |f| %>
+    <auto-check src="<%= token_check_name_path %>" required>
+      <%= f.text_group "Token name", :name, {
+        error: error_for(token, :name),
+        autocapitalize: :off,
+        class: 'js-token-name js-token-name-auto-check',
+        maxlength: 40,
+        required: true,
+      } %>
+      <%= csrf_hidden_input_for token_check_name_path %>
+    </auto-check>
+    <p class="f6 color-fg-muted" style="margin-top: -11px">
+      A unique name for this token. May be visible to resource owners or users with possession of the token.
+    </p>
+
+    <% if current_user.feature_enabled?(:fg_pat_expiration_lifecycle_enforcement) %>
+      <%= render "personal_access_tokens/select_organizations", current_target: current_target %>
+
+      <template class="js-new-default-token-expiration-select-template">
+        <%= render partial: "oauth_tokens/expiration_date_picker", locals: { f: f, access: token } %>
+      </template>
+
+      <div class="js-new-default-token-expiration-select-container">
+        <%= render partial: "oauth_tokens/expiration_date_picker", locals: { f: f, access: token, target_expiration_limit: fine_grained_lifetime_limit_for(current_target), target_and_type_with_expiration: fine_grained_target_and_type_with_limit(current_target), target_limit_exempts_actor: fine_grained_lifetime_limit_exempted_for?(current_target, current_user) } %>
+      </div>
+
+      <%=
+        f.text_area_group "Description", :description,
+          hint: "What is this token for?",
+          class: "width-full",
+          error: error_for(token, :description)
+        %>
+    <% else %>
+      <%= render partial: "oauth_tokens/expiration_date_picker", locals: { f: f, access: token } %>
+
+      <%=
+        f.text_area_group "Description", :description,
+          hint: "What is this token for?",
+          class: "width-full",
+          error: error_for(token, :description)
+        %>
+
+      <%= render "personal_access_tokens/select_organizations", current_target: current_target %>
+    <% end %>
+
+    <div class="js-cap-resolved">
+      <% if local_assigns[:rerender] || current_target.user? %>
+        <%= render partial: "personal_access_tokens/select_access", locals: {
+          token: token, permissions_view: permissions_view, repositories_view: repositories_view,
+        } %>
+      <% elsif current_target.organization? %>
+        <include-fragment src="<%= user_access_token_select_access_path(target_name: current_target.display_login) %>">
+          <%= render partial: "personal_access_tokens/loading", locals: { hidden: false } %>
+        </include-fragment>
+      <% end %>
+    </div>
+
+    <%= render partial: "personal_access_tokens/errors" %>
+    <%= render partial: "personal_access_tokens/loading" %>
+  <% end %>
+<% end %>
+
+<%= render layout: "settings/developer_settings" do %>
+  <%= content %>
+<% end %>
