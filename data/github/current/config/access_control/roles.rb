@@ -2436,6 +2436,22 @@ class Api::AccessControl < Egress::AccessControl
     oauth_allows_access?(user, repo) && resource.closable_by?(user)
   end
 
+  # A user that can reopen an issue or pull request via FGP
+  role :resource_reopener do |context|
+    user, repo, resource = extract(context, :user, :repo, :resource)
+    next false unless user && repo && resource
+    next false unless resource.respond_to?(:reopenable_by?)
+    oauth_allows_access?(user, repo) && resource.reopenable_by?(user)
+  end
+
+  # A user that can set the milestone on an issue or pull request via FGP
+  role :milestone_setter do |context|
+    user, repo, resource = extract(context, :user, :repo, :resource)
+    next false unless user && repo && resource
+    next false unless resource.respond_to?(:can_set_milestone?)
+    oauth_allows_access?(user, repo) && resource.can_set_milestone?(user)
+  end
+
   # A user that can add assignees to an issue
   role :issue_assigner do |context|
     user, repo, issue = extract(context, :user, :repo, :resource)

@@ -46,7 +46,7 @@ module GitHub
       end
 
       def release_assets
-        model.release_assets.map do |release_asset|
+        model.release_assets.uploaded.map do |release_asset|
           {
             user: url_for_model(release_asset.uploader),
             name: release_asset.name,

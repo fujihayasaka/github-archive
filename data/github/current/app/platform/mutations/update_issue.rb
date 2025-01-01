@@ -36,7 +36,10 @@ module Platform
       def self.async_api_can_modify?(permission, **inputs)
         issue = inputs[:issue]
         permission.async_repo_and_org_owner(issue).then do |repo, org|
-          permission.access_allowed?(:triage_issue, resource: issue, repo: repo, current_org: org, allow_integrations: true, allow_user_via_granular_actor: true)
+          # Use custom_role_update_issue which allows FGP roles
+          access_control = :custom_role_update_issue
+
+          permission.access_allowed?(access_control, resource: issue, repo: repo, current_org: org, allow_integrations: true, allow_user_via_granular_actor: true)
         end
       end
 
@@ -70,14 +73,23 @@ module Platform
           # can_set_milestone and triageable_by are not implemented for apps
           can_viewer_write = repository.pushable_by?(context[:viewer]) || repository.resources.issues.writable_by?(context[:viewer])
 
-          # If the issue is locked, only those with write access or higher can edit the issue
-          if issue.locked? && !can_viewer_write
-            message = "#{context[:viewer].display_login} does not have permission to update the locked issue #{issue.global_relay_id}."
-            raise Errors::Forbidden.new(message)
+          # If the viewer cannot at least triage the issue, they're limited by FGP
+          is_fgp_limited = !context[:permission].access_allowed?(
+            :triage_issue,
+            resource: issue,
+            repo: repository,
+            current_org: repository.owner.is_a?(Organization) ? repository.owner : nil,
+            allow_integrations: true,
+            allow_user_via_granular_actor: true,
+          )
+
+          # For FGP-limited users, validate they're only trying to update allowed fields
+          if is_fgp_limited
+            validate_fgp_limited_inputs!(inputs, issue)
           end
 
           # All props mentioned in the arguments which are not metadata props
-          if inputs.key?(:title) || inputs.key?(:body) || inputs.key?(:state)
+          if inputs.key?(:title) || inputs.key?(:body)
             # issue's fields can be edited by people with write OR people with triage, if they are the authors
             if !(can_viewer_write || context[:viewer] == issue.user)
               message = "#{context[:viewer].display_login} does not have permission to update the issue #{issue.global_relay_id}."
@@ -241,6 +253,33 @@ module Platform
               issue: nil,
               errors: Platform::UserErrors.mutation_errors_for_model(issue, translate: { repository_id: "issueTypeId" }),
             }
+          end
+        end
+      end
+
+      # Validates that FGP-limited users are only trying to update fields they have FGP permissions for.
+      # Raises Errors::Forbidden if they try to update fields they don't have permission for.
+      def validate_fgp_limited_inputs!(inputs, issue)
+        can_change_state = (issue.open? && issue.closable_by?(context[:viewer])) ||
+                           (issue.closed? && issue.reopenable_by?(context[:viewer]))
+        can_set_milestone = issue.can_set_milestone?(context[:viewer])
+
+        inputs.each_key do |key|
+          next if key == :issue # :issue is always present
+
+          allowed = case key
+          when :state
+            can_change_state
+          when :milestone
+            can_set_milestone
+          else
+            false
+          end
+
+          unless allowed
+            field_name = key.to_s.tr("_", " ")
+            message = "#{context[:viewer].display_login} does not have permission to update the #{field_name} on the issue #{issue.global_relay_id}."
+            raise Errors::Forbidden.new(message)
           end
         end
       end

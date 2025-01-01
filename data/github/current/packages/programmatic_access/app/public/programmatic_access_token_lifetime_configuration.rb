@@ -2,6 +2,12 @@
 # frozen_string_literal: true
 
 class ProgrammaticAccessTokenLifetimeConfiguration
+  MAX_ORGANIZATIONS_TO_DISPLAY = 100
+  EXPIRATION_LIMIT_CONFIG_NAMES = T.let({
+    ProgrammaticAccessTokenType::FineGrained => Configurable::PersonalAccessTokenExpirationLimit::FG_PAT_KEY,
+    ProgrammaticAccessTokenType::Classic => Configurable::PersonalAccessTokenExpirationLimit::PAT_CLASSIC_KEY
+  }.freeze, T::Hash[ProgrammaticAccessTokenType, String])
+
   extend T::Helpers
 
 
@@ -21,14 +27,20 @@ class ProgrammaticAccessTokenLifetimeConfiguration
     end
   end
 
-  sig { params(business: Business, pat_type: ProgrammaticAccessTokenType, limit: Integer).returns(T::Array[Organization]) }
+  sig { params(business: Business, pat_type: ProgrammaticAccessTokenType, limit: Integer).returns(ActiveRecord::Relation) }
   def self.business_organizations_exceeding_limit(business, pat_type, limit)
-    business.organizations.preload(:configuration_entries).select do |org|
-      current_limit = new(org, pat_type).expiration_limit(ignore_inheritance: true)
-      next if current_limit.nil?
+    config_key = EXPIRATION_LIMIT_CONFIG_NAMES.fetch(pat_type)
 
-      current_limit.to_i > limit
-    end.to_a
+    org_ids = business.organizations.pluck(:id)
+    return Organization.none if org_ids.empty?
+
+    exceeding_org_ids = Configuration::Entry
+      .where(target_type: "User", target_id: org_ids, name: config_key)
+      .where("CAST(value AS SIGNED) > ?", limit)
+      .limit(MAX_ORGANIZATIONS_TO_DISPLAY + 1)
+      .pluck(:target_id)
+
+    business.organizations.where(id: exceeding_org_ids)
   end
 
   sig { params(actor: User, expiration: Integer, exempt_administrators: T::Boolean, exempt_missing_issue_date: T::Boolean).void }

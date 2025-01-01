@@ -18,6 +18,7 @@ module Settings
     # Display the push protection toggle if the push protection feature is available
     sig { returns(T::Boolean) }
     def render?
+      return false if GitHub.enterprise?
       return false unless @owner.user?
       @push_protection.feature_available?
     end

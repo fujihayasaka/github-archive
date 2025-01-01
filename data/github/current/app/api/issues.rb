@@ -228,7 +228,8 @@ class Api::Issues < Api::App
   include Api::Labels::Helpers, Api::Issues::EnsureIssuesEnabled, Api::Issues::EnsureIssuesTypesEnabled, Scientist, Api::Issues::HandleIssueNotFound, Api::Issues::Limits, Api::Issues::Preload, Api::Issues::IssueFieldValuesHelper
   include Api::App::DatabaseConnectionHelper
 
-  STATE      = "state".freeze
+  STATE = "state".freeze
+  STATE_REASON = "state_reason".freeze
   ASSIGNEE   = "assignee".freeze
   ASSIGNEES  = "assignees".freeze
   MILESTONE  = "milestone".freeze
@@ -890,13 +891,11 @@ class Api::Issues < Api::App
         issue, "edit-issue"
       )
 
-      control_access :edit_issue,
+      # Minimum access permission for this endpoint
+      control_access :custom_role_update_issue,
         resource: issue,
         repo: repo,
         challenge: repo.public?,
-        # We only need to forbid in the case where a PAT or OAuth token does not have the right scopes.
-        # Therefore, we could leave off the integration-related key/value pairs in this call.
-        # However, that would count against our linter, so for completeness, we are adding them.
         forbid: access_allowed?(:get_repo, resource: repo, allow_integrations: true, allow_user_via_granular_actor: true),
         allow_integrations: true,
         allow_user_via_granular_actor: true,
@@ -908,11 +907,30 @@ class Api::Issues < Api::App
 
       check_database_resource_update_rate_limit!(resource: issue, repo: repo, current_user: current_user)
       data = receive_with_schema("issue", "update-legacy")
-      # Don't let non collabs set these
+
+      # Filter the keys based on permissions, i.e. collab, FGP, etc.
+      keys = data.keys
+      # Don't let non collabs set these - however we allow FGP users past this point
       collab_access = access_allowed?(:set_collab_only_attributes_on_new_issue, repo: repo, resource: issue, allow_integrations: true, allow_user_via_granular_actor: true)
       unless collab_access
-        data.delete_if { |key, _value| COLLAB_ONLY_ATTRIBUTES.include?(key) }
+        keys.delete_if { |key| COLLAB_ONLY_ATTRIBUTES.include?(key) }
       end
+
+      # Check if user is FGP limited (has FGP access but not full triage access)
+      # FGP limited users can only modify fields they have specific FGP permissions for
+      is_fgp_limited = !access_allowed?(:triage_issue, resource: issue, repo: repo, allow_integrations: true, allow_user_via_granular_actor: true, enforce_oauth_app_policy: repo.private?)
+      if is_fgp_limited
+        keys = filter_keys_for_fgp_user(issue, current_user)
+      end
+
+      # Title/body updates require write access or being the author
+      unless can_edit_content?(issue, repo)
+        keys.delete("title")
+        keys.delete("body")
+      end
+
+      # Filter the keys down to the allowed set
+      data.delete_if { |key, _value| !keys.include?(key) }
 
       if data.include?(ISSUE_TYPE)
         if repo.owner.issue_types_enabled?
@@ -1285,6 +1303,37 @@ class Api::Issues < Api::App
   end
 
   private
+
+  # Filters update keys to only include fields the FGP user has permission to modify.
+  # FGP (fine-grained permission) users have limited access and can only modify specific fields.
+  #
+  # - issue: The issue being updated
+  # - user: The current user making the request
+  #
+  # Returns a Hash containing only the fields the user has permission to modify
+  def filter_keys_for_fgp_user(issue, user)
+    can_change_state = (issue.open? && issue.closable_by?(user)) ||
+                       (issue.closed? && issue.reopenable_by?(user))
+    can_set_milestone = issue.can_set_milestone?(user)
+
+    allowed_fields = []
+    allowed_fields += [STATE, STATE_REASON] if can_change_state
+    allowed_fields << MILESTONE if can_set_milestone
+
+    allowed_fields
+  end
+
+  # Check if the current user can edit the content (title/body) of an issue.
+  # This requires either being the author or having write access.
+  #
+  # - issue: The issue being updated
+  # - repo: The repository containing the issue
+  #
+  # Returns true if the user can edit content, false otherwise
+  def can_edit_content?(issue, repo)
+    issue.user_id == current_user&.id ||
+      access_allowed?(:edit_issue, resource: issue, repo: repo, allow_integrations: true, allow_user_via_granular_actor: true, enforce_oauth_app_policy: repo.private?)
+  end
 
   # Resolves the actor for the current request, it can be a bot, a user, an fgp, installation etc.
   #

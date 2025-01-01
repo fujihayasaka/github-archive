@@ -104,7 +104,6 @@ class Settings::NotificationPreferencesController < ApplicationController
       vulnerabilityEmail: settings&.vulnerability&.email,
       vulnerabilityWeb: settings&.vulnerability&.web,
       orgDeployKeySettings: newsies_settings.org_deploy_key_settings,
-      inProductMessages: current_user.subscribed_to_in_product_messages?,
       securityCampaignsEnabled: !GitHub.enterprise?,
       securityCampaignEmails: settings&.security_campaigns&.email,
       notifiableEmails: current_user.notifiable_emails.map(&:downcase),
@@ -117,6 +116,11 @@ class Settings::NotificationPreferencesController < ApplicationController
       actionsUrl: features_actions_path,
       dependabotHelpUrl: DocsUrlConfig.url_for("code-security/about-dependabot-alerts")
     }
+
+    # Only show in-product messages toggle for non-proxima and non-enterprise environments
+    unless GitHub.multi_tenant_enterprise? || GitHub.enterprise?
+      payload[:inProductMessages] = current_user.subscribed_to_in_product_messages?
+    end
 
     if current_user.is_enterprise_managed?
       payload[:emails] = {
