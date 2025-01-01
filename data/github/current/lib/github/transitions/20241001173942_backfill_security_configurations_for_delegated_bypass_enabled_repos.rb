@@ -93,6 +93,66 @@ module GitHub
 
       private
 
+      sig { params(security_config_ids_with_pp_setting: T::Hash[Integer, Integer], bypass_reviewers_for_org: T::Array[T.untyped], org_id: Integer).void }
+      def update_security_configs_and_bypass_reviewers(security_config_ids_with_pp_setting, bypass_reviewers_for_org, org_id)
+        security_config_ids_pp_enabled = []
+        security_config_ids_pp_not_set = []
+        security_config_ids_pp_disabled = []
+
+        security_config_ids_with_pp_setting.each do |security_config_id, pp_setting|
+          if pp_setting == 1
+            security_config_ids_pp_enabled << security_config_id
+          elsif pp_setting == 2
+            security_config_ids_pp_not_set << security_config_id
+          else
+            security_config_ids_pp_disabled << security_config_id
+          end
+        end
+
+        # For the non-GRC security configurations, set delegated bypass to the same value as push protection
+        if dry_run?
+          log "Would have set delegated bypass for security configurations. enabled_count=#{security_config_ids_pp_enabled.count}, disabled_count=#{security_config_ids_pp_disabled.count}, not_set_count=#{security_config_ids_pp_not_set.count}"
+        else
+          write_to(model_class: SecurityConfiguration) do
+            SecurityConfigurationTable.where(id: security_config_ids_pp_enabled).update_all(secret_scanning_delegated_bypass: 1)
+            SecurityConfigurationTable.where(id: security_config_ids_pp_disabled).update_all(secret_scanning_delegated_bypass: 0)
+            SecurityConfigurationTable.where(id: security_config_ids_pp_not_set).update_all(secret_scanning_delegated_bypass: 2)
+          end
+        end
+
+        # Create bypass reviewers for each non-GRC security configuration that has push protection enabled or not set
+        bypass_reviewer_rows = []
+        (security_config_ids_pp_enabled + security_config_ids_pp_not_set).each do |security_configuration_id|
+          bypass_reviewers_for_org.each do |bypass_reviewer|
+            bypass_reviewer_rows.push(
+              {
+                reviewer_id: bypass_reviewer.reviewer_id,
+                reviewer_type: bypass_reviewer.reviewer_type,
+                owner_scope_id: bypass_reviewer.owner_scope_id,
+                security_configuration_id: security_configuration_id,
+              }
+            )
+          end
+        end
+
+        bypass_reviewers_created_count = 0
+        existing_bypass_reviewers_count = 0
+
+        bypass_reviewer_rows.each do |bypass_reviewer_row|
+          if SecretScanningBypassReviewer.exists?(bypass_reviewer_row)
+            existing_bypass_reviewers_count += 1
+          else
+            if !dry_run?
+              write_to(model_class: SecretScanningBypassReviewer) do
+                SecretScanningBypassReviewer.insert(bypass_reviewer_row)
+              end
+              bypass_reviewers_created_count += 1
+            end
+          end
+        end
+        log "#{dry_run? ? "would have " : ""} created #{bypass_reviewers_created_count} bypass reviewers for org_id=#{org_id}, existing_bypass_reviewers_count=#{existing_bypass_reviewers_count}"
+      end
+
       sig { params(org_id: Integer).returns(GitHub::QueryBatching::IteratorBuilder[T::Array[Integer]]) }
       def repo_iterator_for_org(org_id)
         # Returns an iterator that yields repository ids for the given org_id, using `repo_batch_size` as the batch size.
@@ -129,64 +189,14 @@ module GitHub
           security_config_ids = other_repo_configs.pluck(:security_configuration_id).uniq
           security_config_ids_with_pp_setting = SecurityConfigurationTable.where(id: security_config_ids).pluck(:id, :secret_scanning_push_protection).to_h
 
-          security_config_ids_pp_enabled = []
-          security_config_ids_pp_not_set = []
-          security_config_ids_pp_disabled = []
-
-          security_config_ids_with_pp_setting.each do |security_config_id, pp_setting|
-            if pp_setting == 1
-              security_config_ids_pp_enabled << security_config_id
-            elsif pp_setting == 2
-              security_config_ids_pp_not_set << security_config_id
-            else
-              security_config_ids_pp_disabled << security_config_id
-            end
-          end
-
-          # For the non-GRC security configurations, set delegated bypass to the same value as push protection
-          if dry_run?
-            log "Would have set delegated bypass for security configurations. enabled_count=#{security_config_ids_pp_enabled.count}, disabled_count=#{security_config_ids_pp_disabled.count}, not_set_count=#{security_config_ids_pp_not_set.count}"
-          else
-            write_to(model_class: SecurityConfiguration) do
-              SecurityConfigurationTable.where(id: security_config_ids_pp_enabled).update_all(secret_scanning_delegated_bypass: 1)
-              SecurityConfigurationTable.where(id: security_config_ids_pp_disabled).update_all(secret_scanning_delegated_bypass: 0)
-              SecurityConfigurationTable.where(id: security_config_ids_pp_not_set).update_all(secret_scanning_delegated_bypass: 2)
-            end
-          end
-
-          # Create bypass reviewers for each non-GRC security configuration that has push protection enabled or not set
-          bypass_reviewer_rows = []
-          (security_config_ids_pp_enabled + security_config_ids_pp_not_set).each do |security_configuration_id|
-            bypass_reviewers_for_org.each do |bypass_reviewer|
-              bypass_reviewer_rows.push(
-                {
-                  reviewer_id: bypass_reviewer.reviewer_id,
-                  reviewer_type: bypass_reviewer.reviewer_type,
-                  owner_scope_id: bypass_reviewer.owner_scope_id,
-                  security_configuration_id: security_configuration_id,
-                }
-              )
-            end
-          end
-
-          bypass_reviewers_created_count = 0
-          existing_bypass_reviewers_count = 0
-
-          bypass_reviewer_rows.each do |bypass_reviewer_row|
-            if SecretScanningBypassReviewer.exists?(bypass_reviewer_row)
-              existing_bypass_reviewers_count += 1
-            else
-              if !dry_run?
-                write_to(model_class: SecretScanningBypassReviewer) do
-                  SecretScanningBypassReviewer.insert(bypass_reviewer_row)
-                end
-                bypass_reviewers_created_count += 1
-              end
-            end
-          end
-
-          log "#{dry_run? ? "would have " : ""} created #{bypass_reviewers_created_count} bypass reviewers for org_id=#{org_id}, existing_bypass_reviewers_count=#{existing_bypass_reviewers_count}"
+          update_security_configs_and_bypass_reviewers(security_config_ids_with_pp_setting, bypass_reviewers_for_org, org_id)
         end
+
+        # If any security configurations for the org still have null values for the delegated bypass column, it's because they have
+        # no repos attached. We still need to update them though, using the same logic.
+        security_configs_with_pp_setting_no_repos = SecurityConfigurationTable.where(target_type: "User", target_id: org_id, secret_scanning_delegated_bypass: nil).pluck(:id, :secret_scanning_push_protection).to_h
+        update_security_configs_and_bypass_reviewers(security_configs_with_pp_setting_no_repos, bypass_reviewers_for_org, org_id)
+
       end
     end
   end

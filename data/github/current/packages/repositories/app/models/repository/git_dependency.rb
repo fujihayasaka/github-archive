@@ -570,7 +570,7 @@ module Repository::GitDependency
   #
   # Returns nothing.
   def synchronize_shared_storage!
-    rpc.nw_sync
+    rpc.nw_sync(ignore_locking_errors: true)
   end
 
   # Enqueue a background job to run synchronize_shared_storage!.

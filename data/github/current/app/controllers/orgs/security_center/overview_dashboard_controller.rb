@@ -53,6 +53,7 @@ module Orgs
             scope: "organization",
             show_csv_export: !GitHub.enterprise?,
             is_alert_prioritization_experiment_in_progress: is_alert_prioritization_experiment_in_progress?,
+            allow_autofix_features: CodeScanning::Autofix.any_enabled_for_org?(this_organization),
           }.to_camelback_keys
         end
 

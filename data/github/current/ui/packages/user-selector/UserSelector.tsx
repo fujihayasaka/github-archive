@@ -8,9 +8,9 @@ import {
   Flash,
   type OverlayProps,
   Spinner,
+  Stack,
   TextInput,
 } from '@primer/react'
-import {Octicon} from '@primer/react/deprecated'
 import type React from 'react'
 import {useState} from 'react'
 
@@ -84,19 +84,22 @@ export function UserSelector(props: UserSelectorProps) {
     onOpenChange,
     renderCustomFooter,
     size,
-    showTypedInUser = false,
+    showTypedInUser: showTypedInUserProp = false,
     width = 'large',
     label = '',
   } = props
   const [filterText, setFilterText] = useState('')
   const filteredUsers = filterUsersHelper(usersState.users, filterText)
 
+  const showTypedInUser = showTypedInUserProp && shouldShowTypedInUser(filterText, filteredUsers)
+  const showZeroState = filteredUsers.length === 0 && !showTypedInUser
+
   return (
     <div>
       <ActionMenu onOpenChange={onOpenChange}>
         <ActionMenu.Button data-hotkey={hotKey} size={size} data-testid="user-selector-button">
-          <Box sx={{display: 'flex'}}>
-            <Box sx={{mr: 2}}>
+          <div className="d-flex">
+            <div className="mr-2">
               {currentUser ? (
                 <GitHubAvatar
                   size={16}
@@ -104,9 +107,9 @@ export function UserSelector(props: UserSelectorProps) {
                   square={currentUser.path.startsWith('/apps/')}
                 />
               ) : (
-                <Octicon icon={PeopleIcon} size="small" sx={{color: 'fg.muted'}} />
+                <PeopleIcon size="small" className="fgColor-muted" />
               )}
-            </Box>
+            </div>
             <Box sx={{maxWidth: 125, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
               {currentUser ? (
                 <span>
@@ -117,7 +120,7 @@ export function UserSelector(props: UserSelectorProps) {
                 <span>{defaultText}</span>
               )}
             </Box>
-          </Box>
+          </div>
         </ActionMenu.Button>
         <ActionMenu.Overlay width={width}>
           <ActionList showDividers selectionVariant="single">
@@ -127,9 +130,13 @@ export function UserSelector(props: UserSelectorProps) {
               <Loading />
             ) : usersState.error ? (
               <LoadingFailed />
-            ) : filteredUsers.length === 0 ? (
-              <UsersZeroState showTypedInUser={showTypedInUser} filterText={filterText} onSelect={onSelect} />
             ) : (
+              <>
+                {showZeroState && <UsersZeroState />}
+                {showTypedInUser && <UsersTypedInUser filterText={filterText} onSelect={onSelect} />}
+              </>
+            )}
+            {filteredUsers.length > 0 && (
               <UsersList
                 users={filteredUsers}
                 currentUser={currentUser}
@@ -161,6 +168,19 @@ function filterUsersHelper(users: User[], filterText: string): User[] {
   )
 }
 
+function shouldShowTypedInUser(filterText: string, filteredUsers: User[]): boolean {
+  // dont show the input unless we have filter text
+  if (!filterText) return false
+
+  // if we have zero or more than 1 matches, always show it
+  if (filteredUsers.length === 0 || filteredUsers.length > 1) return true
+
+  // if we have a single match, only show it if it is not an exact match
+  return filteredUsers.length === 1 && filteredUsers[0]
+    ? filteredUsers[0].login.toLowerCase() !== filterText.toLowerCase()
+    : false
+}
+
 interface UserFilterProps {
   onFilterChange: (filterText: string) => void
   defaultText: string
@@ -183,9 +203,9 @@ function UserFilter({onFilterChange, defaultText}: UserFilterProps) {
 
 function Loading() {
   return (
-    <Box sx={{display: 'flex', justifyContent: 'center', p: 2}}>
-      <Spinner size="medium" aria-label="Loading users..." />
-    </Box>
+    <Stack justify="center" className="p-2">
+      <Spinner size="medium" srText="Loading users..." />
+    </Stack>
   )
 }
 
@@ -193,40 +213,34 @@ function LoadingFailed() {
   return <Flash variant="danger">Could not load users</Flash>
 }
 
-function UsersZeroState({
-  showTypedInUser,
-  filterText,
-  onSelect,
-}: {
-  showTypedInUser: boolean
-  filterText: string
-  onSelect?: (user: User) => void
-}) {
-  if (showTypedInUser) {
-    return (
-      <ActionList.Item
-        sx={{display: 'flex', justifyContent: 'center', mb: 2}}
-        onSelect={() => {
-          //for this onSelect to work, you need to only care about the login property of a given User.
-          if (onSelect) {
-            onSelect({
-              login: filterText,
-              name: filterText,
-              path: '',
-              primaryAvatarUrl: '',
-            })
-          }
-        }}
-      >
-        <>
-          Filter on author&nbsp;
-          <Box as="span" sx={{fontWeight: 600}}>
-            {filterText}
-          </Box>
-        </>
-      </ActionList.Item>
-    )
-  }
+function UsersZeroState() {
+  return (
+    <Stack justify="center" className="p-3">
+      Nothing to show
+    </Stack>
+  )
+}
 
-  return <Box sx={{p: 3, display: 'flex', justifyContent: 'center'}}>Nothing to show</Box>
+function UsersTypedInUser({filterText, onSelect}: {filterText: string; onSelect?: (user: User) => void}) {
+  return (
+    <ActionList.Item
+      sx={{display: 'flex', justifyContent: 'center', mb: 2}}
+      onSelect={() => {
+        //for this onSelect to work, you need to only care about the login property of a given User.
+        if (onSelect) {
+          onSelect({
+            login: filterText,
+            name: filterText,
+            path: '',
+            primaryAvatarUrl: '',
+          })
+        }
+      }}
+    >
+      <>
+        Filter on author&nbsp;
+        <span className="text-bold">{filterText}</span>
+      </>
+    </ActionList.Item>
+  )
 }

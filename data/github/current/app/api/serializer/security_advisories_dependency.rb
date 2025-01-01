@@ -13,7 +13,12 @@ module Api::Serializer::SecurityAdvisoriesDependency
 
     # Coerce to the correct subclass.
     if advisory.class == Vulnerability
-      advisory = advisory.becomes(SecurityAdvisory)
+      available_records = options[:available_records]
+      if available_records.nil?
+        advisory = advisory.becomes(SecurityAdvisory)
+      else
+        advisory = available_records.find { |prefilled_advisory| prefilled_advisory.id == advisory.id } || advisory.becomes(SecurityAdvisory)
+      end
     end
 
     # Just in case!
@@ -67,7 +72,13 @@ module Api::Serializer::SecurityAdvisoriesDependency
 
     # Coerce to the correct subclass.
     if vulnerability.class == VulnerableVersionRange
-      vulnerability = vulnerability.becomes(SecurityVulnerability)
+      preloaded_vuln = vulnerability.vulnerability if vulnerability.association(:vulnerability).loaded?
+      if preloaded_vuln.nil?
+        vulnerability = vulnerability.becomes(SecurityVulnerability)
+      else
+        vulnerability = vulnerability.becomes(SecurityVulnerability)
+        GitHub::PrefillAssociations.prefill_associations(vulnerability, [:vulnerability, :security_advisory], available_records: [preloaded_vuln])
+      end
     end
 
     {

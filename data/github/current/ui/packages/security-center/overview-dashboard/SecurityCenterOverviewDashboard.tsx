@@ -46,6 +46,7 @@ export interface SecurityCenterOverviewDashboardProps {
   exportErrorMessage?: string
   scope?: string
   showCsvExport: boolean
+  allowAutofixFeatures?: boolean
   allowOwnerTypeFiltering?: boolean
 }
 
@@ -106,6 +107,7 @@ export function SecurityCenterOverviewDashboard({
   exportErrorMessage,
   scope,
   showCsvExport,
+  allowAutofixFeatures,
 }: SecurityCenterOverviewDashboardProps): JSX.Element {
   const [initialParams] = useSearchParams()
 
@@ -282,6 +284,7 @@ export function SecurityCenterOverviewDashboard({
             endDateString={endDateString}
             selectedDateSpan={selectedDateSpan}
             customProperties={customProperties}
+            allowAutofixFeatures={allowAutofixFeatures}
           />
         )}
       </PageLayout.Content>

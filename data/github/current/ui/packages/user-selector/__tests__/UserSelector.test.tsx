@@ -1,5 +1,5 @@
 import {render} from '@github-ui/react-core/test-utils'
-import {fireEvent, screen} from '@testing-library/react'
+import {screen} from '@testing-library/react'
 
 import type {User, UsersState} from '../user-types'
 import {UserSelector, type UserSelectorProps} from '../UserSelector'
@@ -10,6 +10,19 @@ const defaultProps: UserSelectorProps = {
   usersState: defaultUsersState,
   currentUser: undefined,
   hotKey: 'u',
+}
+
+const filterTestResponse: UsersState = {
+  users: new Array(8).fill(0).map((_, i) => {
+    return {
+      name: `User name ${i}`,
+      login: `user${i}`,
+      primaryAvatarUrl: `http://alambic.github.localhost/avatars/u/${i}?s=80`,
+      path: `/user${i}`,
+    } as User
+  }),
+  error: false,
+  loading: false,
 }
 
 test('Shows the default text in the expandable button', async () => {
@@ -25,10 +38,9 @@ test('Shows the current user in the expandable button', async () => {
 })
 
 test('Opens on click', async () => {
-  render(<UserSelector {...defaultProps} />)
+  const {user} = await render(<UserSelector {...defaultProps} />)
   const button = screen.getByRole('button')
-  // eslint-disable-next-line testing-library/prefer-user-event
-  fireEvent.click(button)
+  await user.click(button)
 
   expect(screen.getByText('monalisa')).toBeInTheDocument()
   expect(screen.getByText('Mona Lisa')).toBeInTheDocument()
@@ -42,12 +54,13 @@ test('Shows a loading indicator while users are being fetched', async () => {
     error: false,
     loading: true,
   }
-  render(<UserSelector {...defaultProps} usersState={loadingResponse} />)
+  const {user} = await render(<UserSelector {...defaultProps} usersState={loadingResponse} />)
   const button = screen.getByRole('button')
-  // eslint-disable-next-line testing-library/prefer-user-event
-  fireEvent.click(button)
+  await user.click(button)
 
   expect(screen.getByLabelText('Loading users...')).toBeInTheDocument()
+  expect(screen.queryByText('Nothing to show')).not.toBeInTheDocument()
+  expect(screen.queryByText('Filter on author')).not.toBeInTheDocument()
 })
 
 test('Shows an error when users cannot be fetched', async () => {
@@ -56,12 +69,13 @@ test('Shows an error when users cannot be fetched', async () => {
     error: true,
     loading: false,
   }
-  render(<UserSelector {...defaultProps} usersState={errorResponse} />)
+  const {user} = await render(<UserSelector {...defaultProps} usersState={errorResponse} />)
   const button = screen.getByRole('button')
-  // eslint-disable-next-line testing-library/prefer-user-event
-  fireEvent.click(button)
+  await user.click(button)
 
   expect(screen.getByText('Could not load users')).toBeInTheDocument()
+  expect(screen.queryByText('Nothing to show')).not.toBeInTheDocument()
+  expect(screen.queryByText('Filter on author')).not.toBeInTheDocument()
 })
 
 test('Shows a zero state when no users are returned', async () => {
@@ -70,10 +84,22 @@ test('Shows a zero state when no users are returned', async () => {
     error: false,
     loading: false,
   }
-  render(<UserSelector {...defaultProps} usersState={emptyResponse} />)
+  const {user} = await render(<UserSelector {...defaultProps} usersState={emptyResponse} />)
   const button = screen.getByRole('button')
-  // eslint-disable-next-line testing-library/prefer-user-event
-  fireEvent.click(button)
+  await user.click(button)
+
+  expect(screen.getByText('Nothing to show')).toBeInTheDocument()
+})
+
+test('Shows a zero state when no users are returned with showTypedInUser enabled', async () => {
+  const emptyResponse: UsersState = {
+    users: [],
+    error: false,
+    loading: false,
+  }
+  const {user} = await render(<UserSelector {...defaultProps} usersState={emptyResponse} showTypedInUser />)
+  const button = screen.getByRole('button')
+  await user.click(button)
 
   expect(screen.getByText('Nothing to show')).toBeInTheDocument()
 })
@@ -89,7 +115,7 @@ test('Shows the avatar if a current user is selected', () => {
 })
 
 test('Renders custom footer', async () => {
-  render(
+  const {user} = await render(
     <UserSelector
       {...defaultProps}
       renderCustomFooter={() => <div data-testid="user-picker-custom-footer">This is a custom footer</div>}
@@ -97,8 +123,7 @@ test('Renders custom footer', async () => {
   )
 
   const button = screen.getByRole('button')
-  // eslint-disable-next-line testing-library/prefer-user-event
-  fireEvent.click(button)
+  await user.click(button)
 
   expect(screen.getByTestId('user-picker-custom-footer')).toHaveTextContent('This is a custom footer')
 })
@@ -116,11 +141,10 @@ test('Virtualizes the list of results', async () => {
     error: false,
     loading: false,
   }
-  render(<UserSelector {...defaultProps} usersState={virtualizedResponse} />)
+  const {user} = await render(<UserSelector {...defaultProps} usersState={virtualizedResponse} />)
 
   const button = screen.getByRole('button')
-  // eslint-disable-next-line testing-library/prefer-user-event
-  fireEvent.click(button)
+  await user.click(button)
 
   // Since the virtualized list relies on DOM measurement, which is not
   // possible in jest tests, the best we can do is verify that not all of the
@@ -129,55 +153,88 @@ test('Virtualizes the list of results', async () => {
 })
 
 test('Filters the list of users based on the curent filter text', async () => {
-  const filterTestResponse: UsersState = {
-    users: new Array(8).fill(0).map((_, i) => {
-      return {
-        name: `User name ${i}`,
-        login: `user${i}`,
-        primaryAvatarUrl: `http://alambic.github.localhost/avatars/u/${i}?s=80`,
-        path: `/user${i}`,
-      } as User
-    }),
-    error: false,
-    loading: false,
-  }
-  render(<UserSelector {...defaultProps} usersState={filterTestResponse} />)
+  const {user} = await render(<UserSelector {...defaultProps} usersState={filterTestResponse} />)
 
   const button = screen.getByRole('button')
-  // eslint-disable-next-line testing-library/prefer-user-event
-  fireEvent.click(button)
+  await user.click(button)
 
   expect(screen.getAllByRole('menuitemradio')).toHaveLength(8)
+  expect(screen.queryByText('Filter on author')).not.toBeInTheDocument()
 
   const input = screen.getByPlaceholderText('Find a user...')
+  await user.click(input)
 
   // Expect 0 result experience shows with no matches
-  // eslint-disable-next-line testing-library/prefer-user-event
-  fireEvent.input(input, {target: {value: 'none'}})
+  await user.paste('none')
   expect(screen.getByText('Nothing to show')).toBeInTheDocument()
+  expect(screen.queryByText('Filter on author')).not.toBeInTheDocument()
 
   // Expect 1 result
-  // eslint-disable-next-line testing-library/prefer-user-event
-  fireEvent.input(input, {target: {value: '4'}})
+  await user.clear(input)
+  await user.paste('4')
   expect(screen.getAllByRole('menuitemradio')).toHaveLength(1)
+  expect(screen.queryByText('Filter on author')).not.toBeInTheDocument()
 
   // Expect all results when filter is cleared
-  // eslint-disable-next-line testing-library/prefer-user-event
-  fireEvent.input(input, {target: {value: ''}})
+  await user.clear(input)
   expect(screen.getAllByRole('menuitemradio')).toHaveLength(8)
+  expect(screen.queryByText('Filter on author')).not.toBeInTheDocument()
 
   // Filter is case insensitive and searches login
-  // eslint-disable-next-line testing-library/prefer-user-event
-  fireEvent.input(input, {target: {value: 'UsEr2'}})
+  await user.clear(input)
+  await user.paste('UsEr2')
   expect(screen.getAllByRole('menuitemradio')).toHaveLength(1)
+  expect(screen.queryByText('Filter on author')).not.toBeInTheDocument()
 
   // Filter is case insensitive and searches name
-  // eslint-disable-next-line testing-library/prefer-user-event
-  fireEvent.input(input, {target: {value: 'NaMe 7'}})
+  await user.clear(input)
+  await user.paste('NaMe 7')
   expect(screen.getAllByRole('menuitemradio')).toHaveLength(1)
+  expect(screen.queryByText('Filter on author')).not.toBeInTheDocument()
 
   // Expect all results when filter matches all
-  // eslint-disable-next-line testing-library/prefer-user-event
-  fireEvent.input(input, {target: {value: 'User name'}})
+  await user.clear(input)
+  await user.paste('User name')
   expect(screen.getAllByRole('menuitemradio')).toHaveLength(8)
+  expect(screen.queryByText('Filter on author')).not.toBeInTheDocument()
+})
+
+test('Filters the list of users based on the curent filter text with selectable input when showTypedInUser', async () => {
+  const {user} = await render(<UserSelector {...defaultProps} usersState={filterTestResponse} showTypedInUser />)
+
+  const button = screen.getByRole('button')
+  await user.click(button)
+
+  expect(screen.getAllByRole('menuitemradio')).toHaveLength(8)
+  expect(screen.queryByText('Filter on author')).not.toBeInTheDocument()
+  expect(screen.queryByText('Nothing to show')).not.toBeInTheDocument()
+
+  const input = screen.getByPlaceholderText('Find a user...')
+  await user.click(input)
+
+  // Expect 1 result - no matches + typed in user
+  await user.paste('none')
+  expect(screen.getAllByRole('menuitemradio')).toHaveLength(1)
+  expect(screen.getByText('Filter on author')).toBeInTheDocument()
+  expect(screen.queryByText('Nothing to show')).not.toBeInTheDocument()
+
+  // Expect all results when filter is cleared and no typed in user
+  await user.clear(input)
+  expect(screen.getAllByRole('menuitemradio')).toHaveLength(8)
+  expect(screen.queryByText('Filter on author')).not.toBeInTheDocument()
+  expect(screen.queryByText('Nothing to show')).not.toBeInTheDocument()
+
+  // if an exact login match - only return 1 result and do not show typed in user
+  await user.clear(input)
+  await user.paste('user7')
+  expect(screen.getAllByRole('menuitemradio')).toHaveLength(1)
+  expect(screen.queryByText('Filter on author')).not.toBeInTheDocument()
+  expect(screen.queryByText('Nothing to show')).not.toBeInTheDocument()
+
+  // Expect all results when filter matches all + typed in user
+  await user.clear(input)
+  await user.paste('User name')
+  expect(screen.getAllByRole('menuitemradio')).toHaveLength(9)
+  expect(screen.getByText('Filter on author')).toBeInTheDocument()
+  expect(screen.queryByText('Nothing to show')).not.toBeInTheDocument()
 })

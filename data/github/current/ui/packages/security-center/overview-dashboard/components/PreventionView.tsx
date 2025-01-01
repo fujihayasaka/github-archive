@@ -14,6 +14,7 @@ export interface PreventionViewProps {
   endDateString: string
   selectedDateSpan: Period | RangeSelection
   customProperties: CustomProperty[]
+  allowAutofixFeatures?: boolean
 }
 
 export function PreventionView({
@@ -22,6 +23,7 @@ export function PreventionView({
   endDateString,
   customProperties,
   selectedDateSpan,
+  allowAutofixFeatures,
 }: PreventionViewProps): JSX.Element {
   return (
     <Stack>
@@ -36,11 +38,13 @@ export function PreventionView({
           datePeriod={isRangeSelection(selectedDateSpan) ? undefined : selectedDateSpan}
         />
 
-        <PullRequestAlertsFixedWithAutofixCard
-          query={submittedQuery}
-          startDate={startDateString}
-          endDate={endDateString}
-        />
+        {allowAutofixFeatures && (
+          <PullRequestAlertsFixedWithAutofixCard
+            query={submittedQuery}
+            startDate={startDateString}
+            endDate={endDateString}
+          />
+        )}
       </Stack>
     </Stack>
   )

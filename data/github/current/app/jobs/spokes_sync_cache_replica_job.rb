@@ -111,7 +111,7 @@ class SpokesSyncCacheReplicaJob < ApplicationJob
       end
       do_fetch(read_route, maint_client.rpc, cache_host, repo.id, repo_type, is_wiki, start)
       updated_refs = read_updated_refs(maint_client.rpc, audit_log_size)
-      maint_client.rpc.nw_sync
+      maint_client.rpc.nw_sync(ignore_locking_errors: true)
       sync_head_ref(maint_client.rpc, reader_rpc)
       sync_extra_state(maint_client.rpc, read_route)
 

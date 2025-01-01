@@ -40,6 +40,7 @@ module Businesses
               custom_properties: [], # TODO: Implement business version of `SecurityCenter::Helpers::CustomProperties` and use here
               scope: "enterprise",
               show_csv_export: !GitHub.enterprise? && ::SecurityCenter::FeatureFlagHelper.enterprise_overview_csv_export?(*feature_flag_actors),
+              allow_autofix_features: CodeScanning::Autofix.any_allowed_by_business?(this_business),
               allow_owner_type_filtering: can_see_personal_repos?,
             }.to_camelback_keys
           end

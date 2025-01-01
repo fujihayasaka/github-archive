@@ -14,11 +14,16 @@ module GitHub::HTML
         next if has_ancestor?(node, IGNORE_TAGS) || has_child?(node, IGNORE_TAGS)
 
         stripped_content = node.content.strip
-        child_math = display_math?(stripped_content) ? stripped_content : "$$#{stripped_content}$$"
+        child_math = if display_math?(stripped_content)
+          "$$#{escape_dollar_signs(stripped_content[2..-3])}$$"
+        else
+          "$$#{escape_dollar_signs(stripped_content)}$$"
+        end
 
         copy_node = node
         copy_node.content = child_math
 
+        # if we ever replace this method call, we need to ensure that the copy_node is properly replaced
         replacement = replace_display_math_notation(copy_node)
 
         next if replacement.nil?
@@ -28,6 +33,11 @@ module GitHub::HTML
       end
 
       doc
+    end
+
+    def escape_dollar_signs(content)
+      # Escape any dollar signs that are not already escaped
+      content.gsub(/(?<!\\)\$/, '\$')
     end
   end
 end

@@ -29,10 +29,17 @@ module GitRPC
     end
 
     rpc_writer :nw_sync
-    def nw_sync
+    def nw_sync(ignore_locking_errors: false)
       res = spawn_git("nw-sync")
-      raise GitRPC::CommandFailed.new(res) if !res["ok"]
-      nil
+      return nil if res["ok"]
+      # It is expected that sometimes this command will fail to acquire
+      # locks. In this case we can ignore the error and report success to
+      # avoid an expensive recompute checksum calculation that would be
+      # triggered by disagreeing backends. Recomputing the checksum is
+      # not necessary for nw-sync because this command does not change
+      # the hard state.
+      return nil if ignore_locking_errors && res["status"] == 2 && res["err"] =~ /fatal: could not get the (nw-sync|network) lock/
+      raise GitRPC::CommandFailed.new(res)
     end
 
     rpc_cache_writer :nw_gc, output_varies: true, no_git_repo: true, require_unanimous: true

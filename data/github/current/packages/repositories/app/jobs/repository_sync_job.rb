@@ -58,10 +58,6 @@ class RepositorySyncJob < ApplicationJob
       repository.synchronize_shared_storage!
     end
   rescue GitRPC::CommandFailed => boom
-    # It is expected that sometimes this job will fail to acquire the nw-sync lock on a repo.
-    # If this is the case, we do not need to raise an error that will be reported.
-    return if boom.message =~ /fatal: could not get the nw-sync lock/
-
     raise RepositorySyncJob::Failed, "Failed to GC repository: #{boom.message}"
   rescue Repository::CommandFailed => boom
     raise RepositorySyncJob::Failed, "Failed to GC repository: #{boom.message}"

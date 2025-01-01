@@ -155,7 +155,7 @@ class Api::RepositorySecretScanning < Api::App
     comment_present = data["resolution_comment"]&.present?
     request_resolution = data["resolution"] || nil
 
-    if ((alert_open == requested_state_open) || (request_resolution == alert&.resolution)) && comment_present
+    if ((alert_open && requested_state_open) || (request_resolution == alert&.resolution)) && comment_present
       deliver_error!(422, message: "Can't set a \"resolution_comment\" without a new resolution")
     end
 

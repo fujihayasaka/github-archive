@@ -371,6 +371,9 @@ module SecurityCenter
             request_hash[:no_data] = true
           else
             request_hash[:repos_in_archived_state] = net_incl_states.first == :true
+            # Even though TSS can directly handle the archived filter, we still need to
+            # limit the repos by what the user is authz to see.
+            request_hash[:repo_ids] = allowed_repo_ids if allowed_repo_ids.present?
           end
           return
         end

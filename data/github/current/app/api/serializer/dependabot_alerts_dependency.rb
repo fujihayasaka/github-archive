@@ -11,14 +11,26 @@ module Api::Serializer::DependabotAlertsDependency
 
   def dependabot_alerts_hash(data, options)
     alerts = data.fetch(:alerts, [])
+
     GitHub::PrefillAssociations.prefill_associations(alerts, [
-      { repository: :owner },
-      :vulnerability,
-      :vulnerable_version_range,
+      { repository: [:owner, :network] },
+      { vulnerability: [:cwe_references, :vulnerability_references, :cwes] },
+      { vulnerable_version_range: :vulnerability },
     ])
 
+    GitHub::PrefillAssociations.prefill_batch_method(alerts.map(&:vulnerability), :cve_epss)
+
+    # Preload advisories for SecurityAdvisory Rails STI
+    prefill_advisories = alerts.map { |alert| alert.vulnerability.becomes(SecurityAdvisory) if alert.vulnerability.class == Vulnerability }.compact
+    GitHub::PrefillAssociations.prefill_associations(prefill_advisories, [
+      :cwe_references, :vulnerability_references, :cwes, :cve_epss,
+      { vulnerabilities: :vulnerability }
+    ])
+    GitHub::PrefillAssociations.prefill_associations(prefill_advisories, [:vulnerable_version_ranges])
+    GitHub::PrefillAssociations.prefill_batch_method(prefill_advisories, :cve_epss)
+
     alerts.map do |alert|
-      dependabot_alert_hash(alert, options)
+      dependabot_alert_hash(alert, options.merge(available_records: prefill_advisories))
     end
   end
 
@@ -31,8 +43,8 @@ module Api::Serializer::DependabotAlertsDependency
       number: alert.number,
       state: alert.state,
       dependency: dependabot_alert_dependency_hash(alert),
-      security_advisory: security_advisory_hash(alert.vulnerability, use_medium_severity: true),
-      security_vulnerability: security_vulnerability_hash(alert.vulnerable_version_range, use_medium_severity: true),
+      security_advisory: security_advisory_hash(alert.vulnerability, use_medium_severity: true, available_records: options[:available_records]),
+      security_vulnerability: security_vulnerability_hash(alert.vulnerable_version_range, use_medium_severity: true, available_records: options[:available_records]),
       url: url("/repos/#{repository.name_with_owner_for_api(use: options[:serialize_login])}/dependabot/alerts/#{alert.number}"),
       html_url: html_url("/#{repository.name_with_owner_for_api(use: options[:serialize_login])}/security/dependabot/#{alert.number}"),
       created_at: time(alert.created_at),

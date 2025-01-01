@@ -44,7 +44,6 @@ export function Commits() {
           author={filters.author}
           refInfo={payload.refInfo}
           path={filters.currentBlobPath}
-          sx={{mb: 3}}
         />
 
         {commitGroups.length === 0 && (

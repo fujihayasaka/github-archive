@@ -22,6 +22,7 @@ module SpokesAPI
         "azaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa💣",
         "0123456789abcdef",
         "AA💣",
+        "GATE-102-DK,-NO,-SE-aus-dem-Code-l\xf6schen", # invalid byte sequence in UTF-8
         :aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,
         nil
       ].each do |input|

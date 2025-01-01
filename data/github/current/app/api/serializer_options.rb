@@ -117,6 +117,7 @@ module Api
           :repo_identifier_only, # For pull request hash
           :calculate_sub_issue_list, # Instructs hash to recalculate the completion for an issue, used whenever a sub-issue is added or removed
           :author_association_viewer, # For injecting the viewer for the author assoication check (issue / pull request comment hash)
+          :available_records, # For prefilling associations
         ) do
           include SerializerOptionsMimeTypes
         end
