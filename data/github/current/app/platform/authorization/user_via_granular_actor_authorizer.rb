@@ -249,7 +249,37 @@ module Platform
         # We don't set it at the top because there are special return cases,
         # that take precedent.
         if preloaded_granular_actor_permitted? && preloaded_granular_actor
-          granular_actor = preloaded_granular_actor
+          is_repo_path =
+            (auth_context.current_repo_loaded? || auth_context.repo_nwo_from_path.present?) &&
+              !template_repo_creation_interaction?(verb)
+
+          # "Allow" the use of the preloaded actor if we're not on the repo path,
+          # or if the granular actor is already set.
+          allow_preloaded_actor = !is_repo_path || granular_actor.present?
+
+          key = "platform.authorization.user_via_granular_actor_authorizer.granular_actor_access_allowed"
+          GitHub.dogstats.increment(key, tags: [
+            "allow_preloaded_actor:#{allow_preloaded_actor}",
+            "verb:#{verb}",
+          ])
+
+          unless allow_preloaded_actor
+            GitHub.logger.info(
+              "preloaded actor not permitted", {
+                "code.namespace" => "Platform::Authorization::UserViaGranularActorAuthorizer",
+                "code.function" => "granular_actor_access_allowed?",
+                "gh.integration_id" => auth_context.current_integration&.id,
+                "gh.authz.verb" => verb.to_s,
+                "gh.repo.id" => (auth_context.current_repo.id if auth_context.current_repo_loaded?),
+                "gh.repo.owner.id" => (auth_context.current_repo.owner_id if auth_context.current_repo_loaded?),
+              }
+            )
+          end
+
+          # Only use preloaded if we're not on a repo path, or if granular_actor is already set
+          if allow_preloaded_actor
+            granular_actor = preloaded_granular_actor
+          end
         end
 
         if (bot = fetch_bot_user(granular_actor, verb))

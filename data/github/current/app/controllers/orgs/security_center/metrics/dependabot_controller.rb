@@ -196,11 +196,6 @@ module Orgs
           render_404 unless ::SecurityCenter::SecurityFeatures.dependabot_metrics_enabled_for_instance?
         end
 
-        sig { void }
-        def security_center_required
-          render_404 unless ::SecurityCenter::SecurityFeatures.security_center_available?(this_organization, dotcom_request_only: true)
-        end
-
         sig { returns(String) }
         memoize def query
           ::Search::Queries::SecurityCenter::DependabotAlertsQuery.canonicalize(params.fetch(:query, ""))

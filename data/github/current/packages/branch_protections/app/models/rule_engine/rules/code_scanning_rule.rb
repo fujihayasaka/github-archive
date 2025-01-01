@@ -108,7 +108,7 @@ module RuleEngine
           opts = if ref_update.is_a?(Git::Branch::Update) && ref_update.pull_request.present?
             is_dependabot = ->(author) { author&.bot? && author&.is_dependabot? }
 
-            merge_commit_oid = CodeScanningCheckSuite.merge_commit_for(pull_request: ref_update.pull_request)
+            merge_commit_oid = ref_update.pull_request.merge_commit_sha
 
             {
               merge_commit_oid:,

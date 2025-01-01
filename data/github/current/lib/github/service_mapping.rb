@@ -148,6 +148,19 @@ module GitHub
       GitHub.logger.with_named_tags(log_context, &block) if block_given?
     end
 
+    # Public: Add the service mapping to the current OpenTelemetry span, if any.
+    #
+    # You do not need to call this if you're already calling `push_service_mapping_context`.
+    # This is only needed if you do not want to modify any context stacks and only affect the span.
+    def set_catalog_service_in_current_span
+      return unless GitHub.serviceowners
+
+      current_service_mapping = logical_service
+      if current_service_mapping
+        GitHub.current_span&.add_attributes({ catalog_service: current_service_mapping }.stringify_keys!)
+      end
+    end
+
     # A cache of { String => Hash } for reusing service contexts
     ALL_SERVICE_CONTEXTS = Hash.new { |h, k| h[k] = { catalog_service: k } }
     private_constant :ALL_SERVICE_CONTEXTS

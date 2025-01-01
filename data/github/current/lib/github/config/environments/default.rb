@@ -213,6 +213,8 @@ GitHub.private_registry_secrets_app_key = "Iv23ct5ltBS3Vk4wSHw8"
 # BYOK Custom Models for GitHub Models & Copilot
 GitHub.byok_custom_models_app_key = "Iv23ctQipwoLMooQHxdq"
 GitHub.copilot_byok_app_key = "Iv23ctXeLyQmO2Auu7KX"
+# ELM Exporter Secrets
+GitHub.elm_exporter_secrets_app_key = "Iv23ctehy9m6mzmux8hy"
 
 # Copilot
 GitHub.copilot_jetbrains_language_server_auth_app_key = "Iv23ctfURkiMfJ4xr5mv"
