@@ -15,7 +15,7 @@ module GitHub::Goomba::Async
 
     def initialize(*args)
       super
-      @node_assets = {}
+      @node_src_assets = {}
 
       # Should match any image where src="https://<ghes-url>/user/<user>/files/<guid>
       @selector = Goomba::Selector.new(match: "img[src^='#{GitHub.storage_cluster_url}'][src*='user'][src*='files'], img[src^='#{storage_cluster_url_isolated_subdomain_complement}'][src*='user'][src*='files']")
@@ -31,13 +31,13 @@ module GitHub::Goomba::Async
         compacted_res = res.compact
         next if compacted_res.empty?
 
-        @node_assets.merge!(compacted_res.reduce({}, :merge))
+        @node_src_assets.merge!(compacted_res.reduce({}, :merge))
       end
     end
 
     def call(node)
       # fetch the preloaded UserAsset data
-      asset = @node_assets[node]
+      asset = @node_src_assets[node["src"]]
       return node unless asset.present?
 
       # Used by AnimatedImageFilter for checking content type

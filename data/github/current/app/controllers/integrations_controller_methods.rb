@@ -448,6 +448,7 @@ module IntegrationsControllerMethods
   end
 
   def copilot
+    return render_404 unless Integrations::ShowView.show_copilot_tab?(current_integration)
     view = create_view_model(
       Integrations::ShowView,
       integration: current_integration
@@ -457,6 +458,7 @@ module IntegrationsControllerMethods
   end
 
   def update_copilot
+    return render_404 if GitHub.enterprise?
     if !Copilot::ExtensionsAgreementSignature.signed_by?(current_context)
       flash[:error] = "You must accept the Marketplace Developer Agreement."
       return redirect_to gh_settings_app_integration_agent_path(current_integration)
