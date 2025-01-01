@@ -1,0 +1,51 @@
+# typed: true
+# frozen_string_literal: true
+
+module Apps
+  class Internal
+    class Pages
+      INTEGRATION_NAME = "GitHub Pages"
+      OAUTH_APP_NAME = "GitHub Pages"
+
+      INTEGRATION = {
+        alias: :pages,
+        id: ->() { GitHub.pages_github_app&.id },
+        inherits: [:internal],
+        capabilities: {
+          auto_upgrade_permissions: true,
+          enforce_internal_access_on_token_generation: false,
+          ip_allowlist_exempt: true,
+          oauth_authorizations_revocable_by_user: false,
+          proxima_first_party_sync: true,
+          user_installable: false,
+          skip_emu_visibility_cap: true,
+          skip_emu_ownership_cap: true, # skip CAP policy that ensures EMUs are not taking actions outside of their enterprise
+        },
+        properties: {
+          proxima_sync_delegate: :DefaultDelegate,
+        },
+        can_auto_install: {},
+        custom_instrumentation_events: {},
+        owners: [],
+      }
+
+      OAUTH = {
+        alias: :pages_oauth,
+        id: ->(*) { GitHub.pages_app_id },
+        inherits: [:internal],
+        capabilities: {
+          can_auto_approve_oauth_authorization: true,
+          oauth_authorizations_revocable_by_user: false,
+          organization_oauth_app_policy_exempt: true,
+          proxima_first_party_sync: true,
+        },
+        properties: {
+          proxima_sync_delegate: :DefaultDelegate,
+        },
+        can_auto_install: {},
+        custom_instrumentation_events: {},
+        owners: [],
+      }
+    end
+  end
+end

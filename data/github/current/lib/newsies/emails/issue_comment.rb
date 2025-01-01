@@ -1,0 +1,41 @@
+# typed: true
+# frozen_string_literal: true
+
+module Newsies
+  module Emails
+    class IssueComment < Newsies::Emails::Message
+      extend T::Sig
+
+      def self.matches?(comment)
+        comment.is_a?(::IssueComment) && !T.must(comment.issue).pull_request?
+      end
+
+      sig { returns(T.nilable(::Issue)) }
+      def issue
+        T.let(comment, ::IssueComment).issue
+      end
+
+      def subject
+        "Re: [#{repository.name_with_display_owner}] #{issue&.title}#{issue_subject_suffix}"
+      end
+
+      def in_reply_to
+        issue&.message_id
+      end
+
+      def deliverable?
+        return false unless super && settings.try(:notify_comment_email?)
+
+        opts = @options || {}
+        actor = opts[:author]
+        trigger = opts[:is_update] ? "updated" : "created"
+        if IssueDeliveryCheck.new(issue, actor, settings_user, trigger).notifyd_enabled?
+          @undeliverable_reason = "notifyd_enabled"
+          return false
+        end
+
+        true
+      end
+    end
+  end
+end

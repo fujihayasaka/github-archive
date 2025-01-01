@@ -1,0 +1,109 @@
+# typed: strict
+# frozen_string_literal: true
+
+module SponsorsButtonsHelper
+  extend T::Sig
+
+  include HydroHelper
+  include Kernel
+
+  SPONSORS_BUTTON_LOCATIONS = T.let([
+    :UNKNOWN,
+    :HOVERCARD_SPONSORING,
+    :HOVERCARD_YOUR_SPONSOR,
+    :HOVERCARD_SPONSOR,
+    :PROFILE_SPONSORING,
+    :PROFILE_SPONSOR,
+    :PROFILE_SPONSORS_DASHBOARD,
+    :MOBILE_PROFILE_SPONSORING,
+    :MOBILE_PROFILE_SPONSOR,
+    :MOBILE_PROFILE_SPONSORS_DASHBOARD,
+    :HEADER_SPONSORS_DASHBOARD,
+    :PROFILE_SPONSORS_TAB_SPONSOR,
+    :PROFILE_SPONSORS_TAB_SPONSORING,
+    :PROFILE_SPONSORING_TAB_SPONSOR,
+    :PROFILE_SPONSORING_TAB_SPONSORING,
+    :NEW_SPONSORSHIP_SURVEY,
+    :SOCIAL_SHARE_TWITTER,
+    :SOCIAL_SHARE_FACEBOOK,
+    :SOCIAL_SHARE_CLIPBOARD,
+    :REPOSITORY_FUNDING_MODAL_SPONSOR,
+    :REPOSITORY_FUNDING_MODAL_SPONSORING,
+    :SPONSORED_ORGS_CTA,
+    :INVOICED_BILLING_CONTACT_US,
+    :ACCOUNT_SWITCHER_OPEN,
+    :SPONSORSHIPS_EXPORT,
+    :DASHBOARD_NEXT_STEPS_TOGGLE,
+    :DASHBOARD_EMBED_IT,
+    :COPY_SPONSOR_BUTTON_SNIPPET,
+    :COPY_SPONSOR_CARD_SNIPPET,
+    :DASHBOARD_SHARE,
+    :DASHBOARD_NEXT_STEPS_PREVIEW_SPONSOR,
+    :REPO_FILES_SIDEBAR_SPONSOR,
+    :REPO_FILES_SIDEBAR_SPONSORING,
+    :PACKAGE_DEPENDENCY_SPONSOR,
+    :PACKAGE_DEPENDENCY_SPONSORING,
+    :USER_SEARCH_RESULT_SPONSOR,
+    :REPO_SEARCH_RESULT_SPONSOR,
+    :FEATURED_SPONSOR,
+    :FEATURED_SPONSORING,
+    :STARRED_REPO_SPONSOR,
+    :STARRED_REPO_SPONSORING,
+    :TRENDING_DEVELOPER_SPONSOR,
+    :TRENDING_DEVELOPER_SPONSORING,
+    :FOLLOW_SPONSOR,
+    :FOLLOW_SPONSORING,
+    :PAY_SPONSORSHIP_PRORATED,
+    :PAY_SPONSORSHIP_IN_FULL,
+    :TOPIC_PAGE_SPONSOR,
+    :TOPIC_PAGE_SPONSORING,
+    :CORPORATE_SPONSORS_BANNER_LEARN_MORE,
+    :CORPORATE_SPONSORS_BANNER_EXPLORE,
+    :CORPORATE_SPONSORS_BANNER_DISMISSED,
+    :DEPENDENCY_SPONSOR,
+    :DEPENDENCY_SPONSORING,
+    :TRENDING_REPO_SPONSOR,
+    :TRENDING_REPO_SPONSORING,
+    :HEADER_YOUR_SPONSORSHIPS,
+    :ISSUE_NUDGE_SPONSOR,
+    :REPOSITORY_HEADER_SPONSOR,
+    :REPOSITORY_HEADER_SPONSORING,
+    :USER_LIST_SPONSOR,
+    :USER_LIST_SPONSORING,
+    :BULK_SPONSORSHIP_USER_LIST,
+    :BULK_SPONSORSHIP_BILLING_SETTINGS,
+    :BULK_SPONSORSHIP_DEPENDENCY_GRAPH,
+    :BULK_SPONSORSHIP_USER_SPONSORING_TAB,
+    :BULK_SPONSORSHIP_ORG_SPONSORING_TAB,
+    :START_BULK_SPONSORSHIP_SPONSORS_EXPLORE,
+    :START_BULK_SPONSORSHIP_USER_SPONSORING_TAB,
+    :START_BULK_SPONSORSHIP_ORG_SPONSORING_TAB,
+    :INVOICED_BILLING_SETUP_BILLING_SETTINGS,
+    :INVOICED_BILLING_SETUP_ACCOUNT_SWITCHER,
+    :INVOICED_BILLING_SETUP_CHECKOUT_FEE,
+    :YOUR_GOALS_SHARE,
+    :SPONSORS_PROFILE_SHARE
+  ].freeze, T::Array[Symbol])
+
+  # Public: Get a hash of attributes for applying to a link to track clicks to the
+  # 'Sponsor' or 'Sponsoring' button via Hydro.
+  #
+  # button - Symbol representing where the button is located, like the page it's on
+  # sponsorable_login - optional String login of the User or Organization whose Sponsors
+  #                     page clicking the button will take you to, if relevant
+  sig { params(button: Symbol, sponsorable_login: T.nilable(String)).returns(T::Hash[String, String]) }
+  def sponsors_button_hydro_attributes(button, sponsorable_login)
+    unless SPONSORS_BUTTON_LOCATIONS.include?(button)
+      if Rails.env.test? || Rails.env.development?
+        raise "Invalid button #{button}; choose from options in " \
+          "SponsorsButtonsHelper::SPONSORS_BUTTON_LOCATIONS"
+      end
+      button = :UNKNOWN
+    end
+    hydro_click_tracking_attributes(
+      "sponsors.button_click",
+      button: button,
+      sponsorable_login: sponsorable_login,
+    )
+  end
+end

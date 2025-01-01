@@ -1,0 +1,82 @@
+# typed: true
+# frozen_string_literal: true
+
+module Apps
+  class Internal
+    class GitHubSpamurai
+      OAUTH_APP_NAME = "GitHub Spamurai Next"
+      OAUTH_APP_NAME_STAGING = "GitHub Spamurai Next Staging"
+      OAUTH_APP_NAME_REMIX = "GitHub Spamurai Next Remix"
+      OAUTH_APP_NAME_DEV = "GitHub Spamurai Next Dev"
+
+      def self.id_finder(name)
+        ->() {
+          OauthApplication.find_by(
+            user: GitHub.trusted_oauth_apps_owner,
+            name: name
+          )&.id
+        }
+      end
+
+      PRODUCTION = {
+        alias: :github_spamurai_next,
+        id: id_finder(OAUTH_APP_NAME),
+        inherits: [:internal],
+        capabilities: {
+          can_auto_approve_oauth_authorization: true, # https://github.com/github/ecosystem-apps/issues/472
+          oauth_authorizations_revocable_by_user: false,
+          organization_oauth_app_policy_exempt: true,
+        },
+        properties: {},
+        can_auto_install: {},
+        custom_instrumentation_events: {},
+        owners: [],
+      }
+
+      STAGING = {
+        alias: :github_spamurai_staging,
+        id: id_finder(OAUTH_APP_NAME_STAGING),
+        inherits: [:internal],
+        capabilities: {
+          can_auto_approve_oauth_authorization: true, # https://github.com/github/ecosystem-apps/issues/472
+          oauth_authorizations_revocable_by_user: false,
+          organization_oauth_app_policy_exempt: true,
+        },
+        properties: {},
+        can_auto_install: {},
+        custom_instrumentation_events: {},
+        owners: [],
+      }
+
+      REMIX = {
+        alias: :github_spamurai_remix,
+        id: id_finder(OAUTH_APP_NAME_REMIX),
+        inherits: [:internal],
+        capabilities: {
+          can_auto_approve_oauth_authorization: true, # https://github.com/github/ecosystem-apps/issues/472
+          oauth_authorizations_revocable_by_user: false,
+          organization_oauth_app_policy_exempt: true,
+        },
+        properties: {},
+        can_auto_install: {},
+        custom_instrumentation_events: {},
+        owners: [],
+      }
+
+      DEV = {
+        alias: :github_spamurai_dev,
+        id: id_finder(OAUTH_APP_NAME_DEV),
+        inherits: [:internal],
+        capabilities: {
+          can_auto_approve_oauth_authorization: true, # https://github.com/github/ecosystem-apps/issues/472
+          oauth_authorizations_revocable_by_user: false,
+          organization_oauth_app_policy_exempt: true,
+        },
+        properties: {},
+        can_auto_install: {},
+        custom_instrumentation_events: {},
+        owners: [],
+      }
+    end
+  end
+end

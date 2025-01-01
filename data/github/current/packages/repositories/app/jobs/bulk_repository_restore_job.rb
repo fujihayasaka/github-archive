@@ -1,0 +1,33 @@
+# typed: true
+# frozen_string_literal: true
+
+# Serially restores a list of repositories.
+class BulkRepositoryRestoreJob < ApplicationJob
+  default_to_write_connection! # rubocop:todo GitHub/JobsDoNotDefaultToWriteConnection
+
+  queue_as :archive_restore
+
+  def self.job_id(ids)
+    "bulk_repository_restore_#{ids.first}"
+  end
+
+  def self.status(ids)
+    JobStatus.find(BulkRepositoryRestoreJob.job_id(ids))
+  end
+
+  def perform(ids, user_id)
+    status = BulkRepositoryRestoreJob.status(ids)
+    return unless status
+    return unless ids.present?
+
+    status.track do
+      repo_id = ids.shift
+      Repository.restore(repo_id, actor: User.new(id: user_id), synchronous: false)
+      # create next job to continue bulk restore
+      if ids.present?
+        JobStatus.create(id: BulkRepositoryRestoreJob.job_id(ids))
+        BulkRepositoryRestoreJob.perform_later(ids, user_id)
+      end
+    end
+  end
+end

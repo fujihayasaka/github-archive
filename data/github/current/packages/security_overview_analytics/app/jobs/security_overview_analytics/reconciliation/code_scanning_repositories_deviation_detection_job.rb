@@ -1,0 +1,280 @@
+# typed: strict
+# frozen_string_literal: true
+
+require "turboscan"
+
+module SecurityOverviewAnalytics
+  module Reconciliation
+    class CodeScanningRepositoriesDeviationDetectionJob < BatchedJob
+      extend T::Sig
+      include GitHub::Memoizer
+      include FanoutThrottler
+      include BatchedJobThrottler
+
+      queue_as :security_overview_analytics_code_scanning_alerts_reconciliation
+
+      use_replicas \
+        ::ApplicationRecord::Configurations,
+        ::ApplicationRecord::Mysql1,
+        ::ApplicationRecord::Mysql5,
+        ::ApplicationRecord::Repositories,
+        ::ApplicationRecord::SecurityOverviewAnalytics
+
+      retry_on_dirty_exit
+
+      NON_RETRYABLE_EXCEPTIONS = T.let([
+        StandardError,
+      ], T::Array[T::Class[T.anything]])
+
+      RETRYABLE_EXCEPTIONS = T.let([
+        Freno::Error,
+        *Resiliency::Response::UnavailableExceptions, # DB unavailable
+      ], T::Array[T::Class[T.anything]])
+
+      # Custom retry for recoverable exceptions. Reset session lock if attempts are exhausted.
+      RETRYABLE_EXCEPTIONS.each do |error_class|
+        retry_on error_class, wait: :polynomially_longer, attempts: 5 do |job, error|
+          last_session_started_at = job.arguments.first&.dig(:last_session_started_at)
+          job.session.reset!(last_session_started_at:)
+
+          GitHub.dogstats.increment("security_overview_analytics.reconciliation.abort",
+            tags: job.all_stats_tags + [
+              "reason:stopped_retry",
+              "error:#{error.class.name.underscore}"
+            ]
+          )
+        end
+      end
+
+      around_enqueue do |job, block|
+        if job.arguments.dig(0, :organization_id).blank?
+          clear_lock
+          raise ArgumentError.new("Missing organization_id.")
+        end
+
+        session_started_at = job.arguments.first&.dig(:session_started_at)
+        if session_started_at.nil? && session.locked?
+          # A new job should bail if there's already one running or if it's still
+          # within the cooldown period.
+          report_reconciliation_skipped("session_locked")
+          clear_lock
+          next
+        elsif session_started_at.nil?
+          # If session is free, initiate a new one
+          job.arguments.first.merge!(session.lock!)
+        end
+
+        block.call
+      end
+
+      around_perform do |job, block|
+        if !session.locked?
+          # This means the session has been reset and should no longer continue.
+          report_reconciliation_skipped("session_reset")
+          next
+        end
+
+        # If the job fails any tenant validation, report, reset session, and skip.
+        unless SecurityCenter::SecurityFeatures.code_scanning_enabled_for_instance?
+          report_reconciliation_skipped("feature_unavailable", reset: true)
+          next
+        end
+
+        unless TenantValidationHelper.is_owner_in_scope?(organization)
+          report_reconciliation_skipped("owner_not_in_scope", reset: true)
+          next
+        end
+
+        unless Initialization.for(organization).initialized?(type: Initialization::Type::CodeScanningAlert)
+          report_reconciliation_skipped("tenant_not_initialized", reset: true)
+          next
+        end
+
+        block.call
+
+      rescue *RETRYABLE_EXCEPTIONS
+        raise
+      rescue *NON_RETRYABLE_EXCEPTIONS => e
+        # Reset session and report error
+        session.reset!(last_session_started_at:)
+        GitHub.dogstats.increment("security_overview_analytics.reconciliation.abort",
+          tags: job.all_stats_tags + [
+            "reason:stopped_retry",
+            "error:#{e.class.name&.underscore}"
+          ]
+        )
+
+        raise
+      end
+
+      sig do
+        override.params(
+          args: T.untyped,
+          organization_id: Integer,
+          offset_item_id: Integer,
+          kwargs: T.untyped,
+        )
+        .returns(T::Array[Integer])
+      end
+      def next_batch(*args, organization_id:, offset_item_id:, **kwargs)
+        ::Repository
+          .where(active: true, owner_id: organization_id)
+          .where(::Repository.arel_table[:id].gt(offset_item_id))
+          .order(:id)
+          .limit(BATCH_SIZE)
+          .pluck(:id)
+      end
+
+      sig do
+        override.params(
+          repository_ids: T::Array[Integer],
+          args: T.untyped,
+          kwargs: T.untyped,
+        ).void
+      end
+      def process_batch(repository_ids, *args, **kwargs)
+        # Orphaned repositories are not handled by alerts reconciliation since revision table does not track repository owners.
+        # They will be cleaned up by RepositoryDataCleanupJob
+        return if repository_ids.empty?
+
+        tracked_repository_ids = T.let(CodeScanningAlertRevision
+          .where(repository_id: repository_ids)
+          .select(:repository_id)
+          .distinct
+          .pluck(:repository_id), T::Array[Integer])
+
+        # For repos that already have revisions, schedule a reconciliation to cover the period since hte last one.
+        tracked_repository_ids.each do |repository_id|
+          CodeScanningAlertsDeviationDetectionJob.perform_later(
+            repository_id:,
+            session_id:,
+            last_session_started_at:,
+          )
+        end
+
+        # For any repos that do not have any revisions, try to run an initial backfill.
+        # If a repo has no alerts in the source system, this will effectively noop.
+        (repository_ids - tracked_repository_ids).each do |repository_id|
+          report_deviation([:missing_repository], repository_id:)
+          Initialization::Repositories::CodeScanningAlertsJob.perform_later(repository_id:)
+        end
+      end
+
+      sig do
+        override.params(
+          repository_ids: T::Array[Integer],
+          args: T.untyped,
+          kwargs: T.untyped,
+        )
+        .returns(T.nilable(Integer))
+      end
+      def next_batch_offset_item_id(repository_ids, *args, **kwargs)
+        repository_ids.last
+      end
+
+      sig { returns(Reconciliation::Session) }
+      memoize def session
+        Reconciliation::Session.new(owner_id: organization_id, type: Initialization::Type::CodeScanningAlert.serialize)
+      end
+
+      sig { override.returns(T::Array[T.class_of(ApplicationJob)]) }
+      def fanout_jobs
+        # If any of the below job queue is being throttled, delay the entire batch.
+        [
+          CodeScanningAlertsDeviationDetectionJob,
+          Initialization::Repositories::CodeScanningAlertsJob,
+        ]
+      end
+
+      protected
+
+      sig { override.returns(T::Array[String]) }
+      def stats_tags
+        [
+          "metric_type:code_scanning_alerts",
+        ].compact
+      end
+
+      sig { override.returns(T::Hash[Symbol, T.untyped]) }
+      def logging_context
+        super.merge({
+          "gh.org.id": organization_id,
+          "gh.security_overview_analytics.job.session_id": session_id,
+          "gh.security_overview_analytics.job.session_started_at": arguments.dig(0, :session_started_at),
+          "gh.security_overview_analytics.job.last_session_started_at": arguments.dig(0, :last_session_started_at),
+          "gh.security_overview_analytics.job.offset_item_id": arguments.dig(0, :offset_item_id),
+          "gh.security_overview_analytics.job.progress": arguments.dig(0, :progress),
+          "gh.security_overview_analytics.metric_type": "code_scanning_alerts",
+        })
+      end
+
+      sig { override.returns(T::Hash[Symbol, T.untyped]) }
+      def failbot_context
+        super.merge(app: "github-security-center")
+      end
+
+      sig { returns(Integer) }
+      memoize def organization_id
+        arguments.dig(0, :organization_id)
+      end
+
+      sig { returns(::Organization) }
+      memoize def organization
+        ::Organization.find_by!(id: organization_id)
+      end
+
+      sig { returns(T.nilable(Time)) }
+      memoize def last_session_started_at
+        (arguments[0] || {}).fetch(:last_session_started_at, nil)
+      end
+
+      sig { returns(T.nilable(Time)) }
+      memoize def session_started_at
+        (arguments[0] || {}).fetch(:session_started_at, nil)
+      end
+
+      sig { returns(String) }
+      memoize def session_id
+        session.id
+      end
+
+      private
+
+      sig { params(reason: String, reset: T::Boolean).void }
+      def report_reconciliation_skipped(reason, reset: false)
+        # If required, reset session lock to the previous session run
+        session.reset!(last_session_started_at:) if reset
+
+        GitHub.logger.info(
+          "Reconciliation skipped.",
+          "code.namespace": self.class.name,
+          "code.function": __method__,
+          "gh.security_overview_analytics.job.reason": reason,
+        )
+        GitHub.dogstats.increment(
+          "security_overview_analytics.reconciliation.skipped",
+          tags: all_stats_tags + [
+            "reason:#{reason.parameterize.underscore}"
+          ]
+        )
+      end
+
+      sig { params(deviations: T::Array[Symbol], repository_id: Integer).void }
+      def report_deviation(deviations, repository_id:)
+        GitHub.logger.info(
+          "Deviations found.",
+          "code.namespace": self.class.name,
+          "code.function": __method__,
+          "gh.repo.id": repository_id,
+          "gh.security_overview_analytics.job.deviations": deviations
+        )
+        GitHub.dogstats.increment(
+          "security_overview_analytics.reconciliation.deviation",
+          tags: all_stats_tags + [
+            *deviations.map { |d| "deviation:#{d}" }
+          ]
+        )
+      end
+    end
+  end
+end

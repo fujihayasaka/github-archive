@@ -1,0 +1,33 @@
+# typed: true
+# frozen_string_literal: true
+
+module AdvancedSecurity
+  class HydroRepositoryArchivedStatusChangedJob < HydroMessageJob
+    extend T::Sig
+    include GitHub::Memoizer
+    include RepositoryHydroMessageJobTenantContext
+
+    queue_as :hydro_advanced_security_repository_archived_status_changed
+    retry_on_dirty_exit
+
+    sig { void }
+    def perform
+      AdvancedSecurity::Instrumentation::FeatureToggledPublisher.instrument_features_toggled(repository_id: repository_id)
+    end
+
+    sig { override.returns(Integer) }
+    memoize def repository_id
+      message.dig(:repository_id)
+    end
+
+    protected
+
+    sig { override.returns(T::Hash[String, T.untyped]) }
+    def logging_context
+      super.merge({
+        "gh.repo.archived": message.dig(:is_archived),
+        "gh.advanced_security.source_event": schema,
+      })
+    end
+  end
+end

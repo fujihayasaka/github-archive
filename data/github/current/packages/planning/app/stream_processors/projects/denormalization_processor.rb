@@ -1,0 +1,380 @@
+# typed: strict
+# frozen_string_literal: true
+
+require_relative Rails.root + "lib/github/stream_processors/transient_error_resiliency_helpers"
+
+module Projects
+  # This processor is responsible for keeping the Elasticsearch index for memex project items in sync with the
+  # changes represented by the event streams it consumes.
+  #
+  # This processor acts as a coordinator for more detailed event-processing code that is encapsulated by the
+  # `MemexProjectColumn::Indexable::Processors::Base` interface. Instances of that class are responsible for
+  # subscribing to events and actually updating the Elasticsearch index, while this class layers on the following
+  # characteristics:
+  #
+  #   1. Broadcasts of websocket messages that trigger live updates in browser clients in response to changes to
+  #      Elasticsearch index.
+  #   2. Automatic retries for transient errors such as high replication lag or temporary Elasticsearch
+  #      unavailability.
+  #   3. A full reindex of the affected project as a last resort recovery mechanism in response to a fatal error
+  #      such as an unhandled exception in processing code.
+  class DenormalizationProcessor < GitHub::StreamProcessors::BaseProcessor
+    extend T::Sig
+    include GitHub::StreamProcessors::TransientErrorResiliencyHelpers
+
+    exempt_from_tenant_context_requirement
+
+    Result = MemexProjectColumn::Indexable::Processor::Result
+    FailureReason = MemexProjectColumn::Indexable::Processor::FailureReason
+    ProcessedResults = T.type_alias do
+      T::Array[MemexProjectColumn::Indexable::Processor::ProcessedResult]
+    end
+
+    ObjectWithGlobalRelayId = T.type_alias do
+      MemexProjectColumn::Indexable::Processor::Base::ObjectWithGlobalRelayId
+    end
+
+    class ProcessingError < StandardError; end
+    class UpsertError < StandardError; end
+    class DeleteError < StandardError; end
+
+    class VersionConflictError < StandardError
+      extend T::Sig
+
+      sig { returns(Integer) }
+      attr_reader :count
+
+      sig { params(count: Integer).void }
+      def initialize(count = 0)
+        super("#{count} version conflicts encountered.")
+        @count = count
+      end
+    end
+
+
+    DEFAULT_GROUP_ID = T.let("github-#{Rails.env}-projects-denormalization-processor", String)
+    METRIC_PREFIX = T.let("memex.#{DEFAULT_GROUP_ID}", String)
+    LIVE_UPDATE_BASE_DATA = T.let({ type: "memex_item_denormalized_to_elasticsearch" }, T::Hash[Symbol, String])
+    TRANSIENT_ERROR_RETRIES = T.let(4, Integer)
+    TRANSIENT_ERROR_PAUSE_DURATION = T.let(10.seconds, ActiveSupport::Duration)
+    MAX_RESYNC_RETRIES = 2
+
+    # This is the timeout used for determining if a given Kafka consumer has
+    # failed or quit due to e.g. a deploy. Setting it to a lower value is NOT
+    # recommended if your Hydro processor interacts with the database, since
+    # Freno may wait up to 30 seconds when throttling writes. Processors that
+    # do not interact with a database may lower this value to allow faster
+    # consumer group rebalancing during deploys and processor failures.
+    #
+    # See https://kafka.apache.org/documentation/#session.timeout.ms
+    options[:session_timeout] = 60.seconds
+
+    # This value must be greater than "session_timeout"
+    #
+    # See https://github.com/zendesk/ruby-kafka#understanding-timeouts
+    options[:socket_timeout] = 65.seconds
+
+    # When the processor starts consuming from a partition for the first time and has no committed offsets,
+    # `start_from_beginning` determines if should start from the beginning of the log (i.e. the oldest available messages)
+    # or the end of the log (i.e. the newest available messages).
+    #
+    # This is the equivalent of the java client `auto.offset.reset` consumer config.
+    # See: https://kafka.apache.org/documentation/#consumerconfigs_auto.offset.reset
+    options[:start_from_beginning] = false
+
+    # Other options you may want to set...
+    #
+    # This will cause the Kafka consumer to wait until there is at least a
+    # given number of bytes available to fetch; but the consumer will wait
+    # no longer than "max_wait_time" (described below). This allows the
+    # processor to wait for a large enough batch of data. The default is
+    # 1 byte, meaning data will be fetched as soon as it's available. Value
+    # below is for example purposes only and not a recommendation; the default
+    # value of 1 should be suitable for most cases.
+    # See https://kafka.apache.org/documentation/#fetch.min.bytes
+    # options[:min_bytes] = 1.kilobyte
+    #
+    # This is the maximum amount of time the Kafka consumer will wait to
+    # fetch data. The default is 500ms (0.5.seconds). Value below is for
+    # example purposes only and not a recommendation; the default value of
+    # 500ms should be suitable for most cases.
+    # options[:max_wait_time] = 1.second
+    #
+    # This is the maximum amount of data that will be fetched at a time. This
+    # value is specified in bytes, so the number of distinct Hydro messages
+    # fetched depends on the size of those messages. The default is 1MB. You
+    # may want to consider lowering this if processing each batch of messages
+    # is taking more than 60 seconds in order to ensure that your processor
+    # shuts down in a timely manner during deploys.
+    # See https://kafka.apache.org/documentation/#max.partition.fetch.bytes
+    # options[:max_bytes_per_partition] = 100.kilobytes
+
+    # Public: Configure the Hydro processor
+    sig { params(kwargs: T.untyped).void }
+    def setup(**kwargs)
+      options[:group_id] ||= DEFAULT_GROUP_ID
+      options[:subscribe_to] ||= MemexProjectColumn::Indexable::Processor.registered_topics
+      self.metric_prefix = METRIC_PREFIX
+      @transient_error_max_retries = T.let(TRANSIENT_ERROR_RETRIES, T.nilable(Integer))
+      @transient_error_pause_duration = T.let(custom_pause_duration, T.nilable(ActiveSupport::Duration))
+    end
+
+    sig { returns(ActiveSupport::Duration) }
+    private def custom_pause_duration
+      # nil or non number values will get cast to 0 via to_i, so if it's zero
+      # we'll use the default
+      if ENV["MEMEX_DENORMALIZATION_PAUSE_DURATION"].to_i > 0
+        ENV["MEMEX_DENORMALIZATION_PAUSE_DURATION"].to_i.seconds
+      else
+        TRANSIENT_ERROR_PAUSE_DURATION
+      end
+    end
+
+    sig { params(message: GitHub::StreamProcessors::Message).void }
+    def process_message(message)
+      results = MemexProjectColumn::Indexable::Processor
+        .for_message(message)
+        .flat_map do |processor|
+          resync_on_exception!(message, processor) do
+            processor.consume.tap { check_for_version_conflicts!(_1) }
+          end
+        end
+        .compact
+
+      broadcast_live_update(results:, timestamp: message.timestamp.to_i)
+      report_results(message, results)
+    end
+
+    sig do
+      params(
+        message: GitHub::StreamProcessors::Message,
+        processor: MemexProjectColumn::Indexable::Processor::Base,
+        blk: T.proc.returns(ProcessedResults)
+      ).returns(T.nilable(ProcessedResults))
+    end
+    private def resync_on_exception!(message, processor, &blk)
+      yield
+    rescue MemexProjectColumn::Indexable::CanonicalDataMissingError => e
+      skip("process_message", message, FailureReason::CONTENT_MISSING, e)
+      nil
+    rescue VersionConflictError => e
+      report_version_conflicts(e.count, message.topic, processor)
+      start_resync_job!(message:, exception: e, processor:) if GitHub.flipper[:memex_resync_on_conflict].enabled?
+      nil
+    rescue StandardError => e # rubocop:todo Lint/GenericRescue
+      raise e if transient_error?(e)
+      start_resync_job!(message:, exception: e, processor:)
+      nil
+    end
+
+    sig { params(responses: ProcessedResults).void }
+    private def check_for_version_conflicts!(responses)
+      aggregated_conflict_count = responses.sum(&:conflict_count)
+      raise VersionConflictError.new(aggregated_conflict_count) if aggregated_conflict_count.positive?
+    end
+
+    # Build a unique set of memex_project_ids from the results and send a live
+    # update message to each of them
+    sig { params(results: ProcessedResults, timestamp: Integer).void }
+    private def broadcast_live_update(results:, timestamp:)
+      return if results.empty?
+
+      project_ids = T.let(Set.new, T::Set[Integer])
+      updated_models = T.let(Set.new, T::Set[ObjectWithGlobalRelayId])
+
+      results.flatten.each do |result|
+        next if result.failed?
+
+        project_ids.merge(result.updated_memex_ids)
+        updated_models.merge(result.updated_models)
+      end
+
+      MemexProjectColumn::Indexable::Processor::LiveUpdateBroadcaster.call(
+        memex_project_ids: project_ids.to_a,
+        timestamp: timestamp,
+        updated_models: updated_models.to_a
+      )
+    end
+
+    sig do
+      params(
+        message: GitHub::StreamProcessors::Message,
+        results: ProcessedResults
+      ).void
+    end
+    private def report_results(message, results)
+      return skip("process_message", message, FailureReason::NO_MATCHING_DOCS) if results.all?(&:no_matching_docs?)
+      return skip("process_message", message, FailureReason::CONTENT_MISSING)  if results.all?(&:content_missing?)
+      return skip("process_message", message, FailureReason::MESSAGE_IGNORED)  if results.all?(&:message_ignored?)
+
+      results.each do |result|
+        raise ProcessingError.new(result.outcome.to_json) if result.failures_or_errors_to_report?
+      end
+
+      success("process_message", message, results.map(&:outcome))
+    end
+
+    sig do
+      params(
+        conflict_count: Integer,
+        topic: String,
+        processor: MemexProjectColumn::Indexable::Processor::Base,
+      )
+      .void
+    end
+    def report_version_conflicts(conflict_count, topic, processor)
+      conflict_scope = case conflict_count
+      when 1 then "S"
+      when 2..10 then "M"
+      when 11..100 then "L"
+      else "XL"
+      end
+      GitHub.dogstats.increment(
+        "#{METRIC_PREFIX}.version_conflict", tags: [
+          "topic:#{topic}",
+          "scope:#{conflict_scope}",
+          "processor": processor.class.name&.demodulize.underscore
+        ]
+      )
+    end
+
+    sig do
+      params(
+        fn_name: String,
+        hydro_message: GitHub::StreamProcessors::Message,
+        context: T.nilable(T.any(String, T::Hash[T.untyped, T.untyped], T::Array[T.untyped])),
+        result: T.nilable(Result),
+        msg: T.nilable(String),
+        error: T.nilable(StandardError),
+        project_id: T.nilable(Integer),
+        job_status: T.nilable(String),
+        tries_remaining: T.nilable(Integer),
+      )
+      .void
+    end
+    private def log_results(fn_name:, hydro_message:, context: nil, result: nil, msg: nil, error: nil, project_id: nil, job_status: nil, tries_remaining: nil)
+      log_hash = {
+        "code.namespace": self.class.name,
+        "code.function": fn_name,
+        "message.timestamp": hydro_message.timestamp,
+        "message.error.context": error_context_for_message(hydro_message),
+        "gh.memex.denormalization_processor.context": context.to_s,
+        "gh.memex.denormalization_processor.tries_remaining": tries_remaining,
+        "gh.memex.project_id": project_id,
+        "gh.memex.resync_memex_project_items_index_job.status": job_status,
+        result: result&.serialize
+      }.compact
+
+      log_hash.merge!(
+        "exception.message": error.message,
+        "exception.stacktrace": error.backtrace,
+        "exception.type": error.class.name
+      ) if error
+
+      GitHub.logger.info(
+        msg || "#{fn_name} processed message with result: #{result&.serialize}.",
+        log_hash
+      )
+    end
+
+    sig do
+      params(
+        fn: String,
+        message: GitHub::StreamProcessors::Message,
+        reason: String,
+        error: T.nilable(StandardError)
+      )
+      .returns(Result::Skip)
+    end
+    private def skip(fn, message, reason, error = nil)
+      message.skip(reason)
+      # Only log in development because there will be so many skips in production that it will be more noise than signal.
+      if Rails.env.development?
+        log_results(
+          fn_name: fn,
+          hydro_message: message,
+          result: Result::Skip,
+          context: reason,
+          error:
+        )
+      end
+      Result::Skip
+    end
+
+    sig do
+      params(
+        fn: String,
+        message: GitHub::StreamProcessors::Message,
+        response: T.untyped
+      )
+      .returns(Result::Success)
+    end
+    private def success(fn, message, response)
+      message.success
+      log_results(
+        fn_name: fn,
+        hydro_message: message,
+        result: Result::Success,
+        context: response
+      )
+      Result::Success
+    end
+
+    sig do
+      params(
+        message: GitHub::StreamProcessors::Message,
+        exception: StandardError,
+        processor: MemexProjectColumn::Indexable::Processor::Base,
+        project_ids_to_resync: T.nilable(T::Array[Integer]),
+        tries_remaining: Integer
+      )
+      .void
+    end
+    private def start_resync_job!(
+      message:,
+      exception:,
+      processor:,
+      project_ids_to_resync: nil,
+      tries_remaining: MAX_RESYNC_RETRIES
+    )
+
+      project_ids_to_resync ||= processor.project_ids_to_resync_on_failure
+
+      msg = if project_ids_to_resync.present?
+        "Attempting to trigger resync job with the following project ids due to an exception: #{project_ids_to_resync.join(",")}"
+      else
+        "No project ids to resync"
+      end
+
+      log_results(
+        msg: msg,
+        fn_name: "start_resync_job!",
+        hydro_message: message,
+        error: exception,
+        context: project_ids_to_resync
+      )
+
+      # If we don't have any project ids to resync, raise the original exception to indicate that we can't recover.
+      raise exception if project_ids_to_resync.blank?
+
+      GitHub.dogstats.increment("#{METRIC_PREFIX}.resync", tags: ["error:#{exception.class.name}", "topic:#{message.topic}"])
+
+      failed_project_ids = MemexProject::ResyncItems.resync_later(project_ids_to_resync)
+
+      return unless failed_project_ids.present?
+
+      raise exception unless tries_remaining > 0
+
+      start_resync_job!(
+        message:,
+        exception:,
+        processor:,
+        project_ids_to_resync: failed_project_ids,
+        tries_remaining: tries_remaining - 1
+      )
+    end
+
+    # Workaround for https://github.com/sorbet/sorbet/issues/5025
+    include GitHub::StreamProcessors::TransientErrorResiliency
+  end
+end

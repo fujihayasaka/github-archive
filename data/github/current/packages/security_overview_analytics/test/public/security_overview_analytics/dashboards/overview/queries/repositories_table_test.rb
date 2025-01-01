@@ -1,0 +1,718 @@
+# typed: true
+# frozen_string_literal: true
+
+require "test_helper"
+
+module SecurityOverviewAnalytics
+  module Dashboards
+    module Overview
+      module Queries
+        class RepositoriesTableTest < GitHub::TestCase
+          VALID_SECURITY_FEATURES = %w[dependabot_alerts secret_scanning codeql]
+          QueryParser = ::Search::Queries::SecurityCenter::QueryParser
+
+          fixtures do
+            @biz = create(:business)
+            @org_admin = create(:user)
+            @biz.add_owner(@org_admin, actor: nil)
+            @user_session = create(:user_session, user: @org_admin)
+            @org = create(:organization, business: @biz, admin: @org_admin)
+            @repo = create(:private_repository, owner: @org)
+          end
+
+          setup do
+            SecurityOverviewAnalytics::FeatureFlagHelper.stubs(:use_alerts_filterer_class?).returns(true)
+            ::SecurityOverviewAnalytics::Dashboards::Overview::SecurityFeaturesParser
+              .any_instance.stubs(:selected_backend_security_features)
+              .returns(VALID_SECURITY_FEATURES)
+          end
+
+          context "#perform" do
+            test "filters to alerts that are open on the end date" do
+              repo_model = create(:soa_repository, repository: @repo)
+              create(:security_overview_analytics_feature_status_revision, repository_metadata: repo_model, date_id: 20231001, dependabot_alerts_enabled: true, code_scanning_enabled: true, secret_scanning_enabled: true, secret_scanning_push_protection_enabled: true, advanced_security_enabled: true)
+
+              # Alert open on the end date.
+              create(:soa_dependabot_alert_revision, date_id: 20231001, repository: @repo, alert_number: 1, alert_created_at: ::Date.new(2023, 10, 1))
+
+              # Alert open on end date and closed after end date.
+              create(:soa_secret_scanning_alert_revision, date_id: 20231002, next_revision_date_id: 20231008, repository: @repo, alert_number: 2, alert_created_at: ::Date.new(2023, 10, 2))
+              create(:soa_secret_scanning_alert_revision, date_id: 20231008, repository: @repo, alert_number: 2, alert_resolved: true, alert_created_at: ::Date.new(2023, 10, 2))
+
+              # Alert closed on the end date (should be excluded from results).
+              create(:soa_code_scanning_alert_revision, date_id: 20231002, repository: @repo, alert_number: 3, alert_resolved: true, alert_created_at: ::Date.new(2023, 10, 2))
+
+              expected = [{ id: @repo.id, repository: @repo.name, owner_type: "ORGANIZATION", total: 2, critical: 1, high: 0, medium: 0, low: 1 }]
+
+              repos = RepositoriesTable.for_organization(
+                organization: @org,
+                user: @org_admin,
+                query: QueryParser.new,
+                start_date: ::Date.new(2023, 10, 2),
+                end_date: ::Date.new(2023, 10, 7),
+                user_session: @user_session,
+                return_alert_count: false,
+                is_open_selected: true,
+              ).perform
+
+              assert_same_elements(expected, repos)
+            end
+
+            test "filters repos based on the repos_filterer" do
+              repos = create_list(:private_repository, 5, owner: @org)
+              repos.each do |repo|
+                repo_model = create(:soa_repository, repository: repo)
+                create(:security_overview_analytics_feature_status_revision, repository_metadata: repo_model, date_id: 20231001, dependabot_alerts_enabled: true, code_scanning_enabled: true, secret_scanning_enabled: true, secret_scanning_push_protection_enabled: true, advanced_security_enabled: true)
+                create(
+                  :soa_secret_scanning_alert_revision,
+                  date_id: 20231001,
+                  repository_id: repo.id,
+                  alert_number: 1,
+                  alert_created_at: ::Date.new(2023, 10, 1)
+                )
+              end
+
+              SecurityProduct::Permissions::OrgAuthz.any_instance.stubs(:can_manage_security_products?).returns(false)
+              SecurityCenter::AuthorizationEnumerator
+                .any_instance
+                .expects(:allowed_repository_ids_by_feature_for_organization_member)
+                .returns({
+                  "code_scanning" => [[repos[0].id, repos[1].id, repos[2].id], false],
+                  "dependabot_alerts" => [[repos[0].id, repos[1].id, repos[2].id], false],
+                  "secret_scanning" => [[repos[0].id, repos[1].id, repos[2].id], false],
+                })
+
+              expected = repos[0..2].map do |repo|
+                {
+                  id: repo.id,
+                  repository: repo.name,
+                  owner_type: "ORGANIZATION",
+                  total: 1,
+                  critical: 1,
+                  high: 0,
+                  medium: 0,
+                  low: 0
+                }
+              end
+
+              repos = RepositoriesTable.for_organization(
+                organization: @org,
+                user: @org_admin,
+                query: QueryParser.new,
+                start_date: ::Date.new(2023, 10, 2),
+                end_date: ::Date.new(2023, 10, 7),
+                user_session: @user_session,
+                return_alert_count: false,
+                is_open_selected: true,
+              ).perform
+
+              assert_same_elements(expected, repos)
+            end
+
+            test "filters out repos with feature disabled" do
+              repos = create_list(:private_repository, 5, owner: @org)
+              repos.each do |repo|
+                repo_model = create(:soa_repository, repository: repo)
+                create(:security_overview_analytics_feature_status_revision, repository_metadata: repo_model, date_id: 20231001,
+                  dependabot_alerts_enabled: true,
+                  code_scanning_enabled: true,
+                  secret_scanning_enabled: false,
+                  secret_scanning_push_protection_enabled: true,
+                  advanced_security_enabled: true)
+                create(
+                  :soa_secret_scanning_alert_revision,
+                  date_id: 20231001,
+                  repository_id: repo.id,
+                  alert_number: 1,
+                  alert_created_at: ::Date.new(2023, 10, 1)
+                )
+              end
+
+              expected = repos[0..2].map do |repo|
+                {
+                  id: repo.id,
+                  repository: repo.name,
+                  owner_type: "ORGANIZATION",
+                  total: 1,
+                  critical: 1,
+                  high: 0,
+                  medium: 0,
+                  low: 0
+                }
+              end
+
+              repos = RepositoriesTable.for_organization(
+                organization: @org,
+                user: @org_admin,
+                query: QueryParser.new,
+                start_date: ::Date.new(2023, 10, 2),
+                end_date: ::Date.new(2023, 10, 7),
+                user_session: @user_session,
+                return_alert_count: false,
+                is_open_selected: true,
+              ).perform
+
+              assert_empty(repos)
+            end
+
+            test "sorts repositories by total alert count" do
+              # repo 1:
+              #   - 1 critical alert
+              repo_1 = create(:private_repository, owner: @org).tap do |repo|
+                repo_model = create(:soa_repository, repository: repo)
+                create(:security_overview_analytics_feature_status_revision, repository_metadata: repo_model, date_id: 20231001, dependabot_alerts_enabled: true, code_scanning_enabled: true, secret_scanning_enabled: true, secret_scanning_push_protection_enabled: true, advanced_security_enabled: true)
+                create(
+                  :soa_secret_scanning_alert_revision,
+                  date_id: 20231001,
+                  repository_id: repo.id,
+                  alert_number: 1,
+                  alert_created_at: ::Date.new(2023, 10, 1)
+                )
+              end
+
+              # repo 2:
+              #   - 1 medium alert
+              #   - 1 critical alert
+              repo_2 = create(:private_repository, owner: @org).tap do |repo|
+                repo_model = create(:soa_repository, repository: repo)
+                create(:security_overview_analytics_feature_status_revision, repository_metadata: repo_model, date_id: 20231001, dependabot_alerts_enabled: true, code_scanning_enabled: true, secret_scanning_enabled: true, secret_scanning_push_protection_enabled: true, advanced_security_enabled: true)
+                create(
+                  :soa_code_scanning_alert_revision,
+                  date_id: 20231002,
+                  repository_id: repo.id,
+                  alert_number: 2,
+                  alert_created_at: ::Date.new(2023, 10, 2),
+                  alert_severity: "medium"
+                )
+                create(
+                  :soa_secret_scanning_alert_revision,
+                  date_id: 20231003,
+                  repository_id: repo.id,
+                  alert_number: 3,
+                  alert_created_at: ::Date.new(2023, 10, 3)
+                )
+              end
+
+              # repo 3:
+              #   - 1 critical alert
+              #   - 2 medium alerts
+              repo_3 = create(:private_repository, owner: @org).tap do |repo|
+                repo_model = create(:soa_repository, repository: repo)
+                create(:security_overview_analytics_feature_status_revision, repository_metadata: repo_model, date_id: 20231001, dependabot_alerts_enabled: true, code_scanning_enabled: true, secret_scanning_enabled: true, secret_scanning_push_protection_enabled: true, advanced_security_enabled: true)
+                create(
+                  :soa_secret_scanning_alert_revision,
+                  date_id: 20231003,
+                  repository_id: repo.id,
+                  alert_number: 1,
+                  alert_created_at: ::Date.new(2023, 10, 3)
+                )
+                create(
+                  :soa_code_scanning_alert_revision,
+                  date_id: 20231003,
+                  repository_id: repo.id,
+                  alert_number: 2,
+                  alert_created_at: ::Date.new(2023, 10, 3),
+                  alert_severity: "medium"
+                )
+                create(
+                  :soa_dependabot_alert_revision,
+                  date_id: 20231003,
+                  repository_id: repo.id,
+                  alert_number: 3,
+                  alert_created_at: ::Date.new(2023, 10, 3),
+                  alert_severity: "moderate"
+                )
+              end
+
+              # repo 4:
+              #   - 1 high alert
+              #   - 1 low alert
+              repo_4 = create(:private_repository, owner: @org).tap do |repo|
+                repo_model = create(:soa_repository, repository: repo)
+                create(:security_overview_analytics_feature_status_revision, repository_metadata: repo_model, date_id: 20231001, dependabot_alerts_enabled: true, code_scanning_enabled: true, secret_scanning_enabled: true, secret_scanning_push_protection_enabled: true, advanced_security_enabled: true)
+                create(
+                  :soa_code_scanning_alert_revision,
+                  date_id: 20231003,
+                  repository_id: repo.id,
+                  alert_number: 4,
+                  alert_created_at: ::Date.new(2023, 10, 3),
+                  alert_severity: "high"
+                )
+                create(
+                  :soa_dependabot_alert_revision,
+                  date_id: 20231003,
+                  repository_id: repo.id,
+                  alert_number: 5,
+                  alert_created_at: ::Date.new(2023, 10, 3),
+                  alert_severity: "low"
+                )
+              end
+
+              expected = [
+                { id: repo_3.id, repository: repo_3.name, owner_type: "ORGANIZATION", total: 3, critical: 1, high: 0, medium: 2, low: 0 },
+                { id: repo_2.id, repository: repo_2.name, owner_type: "ORGANIZATION", total: 2, critical: 1, high: 0, medium: 1, low: 0 },
+                { id: repo_4.id, repository: repo_4.name, owner_type: "ORGANIZATION", total: 2, critical: 0, high: 1, medium: 0, low: 1 },
+                { id: repo_1.id, repository: repo_1.name, owner_type: "ORGANIZATION", total: 1, critical: 1, high: 0, medium: 0, low: 0 },
+              ]
+
+              repos = RepositoriesTable.for_organization(
+                organization: @org,
+                user: @org_admin,
+                query: QueryParser.new,
+                start_date: ::Date.new(2023, 10, 2),
+                end_date: ::Date.new(2023, 10, 7),
+                user_session: @user_session,
+                return_alert_count: false,
+                is_open_selected: true,
+              ).perform
+
+              assert_equal(expected, repos)
+            end
+
+            test "returns empty when no security_features are available" do
+              ::SecurityOverviewAnalytics::Dashboards::Overview::SecurityFeaturesParser
+                .any_instance.stubs(:selected_backend_security_features)
+                .returns([])
+
+              repos = RepositoriesTable.for_organization(
+                organization: @org,
+                user: @org_admin,
+                query: QueryParser.new,
+                start_date: ::Date.new(2023, 10, 2),
+                end_date: ::Date.new(2023, 10, 7),
+                user_session: @user_session,
+                return_alert_count: false,
+                is_open_selected: true,
+              ).perform
+
+              assert_empty(repos)
+            end
+
+            test "limits to 10 repositories" do
+              repos = create_list(:private_repository, 11, owner: @org)
+              repos.each do |repo|
+                repo_model = create(:soa_repository, repository: repo)
+                create(:security_overview_analytics_feature_status_revision, repository_metadata: repo_model, date_id: 20231001, dependabot_alerts_enabled: true, code_scanning_enabled: true, secret_scanning_enabled: true, secret_scanning_push_protection_enabled: true, advanced_security_enabled: true)
+                create(
+                  :soa_secret_scanning_alert_revision,
+                  date_id: 20231001,
+                  repository_id: repo.id,
+                  alert_number: 1,
+                  alert_created_at: ::Date.new(2023, 10, 1)
+                )
+              end
+
+              repos = RepositoriesTable.for_organization(
+                organization: @org,
+                user: @org_admin,
+                query: QueryParser.new,
+                start_date: ::Date.new(2023, 10, 1),
+                end_date: ::Date.new(2023, 10, 2),
+                user_session: @user_session,
+                return_alert_count: false,
+                is_open_selected: true,
+              ).perform
+
+              assert_equal(10, repos.size)
+            end
+
+            test "returns user-owned repository type" do
+              ::AdvancedSecurity::Features::Business::AdvancedSecurity.any_instance.stubs(:security_center_for_emus_enabled?).returns(true)
+
+              user = create(:user)
+              repo = create(:private_repository, owner: user)
+
+              repo_model = create(:soa_repository, repository: repo, business_id: @biz.id)
+              create(:security_overview_analytics_feature_status_revision, repository_metadata: repo_model, date_id: 20231001, dependabot_alerts_enabled: true, code_scanning_enabled: true, secret_scanning_enabled: true, secret_scanning_push_protection_enabled: true, advanced_security_enabled: true)
+              create(
+                :soa_secret_scanning_alert_revision,
+                date_id: 20231001,
+                repository_id: repo.id,
+                alert_number: 1,
+                alert_created_at: ::Date.new(2023, 10, 1)
+              )
+
+              expected = [{ id: repo.id, repository: repo.name, owner_type: "USER", total: 1, critical: 1, high: 0, medium: 0, low: 0 }]
+
+              repos = RepositoriesTable.for_business(
+                business: @biz,
+                user: @org_admin,
+                query: QueryParser.new,
+                start_date: ::Date.new(2023, 10, 1),
+                end_date: ::Date.new(2023, 10, 2),
+                authorized_orgs: [],
+                user_session: @user_session,
+                return_alert_count: false,
+                is_open_selected: true,
+                slice4: nil
+              ).perform
+
+              assert_same_elements(expected, repos)
+
+            end
+
+            context "alert-centric filters" do
+              test "returns no repo result if resolution filter is applied" do
+                repo_model = create(:soa_repository, repository: @repo)
+                create(:security_overview_analytics_feature_status_revision, repository_metadata: repo_model, date_id: 20231001, dependabot_alerts_enabled: true, code_scanning_enabled: true, secret_scanning_enabled: true, secret_scanning_push_protection_enabled: true, advanced_security_enabled: true)
+
+                # Alert open on the end date.
+                create(:soa_dependabot_alert_revision, date_id: 20231001, repository: @repo, alert_number: 1, alert_created_at: ::Date.new(2023, 10, 1))
+
+                # Alert open on end date and closed after end date.
+                create(:soa_secret_scanning_alert_revision, date_id: 20231002, next_revision_date_id: 20231008, repository: @repo, alert_number: 2, alert_created_at: ::Date.new(2023, 10, 2))
+                create(:soa_secret_scanning_alert_revision, date_id: 20231008, repository: @repo, alert_number: 2, alert_resolved: true, alert_created_at: ::Date.new(2023, 10, 2))
+
+                # Alert closed on the end date (should be excluded from results).
+                create(:soa_code_scanning_alert_revision, date_id: 20231002, repository: @repo, alert_number: 3, alert_resolved: true, alert_created_at: ::Date.new(2023, 10, 2))
+
+                repos = RepositoriesTable.for_organization(
+                  organization: @org,
+                  user: @org_admin,
+                  query: QueryParser.new("resolution:risk-accepted"),
+                  start_date: ::Date.new(2023, 10, 2),
+                  end_date: ::Date.new(2023, 10, 7),
+                  user_session: @user_session,
+                  return_alert_count: false,
+                  is_open_selected: true,
+                ).perform
+
+                assert_empty(repos)
+              end
+
+              test "returns only selected severities count and nil for non-selected ones" do
+                repo_model = create(:soa_repository, repository: @repo)
+                create(:security_overview_analytics_feature_status_revision, repository_metadata: repo_model, date_id: 20231001, dependabot_alerts_enabled: true, code_scanning_enabled: true, secret_scanning_enabled: true, secret_scanning_push_protection_enabled: true, advanced_security_enabled: true)
+
+                # Alert open on the end date.
+                create(:soa_dependabot_alert_revision, date_id: 20231001, repository: @repo, alert_number: 1, alert_created_at: ::Date.new(2023, 10, 1))
+
+                # Alert open on end date and closed after end date.
+                create(:soa_secret_scanning_alert_revision, date_id: 20231002, next_revision_date_id: 20231008, repository: @repo, alert_number: 2, alert_created_at: ::Date.new(2023, 10, 2))
+                create(:soa_secret_scanning_alert_revision, date_id: 20231008, repository: @repo, alert_number: 2, alert_resolved: true, alert_created_at: ::Date.new(2023, 10, 2))
+
+                # Alert closed on the end date (should be excluded from results).
+                create(:soa_code_scanning_alert_revision, date_id: 20231002, repository: @repo, alert_number: 3, alert_resolved: true, alert_created_at: ::Date.new(2023, 10, 2))
+
+                expected = [{ id: @repo.id, repository: @repo.name, owner_type: "ORGANIZATION", total: 1, critical: 1, high: nil, medium: nil, low: nil }]
+
+                repos = RepositoriesTable.for_organization(
+                  organization: @org,
+                  user: @org_admin,
+                  query: QueryParser.new("severity:critical"),
+                  start_date: ::Date.new(2023, 10, 2),
+                  end_date: ::Date.new(2023, 10, 7),
+                  user_session: @user_session,
+                  return_alert_count: false,
+                  is_open_selected: true,
+                ).perform
+
+                assert_same_elements(expected, repos)
+              end
+            end
+
+            context "tool-centric filters" do
+              context "dependabot filters" do
+                test "returns only alert counts with selected dependency scopes" do
+                  repo_model = create(:soa_repository, repository: @repo)
+                  create(:security_overview_analytics_feature_status_revision, repository_metadata: repo_model, date_id: 20231001, dependabot_alerts_enabled: true, code_scanning_enabled: true, secret_scanning_enabled: true, secret_scanning_push_protection_enabled: true, advanced_security_enabled: true)
+
+                  # Alert open on the end date.
+                  create(:soa_code_scanning_alert_revision, date_id: 20231001, repository: @repo, alert_number: 1, alert_created_at: ::Date.new(2023, 10, 1))
+
+                  # Alert open on end date and closed after end date.
+                  create(:soa_dependabot_alert_revision, date_id: 20231002, next_revision_date_id: 20231008, repository: @repo, alert_number: 2, alert_created_at: ::Date.new(2023, 10, 2), dependency_scope: "runtime")
+                  create(:soa_dependabot_alert_revision, date_id: 20231008, repository: @repo, alert_number: 2, alert_resolved: true, alert_created_at: ::Date.new(2023, 10, 2), dependency_scope: "runtime")
+                  create(:soa_dependabot_alert_revision, date_id: 20231002, next_revision_date_id: 20231008, repository: @repo, alert_number: 3, alert_created_at: ::Date.new(2023, 10, 2), dependency_scope: "development")
+                  create(:soa_dependabot_alert_revision, date_id: 20231008, repository: @repo, alert_number: 3, alert_resolved: true, alert_created_at: ::Date.new(2023, 10, 2), dependency_scope: "development")
+
+                  expected = [{ id: @repo.id, repository: @repo.name, owner_type: "ORGANIZATION", total: 1, critical: 0, high: 0, medium: 0, low: 1 }]
+
+                  repos = RepositoriesTable.for_organization(
+                    organization: @org,
+                    user: @org_admin,
+                    query: QueryParser.new("dependabot.scope:runtime"),
+                    start_date: ::Date.new(2023, 10, 2),
+                    end_date: ::Date.new(2023, 10, 7),
+                    user_session: @user_session,
+                    return_alert_count: false,
+                    is_open_selected: true,
+                  ).perform
+
+                  assert_same_elements(expected, repos)
+                end
+              end
+
+              context "code scanning filters" do
+                test "returns only alert counts with selected rule ids" do
+                  repo_model = create(:soa_repository, repository: @repo)
+                  create(:security_overview_analytics_feature_status_revision, repository_metadata: repo_model, date_id: 20231001, dependabot_alerts_enabled: true, code_scanning_enabled: true, secret_scanning_enabled: true, secret_scanning_push_protection_enabled: true, advanced_security_enabled: true)
+
+                  # Alert open on the end date.
+                  create(:soa_dependabot_alert_revision, date_id: 20231001, repository: @repo, alert_number: 1, alert_created_at: ::Date.new(2023, 10, 1))
+
+                  # Alert open on end date and closed after end date.
+                  create(:soa_code_scanning_alert_revision, date_id: 20231002, next_revision_date_id: 20231008, repository: @repo, alert_number: 2, alert_created_at: ::Date.new(2023, 10, 2), rule_sarif_identifier: "some-rule")
+                  create(:soa_code_scanning_alert_revision, date_id: 20231008, repository: @repo, alert_number: 2, alert_resolved: true, alert_created_at: ::Date.new(2023, 10, 2), rule_sarif_identifier: "some-rule")
+                  create(:soa_code_scanning_alert_revision, date_id: 20231002, next_revision_date_id: 20231008, repository: @repo, alert_number: 3, alert_created_at: ::Date.new(2023, 10, 2), rule_sarif_identifier: "other-rule")
+                  create(:soa_code_scanning_alert_revision, date_id: 20231008, repository: @repo, alert_number: 3, alert_resolved: true, alert_created_at: ::Date.new(2023, 10, 2), rule_sarif_identifier: "other-rule")
+
+                  expected = [{ id: @repo.id, repository: @repo.name, owner_type: "ORGANIZATION", total: 1, critical: 1, high: 0, medium: 0, low: 0 }]
+
+                  repos = RepositoriesTable.for_organization(
+                    organization: @org,
+                    user: @org_admin,
+                    query: QueryParser.new("codeql.rule:some-rule"),
+                    start_date: ::Date.new(2023, 10, 2),
+                    end_date: ::Date.new(2023, 10, 7),
+                    user_session: @user_session,
+                    return_alert_count: false,
+                    is_open_selected: true,
+                  ).perform
+
+                  assert_same_elements(expected, repos)
+                end
+              end
+
+              context "secret-scanning filters" do
+                test "returns only alert counts with selected token slugs" do
+                  repo_model = create(:soa_repository, repository: @repo)
+                  create(:security_overview_analytics_feature_status_revision, repository_metadata: repo_model, date_id: 20231001, dependabot_alerts_enabled: true, code_scanning_enabled: true, secret_scanning_enabled: true, secret_scanning_push_protection_enabled: true, advanced_security_enabled: true)
+
+                  # Alert open on the end date.
+                  create(:soa_dependabot_alert_revision, date_id: 20231001, repository: @repo, alert_number: 1, alert_created_at: ::Date.new(2023, 10, 1))
+
+                  # Alert open on end date and closed after end date.
+                  create(:soa_secret_scanning_alert_revision, date_id: 20231002, next_revision_date_id: 20231008, repository: @repo, alert_number: 2, alert_created_at: ::Date.new(2023, 10, 2), alert_type_slug: "amazon_secret_key")
+                  create(:soa_secret_scanning_alert_revision, date_id: 20231008, repository: @repo, alert_number: 2, alert_resolved: true, alert_created_at: ::Date.new(2023, 10, 2), alert_type_slug: "amazon_secret_key")
+                  create(:soa_secret_scanning_alert_revision, date_id: 20231002, next_revision_date_id: 20231008, repository: @repo, alert_number: 3, alert_created_at: ::Date.new(2023, 10, 2), alert_type_slug: "github_token")
+                  create(:soa_secret_scanning_alert_revision, date_id: 20231008, repository: @repo, alert_number: 3, alert_resolved: true, alert_created_at: ::Date.new(2023, 10, 2), alert_type_slug: "github_token")
+
+                  expected = [{ id: @repo.id, repository: @repo.name, owner_type: "ORGANIZATION", total: 1, critical: 1, high: 0, medium: 0, low: 0 }]
+
+                  repos = RepositoriesTable.for_organization(
+                    organization: @org,
+                    user: @org_admin,
+                    query: QueryParser.new("secret-scanning.secret-type:amazon_secret_key"),
+                    start_date: ::Date.new(2023, 10, 2),
+                    end_date: ::Date.new(2023, 10, 7),
+                    user_session: @user_session,
+                    return_alert_count: false,
+                    is_open_selected: true,
+                  ).perform
+
+                  assert_same_elements(expected, repos)
+                end
+
+                test "returns only alert counts with selected token providers" do
+                  repo_model = create(:soa_repository, repository: @repo)
+                  create(:security_overview_analytics_feature_status_revision, repository_metadata: repo_model, date_id: 20231001, dependabot_alerts_enabled: true, code_scanning_enabled: true, secret_scanning_enabled: true, secret_scanning_push_protection_enabled: true, advanced_security_enabled: true)
+
+                  # Alert open on the end date.
+                  create(:soa_dependabot_alert_revision, date_id: 20231001, repository: @repo, alert_number: 1, alert_created_at: ::Date.new(2023, 10, 1))
+
+                  # Alert open on end date and closed after end date.
+                  create(:soa_secret_scanning_alert_revision, date_id: 20231002, next_revision_date_id: 20231008, repository: @repo, alert_number: 2, alert_created_at: ::Date.new(2023, 10, 2), alert_type_provider: "Amazon AWS")
+                  create(:soa_secret_scanning_alert_revision, date_id: 20231008, repository: @repo, alert_number: 2, alert_resolved: true, alert_created_at: ::Date.new(2023, 10, 2), alert_type_provider: "Amazon AWS")
+                  create(:soa_secret_scanning_alert_revision, date_id: 20231002, next_revision_date_id: 20231008, repository: @repo, alert_number: 3, alert_created_at: ::Date.new(2023, 10, 2), alert_type_provider: "GitHub")
+                  create(:soa_secret_scanning_alert_revision, date_id: 20231008, repository: @repo, alert_number: 3, alert_resolved: true, alert_created_at: ::Date.new(2023, 10, 2), alert_type_provider: "GitHub")
+
+                  expected = [{ id: @repo.id, repository: @repo.name, owner_type: "ORGANIZATION", total: 1, critical: 1, high: 0, medium: 0, low: 0 }]
+
+                  repos = RepositoriesTable.for_organization(
+                    organization: @org,
+                    user: @org_admin,
+                    query: QueryParser.new("secret-scanning.provider:amazon_aws"),
+                    start_date: ::Date.new(2023, 10, 2),
+                    end_date: ::Date.new(2023, 10, 7),
+                    user_session: @user_session,
+                    return_alert_count: false,
+                    is_open_selected: true,
+                  ).perform
+
+                  assert_same_elements(expected, repos)
+                end
+
+                test "returns only alert counts with selected validities" do
+                  repo_model = create(:soa_repository, repository: @repo)
+                  create(:security_overview_analytics_feature_status_revision, repository_metadata: repo_model, date_id: 20231001, dependabot_alerts_enabled: true, code_scanning_enabled: true, secret_scanning_enabled: true, secret_scanning_push_protection_enabled: true, advanced_security_enabled: true)
+
+                  # Alert open on the end date.
+                  create(:soa_dependabot_alert_revision, date_id: 20231001, repository: @repo, alert_number: 1, alert_created_at: ::Date.new(2023, 10, 1))
+
+                  # Alert open on end date and closed after end date.
+                  create(:soa_secret_scanning_alert_revision, date_id: 20231002, next_revision_date_id: 20231008, repository: @repo, alert_number: 2, alert_created_at: ::Date.new(2023, 10, 2), alert_validity: SecretScanningAlertRevision::SecretScanningTokenValidity::TOKEN_VALIDITY_INACTIVE)
+                  create(:soa_secret_scanning_alert_revision, date_id: 20231008, repository: @repo, alert_number: 2, alert_resolved: true, alert_created_at: ::Date.new(2023, 10, 2), alert_validity: SecretScanningAlertRevision::SecretScanningTokenValidity::TOKEN_VALIDITY_ACTIVE)
+                  create(:soa_secret_scanning_alert_revision, date_id: 20231002, next_revision_date_id: 20231008, repository: @repo, alert_number: 3, alert_created_at: ::Date.new(2023, 10, 2), alert_validity: "GitHub")
+                  create(:soa_secret_scanning_alert_revision, date_id: 20231008, repository: @repo, alert_number: 3, alert_resolved: true, alert_created_at: ::Date.new(2023, 10, 2), alert_validity: "GitHub")
+
+                  expected = [{ id: @repo.id, repository: @repo.name, owner_type: "ORGANIZATION", total: 1, critical: 1, high: 0, medium: 0, low: 0 }]
+
+                  repos = RepositoriesTable.for_organization(
+                    organization: @org,
+                    user: @org_admin,
+                    query: QueryParser.new("secret-scanning.validity:active"),
+                    start_date: ::Date.new(2023, 10, 2),
+                    end_date: ::Date.new(2023, 10, 7),
+                    user_session: @user_session,
+                    return_alert_count: false,
+                    is_open_selected: true,
+                  ).perform
+
+                  assert_same_elements(expected, repos)
+                end
+
+                test "returns only alert counts with selected bypassed status" do
+                  repo_model = create(:soa_repository, repository: @repo)
+                  create(:security_overview_analytics_feature_status_revision, repository_metadata: repo_model, date_id: 20231001, dependabot_alerts_enabled: true, code_scanning_enabled: true, secret_scanning_enabled: true, secret_scanning_push_protection_enabled: true, advanced_security_enabled: true)
+
+                  # Alert open on the end date.
+                  create(:soa_dependabot_alert_revision, date_id: 20231001, repository: @repo, alert_number: 1, alert_created_at: ::Date.new(2023, 10, 1))
+
+                  # Alert open on end date and closed after end date.
+                  create(:soa_secret_scanning_alert_revision, date_id: 20231002, next_revision_date_id: 20231008, repository: @repo, alert_number: 2, alert_created_at: ::Date.new(2023, 10, 2), alert_bypassed: true)
+                  create(:soa_secret_scanning_alert_revision, date_id: 20231008, repository: @repo, alert_number: 2, alert_resolved: true, alert_created_at: ::Date.new(2023, 10, 2), alert_bypassed: true)
+                  create(:soa_secret_scanning_alert_revision, date_id: 20231002, next_revision_date_id: 20231008, repository: @repo, alert_number: 3, alert_created_at: ::Date.new(2023, 10, 2), alert_bypassed: false)
+                  create(:soa_secret_scanning_alert_revision, date_id: 20231008, repository: @repo, alert_number: 3, alert_resolved: true, alert_created_at: ::Date.new(2023, 10, 2), alert_bypassed: false)
+
+                  expected = [{ id: @repo.id, repository: @repo.name, owner_type: "ORGANIZATION", total: 1, critical: 1, high: 0, medium: 0, low: 0 }]
+
+                  repos = RepositoriesTable.for_organization(
+                    organization: @org,
+                    user: @org_admin,
+                    query: QueryParser.new("secret-scanning.bypassed:true"),
+                    start_date: ::Date.new(2023, 10, 2),
+                    end_date: ::Date.new(2023, 10, 7),
+                    user_session: @user_session,
+                    return_alert_count: false,
+                    is_open_selected: true,
+                  ).perform
+
+                  assert_same_elements(expected, repos)
+                end
+              end
+            end
+
+            context "parallel queries using load_async" do
+              test "returns the expected results" do
+                SecurityOverviewAnalytics::FeatureFlagHelper.stubs(:dashboard_repos_load_async?).returns(true)
+
+                repos = []
+
+                # Create 11 repos in sequence, so they fall into 4 different slices
+                # Test is done in a transaction, so guaranteed not to be interleaved with other transactions
+                11.times do |i|
+                  repo = create(:private_repository, owner: @org)
+                  repo_model = create(:soa_repository, repository: repo)
+
+                  repos << repo
+
+                  create(:security_overview_analytics_feature_status_revision, repository_metadata: repo_model, date_id: 20231001, dependabot_alerts_enabled: true, code_scanning_enabled: true, secret_scanning_enabled: true, secret_scanning_push_protection_enabled: true, advanced_security_enabled: true)
+                  create(:soa_dependabot_alert_revision, date_id: 20231001, repository: repo, alert_number: 1, alert_created_at: ::Date.new(2023, 10, 1))
+
+                  # One repo has 2 alerts, so we can test the sorting by open alert count
+                  if i == 5
+                    create(:soa_dependabot_alert_revision, date_id: 20231001, repository: repo, alert_number: 2, alert_created_at: ::Date.new(2023, 10, 1))
+                  end
+                end
+
+                # Repo with most alerts goes on top
+                expected = []
+                expected << { id: repos.fetch(5).id, repository: repos.fetch(5).name, owner_type: "ORGANIZATION", total: 2, critical: 0, high: 0, medium: 0, low: 2 }
+
+                # Other repos are sorted by id ascending (same as repo creation order)
+                repos.each do |repo|
+                  if repo.id != repos.fetch(5).id
+                    expected << { id: repo.id, repository: repo.name, owner_type: "ORGANIZATION", total: 1, critical: 0, high: 0, medium: 0, low: 1 }
+                  end
+                end
+                expected = expected.compact.first(10)
+
+                org_results = RepositoriesTable.for_organization(
+                  organization: @org,
+                  user: @org_admin,
+                  query: QueryParser.new,
+                  start_date: ::Date.new(2023, 10, 2),
+                  end_date: ::Date.new(2023, 10, 7),
+                  user_session: @user_session,
+                ).perform
+
+                assert_same_elements(expected, org_results)
+
+                business_results = RepositoriesTable.for_business(
+                  business: @biz,
+                  user: @org_admin,
+                  query: QueryParser.new,
+                  start_date: ::Date.new(2023, 10, 2),
+                  end_date: ::Date.new(2023, 10, 7),
+                  authorized_orgs: [@org],
+                  user_session: @user_session,
+                ).perform
+
+                assert_same_elements(expected, business_results)
+              end
+
+              test "does not error if filter value contains colons" do
+                SecurityOverviewAnalytics::FeatureFlagHelper.stubs(:dashboard_repos_load_async?).returns(true)
+
+                repos = []
+
+                # Create 11 repos in sequence, so they fall into 4 different slices
+                # Test is done in a transaction, so guaranteed not to be interleaved with other transactions
+                11.times do |i|
+                  repo = create(:private_repository, owner: @org)
+                  repo_model = create(:soa_repository, repository: repo)
+
+                  repos << repo
+
+                  create(:security_overview_analytics_feature_status_revision, repository_metadata: repo_model, date_id: 20231001, dependabot_alerts_enabled: true, code_scanning_enabled: true, secret_scanning_enabled: true, secret_scanning_push_protection_enabled: true, advanced_security_enabled: true)
+                  create(:soa_dependabot_alert_revision, date_id: 20231001, repository: repo, alert_number: 1, alert_created_at: ::Date.new(2023, 10, 1))
+
+                  # One repo has 2 alerts, so we can test the sorting by open alert count
+                  if i == 5
+                    create(:soa_dependabot_alert_revision, date_id: 20231001, repository: repo, alert_number: 2, alert_created_at: ::Date.new(2023, 10, 1))
+                  end
+                end
+
+                # Repo with most alerts goes on top
+                expected = []
+                expected << { id: repos.fetch(5).id, repository: repos.fetch(5).name, owner_type: "ORGANIZATION", total: 2, critical: 0, high: 0, medium: 0, low: 2 }
+
+                # Other repos are sorted by id ascending (same as repo creation order)
+                repos.each do |repo|
+                  if repo.id != repos.fetch(5).id
+                    expected << { id: repo.id, repository: repo.name, owner_type: "ORGANIZATION", total: 1, critical: 0, high: 0, medium: 0, low: 1 }
+                  end
+                end
+                expected = expected.compact.first(10)
+
+                org_results = RepositoriesTable.for_organization(
+                  organization: @org,
+                  user: @org_admin,
+                  query: QueryParser.new("-dependabot.ecosystem:what:test"),
+                  start_date: ::Date.new(2023, 10, 2),
+                  end_date: ::Date.new(2023, 10, 7),
+                  user_session: @user_session,
+                ).perform
+
+                assert_same_elements(expected, org_results)
+
+                business_results = RepositoriesTable.for_business(
+                  business: @biz,
+                  user: @org_admin,
+                  query: QueryParser.new("-dependabot.ecosystem:what:test"),
+                  start_date: ::Date.new(2023, 10, 2),
+                  end_date: ::Date.new(2023, 10, 7),
+                  authorized_orgs: [@org],
+                  user_session: @user_session,
+                ).perform
+
+                assert_same_elements(expected, business_results)
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+end

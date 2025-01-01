@@ -1,0 +1,42 @@
+# typed: true
+# frozen_string_literal: true
+
+module ContextRegion
+  class Factory
+    def self.presets
+      {
+        copilot: BasicCrumb.new(nil, label: "Copilot", path_name: :copilot_immersive_path),
+        codespaces: BasicCrumb.new(nil, label: "Codespaces", path_name: :codespaces_path),
+        developer_settings: DeveloperSettingsCrumb.new,
+        explore: ExploreCrumb.new,
+        topics: BasicCrumb.new(nil, label: "Topics", path_name: :topics_path),
+        trending: BasicCrumb.new(nil, label: "Trending", path_name: :trending_index_path),
+        marketplace: BasicCrumb.new(nil, label: "Marketplace", path_name: :marketplace_path),
+        notifications: BasicCrumb.new(nil, label: "Notifications", path_name: :notifications_v2_index_path),
+        settings: BasicCrumb.new(nil, label: "Settings", path_name: :settings_path),
+        stafftools: BasicCrumb.new(nil, label: "Site admin", path_name: :stafftools_path)
+      }
+    end
+
+    def self.build(object, **options)
+      case object
+      when Business
+        BusinessCrumb.new(object, **options)
+      when Repository
+        RepositoryCrumb.new(object, **options)
+      when User, Organization
+        UserCrumb.new(object, **options)
+      when MemexProject
+        MemexCrumb.new(object, **options)
+      when Team
+        TeamCrumb.new(object, **options)
+      else
+        nil
+      end
+    end
+
+    def self.preset(preset_name)
+      presets[preset_name]
+    end
+  end
+end

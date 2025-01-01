@@ -1,0 +1,84 @@
+# typed: strict
+# frozen_string_literal: true
+
+module SecretScanning
+  module Models
+    module React
+      class BasePayloadBuilder
+        extend T::Sig
+        include SecretScanning::Encryption::EncryptedSecretsHelper
+        include GitHub::TokenScanning::SecretScanningHelper
+        include SecretScanning::Features::FeatureFlagHelper
+
+        FILE_PATH_TRUNCATION_LENGTH = 24
+
+        sig { params(repo: Repository, user: User).void }
+        def initialize(repo, user)
+          @repo = repo
+          @user = user
+        end
+
+        sig { returns(T::Boolean) }
+        def show_user_feedback_link?
+          SecretScanning::Features::Repo::TokenScanning.new(@repo).feedback_link_enabled? &&
+            !@user.dismissed_notice?(UserNotice::SECRET_SCANNING_FEEDBACK_NOTICE)
+        end
+
+        sig { params(alert: GitHub::TokenScanning::Service::Token).returns(SecretScanning::Models::Alert) }
+        def serialize_alert(alert)
+          set_raw_secret_from_encrypted_secret(alert)
+
+          if alert.raw_secret.nil?
+            SecretScanning::Util::RawSecret.replacement_for_nil_raw_secret(alert)
+          end
+
+          created_at = alert.first_location ? alert.first_location.created_at : alert.created_at
+          validation_support = get_validation_support(alert)
+
+          SecretScanning::Models::Alert.new(
+            number: alert.number,
+            label: alert.label,
+            token_type: alert.token_type,
+            raw_secret: alert.raw_secret,
+            resolution: alert.resolution,
+            created_at: created_at,
+            resolved_at: alert.resolved_at,
+            is_closed: alert.resolved?,
+            token_type_provider: alert.token_type_provider,
+            partner_remediation_url: alert.external_remediation_doc_url,
+            validation_support: validation_support,
+            low_confidence: alert.low_confidence,
+            llm_detected: alert.llm_detected,
+            token_groups: alert.token_groups,
+            validity: alert.validity,
+            validity_last_checked: alert.validity_last_checked,
+            async_check_requested_at: alert.async_check_requested_at,
+            async_check_in_progress: alert.async_check_in_progress?,
+            is_multipart: alert.is_multipart,
+            slug: alert.token.slug,
+          )
+        end
+
+        private
+
+        sig { params(alert: GitHub::TokenScanning::Service::Token).returns(SecretScanning::Models::ValidationSupport) }
+        def get_validation_support(alert)
+          on_demand_checks_supported = alert.on_demand_checks_supported?
+          validity_checks_supported = alert.validity_checks_supported?
+
+          if alert.is_async_validated_token?
+            validity_checks_feature = SecretScanning::Features::Repo::ValidityChecks.new(@repo)
+            on_demand_checks_supported &&= validity_checks_feature.on_demand_checks_enabled_for_async_token_types?
+          end
+
+          validation_support = SecretScanning::Models::ValidationSupport.new(
+            on_demand_checks_supported: on_demand_checks_supported,
+            validity_checks_supported: validity_checks_supported
+          )
+
+          validation_support
+        end
+      end
+    end
+  end
+end

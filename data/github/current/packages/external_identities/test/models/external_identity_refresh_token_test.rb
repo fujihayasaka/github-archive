@@ -1,0 +1,32 @@
+# typed: true
+# frozen_string_literal: true
+
+require "test_helper"
+
+class ExternalIdentityRefreshTokenTest < GitHub::TestCase
+  extend EncryptedColumnTestHelper
+
+  test_encrypted_column(:external_identity_refresh_token, :encrypted_refresh_token)
+
+  fixtures do
+    REFRESH_TOKEN = "0.AXUAfeQ5gJ6PdE-w6JIBqnpIlQiV6R6x_hVEsaVX1B8J5ul1AIc.AgABAAAAAAD--DLA3VO7QrddgJg7WevrAgDs_wQA9P9VYX-WOaKamz9K2PbzI8AfPyfS755KIECH-GtrdVEhP_MxsUxIpptrtL8Zz4aQsZ1Dp4bbo1rjLI8sNUJGffCstoo7H82__39k-c3bjzCnmOaUCurVfPXrwA_RVVWHDEJg_cdCtGMKU4g0g3A0HcjRH8VmYQ7s1eMbQxiyeL-dRPym5mHAgexf0mBrt3PbrumcGE77HZ0Y-fNH_o4o59YqMFZBvK8xOQb3u3i0r6wlF16jJltA13rJJb_YArfTlcf0IPZaNvKob81JuqZLhPdGnrG2QyrYE5rvK1QYzqhjvBA220DZDxPXvGiCVCTEepBwJbHvAOur3RFqOUGmprtYYRsk5pdlj2zdFIcJzO56JAnwQDcGQ2y9YKtliPICbs6IlzNtxdDPcS-5_Pkv3a-Dz1js3Jfzh4cOtIEJKjYM5KdhpiglPwx8t5dNDcSPLxSqH_2MzUl28DlN9HO-r-j8HAmnRJ1nqlynxKgndxzm4gv3D6h_jOLCQdWUM3TqNnC-Ev1IK578TLGv06gt84Q-FZRfP6wuTA_OoYK5pmQlIys6DucDpFO2wtdBvaQms_fhb8hGHYJRv17pA6aDTanGEvcbtfKb3TXJIOOYQsLiai9e2WU2mbDbiMD5t7c4i8bvFKlWpidiNmDBEoLfELLqQiixS5zdVRwLVyrHAIh0Wl9TQIcGiwfGG_OziOH9bOrMuwO4jU2ARb4MGQrQtuDntenL3unpEskRadI0u7-vqPDpVYwWWf4jklKGmcrsmfo4oUvbGlzoo9NO6Y8A3xC_l78FubmQbUXRlZMOZctLLHbZNN5KCVbE93YhVTaRmQ2jjiBrbsKXqithlEjg0BDSQml7YiKbPr4b8UNK_hvynjhz8iUzmD-ZFVc-r7aTJU_iUpJIued8HCohjDCsH3ANd07Yy8Wh-zBOIX5XMKlxqcziek3wO3pU1_X54Exc8pjcf3de_6rHSF49"
+    @external_identity = create(:external_identity, org: create(:business_plus_org))
+  end
+
+  context "Creation" do
+    test "Valid with external_identity and encrypted_refresh_token" do
+      rt = ExternalIdentityRefreshToken.create(external_identity: @external_identity, encrypted_refresh_token: REFRESH_TOKEN)
+      assert rt.valid?
+    end
+
+    test "Invalid without external_identity" do
+      rt = ExternalIdentityRefreshToken.create(encrypted_refresh_token: REFRESH_TOKEN)
+      refute rt.valid?
+    end
+
+    test "Invalid without encrypted_refresh_token" do
+      rt = ExternalIdentityRefreshToken.create(external_identity: @external_identity)
+      refute rt.valid?
+    end
+  end
+end

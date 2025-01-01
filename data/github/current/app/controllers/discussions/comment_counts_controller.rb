@@ -1,0 +1,37 @@
+# typed: true
+# frozen_string_literal: true
+
+class Discussions::CommentCountsController < Discussions::BaseController
+  before_action :require_discussion
+
+  preload_features [
+    :permission_enforcer_with_caching,
+    :otel_rack_middleware,
+    :emu_vss_business,
+    :oidc_policy_enforced,
+    :api_insights_rest,
+    :owner_scoped_github_apps,
+    :stafftools_tenant_use_parameter,
+  ]
+
+  depends_on_clusters ApplicationRecord::Mysql1,
+    ApplicationRecord::Repositories,
+    ApplicationRecord::Collab,
+    ApplicationRecord::Configurations,
+    ApplicationRecord::IamAbilities,
+    ApplicationRecord::Mysql2,
+    ApplicationRecord::NotificationsEntries,
+    ApplicationRecord::Mysql5,
+    only: [:show]
+
+  depends_on_clusters ApplicationRecord::Copilot,
+    only: [:show],
+    optional: true
+
+  def show
+    render Discussions::CommentCountComponent.new(
+      discussion: discussion,
+      repository: current_repository,
+    ), layout: false
+  end
+end

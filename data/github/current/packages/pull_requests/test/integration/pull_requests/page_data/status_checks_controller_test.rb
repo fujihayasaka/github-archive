@@ -1,0 +1,219 @@
+# typed: true
+# frozen_string_literal: true
+
+require "test_helper"
+
+class PullRequests::PageData::StatusChecksControllerTest < GitHub::IntegrationTestCase
+  include ResiliencyHelpers
+
+  fixtures do
+    @owner = create(:user, login: "wiseguy")
+    @forker = create(:user, :verified, login: "forker")
+    @rando  = create(:user)
+
+    @source = create(:private_repository, owner: @owner, name: "source", from_example: :review_comment_fork)
+    @source.add_member @forker, action: :write
+
+    @fork = create(:fork_repository, forker: @forker, fork_repo: @source, create_owner: true, from_example: :review_comment_fork)
+
+    @issue = create(:issue, user: @owner, repository: @source, title: "A Title")
+    @pull =
+      create(:pull_request,
+        repository: @source,
+        base_repository: @source,
+        base_user: @source.owner,
+        base_ref: "master",
+        head_repository: @source,
+        head_user: @source.owner,
+        head_ref: "topic",
+        issue: @issue,
+        user: @owner
+      )
+
+    @no_status_pr =
+      create(:pull_request,
+        repository: @fork,
+        base_repository: @fork,
+        base_user: @fork.owner,
+        base_ref: "master",
+        head_repository: @fork,
+        head_user: @fork.owner,
+        head_ref: "topic",
+        user: @forker
+      )
+
+    #statusContext
+    @oauth_application = create(:oauth_application, name: "Lofty-CI", url: "https://lofty-ci.com/")
+    @status_context1 = create(:status,
+      oauth_application: @oauth_application,
+      repository: @source,
+      creator: @source.owner,
+      sha: @pull.head_sha,
+      context: "context1",
+      state: "success",
+      description: "yeah #3",
+      target_url: "https://github.com/"
+    )
+    @status_context2 = create(:status,
+      oauth_application: @oauth_application,
+      repository: @source,
+      creator: @source.owner,
+      sha: @pull.head_sha,
+      context: "context2",
+      state: "pending",
+      description: "yeah #2",
+      target_url: "https://github.com/"
+    )
+
+    #checkRun
+    github_app = create :integration, default_permissions: { "checks" => :write }
+    check_suite = create(:check_suite, repository: @source, github_app: github_app, head_sha: @pull.head_sha)
+    @check_run1  = create(:check_run, name: "foo", check_suite: check_suite, status: :completed, completed_at: Time.now, conclusion: :success)
+
+    # required Workflow
+    make_trusted_oauth_apps_owner
+    workflow_check_suite = create(:check_suite_for_actions_app,
+      :success,
+      repository: @source,
+      workflow_file_path: "required/#{@source.id}/.github/workflows/req_workflow1.yml",
+      name: "Required Ruleset Workflow 1",
+      head_sha: @pull.head_sha
+    )
+
+    @org_2 = create(:enterprise_linked_organization, admin: @admin)
+    @source_repo = create(:internal_repository, owner: @org_2, from_example: :simple)
+    @target_repo = create(:repository, owner: @org_2, from_example: :pull_request_source)
+  end
+
+  setup do
+    GitHub.stubs(:actions_enabled?).returns(true)
+    @org_2.stubs(:actions_enabled?).returns(true)
+  end
+
+  test "returns 200 response even if there are no checks" do
+    GitHub.flipper[:status_checks_json].enable
+    as @no_status_pr.user
+    get "#{GitHub.url}/#{@no_status_pr.repository.name_with_display_owner}/pull/#{@no_status_pr.number}/page_data/status_checks"
+
+    assert_response :success
+    json = JSON.parse(response.body)
+    assert_equal 0, json["statusChecks"].count
+  end
+
+  test "returns 404 for user without read access to the repository" do
+    GitHub.flipper[:status_checks_json].enable(@source)
+    as @rando
+    get "#{GitHub.url}/#{@no_status_pr.repository.name_with_display_owner}/pull/#{@no_status_pr.number}/page_data/status_checks"
+
+    assert_response :not_found
+  end
+
+  test "returns 404 if pull request is not found" do
+    GitHub.flipper[:status_checks_json].enable(@source)
+    as @owner
+    non_existent_pr = "0" * 40
+    get "#{GitHub.url}/#{@pull.repository.name_with_display_owner}/pull/#{non_existent_pr}/page_data/status_checks"
+
+    assert_response :not_found
+  end
+
+  test "returns 200 response for status checks" do
+    GitHub.flipper[:status_checks_json].enable(@source)
+    as @pull.user
+    get "#{GitHub.url}/#{@pull.repository.name_with_display_owner}/pull/#{@pull.number}/page_data/status_checks"
+
+    assert_response :success
+    json = JSON.parse(response.body)
+
+    assert_equal 4, json["statusChecks"].count
+    assert_same_elements(
+      [{ "count" => 3, "state" => "SUCCESS" }, { "count" => 1, "state" => "PENDING" }],
+      json["statusRollup"]["summary"]
+    )
+  end
+
+  test "returns 200 response for workflow runs" do
+    @source_repo.set_actions_repository_share_policy(
+      policy: Configurable::ActionsRepositorySharePolicy::ACCESSIBLE_SAME_ORGANIZATION,
+      actor: @owner
+    )
+
+    ruleset_workflow_path = ".github/workflows/test.yml"
+    ruleset_workflow_ref = @source_repo.heads.read(@source_repo.default_branch)
+
+    ruleset_workflow_ref.append_commit({ message: "add workflow", committer: @source_repo.owner.admin }, @source_repo.owner) do |files|
+      files.add(ruleset_workflow_path, "some content")
+    end
+
+    ruleset = create :repository_ruleset, source: @org_2
+    configuration = create(:repository_rule_configuration, rule_type: "workflows", repository_ruleset: ruleset, parameters: {
+      workflows: [{
+        repository_id: @source_repo.id,
+        path: ruleset_workflow_path,
+        ref: "refs/heads/#{@source_repo.default_branch}"
+      }]
+    })
+
+    before = @target_repo.heads[@target_repo.default_branch].target_oid
+    after = @target_repo.commits.create({ message: "New commit", committer: @target_repo.owner }, before) do |files|
+      files.add "New file", "New file"
+    end.oid
+
+    pull = create :pull_request, :with_mergeable_head, repository: @target_repo
+    check_suite = create(:check_suite_for_actions_app, repository: @target_repo, head_sha: pull.head_sha, name: "CI", event: "pull_request", workflow_file_path: "required/#{@source_repo.id}/#{ruleset_workflow_path}")
+    check_run = create :check_run_for_actions_app, check_suite: check_suite, name: "req-workflow-context1", status: "pending", conclusion: nil
+
+    CheckSuite.any_instance.stubs(:imposer_repo_id).returns(@source_repo.id)
+    Actions::WorkflowRun.any_instance.stubs(:workflow_file_ref).returns("refs/heads/#{@source_repo.default_branch}")
+
+    GitHub.flipper[:status_checks_json].enable(@target_repo)
+    as pull.user
+    get "#{GitHub.url}/#{pull.repository.name_with_display_owner}/pull/#{pull.number}/page_data/status_checks"
+
+    assert_response :success
+    json = JSON.parse(response.body)
+
+    assert_equal 1, json["statusChecks"].count
+  end
+
+  test "returns 500 response when required clusters fail" do
+    GitHub.flipper[:status_checks_json].enable(@source)
+    prevent_connections_to(ApplicationRecord::RepositoriesActionsChecks) do
+      as @pull.user
+      get "/#{@pull.repository.name_with_display_owner}/pull/#{@pull.number}/page_data/status_checks"
+
+      assert_response :internal_server_error
+    end
+  end
+
+  test "it fails when rate limited", skip_unless: :rate_limiting_enabled? do
+    GitHub.flipper[:status_checks_json].enable(@source)
+    expected_key = "pull_requests/page_data/shared_controller.status_checks:#{@pull.user.id}"
+    expected_opts = {
+      max_tries: 400,
+      ttl: 1.minute.to_i,
+    }
+
+    PullRequests::PageData::SharedController.any_instance.expects(:rate_limit_increment_limited?).with(expected_key, expected_opts).once.returns(true)
+
+    as @pull.user
+    get "/#{@pull.repository.name_with_display_owner}/pull/#{@pull.number}/page_data/status_checks"
+    assert_equal 429, response.status
+  end
+
+  test "returns 404 if feature is not enabled" do
+    GitHub.flipper[:status_checks_json].disable
+    as @owner
+    get "#{GitHub.url}/#{@pull.repository.name_with_display_owner}/pull/#{@pull.number}/page_data/status_checks"
+
+    assert_response :not_found
+  end
+
+  test "can pass in avatar_size param to set avatar_url field" do
+    GitHub.flipper[:status_checks_json].enable(@source)
+    as @pull.user
+    get "#{GitHub.url}/#{@pull.repository.name_with_display_owner}/pull/#{@pull.number}/page_data/status_checks?avatar_size=20"
+
+    assert_response :success
+  end
+end
