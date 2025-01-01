@@ -86,7 +86,16 @@ module Api::Serializer::OrganizationsDependency
         members_can_create_pages: org.members_can_create_pages?,
         members_can_fork_private_repositories: org.allow_private_repository_forking?,
         web_commit_signoff_required: org.dco_signoff_enabled?,
-        deploy_keys_enabled_for_repositories: org.deploy_key_policy_enabled?
+        deploy_keys_enabled_for_repositories: org.deploy_key_policy_enabled?,
+        members_can_delete_repositories: org.members_can_delete_repositories?,
+        members_can_change_repo_visibility: org.members_can_change_repo_visibility?,
+        members_can_invite_outside_collaborators: org.members_can_invite_outside_collaborators?,
+        members_can_delete_issues: org.members_can_delete_issues?,
+        display_commenter_full_name_setting_enabled: org.display_commenter_full_name_setting_enabled?,
+        readers_can_create_discussions: org.readers_can_create_discussions?,
+        members_can_create_teams: org.members_can_create_teams?,
+        members_can_view_dependency_insights: org.members_can_view_dependency_insights?,
+        default_repository_branch: org.default_new_repo_branch
 
       if GitHub.flipper[:private_pages_org_toggle].enabled?(org)
         hash[:members_can_create_public_pages] = org.members_can_create_public_pages?

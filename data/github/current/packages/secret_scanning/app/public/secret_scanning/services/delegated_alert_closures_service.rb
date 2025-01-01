@@ -91,6 +91,22 @@ module SecretScanning
         closure_request
       end
 
+      sig { params(repository: Repository, reviewer: RuleEngine::Types::Actor).returns(T::Boolean) }
+      def self.is_valid_reviewer?(repository, reviewer)
+        # We don't support PublicKeys.
+        return false if reviewer.is_a?(PublicKey)
+
+        return false unless repository.owner.is_a?(Organization)
+
+        org = T.cast(repository.owner, Organization)
+
+        # The reviewer must have read permissions on the repo
+        return false unless repository.async_permit?(reviewer, :read).sync
+
+        # The reviewer must have the FGP for the org.
+        org.has_review_delegated_alert_closure_fgp?(reviewer)
+      end
+
       sig { params(reason: String).returns(Symbol) }
       def self.ui_reason_to_tss_symbol(reason)
         case reason

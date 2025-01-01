@@ -61,6 +61,10 @@ class AssetScanner
         return MatchResult.match(nil, match[0], nil, "RepositoryFile")
       end
 
+      if match = scan_url(src, old_repository_file_canonical_re)
+        return MatchResult.match(nil, match[0], nil, "RepositoryFile")
+      end
+
       if match = scan_url(src, old_asset_re)
         return MatchResult.match(match[0], nil, match[1])
       end
@@ -89,6 +93,9 @@ class AssetScanner
       elsif repository_file_canonical_asset(path)
         match = scan_url(path, repository_file_canonical_re)
         MatchResult.match(nil, match[0], nil, "RepositoryFile")
+      elsif old_repository_file_canonical_asset(path)
+        match = scan_url(path, old_repository_file_canonical_re)
+        MatchResult.match(nil, match[0], nil, "RepositoryFile")
       else
         # Fall back to alambic asset matching
         path_part = path.split("?").first
@@ -114,6 +121,11 @@ class AssetScanner
       return false if src.nil?
       src.match?(repository_file_canonical_re)
     end
+
+    def old_repository_file_canonical_asset(src)
+      return false if src.nil?
+      src.match?(old_repository_file_canonical_re)
+    end
   end
 
   class FileScanner < AssetScanner
@@ -132,12 +144,21 @@ class AssetScanner
     def match_src(src)
       patterns = [cluster_asset_re, private_cluster_asset_re, cluster_private_asset_re,
         cluster_gist_asset_re, cluster_gist_asset_subdomain_complement_re]
+
       if match = scan_url(src, *patterns)
         return MatchResult.match(match[0], nil, match[1])
       end
 
       if match = scan_url(src, new_cluster_private_asset_re)
         return MatchResult.match(nil, nil, match[0])
+      end
+
+      if match = scan_url(src, repository_file_canonical_re)
+        return MatchResult.match(nil, match[0], nil, "RepositoryFile")
+      end
+
+      if match = scan_url(src, old_repository_file_canonical_re)
+        return MatchResult.match(nil, match[0], nil, "RepositoryFile")
       end
 
       if GitHub.enterprise?
@@ -339,6 +360,16 @@ class AssetScanner
     # example url structure : https://github.com/user-attachments/files/<guid>/<filename>
     # example url : https://github.com/user-attachments/files/1234567/attachment.txt
     @repository_file_canonical_re ||= %r{\A#{GitHub.url}(?::\d+)?\/user-attachments\/files\/(\d+)\/([^\.]+)\.}
+  end
+
+  def old_repository_file_canonical_re
+    return if GitHub.url.blank?
+
+    # In local dev, canonical URLs in image uploads contain :80 appended to them so regex
+    # accounts for this and ignores port
+    # example url structure : https://github.com/<owner>/<repo>/files/<asset_id>/<file_name>
+    # example url : https://github.com/Auth-Rewrite/test-stafftools-delete/files/12345/my-file.pdf
+    @old_repository_file_canonical_re ||= %r{\A#{GitHub.url}(?::\d+)?\/[\w.-]+\/[\w.-]+\/files\/(\d+)\/([^\.]+)}
   end
 
   def cdn_prod_data_private_images_s3_re

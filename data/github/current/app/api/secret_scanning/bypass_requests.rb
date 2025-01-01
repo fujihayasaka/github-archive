@@ -2,7 +2,7 @@
 # frozen_string_literal: true
 
 class Api::SecretScanning::BypassRequests < Api::App
-  EXEMPTION_REQUEST_STATUSES = %w[all completed cancelled expired denied open].freeze
+  EXEMPTION_REQUEST_STATUSES = %w[all approved completed cancelled expired denied open].freeze
   TIME_PERIODS = %w[hour day week month].freeze
 
   get "/repositories/:repository_id/bypass-requests/secret-scanning", operation_id: "secret-scanning/list-repo-bypass-requests" do

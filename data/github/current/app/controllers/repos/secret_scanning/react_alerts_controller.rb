@@ -28,6 +28,7 @@ class Repos::SecretScanning::ReactAlertsController < AbstractRepositoryControlle
   before_action :require_token_scanning_enabled, except: [:index]
   before_action :check_user_has_view_permission, except: [:resolve, :report]
   before_action :check_user_has_write_permission, only: [:resolve, :report, :create_closure_requests]
+  before_action :check_delegated_alert_closures_status, only: [:resolve]
   before_action :require_delegated_alert_closures_enabled, only: [:create_closure_requests]
   skip_before_action :cap_pagination, only: [:index] # Skip pagination being capped at 100 pages on dotcom: app/controllers/application_controller.rb
 
@@ -544,6 +545,15 @@ class Repos::SecretScanning::ReactAlertsController < AbstractRepositoryControlle
     # rubocop:todo GitHub/AvoidCast
     render_404 unless alert.present? && T.cast(current_repository, Repository).any_commits_authored_by_user?(current_user, alert.commit_oids)
     # rubocop:enable GitHub/AvoidCast
+  end
+
+  sig { void }
+  def check_delegated_alert_closures_status
+    # If delegated alert closures is disabled, skip the rest of this check.
+    return unless self.delegated_alert_closures.enabled?
+
+    # The user should only be able to resolve an alert directly, if they are a valid reviewer.
+    render_404 unless SecretScanning::Services::DelegatedAlertClosuresService.is_valid_reviewer?(current_repository, current_user)
   end
 
   # currently this is only called by the resolve action

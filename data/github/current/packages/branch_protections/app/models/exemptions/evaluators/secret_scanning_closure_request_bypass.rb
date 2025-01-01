@@ -26,24 +26,10 @@ module Exemptions
 
     sig { override.params(request: ExemptionRequest, reviewer: RuleEngine::Types::Actor).returns(T::Boolean) }
     def is_valid_reviewer?(request, reviewer)
-      # We don't support PublicKeys.
-      return false if reviewer.is_a?(PublicKey)
       # Users cannot review their own requests.
       return false if request.requester == reviewer
 
-      # The request should belong to an org-owned repo.
-      return false unless request.repository
-      repo = T.must(request.repository)
-
-      return false unless repo.owner.is_a?(Organization)
-
-      org = T.cast(repo.owner, Organization)
-
-      # The reviewer must have read permissions on the repo
-      return false unless repo.async_permit?(reviewer, :read).sync
-
-      # The reviewer must have the FGP for the org.
-      org.has_review_delegated_alert_closure_fgp?(reviewer)
+      SecretScanning::Services::DelegatedAlertClosuresService.is_valid_reviewer?(T.must(request.repository), reviewer)
     end
 
     sig { override.params(request: ExemptionRequest, requester: RuleEngine::Types::Actor).returns([T::Boolean, T.nilable(String)]) }

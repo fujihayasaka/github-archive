@@ -51,6 +51,7 @@ module Elastomer
     STARTED_KEY = "started".freeze
     ACTIVE_KEY  = "active".freeze
     WORKER_KEY  = "workers".freeze
+    FINISHED_KEY = "finished_at".freeze
     UPDATED_AT_START_KEY = "updated_after_start".freeze
     UPPER_BOUND_KEY = "upper_bound".freeze
 
@@ -83,7 +84,22 @@ module Elastomer
 
       count.times { requeue }
       redis.hsetnx(group_key, STARTED_KEY, Time.now.iso8601)
-      GitHub.dogstats.count("search.repair.workers", count, { tags: ["index:#{index_name}"] })
+      GitHub.dogstats.gauge("search.repair.workers", count, { tags: [
+        "index:#{index_name}",
+        "group_key:#{group_key}",
+        "search_cluster:#{cluster_name}"
+      ] })
+      GitHub.dogstats.gauge("search.repair.active_jobs", active_jobs, { tags:
+        ["index:#{index_name}", "group_key:#{group_key}", "search_cluster:#{cluster_name}"]
+      })
+      GitHub.dogstats.event(
+        "Repair Job Started",
+        "Started repair job for index #{index_name} with #{count} workers", tags: [
+          "index:#{index_name}",
+          "search_cluster:#{cluster_name}",
+          "group_key:#{group_key}",
+        ]
+      )
     end
 
     # Perform the actual work of reconciling the search index with the canoncial
@@ -104,13 +120,39 @@ module Elastomer
       end
 
       return if disabled?
+      GitHub.dogstats.increment("search.repair.batch_start", { tags: [
+        "index:#{index_name}",
+        "group_key:#{group_key}",
+        "search_cluster:#{cluster_name}",
+      ] })
+
+      GitHub.logger.info(
+        "Starting repair job for index #{name} with options: #{opts.inspect}",
+        tags: logger_tags
+      )
       repair!
+
     ensure
       active_jobs = redis.hget(group_key, ACTIVE_KEY).to_i
       worker_count = redis.hget(group_key, WORKER_KEY).to_i
-
-      # Only requeue if the customer-requested count is less than current active jobs
-      requeue if enabled? && !finished? && (worker_count > active_jobs)
+      should_requeue = enabled? && !finished? && (worker_count > active_jobs)
+      GitHub.dogstats.increment("search.repair.batch_complete", { tags: [
+        "index:#{index_name}",
+        "requeue:#{should_requeue}",
+        "enabled:#{enabled?}",
+        "finished:#{finished?}",
+        "has_worker_capacity:#{worker_count > active_jobs}",
+        "group_key:#{group_key}",
+        "search_cluster:#{cluster_name}",
+      ] })
+      GitHub.dogstats.gauge("search.repair.progress", progress, {
+        tags: [
+          "index:#{index_name}",
+          "group_key:#{group_key}",
+          "search_cluster:#{cluster_name}",
+        ]
+      })
+      requeue if should_requeue
     end
 
     # Perform the actual work of the repairing the search index. This method
@@ -156,17 +198,25 @@ module Elastomer
 
     # Returns `true` if all the reconcilers report that they have finished
     # processing all models. Returns `false` if any reconciler has more models
-    # to process. Returns `nil` if there are no reconcilers.
+    # to process.
     def finished?
-      keys = reconcilers.map { |r| r.finished_key }
-      return if keys.empty?
-
-      redis.hmget(group_key, *keys).all?
+      completed_at = redis.hget(group_key, FINISHED_KEY)&.to_f
+      return true if completed_at&.positive?
+      if reconcilers.all?(&:finished?)
+        completed_at = Time.now.utc.to_f
+        redis.hsetnx(group_key, FINISHED_KEY, completed_at)
+        GitHub.logger.info(
+          "Repair job for index #{index_name} with group key #{group_key} marked complete at #{completed_at}",
+          tags: logger_tags
+        )
+      end
+      completed_at&.positive? || false
     end
 
     # Returns the progress through the repair job - a floating point number
     # between 0.0 and 100.0.
     def progress
+      return 0.0 unless exists?
       return 100.0 if finished?
 
       values = reconcilers.map { |r| r.progress }
@@ -241,8 +291,26 @@ module Elastomer
     #
     # Returns this repair job instance.
     def reset!
+      GitHub.logger.warn(
+        "Resetting repair job for index #{index_name} with group key #{group_key}",
+        tags: logger_tags
+      )
       redis.del(group_key)
       self
+    end
+
+    def logger_tags
+      [
+        "index:#{index_name}",
+        "group_key:#{group_key}",
+        "search_cluster:#{cluster_name}",
+        "repo_id:#{repo_id}",
+        "enabled:#{enabled?}",
+        "active:#{active?}",
+        "finished:#{finished?}",
+        "raise_errors:#{raise_errors?}",
+        "repair_strategy:#{repair_strategy}",
+      ]
     end
 
     # Returns `true` if the repair job group key exists in Redis. This

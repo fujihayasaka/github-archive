@@ -10,14 +10,10 @@ class Api::Admin::UsersManager < Api::Admin
 
   # Create user. The provided login should match what the auth mechanism provides.
   post "/admin/users", operation_id: "enterprise-admin/create-user" do # rubocop:todo GitHub/ControlAccess
-    # Only allow user creation if Default auth or GitHub.auth.builtin_auth_fallback? is true (with SAML or SCIM enabled)
-    proceed_with_creation = GitHub.auth.default? || GitHub.auth.builtin_auth_fallback?
-
-    unless proceed_with_creation
-      if scim_managed_enterprise?(GitHub.global_business) || GitHub.auth.saml?
-        deliver_error! 404,
-          message: "Account creation is managed through the IdP."
-      end
+    # Only prevents user creation when SCIM is enabled without builtin auth
+    if scim_managed_enterprise?(GitHub.global_business) && !GitHub.auth.builtin_auth_fallback?
+      deliver_error! 404,
+        message: "Account creation is managed through the IdP."
     end
 
     data = receive(Hash)

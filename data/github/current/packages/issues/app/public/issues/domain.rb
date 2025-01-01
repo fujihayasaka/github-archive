@@ -9,7 +9,59 @@ module Issues
     # Find an issue by its number for a given repository. Returns nil no issue is found.
     sig { params(number: Integer, repo_id: Integer).returns(T.nilable(IIssue)) }
     def by_number(number, repo_id:)
+      # Use this method to avoid an N+1 query when fetching issue events across multiple
+      # issues; it can be used to retrieve all the issues associated with a list of
+      # events (or any other object that has an issue reference).
       ::Issue.find_by(repository_id: repo_id, number: number)
+    end
+
+    # Find an issue by any args. Returns nil if no issue is found.
+    # If you find yoursself needing to add more arguments, feel free to do so as long
+    # as the argument is non-nullable in the databse
+    # otherwise see the comment below 👇🏻
+    sig { params(repo_id: Integer, title: T.nilable(String), number: T.nilable(Integer), state: T.nilable(Symbol)).returns(T.nilable(IIssue)) }
+    def by_any(repo_id:, title: nil, number: nil, state: nil)
+      # Using nillable arguments is not optimal because we cannot distinguish between
+      # an explicitly nil value and an omitted argument, but because so far we only have non-nullable
+      # columns and this way provides the best devx, we will use it for now.
+      # If we need to support nullable columns in the future, we'll have to introduce a typed struct
+      # I didn't use shapes (https://sorbet.org/docs/shapes) because they are still WIP and they don't work
+      # with splatted hashes
+
+      ::Issue.find_by(
+        repository_id: repo_id,
+        ** {
+          title: title,
+          number: number,
+          state: state
+        }.compact
+      )
+    end
+
+    # Bulk retrieve issues by ID. Returns a hash of issue IDs to issue numbers within the repository.
+    sig { params(repo_id: Integer, issue_ids: T::Array[Integer]).returns(T::Hash[Integer, Integer]) }
+    def numbers_by_ids(repo_id, issue_ids)
+      # This method exists to provide a way to retrieve multiple issues in a single query.
+      # Use this to avoid an N+1 query pattern when fetching objects across issue boundaries
+      # during bulk operations. An example is in exporting issue events.
+      ::Issue.where(repository_id: repo_id, id: issue_ids)
+        .pluck(:id, :number)
+        .to_h
+    end
+
+    # Bulk retrieve whether issues are pull requests by ID.
+    sig { params(issue_ids: T::Array[Integer]).returns(T::Hash[Integer, T::Boolean]) }
+    def is_pull_request_by_ids(issue_ids)
+      # This method exists to provide a way to retrieve multiple issues in a single query.
+      # Use this to avoid an N+1 query pattern when fetching objects across issue boundaries
+      # during bulk operations. An example is in exporting issue events.
+      #
+      # If the ID is not in the output hash, it is not a pull request.
+      ::Issue.where(id: issue_ids)
+        .pluck(:id, :pull_request_id)
+        .each_with_object({}) do |(id, pr_id), hash|
+          hash[id] = pr_id.present?
+        end
     end
 
     # Returns a hash of open issue and pull request counts for a list of repository ids.

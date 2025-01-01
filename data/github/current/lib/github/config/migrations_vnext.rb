@@ -19,6 +19,18 @@ module GitHub
       def mvnd_hmac_key
         GitHub.environment["MVND_HMAC_KEY"]
       end
+
+      # Determine if ELM internal webhooks are enabled
+      # - Disabled for dotcom
+      # - Disabled for enterprise by default, except if explicitly enabled via ghe-config apply. Checks for ENTERPRISE_ELM_INTERNAL_WEBHOOKS_ENABLED variable.
+      #
+      # Returns true if enabled, false otherwise.
+      def elm_internal_webhooks_enabled?
+        return false unless GitHub.enterprise?
+        return @elm_internal_webhooks_enabled if defined?(@elm_internal_webhooks_enabled)
+        @elm_internal_webhooks_enabled = false
+      end
+      attr_writer :elm_internal_webhooks_enabled
     end
   end
 

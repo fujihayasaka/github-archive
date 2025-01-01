@@ -93,7 +93,7 @@ module ConditionalAccess
             when Business
               satisfied = false if pat_expiration_limit_unsatisfied_business_ids.include?(target.id)
             when Organization
-              satisfied = false if pat_expiration_limit_unsatisfied_org_ids.include?(target.id)
+              satisfied = false if org_expiration_science_experiment(target.id, targets)
             when User
               satisfied = true
 
@@ -139,6 +139,10 @@ module ConditionalAccess
         @pat_expiration_limit_unsatisfied_business_ids = business_ids_restricting_pat_lifetime(expirable_access.pat_lifetime_in_days, expirable_access.pat_type)
       end
 
+      def org_expiration_science_experiment(org_id, targets)
+        pat_expiration_limit_unsatisfied_org_ids_candidate(targets).include?(org_id)
+      end
+
       # Internal: Find all of the actor's associated Orgs that enforce
       # an expiration policy the PAT doesn't adhere to.
       #
@@ -147,6 +151,16 @@ module ConditionalAccess
         return @pat_expiration_limit_unsatisfied_org_ids if defined?(@pat_expiration_limit_unsatisfied_org_ids)
 
         @pat_expiration_limit_unsatisfied_org_ids = organization_ids_restricting_pat_lifetime(expirable_access.pat_lifetime_in_days, expirable_access.pat_type)
+      end
+
+      def pat_expiration_limit_unsatisfied_org_ids_candidate(targets)
+        return @pat_expiration_limit_unsatisfied_org_ids_candidate if defined?(@pat_expiration_limit_unsatisfied_org_ids_candidate)
+
+        @pat_expiration_limit_unsatisfied_org_ids_candidate = organization_ids_restricting_pat_lifetime_candidate(
+          expirable_access.pat_lifetime_in_days,
+          expirable_access.pat_type,
+          targets: targets
+        )
       end
 
       # TODO move to module

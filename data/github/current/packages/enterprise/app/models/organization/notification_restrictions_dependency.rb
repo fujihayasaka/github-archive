@@ -139,11 +139,11 @@ module Organization::NotificationRestrictionsDependency
   def user_can_receive_email_notifications?(user)
     return false unless user
 
-    # Does the organization require a domain restriction check for this user
-    return true unless verified_domain_restriction_should_check_user?(user)
-
     # Can receive notifications if notifications aren't restricted
     return true unless T.unsafe(self).restrict_notifications_to_verified_domains?
+
+    # Does the organization require a domain restriction check for this user
+    return true unless verified_domain_restriction_should_check_user?(user)
 
     # Cannot receive notification if notifications are restricted and user doesn't have a verified
     # email address from a verified or approved domain for this organization or its enterprise

@@ -17,6 +17,47 @@ module ConditionalAccess
         target.instance_of?(Organization) || target.instance_of?(Business)
       end
 
+      def organization_ids_restricting_pat_access_candidate(configuration_key:, targets:)
+        T.bind(self, T.any(
+          ::ConditionalAccess::Policy::LegacyPersonalAccessTokens::AppliedIn,
+          ::ConditionalAccess::Policy::PersonalAccessTokens::AppliedIn,
+          ::ConditionalAccess::Policy::PersonalAccessTokensExpirationLimit::AppliedIn
+        ))
+
+        policy_debug_logging("Checking for organizations restricting PAT access", "organization_ids_restricting_pat_access_candidate", {
+          "gh.configuration_key" => configuration_key,
+        })
+
+        return [] if targets.empty?
+
+        # Get IDs of orgs restricting PAT access directly at the org level.
+        org_and_memberships = actor_organization_ids_and_business_memberships_candidate(actor, targets)
+
+        if GitHub.single_business_environment? && GitHub.global_business.present?
+          if business_ids_with_configuration_enabled([GitHub.global_business.id], configuration_key).any?
+            return org_and_memberships.organization_ids
+          end
+        end
+
+        restricted_org_ids = organization_ids_with_configuration_enabled(org_and_memberships.direct_organization_ids, configuration_key)
+
+        return [] if restricted_org_ids.empty? && org_and_memberships.business_memberships.empty?
+
+        business_memberships = org_and_memberships.business_memberships
+        return restricted_org_ids if business_memberships.empty?
+
+        # Get IDs of businesses that restrict access on orgs.
+        membership_business_ids = business_memberships.map(&:business_id).uniq
+        restricted_business_ids = business_ids_with_configuration_enabled(membership_business_ids, configuration_key)
+
+        return [] if restricted_org_ids.empty? && restricted_business_ids.empty?
+
+        # Only keep memberships where the org is restricted by the business.
+        restricted_business_memberships = business_memberships.filter { |membership| restricted_business_ids.include?(membership.business_id) }
+
+        (restricted_business_memberships.map(&:organization_id) | restricted_org_ids).compact
+      end
+
       def organization_ids_restricting_pat_access(configuration_key:)
         T.bind(self, T.any(
           ::ConditionalAccess::Policy::LegacyPersonalAccessTokens::AppliedIn,
@@ -70,6 +111,61 @@ module ConditionalAccess
         business_ids.keep_if { |business_id| business_ids_exempting_actor.exclude?(business_id) }
 
         business_ids_with_pat_lifetime_restricted_by_limit(business_ids: business_ids, lifetime_limit: expirable_access.pat_lifetime_in_days, pat_type: expirable_access.pat_type)
+      end
+
+      def organization_ids_restricting_pat_lifetime_candidate(pat_lifetime, pat_type, targets: [])
+        T.bind(self, T.any(
+          ::ConditionalAccess::Policy::LegacyPersonalAccessTokens::AppliedIn,
+          ::ConditionalAccess::Policy::PersonalAccessTokens::AppliedIn
+        ))
+        return [] if targets.empty?
+
+        org_and_memberships = actor_organization_ids_and_business_memberships_candidate(actor, targets)
+        return [] if org_and_memberships.organization_ids.empty?
+
+        # Businesses the actor administrates and exempt administrators. We look this up early for the single_business_environment case.
+        business_ids_exempting_actor = business_ids_with_pat_lifetime_limit_exemptions(pat_type: pat_type)
+
+        if GitHub.single_business_environment? && GitHub.global_business.present?
+          # If the global business is exempted, we don't need to check its PAT lifetime limit.
+          return [] if business_ids_exempting_actor.include?(GitHub.global_business.id)
+
+          if business_ids_with_pat_lifetime_restricted_by_limit(
+              business_ids: [GitHub.global_business.id],
+              lifetime_limit: pat_lifetime,
+              pat_type: pat_type
+          ).any?
+            return org_and_memberships.organization_ids
+          end
+        end
+
+        # Get IDs of orgs restricting PAT access directly at the org level.
+        restricted_org_ids = organization_ids_with_pat_lifetime_restricted_by_limit(organization_ids: org_and_memberships.direct_organization_ids, lifetime_limit: pat_lifetime, pat_type: pat_type)
+        # They're not restricted directly by an org and they're not part of a business-owned org.
+        if restricted_org_ids.empty? && org_and_memberships.business_memberships.empty?
+          return []
+        end
+
+        business_memberships = org_and_memberships.business_memberships
+        return restricted_org_ids if business_memberships.empty?
+
+        # Get IDs of businesses that restrict access on orgs.
+        membership_business_ids = business_memberships.map(&:business_id).uniq
+        restricted_business_ids = business_ids_with_pat_lifetime_restricted_by_limit(business_ids: membership_business_ids, lifetime_limit: pat_lifetime, pat_type: pat_type)
+
+        if restricted_org_ids.empty? && restricted_business_ids.empty?
+          return []
+        end
+
+        # Only keep memberships where the org is restricted by the business.
+        restricted_business_memberships = business_memberships.filter { |membership| restricted_business_ids.include?(membership.business_id) }
+
+        # Only keep memberships where the actor is not exempted from the limit.
+        non_exempt_restricted_business_memberships = restricted_business_memberships.filter { |membership| business_ids_exempting_actor.exclude?(membership.business_id) }
+
+        # And only keep restricted_org_ids where orgs are restricted directly, without
+        # an owning protecting business entry.
+        (non_exempt_restricted_business_memberships.map(&:organization_id) | restricted_org_ids).compact
       end
 
       # method to filter organization ids restricting PAT lifetime combined with the limit
@@ -221,6 +317,38 @@ module ConditionalAccess
         end
 
         @actor_organization_ids_and_business_memberships = ActorOrganizationsAndBusinessMemberships.new(user_org_ids, user_direct_org_ids, business_memberships)
+      end
+
+      def actor_organization_ids_and_business_memberships_candidate(actor, targets)
+        return @actor_organization_ids_and_business_memberships_candidate if defined?(@actor_organization_ids_and_business_memberships_candidate)
+
+        target_org_ids = targets.select { |target| target.instance_of?(Organization) }
+                                  .map(&:id)
+                                  .uniq
+        user_direct_org_ids = actor.organization_ids & target_org_ids
+
+        user_indirect_org_ids = if GitHub.single_business_environment?
+          # In a single business environment, we want to avoid org_ids_via_business_membership
+          # because it can return too many orgs. This if-else is an optimized version of it.
+          Organization.where(id: target_org_ids).pluck(:id)
+        else
+          actor.org_ids_via_business_membership
+        end
+
+        actor_affiliated_organization_ids = user_direct_org_ids | user_indirect_org_ids
+        applicable_organization_ids = target_org_ids & actor_affiliated_organization_ids
+
+        if applicable_organization_ids.empty?
+          @actor_organization_ids_and_business_memberships_candidate = ActorOrganizationsAndBusinessMemberships.new([], [], [])
+
+          return @actor_organization_ids_and_business_memberships_candidate
+        end
+
+        business_memberships = applicable_organization_ids.in_groups_of(BATCH_SIZE, false).flat_map do |org_ids|
+          Business::OrganizationMembership.where(organization_id: org_ids).select(:business_id, :organization_id)
+        end
+
+        @actor_organization_ids_and_business_memberships_candidate = ActorOrganizationsAndBusinessMemberships.new(applicable_organization_ids, user_direct_org_ids, business_memberships)
       end
 
       def configuration_key_for_pat_lifetime(pat_type)

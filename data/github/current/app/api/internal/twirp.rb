@@ -78,6 +78,10 @@ class Api::Internal::Twirp < ::Api::Internal
 
   # Monolith Twirp tooling
   mount ::Api::Internal::Twirp::Examples::Octocat::V1::OctocatAPIHandler
+  mount ::Api::Internal::Twirp::Elm::Actions::V1::ExportActionsSettingsAPIHandler
+  mount ::Api::Internal::Twirp::Elm::Issues::V1::ExportIssueEventsAPIHandler
+  mount ::Api::Internal::Twirp::Elm::Actions::V1::ExportCommitStatusChecksAPIHandler
+  mount ::Api::Internal::Twirp::Elm::Data::V1::ExportAssetsAPIHandler
   mount ::Api::Internal::Twirp::Elm::Repositories::V1::ExportRepositorySettingsAPIHandler
   mount ::Api::Internal::Twirp::Elm::Repositories::V1::ExportRepositoryTopicsAPIHandler
   mount ::Api::Internal::Twirp::Elm::Organizations::V1::ExportSettingsAPIHandler
@@ -221,8 +225,6 @@ class Api::Internal::Twirp < ::Api::Internal
   mount ::Api::Internal::Twirp::IssueComments::WebhookPayloadHydration::IssueCommentApiHandler
   mount ::Api::Internal::Twirp::PullRequests::WebhookPayloadHydration::PullRequestReviewApiHandler
   mount ::Api::Internal::Twirp::Issues::WebhookPayloadHydration::IssuesEventApiHandler
-  # ELM migration handlers
-  mount ::Api::Internal::Twirp::Elm::Actions::V1::ExportCommitStatusChecksAPIHandler
   ##
   # ::Api::Internal access control checks
 
