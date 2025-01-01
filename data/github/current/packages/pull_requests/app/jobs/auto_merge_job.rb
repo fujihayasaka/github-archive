@@ -103,21 +103,6 @@ class AutoMergeJob < ApplicationJob
   def auto_merge_for_queue(pull_request:, merge_queue:, user:)
     auto_merge_request = pull_request.auto_merge_request
 
-    if !auto_merge_request.merge_method.in?(%w[merge_queue merge_queue_solo merge_queue_jump])
-      GitHub.dogstats.increment("merge_queue.auto_merge_request.unknown_merge_method.#{auto_merge_request.merge_method}")
-
-      err = InvalidMergeMethod.new("#{auto_merge_request.merge_method} merge method is not valid for merge queue")
-      Failbot.report(
-        err,
-        "gh.user.id": user.id,
-        "gh.pull_request.id": pull_request.id,
-        "gh.auto_merge_request.id": auto_merge_request.id,
-        "gh.auto_merge_request.solo": auto_merge_request.merge_queue_solo?,
-        "gh.auto_merge_request.jump_queue": auto_merge_request.merge_queue_jump?,
-      )
-      raise err
-    end
-
     if merge_queue.has_entry_for?(pull_request: pull_request)
       GitHub.dogstats.increment("merge_queue.auto_merge_request.already_enqueued")
       return

@@ -21,6 +21,8 @@ class MigrationFile < ApplicationRecord::Domain::Migrations
 
   validate :storage_ensure_asset_size
 
+  validate :uploader_access, on: :create
+
   add_uploadable_policy_attributes :migration_id, :name, :supports_multi_part_upload, :part_number, :part_sha, :multi_part_upload_id
 
   scope :older_than, lambda { |time| where("updated_at < ?", time) }
@@ -300,6 +302,12 @@ class MigrationFile < ApplicationRecord::Domain::Migrations
   end
 
   private
+
+  def uploader_access
+    return if migration.nil?
+    return if T.must(migration).creator == uploader
+    errors.add :uploader_id, "does not have access to migration #{migration_id}"
+  end
 
   def update_migration_archive_size
     migration&.update_column :archive_size, size

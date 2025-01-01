@@ -2428,6 +2428,14 @@ class Api::AccessControl < Egress::AccessControl
     oauth_allows_access?(user, repo) && resource.labelable_by?(actor: user)
   end
 
+  # A user that can close an issue or pull request
+  role :resource_closer do |context|
+    user, repo, resource = extract(context, :user, :repo, :resource)
+    next false unless user && repo && resource
+    next false unless resource.respond_to?(:closable_by?)
+    oauth_allows_access?(user, repo) && resource.closable_by?(user)
+  end
+
   # A user that can add assignees to an issue
   role :issue_assigner do |context|
     user, repo, issue = extract(context, :user, :repo, :resource)

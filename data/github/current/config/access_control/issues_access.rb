@@ -140,8 +140,16 @@ class Api::AccessControl < Egress::AccessControl
 
     access.allow(:issue_author) do |context|
       user, issue = extract(context, :user, :resource)
-      next true unless FeatureFlag.vexi.enabled?(:authors_can_only_close_closed_issues_closed_by_them, user, default: false)
 
+      !issue.closed? || issue.closed_by == user
+    end
+    access.allow(:resource_closer) do |context|
+      user, issue = extract(context, :user, :resource)
+      actor = user.try(:installation) || user
+      # actor.can_have_granular_permissions? returns false for Users and true for GitHub Apps
+      # Apps can't have FGP permissions, so we fail them here and allow only Users to close issues with FGP.
+      # Apps will be able to close through write permissions below.
+      next false if actor && actor.can_have_granular_permissions?
       !issue.closed? || issue.closed_by == user
     end
     access.allow(:issue_writer) { |context| issue_must_match_permission(context, :write) }
