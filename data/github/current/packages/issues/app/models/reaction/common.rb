@@ -60,6 +60,8 @@ module Reaction::Common
       if subject = reactable_subject_for(user: user, subject_id: subject_id)
         if existing_reaction = existing_reaction_for(user: user, content: content, subject: subject)
           # Reaction exists. Destroy it and return the object.
+          GitHub.instrument "reaction.deleted", reaction: existing_reaction
+
           existing_reaction.destroy
           subject.notify_socket_subscribers
           subject.notify_graphql_subscribers if subject.respond_to?(:notify_graphql_subscribers)
@@ -336,5 +338,6 @@ module Reaction::Common
 
   def instrument_creation_event
     GlobalInstrumenter.instrument "reaction.created", reaction: self
+    GitHub.instrument "reaction.created", reaction: self
   end
 end

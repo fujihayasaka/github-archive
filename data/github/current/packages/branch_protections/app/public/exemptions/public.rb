@@ -31,14 +31,15 @@ module Exemptions
       params(
         repository_id: Integer,
         actor_id: Integer,
+        request_type: String,
         response_status: String,
         include_responses: T.nilable(T::Boolean),
         include_cancelled_requests: T.nilable(T::Boolean)
       ).returns(T::Array[Exemptions::Serializer::ExemptionRequestHash])
     end
-    def self.requests_for_repository(repository_id, actor_id, response_status, include_responses: false, include_cancelled_requests: false)
+    def self.requests_for_repository(repository_id, actor_id, request_type, response_status, include_responses: false, include_cancelled_requests: false)
       requests = ExemptionRequest
-        .where(repository_id: repository_id, requester_id: actor_id)
+        .where(repository_id: repository_id, requester_id: actor_id, request_type: request_type)
       requests = requests.where.not(status: "rejected") if response_status != "rejected"
       if !include_cancelled_requests
         requests = requests.where.not(status: "cancelled")

@@ -30,6 +30,21 @@ export class JumpToElement extends HTMLElement {
   connectedCallback() {
     // add current page to recently visited list for jump-to
     logPageView(window.location.pathname)
+
+    /*
+      This is an event that is used by Blackbird search to open the search dialog and append a query
+      to the current search input in response to various actions in the app.
+
+      However, when Blackbird is disabled (as it is in GHES), we still want to preserve some of that intended behavior
+      by focusing the Jump To search input when the event is triggered.
+
+      Without this, the "/" hotkey will not work to activate the Jump To search input on certain pages (such as repository file trees).
+    */
+    window.addEventListener('blackbird_monolith_append_and_focus_input', this.handleFocusInputEvent)
+  }
+
+  disconnectedCallback() {
+    window.removeEventListener('blackbird_monolith_append_and_focus_input', this.handleFocusInputEvent)
   }
 
   get queryText() {
@@ -405,6 +420,10 @@ export class JumpToElement extends HTMLElement {
     this.field?.classList.remove('jump-to-dropdown-visible')
     this.field?.setAttribute('aria-expanded', 'false')
     trackJumpToEvent('menu-deactivation')
+  }
+
+  handleFocusInputEvent = () => {
+    this.field?.focus()
   }
 }
 

@@ -12,8 +12,6 @@ module SecretScanning
       return nil unless rule_suite_id
       return nil unless repo
       id = generate_bypass_url_hash(rule_suite_id, resource_id)
-      repo = repo.network&.root if repo.fork?
-      return nil unless repo
 
       UrlHelpers.secret_scanning_new_bypass_request_url(repo.owner, repo, id,
         host: GitHub.multi_tenant_enterprise? ? GitHub.host_name_with_tenant : GitHub.host_name,

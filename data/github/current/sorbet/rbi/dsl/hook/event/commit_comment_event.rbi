@@ -15,6 +15,7 @@ class Hook::Event::CommitCommentEvent
       delivered_hook_ids: T.untyped,
       event_guid: T.untyped,
       flags: T.untyped,
+      old_body: T.untyped,
       organization_id: T.untyped,
       primary_resource: T.untyped,
       primary_resource_data: T.untyped,
@@ -22,7 +23,7 @@ class Hook::Event::CommitCommentEvent
       triggered_at: T.untyped
     ).void
   end
-  def initialize(action:, commit_comment_id:, actor_id: nil, business_id: nil, delivered_hook_ids: nil, event_guid: nil, flags: nil, organization_id: nil, primary_resource: nil, primary_resource_data: nil, repository_id: nil, triggered_at: nil); end
+  def initialize(action:, commit_comment_id:, actor_id: nil, business_id: nil, delivered_hook_ids: nil, event_guid: nil, flags: nil, old_body: nil, organization_id: nil, primary_resource: nil, primary_resource_data: nil, repository_id: nil, triggered_at: nil); end
 
   sig { returns(T.untyped) }
   def action; end
@@ -67,6 +68,12 @@ class Hook::Event::CommitCommentEvent
   def flags=(value); end
 
   sig { returns(T.untyped) }
+  def old_body; end
+
+  sig { params(value: T.untyped).void }
+  def old_body=(value); end
+
+  sig { returns(T.untyped) }
   def organization_id; end
 
   sig { params(value: T.untyped).void }
@@ -106,6 +113,7 @@ class Hook::Event::CommitCommentEvent
         delivered_hook_ids: T.untyped,
         event_guid: T.untyped,
         flags: T.untyped,
+        old_body: T.untyped,
         organization_id: T.untyped,
         primary_resource: T.untyped,
         primary_resource_data: T.untyped,
@@ -113,6 +121,6 @@ class Hook::Event::CommitCommentEvent
         triggered_at: T.untyped
       ).returns(T::Boolean)
     end
-    def queue(action:, commit_comment_id:, actor_id: nil, business_id: nil, delivered_hook_ids: nil, event_guid: nil, flags: nil, organization_id: nil, primary_resource: nil, primary_resource_data: nil, repository_id: nil, triggered_at: nil); end
+    def queue(action:, commit_comment_id:, actor_id: nil, business_id: nil, delivered_hook_ids: nil, event_guid: nil, flags: nil, old_body: nil, organization_id: nil, primary_resource: nil, primary_resource_data: nil, repository_id: nil, triggered_at: nil); end
   end
 end

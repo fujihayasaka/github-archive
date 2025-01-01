@@ -109,7 +109,8 @@ module RuleEngine
         secret_bypass_placeholder_ksuids_to_urls = {}
         if use_delegated_bypass_flow
           scan_result.secrets.each do |secret|
-            secret_bypass_placeholder_ksuids_to_urls[secret.bypass_placeholder_ksuid] = create_secret_scanning_bypass_url(rule_suite.repository, rule_suite.id, T.must(secret.bypass_placeholder_ksuid))
+            url = create_secret_scanning_bypass_url(rule_suite.repository, rule_suite.id, T.must(secret.bypass_placeholder_ksuid))
+            secret_bypass_placeholder_ksuids_to_urls[secret.bypass_placeholder_ksuid] = url
           end
         else
           scan_result.secrets.each do |secret|

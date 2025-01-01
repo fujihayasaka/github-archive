@@ -302,7 +302,7 @@ module SecretScanning
 
       sig { params(repo: Repository, actor: T.any(User, PublicKey),).returns(T::Array[DelegatedBypassRequestType]) }
       def self.get_delegated_bypass_requests(repo, actor)
-        exemptions = Exemptions::Public.requests_for_repository(repo.id, actor.id, "approved", include_responses: true)
+        exemptions = Exemptions::Public.requests_for_repository(repo.id, actor.id, SecretScanning::ExemptionConstants::EXEMPTION_REQUEST_TYPE, "approved", include_responses: true)
         delegated_bypass_requests = exemptions.map do |exemption|
           if exemption[:metadata].nil?
             Failbot.report(SecretScanning::Errors::Error.new("ExemptionRequest is missing metadata"), app: FAILBOT_APP_NAME, repository_id: repo.id, exemption_request_id: exemption[:id])

@@ -70,7 +70,7 @@ class ActionsPolicy::Allowlist < ApplicationRecord::Collab
     update(github_owned_allowed: false, verified_allowed: false)
   end
 
-  def enable_specified_actions(github_owned: nil, verified: nil, patterns: nil, actor:)
+  def enable_specified_actions(github_owned: nil, verified: nil, patterns: nil, sha_pinning: nil, actor:)
     self.github_owned_allowed = github_owned unless github_owned.nil?
     self.verified_allowed = verified unless verified.nil?
     save

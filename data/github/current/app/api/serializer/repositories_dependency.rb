@@ -897,11 +897,13 @@ module Api::Serializer::RepositoriesDependency
       draft: release.draft?,
       prerelease: release.prerelease?,
       created_at: time(release.created_at),
+      updated_at: time(release.updated_at),
       published_at: time(release.published_at),
       assets: assets.map { |a| release_asset_hash(a, asset_options) },
       tarball_url: nil,
       zipball_url: nil,
     }
+
 
     h.update mime_body_hash(release, options)
 

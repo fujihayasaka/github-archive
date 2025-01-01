@@ -417,6 +417,11 @@ class IssueEvent < ApplicationRecord::Domain::IssuesPullRequests
   after_commit :update_summary_state, on: :create, unless: -> { T.bind(self, IssueEvent); skip_notifications? } # rubocop:todo GitHub/AvoidActiveRecordCallbacks
   after_commit :subscribe_and_notify, on: :create, unless: -> { T.bind(self, IssueEvent); skip_notifications? } # rubocop:todo GitHub/AvoidActiveRecordCallbacks
 
+  # Webhooks (Enterprise Live Migrations feature)
+  after_commit :instrument_creation, on: :create, unless: -> { T.bind(self, IssueEvent); skip_elm_webhooks? } # rubocop:todo GitHub/AvoidActiveRecordCallbacks
+  before_destroy :generate_destruction_hook_payload, unless: -> { T.bind(self, IssueEvent); skip_elm_webhooks? } # rubocop:todo GitHub/AvoidActiveRecordCallbacks
+  after_commit :instrument_destruction, on: :destroy, unless: -> { T.bind(self, IssueEvent); skip_elm_webhooks? } # rubocop:todo GitHub/AvoidActiveRecordCallbacks
+
   # Temporarily track associated record for newsfeed events
   attr_accessor :assignee
 
@@ -1681,10 +1686,57 @@ class IssueEvent < ApplicationRecord::Domain::IssuesPullRequests
     GlobalInstrumenter.instrument "issue.events.#{event}", payload
   end
 
+  def instrument_creation
+    return unless GitHub.elm_internal_webhooks_enabled?
+
+    instrument :created, {
+                 prefix: "issue_event",
+                 event_name: event,
+                 # target is used here because the default payload
+                 # (used in the audit log) overwrites `event`
+                 target: self,
+                 repository_id: repository_id,
+                 actor_id: actor_id,
+                 issue_id: issue_id,
+                 created_at: Time.now.utc,
+               }
+  end
+
+  def generate_destruction_hook_payload
+    return unless GitHub.elm_internal_webhooks_enabled?
+
+    payload = {
+      action: "deleted",
+      event_name: event,
+      # target_id is used here because the default payload
+      # (used in the audit log) overwrites `event`
+      target_id: self.id,
+      repository_id: repository_id,
+      actor_id: actor_id,
+      issue_id: issue_id,
+      updated_at: Time.now.utc
+    }
+    event = Hook::Event::IssueEventEvent.new(payload)
+    @delivery_system = Hook::DeliverySystem.new(event)
+    @delivery_system.generate_hookshot_payloads
+  end
+
+  def instrument_destruction
+    unless defined?(@delivery_system)
+      raise "'generate_destruction_hook_payload' must be called before instrumenting destruction"
+    end
+
+    @delivery_system&.deliver_later
+  end
+
   private
 
   def skip_notifications?
     issue_transfer? || importing?
+  end
+
+  def skip_elm_webhooks?
+    !GitHub.elm_internal_webhooks_enabled?
   end
 
   # Private: some events have explicit recipients they should be sent to for notifications.

@@ -245,6 +245,7 @@ class DiscussionReaction < ApplicationRecord::Domain::Discussions
   sig { void }
   def instrument_creation_event
     GlobalInstrumenter.instrument "discussion_reaction.create", reaction: self
+    GitHub.instrument "discussion_reaction.created", reaction: self
 
     message = {
       repository_id: discussion&.repository&.id,
@@ -264,6 +265,7 @@ class DiscussionReaction < ApplicationRecord::Domain::Discussions
   sig { void }
   def instrument_deletion_event
     GlobalInstrumenter.instrument "discussion_reaction.delete", reaction: self
+    GitHub.instrument "discussion_reaction.deleted", reaction: self
 
     message = {
       repository_id: repository&.id,

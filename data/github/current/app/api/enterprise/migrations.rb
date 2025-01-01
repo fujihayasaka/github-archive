@@ -2,6 +2,30 @@
 # frozen_string_literal: true
 
 class Api::Enterprise::Migrations < Api::Enterprise::App
+  # Pre-compute ELM resource mapping at class load time for Sorbet compatibility
+  # Auto-discovers all ELM export resources from MonolithTwirp::Elm::{Module}::{Version} namespaces
+  ELM_RESOURCE_MAPPING = MonolithTwirp::Elm.constants
+    .flat_map do |module_name|
+      # Get each module constant (e.g., Actions, Organizations, etc.)
+      module_const = MonolithTwirp::Elm.const_get(module_name)
+      # Find all version constants (V1, V2, V3, etc.) within each module
+      module_const.constants.filter_map do |version_name|
+        version_module = module_const.const_get(version_name)
+        next unless version_name.to_s.start_with?("V") && version_module.is_a?(Module)
+
+        # Within each version namespace, find all Export* classes
+        version_module.constants
+          .select { |class_name| class_name.to_s.start_with?("Export") }
+          .filter_map do |class_name|
+            class_const = version_module.const_get(class_name)
+            # Map resource name to class: "ExportCommitStatusCheck" => MonolithTwirp::Elm::Actions::V1::ExportCommitStatusCheck
+            # Note: If multiple versions have the same resource name, later versions will overwrite earlier ones
+            [class_name.to_s, class_const] if class_const.is_a?(Class)
+          end
+      end.flatten(1) # Flatten the nested arrays from versions
+    end
+    .to_h # Convert array of [name, class] pairs to hash
+    .freeze
 
   post "/enterprise/migration/events", operation_id: "enterprise-admin/migration-events" do
     deliver_error! 404 unless GitHub.multi_tenant_enterprise?
@@ -81,7 +105,10 @@ class Api::Enterprise::Migrations < Api::Enterprise::App
     return unless resource_type
 
     inner_data = resource_data["Resource"][resource_type]
-    inner_class = Mvnd::Migrations::Api::V1.const_get(resource_type)
+
+    # Map resource types to their correct namespaces
+    inner_class = get_resource_class(resource_type)
+
     inner_object = inner_class.new(inner_data)
     resource = Mvnd::Migrations::Api::V1::Resource.new(
       { resource_type.underscore => inner_object, :migration_context => migration_ctx })
@@ -90,6 +117,28 @@ class Api::Enterprise::Migrations < Api::Enterprise::App
       GitHub.mvnd_client.create_resource(resource)
     rescue Mvnd::TwirpError
       deliver_error!(500, message: "Error processing resource")
+    end
+  end
+
+  def get_resource_class(resource_type)
+    return ELM_RESOURCE_MAPPING[resource_type] if ELM_RESOURCE_MAPPING.key?(resource_type)
+
+    # Default to existing entities namespace for legacy resources
+    Mvnd::Migrations::Api::V1::Entities.const_get(resource_type)
+  end
+
+  def generate_signed_upload_url!(migration_ctx, resource_id, content_type, asset_kind)
+    request = Mvnd::Migrations::Api::V1::GenerateSignedUploadURLRequest.new(
+      resource_id: resource_id,
+      content_type: content_type,
+      asset_kind: asset_kind,
+      migration_context: migration_ctx
+    )
+
+    begin
+      GitHub.mvnd_client.generate_signed_upload_url(request)
+    rescue Mvnd::TwirpError
+      deliver_error!(500, message: "Error creating attachment upload url")
     end
   end
 end

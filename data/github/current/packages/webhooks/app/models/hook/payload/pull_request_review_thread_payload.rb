@@ -8,6 +8,8 @@ class Hook::Payload::PullRequestReviewThreadPayload < Hook::Payload
       action: hook_event.action,
       pull_request: api_serialize(:pull_request_hash, hook_event.pull_request),
       thread: api_serialize(:pull_request_review_thread_hash, hook_event.thread.async_to_deprecated_thread.sync),
-    }
+    }.tap do |payload_hash|
+      payload_hash[:updated_at] = hook_event.thread.updated_at.iso8601 unless hook_event.thread.updated_at.nil?
+    end
   end
 end

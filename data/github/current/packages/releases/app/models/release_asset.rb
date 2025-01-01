@@ -38,11 +38,12 @@ class ReleaseAsset < ApplicationRecord::Domain::AssetObjects # rubocop:todo GitH
   before_save :destroy_duplicate, if: :replacing_asset # rubocop:todo GitHub/AvoidActiveRecordCallbacks
   after_save_commit :touch_release_after_save, if: :uploaded_or_updated? # rubocop:todo GitHub/AvoidActiveRecordCallbacks
   # rubocop:todo GitHub/AvoidActiveRecordCallbacks
-  after_save :instrument_uploaded_event, if: proc { T.bind(self, ReleaseAsset); state == "uploaded" && state_previously_changed? }
+  after_save_commit :instrument_uploaded_event, if: proc { T.bind(self, ReleaseAsset); state == "uploaded" && state_previously_changed? }
   # rubocop:enable GitHub/AvoidActiveRecordCallbacks
   after_commit :storage_delete_object, on: :destroy # rubocop:todo GitHub/AvoidActiveRecordCallbacks
   # rubocop:todo GitHub/AvoidActiveRecordCallbacks
   after_destroy_commit :touch_release_after_destroy, if: proc { T.bind(self, ReleaseAsset); state == "uploaded" }
+  after_destroy_commit :instrument_deleted_event, if: proc { T.bind(self, ReleaseAsset); state == "uploaded" }
   # rubocop:enable GitHub/AvoidActiveRecordCallbacks
   before_validation :set_guid, on: :create
 
@@ -508,5 +509,11 @@ class ReleaseAsset < ApplicationRecord::Domain::AssetObjects # rubocop:todo GitH
       repository: repo,
       owner: repo&.owner,
     })
+    release&.track_asset_change(self, :created)
   end
+
+  def instrument_deleted_event
+    release&.track_asset_change(self, :destroyed)
+  end
+
 end

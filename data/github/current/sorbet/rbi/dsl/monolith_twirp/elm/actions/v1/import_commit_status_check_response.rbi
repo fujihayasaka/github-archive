@@ -8,25 +8,35 @@
 class MonolithTwirp::Elm::Actions::V1::ImportCommitStatusCheckResponse < Google::Protobuf::AbstractMessage
   sig do
     params(
+      created_commit_status_checks: T.nilable(T.any(Google::Protobuf::RepeatedField[MonolithTwirp::Elm::Actions::V1::CreatedCommitStatusCheck], T::Array[MonolithTwirp::Elm::Actions::V1::CreatedCommitStatusCheck])),
       error_message: T.nilable(String),
-      import_commit_status_checks: T.nilable(T.any(Google::Protobuf::RepeatedField[MonolithTwirp::Elm::Actions::V1::ImportCommitStatusCheck], T::Array[MonolithTwirp::Elm::Actions::V1::ImportCommitStatusCheck])),
-      success: T.nilable(T::Boolean),
-      total_count: T.nilable(Integer)
+      failed_commit_status_checks: T.nilable(T.any(Google::Protobuf::RepeatedField[MonolithTwirp::Elm::Actions::V1::FailedCommitStatusCheck], T::Array[MonolithTwirp::Elm::Actions::V1::FailedCommitStatusCheck])),
+      success: T.nilable(T::Boolean)
     ).void
   end
-  def initialize(error_message: nil, import_commit_status_checks: T.unsafe(nil), success: nil, total_count: nil); end
+  def initialize(created_commit_status_checks: T.unsafe(nil), error_message: nil, failed_commit_status_checks: T.unsafe(nil), success: nil); end
+
+  sig { void }
+  def clear_created_commit_status_checks; end
 
   sig { void }
   def clear_error_message; end
 
   sig { void }
-  def clear_import_commit_status_checks; end
+  def clear_failed_commit_status_checks; end
 
   sig { void }
   def clear_success; end
 
-  sig { void }
-  def clear_total_count; end
+  sig { returns(Google::Protobuf::RepeatedField[MonolithTwirp::Elm::Actions::V1::CreatedCommitStatusCheck]) }
+  def created_commit_status_checks; end
+
+  sig do
+    params(
+      value: Google::Protobuf::RepeatedField[MonolithTwirp::Elm::Actions::V1::CreatedCommitStatusCheck]
+    ).void
+  end
+  def created_commit_status_checks=(value); end
 
   sig { returns(String) }
   def error_message; end
@@ -34,21 +44,15 @@ class MonolithTwirp::Elm::Actions::V1::ImportCommitStatusCheckResponse < Google:
   sig { params(value: String).void }
   def error_message=(value); end
 
-  sig { returns(Google::Protobuf::RepeatedField[MonolithTwirp::Elm::Actions::V1::ImportCommitStatusCheck]) }
-  def import_commit_status_checks; end
+  sig { returns(Google::Protobuf::RepeatedField[MonolithTwirp::Elm::Actions::V1::FailedCommitStatusCheck]) }
+  def failed_commit_status_checks; end
 
-  sig { params(value: Google::Protobuf::RepeatedField[MonolithTwirp::Elm::Actions::V1::ImportCommitStatusCheck]).void }
-  def import_commit_status_checks=(value); end
+  sig { params(value: Google::Protobuf::RepeatedField[MonolithTwirp::Elm::Actions::V1::FailedCommitStatusCheck]).void }
+  def failed_commit_status_checks=(value); end
 
   sig { returns(T::Boolean) }
   def success; end
 
   sig { params(value: T::Boolean).void }
   def success=(value); end
-
-  sig { returns(Integer) }
-  def total_count; end
-
-  sig { params(value: Integer).void }
-  def total_count=(value); end
 end

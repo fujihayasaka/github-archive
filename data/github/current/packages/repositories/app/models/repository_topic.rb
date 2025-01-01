@@ -57,6 +57,8 @@ class RepositoryTopic < ApplicationRecord::Domain::Repositories
   after_commit :synchronize_search_index # rubocop:todo GitHub/AvoidActiveRecordCallbacks
   after_commit :instrument_add_topic, on: :create, if: :applied? # rubocop:todo GitHub/AvoidActiveRecordCallbacks
   after_commit :instrument_remove_topic, on: :destroy # rubocop:todo GitHub/AvoidActiveRecordCallbacks
+  after_commit :trigger_delete_webhook, on: :destroy, unless: -> { !GitHub.elm_internal_webhooks_enabled? } # rubocop:todo GitHub/AvoidActiveRecordCallbacks
+  before_destroy :generate_webhook_payload_for_deletion, unless: -> { !GitHub.elm_internal_webhooks_enabled? } # rubocop:todo GitHub/AvoidActiveRecordCallbacks
 
   # Includes only records for topics users manually applied or accepted from
   # suggestions.
@@ -310,7 +312,7 @@ class RepositoryTopic < ApplicationRecord::Domain::Repositories
   end
 
   def instrument_add_topic
-    instrument :add_topic
+    instrument :add_topic, actor_id: user&.id
     GlobalInstrumenter.instrument("topic", {
       repository: self.repository,
       repository_owner: self.repository&.owner,
@@ -346,5 +348,27 @@ class RepositoryTopic < ApplicationRecord::Domain::Repositories
     unless existing_topic_count < LIMIT_PER_REPOSITORY
       errors.add(:repository, "cannot have more than #{LIMIT_PER_REPOSITORY} topics.")
     end
+  end
+
+  def trigger_delete_webhook
+    if GitHub.elm_internal_webhooks_enabled?
+      unless defined?(@delivery_system)
+        raise "generate_webhook_payload_for_deletion must be called before triggering delete webhook"
+      end
+
+      @delivery_system&.deliver_later
+    end
+  end
+
+  # Generate the webhook payload before the repository topic is deleted, so we don't lose the data
+  def generate_webhook_payload_for_deletion
+    event_for_delete = Hook::Event::RepositoryTopicEvent.new(
+      action: :deleted,
+      repository_topic_id: id,
+      actor_id: user&.id,
+      triggered_at: Time.current
+    )
+    @delivery_system = Hook::DeliverySystem.new(event_for_delete)
+    @delivery_system.generate_hookshot_payloads
   end
 end

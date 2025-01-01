@@ -11,17 +11,6 @@ module GitHub::Goomba
       SELECTOR
     end
 
-    def self.feature_flags
-      [:azure_boards_links_in_pr_development_section]
-    end
-
-    def self.enabled?(context)
-      repo = context[:entity].try(:repository)
-      return false unless repo.respond_to?(:owner) && repo.owner.respond_to?(:feature_enabled?) # identification if the entity is a repository to avoid package dependency violation
-
-      repo.owner.feature_enabled?(:azure_boards_links_in_pr_development_section)
-    end
-
     def call(node)
       text_content = node.text_content
       href_content = node["href"]

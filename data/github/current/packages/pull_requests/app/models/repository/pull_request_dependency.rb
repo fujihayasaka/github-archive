@@ -270,6 +270,8 @@ module Repository::PullRequestDependency
       squash_allowed = T.let(squash_allowed, T.nilable(T::Boolean))
       rebase_allowed = T.let(rebase_allowed, T.nilable(T::Boolean))
       auto_merge_allowed = T.let(auto_merge_allowed, T.nilable(T::Boolean))
+      delete_branch_allowed = T.let(delete_branch_allowed, T.nilable(T::Boolean))
+      update_branch_allowed = T.let(update_branch_allowed, T.nilable(T::Boolean))
 
       transaction do
         merge_commit_currently_allowed = merge_commit_allowed?
@@ -283,6 +285,10 @@ module Repository::PullRequestDependency
 
         auto_merge_currently_allowed = auto_merge_allowed?
         auto_merge_allowed = auto_merge_currently_allowed if auto_merge_allowed.nil?
+
+        delete_branch_currently_allowed = delete_branch_on_merge?
+
+        update_branch_currently_allowed = enable_update_branch?
 
         validate_merge_settings_update!(
           merge_allowed: merge_allowed,
@@ -307,6 +313,16 @@ module Repository::PullRequestDependency
               merge_type: "merge_commit",
               enabled: !!merge_allowed,
             }
+
+            if GitHub.elm_internal_webhooks_enabled?
+              GitHub.instrument("repo.pull_request_settings_update", {
+                actor: user,
+                repo: self,
+                changes: {
+                  allow_merge_commit: !!merge_allowed
+                }
+              })
+            end
           end
 
           if squash_allowed != squash_commit_currently_allowed
@@ -321,6 +337,16 @@ module Repository::PullRequestDependency
               merge_type: "squash",
               enabled: !!squash_allowed,
             }
+
+            if GitHub.elm_internal_webhooks_enabled?
+              GitHub.instrument("repo.pull_request_settings_update", {
+                actor: user,
+                repo: self,
+                changes: {
+                  allow_squash_merge: !!squash_allowed
+                }
+              })
+            end
           end
 
           if rebase_allowed != rebase_commit_currently_allowed
@@ -335,6 +361,16 @@ module Repository::PullRequestDependency
               merge_type: "rebase",
               enabled: !!rebase_allowed,
             }
+
+            if GitHub.elm_internal_webhooks_enabled?
+              GitHub.instrument("repo.pull_request_settings_update", {
+                actor: user,
+                repo: self,
+                changes: {
+                  allow_rebase_merge: !!rebase_allowed
+                }
+              })
+            end
           end
 
           if can_auto_merge_be_allowed? && auto_merge_allowed != auto_merge_currently_allowed
@@ -343,22 +379,72 @@ module Repository::PullRequestDependency
             else
               disallow_auto_merge(actor: user)
             end
+
+            if GitHub.elm_internal_webhooks_enabled?
+              GitHub.instrument("repo.pull_request_settings_update", {
+                actor: user,
+                repo: self,
+                changes: {
+                  allow_auto_merge: !!auto_merge_allowed
+                }
+              })
+            end
           end
 
           # don't alter the state if the actor can't perform the action
           if can_modify_delete_branch_setting?(user)
             if delete_branch_allowed == false
               disallow_auto_deleting_branches(actor: user)
+
+              if GitHub.elm_internal_webhooks_enabled? && delete_branch_currently_allowed
+                GitHub.instrument("repo.pull_request_settings_update", {
+                  actor: user,
+                  repo: self,
+                  changes: {
+                    delete_branch_on_merge: false
+                  }
+                })
+              end
             elsif delete_branch_allowed == true
               allow_auto_deleting_branches(actor: user)
+
+              if GitHub.elm_internal_webhooks_enabled? && !delete_branch_currently_allowed
+                GitHub.instrument("repo.pull_request_settings_update", {
+                  actor: user,
+                  repo: self,
+                  changes: {
+                    delete_branch_on_merge: true
+                  }
+                })
+              end
             end
           end
 
           # adjust setting of `always allowing to update branch`
           if update_branch_allowed == true
             allow_updating_branches(actor: user)
+
+            if GitHub.elm_internal_webhooks_enabled? && !update_branch_currently_allowed
+              GitHub.instrument("repo.pull_request_settings_update", {
+                actor: user,
+                repo: self,
+                changes: {
+                  allow_update_branch: true
+                }
+              })
+            end
           elsif update_branch_allowed == false
             disallow_updating_branches(actor: user)
+
+            if GitHub.elm_internal_webhooks_enabled? && update_branch_currently_allowed
+              GitHub.instrument("repo.pull_request_settings_update", {
+                actor: user,
+                repo: self,
+                changes: {
+                  allow_update_branch: false
+                }
+              })
+            end
           end
 
           # adjust setting of `squash pr title`

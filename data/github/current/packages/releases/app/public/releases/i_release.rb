@@ -39,6 +39,9 @@ module Releases
     def created_at; end
 
     sig { abstract.returns(Time) }
+    def updated_at; end
+
+    sig { abstract.returns(Time) }
     def published_at; end
 
     sig { abstract.returns(T::Boolean) }

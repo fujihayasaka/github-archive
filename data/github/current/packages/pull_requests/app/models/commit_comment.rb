@@ -72,6 +72,8 @@ class CommitComment < ApplicationRecord::Domain::IssuesPullRequests
   after_commit :subscribe_and_notify,            on: :create, unless: :importing? # rubocop:todo GitHub/AvoidActiveRecordCallbacks
   after_commit :update_subscriptions_and_notify, on: :update # rubocop:todo GitHub/AvoidActiveRecordCallbacks
 
+  before_destroy :generate_webhook_payload_for_deletion # rubocop:todo GitHub/AvoidActiveRecordCallbacks
+
   scope :for_display, -> (viewer, commit, repository) {
     where(commit_id: commit.oid, repository_id: repository.id)
       .filter_spam_for(viewer)
@@ -685,7 +687,7 @@ class CommitComment < ApplicationRecord::Domain::IssuesPullRequests
 
   def instrument_update
     previous_body = previous_changes[:body].try(:first)
-    instrument :update, changes: { old_body: previous_body, body: body }
+    instrument :update, changes: { old_body: previous_body, body: body }, actor_id: modifying_user&.id
     GlobalInstrumenter.instrument(
       "commit_comment.update",
       {
@@ -698,7 +700,36 @@ class CommitComment < ApplicationRecord::Domain::IssuesPullRequests
   end
 
   def instrument_destruction
+    if GitHub.elm_internal_webhooks_enabled?
+      unless defined?(@delivery_system_for_delete)
+        raise "`generate_webhook_payload_for_deletion` must be called before `instrument_destruction`"
+      end
+
+      # Send webhook for deletion event
+      @delivery_system_for_delete&.deliver_later
+    end
+
     instrument :destroy
+  end
+
+  # we need to generate the payload before the commit comment is deleted, so we don't lose the data
+  sig { void }
+  def generate_webhook_payload_for_deletion
+    return unless GitHub.elm_internal_webhooks_enabled?
+
+    if modifying_user&.spammy?
+      @delivery_system_for_delete = nil
+      return
+    end
+
+    event_for_delete = Hook::Event::CommitCommentEvent.new(
+      action: :deleted,
+      commit_comment_id: id,
+      actor_id: modifying_user.id,
+      triggered_at: Time.now
+    )
+    @delivery_system_for_delete = Hook::DeliverySystem.new(event_for_delete)
+    @delivery_system_for_delete.generate_hookshot_payloads
   end
 
   # Find all issue mentions in the comment body and create references for

@@ -62,7 +62,8 @@ class Page < ApplicationRecord::Domain::PagesFromRepositories
   before_create :set_visibility
   before_create :initialize_source_fields, unless: :workflow_build_enabled?
   before_update :legacy_backport_source_fields, unless: :workflow_build_enabled?
-  after_create :track_page_creation
+  after_create :track_page_creation # rubocop:todo GitHub/AfterCommitCallbackInstrumentation
+  before_destroy :generate_webhook_payload_for_deletion # rubocop:todo GitHub/AvoidActiveRecordCallbacks
   after_destroy :destroy_dependent_pages_replicas
   after_destroy :instrument_destroy
   after_update :instrument_https_redirect_toggled, if: :saved_change_to_https_redirect?
@@ -87,6 +88,8 @@ class Page < ApplicationRecord::Domain::PagesFromRepositories
   after_update :add_proxima_record_on_update_subdomain, if: :should_emit_page_update_record_on_update_subdomain?
   after_update :add_proxima_record_on_delete, if: :should_emit_page_deletion_record_on_update?
   after_destroy :add_proxima_record_on_delete, if: -> { GitHub.multi_tenant_enterprise? }
+
+  after_commit :instrument_update
 
   # We rely on Owner a lot, which goes through repository, so lets delegate
   delegate :owner, to: :repository
@@ -1486,11 +1489,43 @@ class Page < ApplicationRecord::Domain::PagesFromRepositories
     }
     GitHub.dogstats.increment "pages.sites"
     instrument_source if saved_change_to_source_fields?
+
+    GitHub.instrument "page", { action: "created", page_id: self.id }
+  end
+
+  # we need to generate the payload before the page is deleted, so we don't lose the data
+  sig { void }
+  def generate_webhook_payload_for_deletion
+    return unless GitHub.elm_internal_webhooks_enabled?
+
+    event_for_delete = Hook::Event::PageEvent.new(
+      action: "deleted",
+      page_id: id,
+      repository_id: repository.id,
+      triggered_at: Time.now.utc
+    )
+    @delivery_system_for_delete = Hook::DeliverySystem.new(event_for_delete)
+    @delivery_system_for_delete.generate_hookshot_payloads
   end
 
   def instrument_destroy
     repository.instrument :pages_destroy, cname: cname, source: "#{source_ref_name} #{source_subdir}", soft_deleted_at: deleted_at&.utc
     GitHub.dogstats.decrement "pages.sites"
+
+    if GitHub.elm_internal_webhooks_enabled?
+      unless defined?(@delivery_system_for_delete)
+        raise "`generate_webhook_payload_for_deletion` must be called before `instrument_destroy`"
+      end
+
+      # Send webhook for deletion event
+      @delivery_system_for_delete&.deliver_later
+    end
+  end
+
+  def instrument_update
+    return unless GitHub.elm_internal_webhooks_enabled?
+
+    GitHub.instrument "page", { action: "updated", page: self, changes: previous_changes }
   end
 
   def destroy_dependent_pages_replicas

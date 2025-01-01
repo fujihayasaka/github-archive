@@ -26,6 +26,8 @@ class CloseIssueReference < ApplicationRecord::Collab
   after_commit :notify_socket_subscribers, on: [:create, :destroy] # rubocop:todo GitHub/AvoidActiveRecordCallbacks
   after_commit :synchronize_issue_and_pr_search_index, on: [:create, :destroy] # rubocop:todo GitHub/AvoidActiveRecordCallbacks
 
+  before_destroy :generate_webhook_payload_for_deletion # rubocop:todo GitHub/AvoidActiveRecordCallbacks
+
   validates :issue, :pull_request, :pull_request_author, :issue_repository, presence: true
   validates :issue_id, uniqueness: { scope: :pull_request_id }
   validate :pull_request_must_reference_issue
@@ -183,7 +185,24 @@ class CloseIssueReference < ApplicationRecord::Collab
     actor = User.find_by(id: actor_id)
     return unless actor
 
-    instrument("create") if webhook_event_payload_valid?
+    # If ELM internal webhooks are enabled, always emit the :create event once with extra fields.
+    # Otherwise, keep the original behavior of only emitting when webhook_event_payload_valid? is true.
+    # Ensures we avoid duplicate audit log entries while still leveraging the existing :create event.
+    if GitHub.elm_internal_webhooks_enabled?
+      payload = {
+        close_issue_reference_id: id,
+        pull_request_id: pull_request_id,
+        pull_request_author_id: pull_request_author_id,
+        source: source,
+        referenced_at: created_at
+      }
+
+      payload[:organization_id] = nil unless webhook_event_payload_valid?
+
+      instrument :create, payload
+    else
+      instrument("create") if webhook_event_payload_valid?
+    end
 
     GlobalInstrumenter.instrument("issue.pr_connected", {
       issue_repository: issue&.repository,
@@ -201,6 +220,15 @@ class CloseIssueReference < ApplicationRecord::Collab
     actor = User.find_by(id: actor_id)
     return unless actor
 
+    if GitHub.elm_internal_webhooks_enabled?
+      unless defined?(@delivery_system_for_delete)
+        raise "`generate_webhook_payload_for_deletion` must be called before `instrument_destroy`"
+      end
+
+      # Send webhook for deletion event
+      @delivery_system_for_delete&.deliver_later
+    end
+
     instrument("destroy") if webhook_event_payload_valid?
 
     GlobalInstrumenter.instrument("issue.pr_disconnected", {
@@ -211,6 +239,29 @@ class CloseIssueReference < ApplicationRecord::Collab
       pull_request_author: pull_request_author,
       source: source,
     })
+  end
+
+  # We need to generate the payload before the close issue reference is deleted, so we don't lose the data.
+  sig { void }
+  def generate_webhook_payload_for_deletion
+    return unless GitHub.elm_internal_webhooks_enabled?
+
+    payload = {
+      action: :deleted,
+      actor_id: actor_id,
+      close_issue_reference_id: id,
+      issue_id: issue_id,
+      pull_request_id: pull_request_id,
+      pull_request_author_id: pull_request_author_id,
+      repository_id: issue_repository_id,
+      source: source,
+      triggered_at: Time.now.utc
+    }
+
+    event_for_delete = Hook::Event::CloseIssueReferenceEvent.new(payload)
+
+    @delivery_system_for_delete = Hook::DeliverySystem.new(event_for_delete)
+    @delivery_system_for_delete.generate_hookshot_payloads
   end
 
   def create_connected_events

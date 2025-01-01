@@ -11,16 +11,17 @@ class MonolithTwirp::Elm::Actions::V1::ImportCommitStatusCheck < Google::Protobu
       avatar_url: T.nilable(String),
       commit_sha: T.nilable(String),
       context: T.nilable(String),
-      created_at: T.nilable(Google::Protobuf::Timestamp),
       creator_id: T.nilable(Integer),
+      creator_resource_id: T.nilable(String),
       description: T.nilable(String),
-      id: T.nilable(Integer),
+      repository_resource_id: T.nilable(String),
+      resource_id: T.nilable(String),
+      source_resource_id: T.nilable(String),
       state: T.nilable(T.any(Symbol, Integer)),
-      target_url: T.nilable(String),
-      updated_at: T.nilable(Google::Protobuf::Timestamp)
+      target_url: T.nilable(String)
     ).void
   end
-  def initialize(avatar_url: nil, commit_sha: nil, context: nil, created_at: nil, creator_id: nil, description: nil, id: nil, state: nil, target_url: nil, updated_at: nil); end
+  def initialize(avatar_url: nil, commit_sha: nil, context: nil, creator_id: nil, creator_resource_id: nil, description: nil, repository_resource_id: nil, resource_id: nil, source_resource_id: nil, state: nil, target_url: nil); end
 
   sig { returns(String) }
   def avatar_url; end
@@ -38,25 +39,28 @@ class MonolithTwirp::Elm::Actions::V1::ImportCommitStatusCheck < Google::Protobu
   def clear_context; end
 
   sig { void }
-  def clear_created_at; end
+  def clear_creator_id; end
 
   sig { void }
-  def clear_creator_id; end
+  def clear_creator_resource_id; end
 
   sig { void }
   def clear_description; end
 
   sig { void }
-  def clear_id; end
+  def clear_repository_resource_id; end
+
+  sig { void }
+  def clear_resource_id; end
+
+  sig { void }
+  def clear_source_resource_id; end
 
   sig { void }
   def clear_state; end
 
   sig { void }
   def clear_target_url; end
-
-  sig { void }
-  def clear_updated_at; end
 
   sig { returns(String) }
   def commit_sha; end
@@ -70,12 +74,6 @@ class MonolithTwirp::Elm::Actions::V1::ImportCommitStatusCheck < Google::Protobu
   sig { params(value: String).void }
   def context=(value); end
 
-  sig { returns(T.nilable(Google::Protobuf::Timestamp)) }
-  def created_at; end
-
-  sig { params(value: T.nilable(Google::Protobuf::Timestamp)).void }
-  def created_at=(value); end
-
   sig { returns(Integer) }
   def creator_id; end
 
@@ -83,22 +81,34 @@ class MonolithTwirp::Elm::Actions::V1::ImportCommitStatusCheck < Google::Protobu
   def creator_id=(value); end
 
   sig { returns(String) }
+  def creator_resource_id; end
+
+  sig { params(value: String).void }
+  def creator_resource_id=(value); end
+
+  sig { returns(String) }
   def description; end
 
   sig { params(value: String).void }
   def description=(value); end
 
-  sig { returns(Object) }
-  def has_created_at?; end
+  sig { returns(String) }
+  def repository_resource_id; end
 
-  sig { returns(Object) }
-  def has_updated_at?; end
+  sig { params(value: String).void }
+  def repository_resource_id=(value); end
 
-  sig { returns(Integer) }
-  def id; end
+  sig { returns(String) }
+  def resource_id; end
 
-  sig { params(value: Integer).void }
-  def id=(value); end
+  sig { params(value: String).void }
+  def resource_id=(value); end
+
+  sig { returns(String) }
+  def source_resource_id; end
+
+  sig { params(value: String).void }
+  def source_resource_id=(value); end
 
   sig { returns(T.any(Symbol, Integer)) }
   def state; end
@@ -111,10 +121,4 @@ class MonolithTwirp::Elm::Actions::V1::ImportCommitStatusCheck < Google::Protobu
 
   sig { params(value: String).void }
   def target_url=(value); end
-
-  sig { returns(T.nilable(Google::Protobuf::Timestamp)) }
-  def updated_at; end
-
-  sig { params(value: T.nilable(Google::Protobuf::Timestamp)).void }
-  def updated_at=(value); end
 end

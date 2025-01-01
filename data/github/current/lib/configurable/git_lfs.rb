@@ -36,10 +36,30 @@ module Configurable
 
     def enable_lfs_in_archives(actor)
       config.enable(ARCHIVE_KEY, actor)
+
+      if GitHub.elm_internal_webhooks_enabled?
+        GitHub.instrument("repo.archive_settings_update", {
+          actor: actor,
+          repo: self,
+          changes: {
+            git_lfs_enabled: true
+          }
+        })
+      end
     end
 
     def disable_lfs_in_archives(actor)
       config.disable(ARCHIVE_KEY, actor)
+
+      if GitHub.elm_internal_webhooks_enabled?
+        GitHub.instrument("repo.archive_settings_update", {
+          actor: actor,
+          repo: self,
+          changes: {
+            git_lfs_enabled: false
+          }
+        })
+      end
     end
 
     # Public: Gets the current setting for the timeout

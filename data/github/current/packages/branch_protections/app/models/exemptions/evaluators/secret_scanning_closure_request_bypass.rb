@@ -68,7 +68,9 @@ module Exemptions
 
       security_managers = SecurityProduct::SecurityManagers.new(org).users.map { |user| user.id }
       org_admins = org.admins.map { |user| user.id }
-      user_ids_with_fgp = SecretScanning::Services::DelegatedAlertClosuresService.get_users_with_fgp_via_custom_roles(org)
+      user_ids_with_org_fgp = SecretScanning::Services::DelegatedAlertClosuresService.get_users_with_fgp_via_custom_roles(org)
+      user_ids_with_repo_fgp = request.repository&.secret_scanning_alerts_user_ids
+      user_ids_with_fgp = user_ids_with_org_fgp & user_ids_with_repo_fgp
       (security_managers + org_admins + user_ids_with_fgp).uniq
     end
 

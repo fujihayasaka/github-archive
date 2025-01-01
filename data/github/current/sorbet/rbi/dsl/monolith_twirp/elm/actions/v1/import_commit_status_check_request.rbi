@@ -6,29 +6,25 @@
 
 
 class MonolithTwirp::Elm::Actions::V1::ImportCommitStatusCheckRequest < Google::Protobuf::AbstractMessage
-  sig { params(page: T.nilable(Integer), per_page: T.nilable(Integer), repository_id: T.nilable(Integer)).void }
-  def initialize(page: nil, per_page: nil, repository_id: nil); end
+  sig do
+    params(
+      commit_status_checks: T.nilable(T.any(Google::Protobuf::RepeatedField[MonolithTwirp::Elm::Actions::V1::ImportCommitStatusCheck], T::Array[MonolithTwirp::Elm::Actions::V1::ImportCommitStatusCheck])),
+      repository_id: T.nilable(Integer)
+    ).void
+  end
+  def initialize(commit_status_checks: T.unsafe(nil), repository_id: nil); end
 
   sig { void }
-  def clear_page; end
-
-  sig { void }
-  def clear_per_page; end
+  def clear_commit_status_checks; end
 
   sig { void }
   def clear_repository_id; end
 
-  sig { returns(Integer) }
-  def page; end
+  sig { returns(Google::Protobuf::RepeatedField[MonolithTwirp::Elm::Actions::V1::ImportCommitStatusCheck]) }
+  def commit_status_checks; end
 
-  sig { params(value: Integer).void }
-  def page=(value); end
-
-  sig { returns(Integer) }
-  def per_page; end
-
-  sig { params(value: Integer).void }
-  def per_page=(value); end
+  sig { params(value: Google::Protobuf::RepeatedField[MonolithTwirp::Elm::Actions::V1::ImportCommitStatusCheck]).void }
+  def commit_status_checks=(value); end
 
   sig { returns(Integer) }
   def repository_id; end

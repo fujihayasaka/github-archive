@@ -112,7 +112,7 @@ class Release < ApplicationRecord::Domain::Repositories # rubocop:todo GitHub/Da
   after_commit :instrument_update, on: :update # rubocop:todo GitHub/AvoidActiveRecordCallbacks
   after_commit :instrument_destroy, on: :destroy # rubocop:todo GitHub/AvoidActiveRecordCallbacks
   after_commit :instrument_unpublish, on: :update # rubocop:todo GitHub/AvoidActiveRecordCallbacks
-  after_commit :instrument_prerelease, on: [:create, :update] # rubocop:todo GitHub/AvoidActiveRecordCallbacks
+  after_commit :instrument_prerelease_or_unprerelease, on: [:create, :update] # rubocop:todo GitHub/AvoidActiveRecordCallbacks
   after_commit :instrument_release_create, on: :create # rubocop:todo GitHub/AvoidActiveRecordCallbacks
   after_commit :instrument_release_update, on: :update # rubocop:todo GitHub/AvoidActiveRecordCallbacks
   after_commit :synchronize_search_index, on: [:create, :update] # rubocop:todo GitHub/AvoidActiveRecordCallbacks
@@ -731,6 +731,17 @@ class Release < ApplicationRecord::Domain::Repositories # rubocop:todo GitHub/Da
     end
   end
 
+  # Public: Tracks when an asset has been created or destroyed by storing it in instance variables
+  # for later use in audit logging and webhook events.
+  def track_asset_change(asset, action)
+    if action == :created
+      @added_asset = asset
+    end
+    if action == :destroyed
+      @deleted_asset = asset
+    end
+  end
+
   # Internal: Backdate the Release to the Tag date if if it's been tagged.
   def backdate_if_tagged
     if tagged? && tag.target.respond_to?(:date) && tag.target.date
@@ -1229,7 +1240,7 @@ class Release < ApplicationRecord::Domain::Repositories # rubocop:todo GitHub/Da
   # Instruments an update for the audit log (NOT webhooks). The actual body is intentionally
   # not included to prevent logging too much info.
   def instrument_update_audit_log
-    return if previous_changes.empty? unless make_latest
+    return unless has_auditable_changes?
 
     changes = {}.tap do |hash|
       hash[:old_name] = previous_changes["name"].first if previous_changes["name"].present?
@@ -1251,15 +1262,18 @@ class Release < ApplicationRecord::Domain::Repositories # rubocop:todo GitHub/Da
 
       # do not update to include the actual body
       hash[:body_changed] = true if previous_changes["body"].present?
-    end
 
+      # Track if any assets were added or deleted to an existing release
+      hash[:added_asset] = { id: @added_asset.id, name: @added_asset.name } if @added_asset.present?
+      hash[:deleted_asset] = { id: @deleted_asset.id, name: @deleted_asset.name } if @deleted_asset.present?
+    end
     return if changes.empty?
     instrument :update, changes: changes
   end
 
   # This version is only used for webhooks.
   def instrument_update_webhook
-    return if previous_changes.empty? unless make_latest
+    return unless has_auditable_changes?
     return if being_prereleased?
 
     changes = {}.tap do |hash|
@@ -1277,6 +1291,9 @@ class Release < ApplicationRecord::Domain::Repositories # rubocop:todo GitHub/Da
           hash[:old_tag_name] = previous_changes["tag_name"].first
         end
       end
+      # Track if any assets were added or deleted to an existing release
+      hash[:added_asset] = { id: @added_asset.id, name: @added_asset.name } if @added_asset.present?
+      hash[:deleted_asset] = { id: @deleted_asset.id, name: @deleted_asset.name } if @deleted_asset.present?
     end
 
     # we don't send the 'release.edited' webhook event if the changes hash is empty
@@ -1307,11 +1324,18 @@ class Release < ApplicationRecord::Domain::Repositories # rubocop:todo GitHub/Da
     previous_changes.key?("state")
   end
 
-  def instrument_prerelease
-    return unless being_prereleased?
+  def instrument_prerelease_or_unprerelease
+    return unless being_prereleased? || being_unprereleased?
+
+    hook_name = being_prereleased? ? "prerelease" : "unprerelease"
+
+    # The unprerelease hook is ELM-internal.
+    if hook_name == "unprerelease" && !GitHub.elm_internal_webhooks_enabled?
+      return
+    end
 
     # intentionally uses GitHub.instrument to override the full payload
-    GitHub.instrument "release.prerelease", webhook_event_payload
+    GitHub.instrument "release.#{hook_name}", webhook_event_payload
   end
 
   def being_released?
@@ -1322,6 +1346,11 @@ class Release < ApplicationRecord::Domain::Repositories # rubocop:todo GitHub/Da
   def being_prereleased?
     return false unless previous_changes && previous_changes["prerelease"]
     previous_changes["prerelease"].first != true && self.prerelease == true
+  end
+
+  def being_unprereleased?
+    return false unless previous_changes && previous_changes["prerelease"]
+    previous_changes["prerelease"].first == true && self.prerelease == false
   end
 
   def instrument_release_update
@@ -1396,5 +1425,20 @@ class Release < ApplicationRecord::Domain::Repositories # rubocop:todo GitHub/Da
   def set_as_latest
     return unless make_latest
     T.must(repository).set_latest_release(self)
+  end
+
+  def immutable_fields_cannot_be_changed
+    # Skip if this release was not previously marked as being immutable
+    return unless immutable_was
+
+    IMMUTABLE_PROTECTED_FIELDS.each do |field|
+      if attribute_changed?(field)
+        errors.add(field, "cannot be changed when release is immutable")
+      end
+    end
+  end
+
+  def has_auditable_changes?
+    previous_changes.any? || @addest_asset.present? || @deleted_asset.present? || make_latest
   end
 end

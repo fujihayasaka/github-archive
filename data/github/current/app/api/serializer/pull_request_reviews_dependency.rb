@@ -63,7 +63,9 @@ module Api::Serializer::PullRequestReviewsDependency
         html: { href: review.permalink.to_s },
         pull_request: { href: pull_url.to_s },
       },
-    }.update(mime_body_hash(review, options))
+    }.tap do |review_hash|
+      review_hash[:updated_at] = time(review.updated_at) if review.updated_at
+    end.update(mime_body_hash(review, options))
   end
 
   def requested_reviewers_hash(pull, options = {})

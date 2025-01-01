@@ -53,7 +53,9 @@ class AddToSearchIndexJob < ApplicationJob
   retry_on_recoverable_exceptions(wait: :polynomially_longer, attempts: 8) { |job, error| job.stats.failed(error.class) }
   retry_on(ElastomerRetryError, wait: :polynomially_longer, attempts: 8) { |job, error| job.stats.failed(error.class) }
   retry_on(GeoIP2Compat::Error, wait: :polynomially_longer, attempts: 8) { |job, error| job.stats.failed(error.class) }
-  retry_on(GitHub::Restraint::UnableToLock, wait: :polynomially_longer, attempts: 20) { |job, error| job.stats.failed(error.class) }
+  retry_on(GitHub::Restraint::UnableToLock, wait: :polynomially_longer, attempts: GitHub.elastomer_index_lock_backoff_attempts) do
+     |job, error| job.stats.failed(error.class)
+  end
   retry_on(Freno::Error, wait: :polynomially_longer, attempts: 8) { |job, error| job.stats.failed(error.class) }
   retry_on(Elastomer::ModelMissing, wait: :polynomially_longer, attempts: 8) { |job, error| job.stats.failed(error.class) }
   retry_on(ElastomerClient::Client::ConnectionFailed, wait: :polynomially_longer, attempts: 8) { |job, error| job.stats.failed(error.class) }

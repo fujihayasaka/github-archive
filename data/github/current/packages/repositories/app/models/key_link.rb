@@ -54,6 +54,8 @@ class KeyLink < ApplicationRecord::Collab
 
   after_commit :instrument_creation_event, on: :create # rubocop:todo GitHub/AvoidActiveRecordCallbacks
   after_commit :instrument_destroy, on: :destroy # rubocop:todo GitHub/AvoidActiveRecordCallbacks
+  after_commit :instrument_destruction, on: :destroy, unless: -> { !GitHub.elm_internal_webhooks_enabled? } # rubocop:todo GitHub/AvoidActiveRecordCallbacks
+  before_destroy :generate_webhook_payload_for_deletion, unless: -> { !GitHub.elm_internal_webhooks_enabled? } # rubocop:todo GitHub/AvoidActiveRecordCallbacks
 
   def url(number)
     url_template
@@ -134,13 +136,46 @@ class KeyLink < ApplicationRecord::Collab
   end
 
   def instrument_creation_event
-    instrument :create
+    payload = {
+      action: :created,
+      autolink_id: id,
+      key_prefix: key_prefix,
+      url_template: url_template,
+      is_alphanumeric: is_alphanumeric,
+      repository_id: owner.is_a?(Repository) ? owner.id : nil
+    }
+    instrument :create, payload
     GitHub.dogstats.increment("key_links", tags: ["action:create", "valid:true"])
     GlobalInstrumenter.instrument("key_link.create", event_payload)
   end
 
+  def instrument_destruction
+    if GitHub.elm_internal_webhooks_enabled?
+      unless defined?(@delivery_system)
+        raise "'generate_webhook_payload_for_deletion' must be called before instrumenting destruction"
+      end
+
+      @delivery_system&.deliver_later
+    end
+  end
+
   def instrument_destroy
     instrument :destroy
+  end
+
+  # we need to generate the payload before the key link is deleted, so we don't lose the data
+  def generate_webhook_payload_for_deletion
+    event_for_delete = Hook::Event::AutolinkEvent.new(
+      action: :deleted,
+      autolink_id: id,
+      key_prefix: key_prefix,
+      url_template: url_template,
+      is_alphanumeric: is_alphanumeric,
+      repository_id: owner.is_a?(Repository) ? owner.id : nil,
+      triggered_at: Time.now
+    )
+    @delivery_system = Hook::DeliverySystem.new(event_for_delete)
+    @delivery_system.generate_hookshot_payloads
   end
 
   def event_payload

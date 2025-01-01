@@ -141,6 +141,8 @@ class Reaction < ApplicationRecord::Domain::Repositories
       end
 
       if existing_reaction = user.reactions.where(subject_id: subject.id, subject_type: subject.class, content: content).first
+        GitHub.instrument "reaction.deleted", reaction: existing_reaction
+
         # Reaction exists. Destroy it and return the object.
         existing_reaction.destroy
         subject.notify_socket_subscribers
@@ -235,7 +237,6 @@ class Reaction < ApplicationRecord::Domain::Repositories
 
     subject_type.safe_constantize.find_by_id(subject_id)
   end
-  private_class_method :find_subject
 
   # Internal: Is the subject_type a valid class for a reaction subject?
   def self.valid_subject_type?(subject_type)
@@ -336,5 +337,6 @@ class Reaction < ApplicationRecord::Domain::Repositories
 
   def instrument_creation_event
     GlobalInstrumenter.instrument "reaction.created", reaction: self
+    GitHub.instrument "reaction.created", reaction: self
   end
 end

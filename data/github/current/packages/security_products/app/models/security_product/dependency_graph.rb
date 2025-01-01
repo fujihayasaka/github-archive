@@ -35,6 +35,16 @@ module SecurityProduct
 
         GitHub.instrument("repository_dependency_graph.enable", instrumentation_payload(actor))
 
+        if GitHub.elm_internal_webhooks_enabled?
+          GitHub.instrument("repo.advanced_security_settings_update",
+            actor: actor,
+            repo: repository,
+            changes: {
+              dependency_graph_enabled: true
+            }
+          )
+        end
+
         Result.new(ToggledServiceCollection.create(to_sym, options))
       end
     end
@@ -71,6 +81,16 @@ module SecurityProduct
         )
 
         GitHub.instrument("repository_dependency_graph.disable", instrumentation_payload(actor))
+
+        if GitHub.elm_internal_webhooks_enabled?
+          GitHub.instrument("repo.advanced_security_settings_update",
+            actor: actor,
+            repo: repository,
+            changes: {
+              dependency_graph_enabled: false
+            }
+          )
+        end
 
         Result.new(ToggledServiceCollection.create(to_sym, options).merge!(dependent_results.toggled_services))
       end

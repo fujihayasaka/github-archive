@@ -78,7 +78,6 @@ class Hook::Event
 
     def validate_required_attributes
       return unless T.unsafe(self).class.required_attribute_keys
-
       T.unsafe(self).class.required_attribute_keys.each do |required_attr|
         raise MissingRequiredAttribute.new(T.unsafe(self).class.name, required_attr) unless attributes[required_attr].present?
       end

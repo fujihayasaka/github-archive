@@ -4,9 +4,10 @@
 class Hook::Payload::CommitCommentPayload < Hook::Payload
 
   def to_payload_hash
-    {
-      action: hook_event.action,
-      comment: api_serialize(:commit_comment_hash, hook_event.commit_comment),
-    }
+    {}.tap do |payload|
+      payload[:action]  = hook_event.action
+      payload[:changes] = hook_event.changes if hook_event.changes
+      payload[:comment] = api_serialize(:commit_comment_hash, hook_event.commit_comment)
+    end
   end
 end

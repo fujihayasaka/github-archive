@@ -486,13 +486,24 @@ HookEventSubscriber.subscribe "release.unpublish" do |_name, start, _ending, _tr
   )
 end
 
-HookEventSubscriber.subscribe "release.prerelease" do |_name, start, _ending, _transaction_id, payload|
+HookEventSubscriber.subscribe /\Arelease.(prerelease|unprerelease)\Z/ do |name, start, _ending, _transaction_id, payload|
   next if payload[:spammy]
+
+  # The subscription name is in the format "release.prerelease" or "release.unprerelease", but the action is :prereleased or :unprereleased.
+  # This inconsistency is not ideal, but necessary for historical reasons.
+  action = case name.split(".").last
+  when "prerelease"
+    :prereleased
+  when "unprerelease"
+    :unprereleased
+  else
+    raise ArgumentError, "Unknown release action: #{name}"
+  end
 
   Hook::Event::ReleaseEvent.queue(
     release_id: payload[:release_id],
     triggered_at: start,
-    action: :prereleased,
+    action: action,
     actor_id: payload[:actor_id],
   )
 end
@@ -611,6 +622,34 @@ HookEventSubscriber.subscribe "commit_comment.create" do |_name, start, _ending,
   )
 end
 
+HookEventSubscriber.subscribe "commit_comment.update" do |_name, start, _ending, _transaction_id, payload|
+  next unless GitHub.elm_internal_webhooks_enabled?
+
+  actor_id, changes, commit_comment_id = payload.values_at(:actor_id, :changes, :commit_comment_id)
+
+  next if spammy_user_acting_outside_own_repos?(payload)
+
+  Hook::Event::CommitCommentEvent.queue(
+    action: :edited,
+    commit_comment_id: commit_comment_id,
+    actor_id: actor_id,
+    old_body: changes[:old_body],
+    triggered_at: start,
+  )
+end
+
+HookEventSubscriber.subscribe "page" do |_name, start, _ending, _transaction_id, payload|
+  next unless GitHub.elm_internal_webhooks_enabled?
+  next if spammy_user_acting_outside_own_repos?(payload)
+
+  Hook::Event::PageEvent.queue(
+    action: payload[:action],
+    page_id: payload[:page_id],
+    changes: payload[:changes],
+    triggered_at: payload[:triggered_at] || start,
+  )
+end
+
 HookEventSubscriber.subscribe "issue_comment.create" do |_name, start, _ending, _transaction_id, payload|
   comment_id, actor_id = payload.values_at(:issue_comment_id, :actor_id)
   next if spammy_user_acting_outside_own_repos?(payload)
@@ -720,6 +759,51 @@ HookEventSubscriber.subscribe "repo.update" do |_name, start, _ending, _transact
   if !payload[:changes].empty?
     repo_id, actor_id = payload.values_at(:repo_id, :actor_id)
     Hook::Event::RepositoryEvent.queue(
+        action: :edited,
+        repository_id: repo_id,
+        actor_id: actor_id,
+        triggered_at: start,
+        changes: payload[:changes],
+    )
+  end
+end
+
+HookEventSubscriber.subscribe "repo.advanced_security_settings_update" do |_name, start, _ending, _transaction_id, payload|
+  next unless GitHub.elm_internal_webhooks_enabled?
+
+  if !payload[:changes].empty?
+    repo_id, actor_id = payload.values_at(:repo_id, :actor_id)
+    Hook::Event::RepositoryAdvancedSecuritySettingsEvent.queue(
+        action: :edited,
+        repository_id: repo_id,
+        actor_id: actor_id,
+        triggered_at: start,
+        changes: payload[:changes],
+    )
+  end
+end
+
+HookEventSubscriber.subscribe "repo.pull_request_settings_update" do |_name, start, _ending, _transaction_id, payload|
+  next unless GitHub.elm_internal_webhooks_enabled?
+
+  if !payload[:changes].empty?
+    repo_id, actor_id = payload.values_at(:repo_id, :actor_id)
+    Hook::Event::RepositoryPullRequestSettingsEvent.queue(
+        action: :edited,
+        repository_id: repo_id,
+        actor_id: actor_id,
+        triggered_at: start,
+        changes: payload[:changes],
+    )
+  end
+end
+
+HookEventSubscriber.subscribe "repo.archive_settings_update" do |_name, start, _ending, _transaction_id, payload|
+  next unless GitHub.elm_internal_webhooks_enabled?
+
+  if !payload[:changes].empty?
+    repo_id, actor_id = payload.values_at(:repo_id, :actor_id)
+    Hook::Event::RepositoryArchiveSettingsEvent.queue(
         action: :edited,
         repository_id: repo_id,
         actor_id: actor_id,
@@ -1197,7 +1281,27 @@ HookEventSubscriber.subscribe "issue.update" do |_name, start, _ending, _transac
   end
 end
 
-HookEventSubscriber.subscribe(/\Aclose_issue_reference\.(create|destroy)\Z/) do |_name, _start, _ending, _transaction_id, payload|
+HookEventSubscriber.subscribe(/\Aclose_issue_reference\.(create|destroy)\Z/) do |name, start, _ending, _transaction_id, payload|
+  # ELM internal webhook, only handle `.create` here. `.destroy` is handled by pre-delete delivery.
+  if GitHub.elm_internal_webhooks_enabled?
+    action = name.end_with?(".create") ? :created : nil
+
+    if action
+      Hook::Event::CloseIssueReferenceEvent.queue(
+        action: action,
+        close_issue_reference_id: payload[:close_issue_reference_id],
+        actor_id: payload[:actor_id],
+        issue_id: payload[:issue_id],
+        repository_id: payload[:repository_id],
+        pull_request_id: payload[:pull_request_id],
+        pull_request_author_id: payload[:pull_request_author_id],
+        source: payload[:source],
+        referenced_at: payload[:referenced_at],
+        triggered_at: start
+      )
+    end
+  end
+
   next unless payload[:organization_id]
 
   actor_id, issue_id, repository_id, organization_id = payload.values_at(
@@ -2305,6 +2409,197 @@ HookEventSubscriber.subscribe /\Asub_issues\.(sub_issue|parent_issue)_(add|remov
     child_issue_id: child_issue_id,
     actor_id: actor_id,
     audit_only: audit_only,
+    triggered_at: start,
+  )
+end
+
+HookEventSubscriber.subscribe /\Aissue_dependencies\.(blocked_by|blocking)_(add|remove)\Z/ do |name, start, _ending, _transaction_id, payload|
+  blocked_issue_id, blocking_issue_id, actor_id = payload.values_at(:blocked_issue_id, :blocking_issue_id, :actor_id)
+  next if spammy_user_acting_outside_own_repos?(payload)
+
+  action = case name.split(".").last
+  when "blocked_by_add" then :blocked_by_added
+  when "blocking_add" then :blocking_added
+  when "blocked_by_remove" then :blocked_by_removed
+  when "blocking_remove" then :blocking_removed
+  end
+
+  Hook::Event::IssueDependenciesEvent.queue(
+    action: action,
+    blocked_issue_id: blocked_issue_id,
+    blocking_issue_id: blocking_issue_id,
+    actor_id: actor_id,
+    triggered_at: start,
+  )
+end
+
+HookEventSubscriber.subscribe /\Adiscussion_comment_reaction.(created|deleted)\Z/ do |name, start, _ending, _transaction_id, payload|
+  next unless GitHub.elm_internal_webhooks_enabled?
+
+  action = name.split(".").last.to_sym
+  reaction = payload[:reaction]
+  reacted_at = start if action == :deleted # in this case `updated_at` is not touched by the delete, so rather use time of event
+  reacted_at ||= reaction.updated_at
+
+  Hook::Event::ReactionEvent.queue(
+    action: action,
+    actor_id: reaction.user_id,
+    reaction_id: reaction.id,
+    subject_id: reaction.discussion_comment_id,
+    subject_type: "DiscussionComment",
+    content: reaction.content,
+    reacted_at: reacted_at,
+    triggered_at: start
+  )
+end
+
+HookEventSubscriber.subscribe /\Adiscussion_reaction.(created|deleted)\Z/ do |name, start, _ending, _transaction_id, payload|
+  next unless GitHub.elm_internal_webhooks_enabled?
+
+  action = name.split(".").last.to_sym
+  reaction = payload[:reaction]
+  reacted_at = start if action == :deleted # in this case `updated_at` is not touched by the delete, so rather use time of event
+  reacted_at ||= reaction.updated_at
+
+  Hook::Event::ReactionEvent.queue(
+    action: action,
+    actor_id: reaction.user_id,
+    reaction_id: reaction.id,
+    subject_id: reaction.discussion_id,
+    subject_type: "Discussion",
+    content: reaction.content,
+    reacted_at: reacted_at,
+    triggered_at: start
+  )
+end
+
+HookEventSubscriber.subscribe /\Areaction.(created|deleted)\Z/ do |name, start, _ending, _transaction_id, payload|
+  next unless GitHub.elm_internal_webhooks_enabled?
+
+  action = name.split(".").last.to_sym
+  reaction = payload[:reaction]
+
+  # These types are not supported right now
+  next if %w(FeedPost FeedPostComment DiscussionPostReply DiscussionPost).include?(reaction.subject_type)
+
+  reacted_at = start if action == :deleted # in this case `updated_at` is not touched by the delete, so rather use time of event
+  reacted_at ||= reaction.updated_at
+
+  Hook::Event::ReactionEvent.queue(
+    action: action,
+    actor_id: reaction.user_id,
+    reaction_id: reaction.id,
+    subject_id: reaction.subject_id,
+    subject_type: reaction.subject_type,
+    content: reaction.content,
+    reacted_at: reacted_at,
+    triggered_at: start
+  )
+end
+
+HookEventSubscriber.subscribe "key_link.create" do |_name, start, _ending, _transaction_id, payload|
+  next unless GitHub.elm_internal_webhooks_enabled?
+
+  autolink_id, key_prefix, url_template, is_alphanumeric, repository_id = payload.values_at(
+    :autolink_id, :key_prefix, :url_template, :is_alphanumeric, :repository_id
+  )
+
+  Hook::Event::AutolinkEvent.queue(
+    action: :created,
+    autolink_id: autolink_id,
+    key_prefix: key_prefix,
+    url_template: url_template,
+    is_alphanumeric: is_alphanumeric,
+    repository_id: repository_id,
+    triggered_at: start
+  )
+end
+
+HookEventSubscriber.subscribe "repo.update_actions_settings" do |_name, start, _ending, _transaction_id, payload|
+  next unless GitHub.elm_internal_webhooks_enabled?
+
+  actor_id, repo_id = payload.values_at(:actor_id, :repo_id)
+
+  old_policy,
+    new_policy,
+    updated_github_owned_allowed,
+    updated_verified_allowed,
+    updated_sha_pinning_required,
+    updated_allowed_types,
+    updated_access_policy,
+    updated_patterns = payload.values_at(
+    :old_policy,
+    :new_policy,
+    :updated_github_owned_allowed,
+    :updated_verified_allowed,
+    :updated_sha_pinning_required,
+    :updated_allowed_types,
+    :updated_access_policy,
+    :updated_patterns
+  )
+
+  Hook::Event::RepositoryActionsSettingsEvent.queue(
+    action: :updated,
+    actor_id:,
+    old_policy:,
+    new_policy:,
+    repo_id:,
+    triggered_at: start,
+    updated_access_policy:,
+    updated_allowed_types:,
+    updated_github_owned_allowed:,
+    updated_sha_pinning_required:,
+    updated_verified_allowed:,
+    updated_patterns:
+  )
+end
+
+HookEventSubscriber.subscribe /\Ahook\.(create|events_changed|config_changed|active_changed)\Z/ do |name, start, _ending, _transaction_id, payload|
+  next unless GitHub.elm_internal_webhooks_enabled?
+  next unless payload[:hook_type] == :repo && payload[:webhook]
+
+  action = case name.split(".").last
+  when "create" then :created
+  else :updated
+  end
+
+  Hook::Event::RepositoryWebhookEvent.queue(
+    action: action,
+    hook_id: payload[:hook_id],
+    triggered_at: start,
+  )
+end
+
+HookEventSubscriber.subscribe /\Aissue_event.(created|deleted)\Z/ do |name, start, _ending, _transaction_id, payload|
+  next unless GitHub.elm_internal_webhooks_enabled?
+
+  action = name.split(".").last.to_sym
+  event_name, target_id, repository_id, actor_id, issue_id, commit_id, commit_repository_id, referencing_issue_id, performed_by_integration_id = payload.values_at(
+    :event_name, :target_id, :repository_id, :actor_id, :issue_id, :commit_id, :commit_repository_id, :referencing_issue_id, :performed_by_integration_id
+  )
+
+  Hook::Event::IssueEventEvent.queue(
+    action:,
+    event_name:,
+    target_id:,
+    repository_id:,
+    actor_id:,
+    issue_id:,
+    commit_id:,
+    commit_repository_id:,
+    referencing_issue_id:,
+    performed_by_integration_id:,
+    triggered_at: start,
+  )
+end
+
+HookEventSubscriber.subscribe "repo.add_topic" do |_name, start, _ending, _transaction_id, payload|
+  next unless GitHub.elm_internal_webhooks_enabled?
+
+  Hook::Event::RepositoryTopicEvent.queue(
+    action: :created,
+    repository_topic_id: payload[:repository_topic_id],
+    actor_id: payload[:user_id],
     triggered_at: start,
   )
 end
