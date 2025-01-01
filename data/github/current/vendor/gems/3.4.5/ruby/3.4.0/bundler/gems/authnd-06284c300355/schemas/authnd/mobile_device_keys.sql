@@ -1,0 +1,23 @@
+CREATE TABLE `mobile_device_keys` (
+    `id`                        bigint unsigned     NOT NULL AUTO_INCREMENT,
+    `user_id`                   bigint unsigned     NOT NULL,
+    `oauth_access_id`           bigint unsigned     NOT NULL,
+    `device_name`               varchar(40)         NOT NULL,
+    `device_model`              varchar(40)         NOT NULL,
+    `device_os`                 varchar(40)         NOT NULL,
+    `is_hardware_backed`        boolean             NOT NULL,
+    `public_key`                text                NOT NULL,
+    `public_key_fingerprint`    varbinary(64)       NOT NULL,
+    `type`                      varchar(40)         NOT NULL,
+    `created_at_utc`            datetime            NOT NULL,
+    `expires_at_utc`            datetime            NULL,
+    `updated_at_utc`            datetime            NULL,
+    `last_used_at_utc`          datetime            NULL,
+    `revoked_at_utc`            datetime            NULL,
+    PRIMARY KEY (`id`),
+    KEY `index_mobile_device_keys_on_public_key_fingerprint` (`public_key_fingerprint`),
+    KEY `index_mobile_device_keys_on_user_id` (`user_id`),
+    KEY `index_mobile_device_keys_on_oauth_access_id` (`oauth_access_id`),
+    KEY `index_mobile_device_keys_on_expires_and_revoked_at_utc` (`expires_at_utc`, `revoked_at_utc`),
+    KEY `index_mobile_device_keys_on_revoked_at_utc` (`revoked_at_utc`)
+)

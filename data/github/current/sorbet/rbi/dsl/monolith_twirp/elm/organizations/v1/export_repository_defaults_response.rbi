@@ -6,7 +6,7 @@
 
 
 class MonolithTwirp::Elm::Organizations::V1::ExportRepositoryDefaultsResponse < Google::Protobuf::AbstractMessage
-  sig { params(repository_defaults: T.nilable(MonolithTwirp::Elm::Organizations::V1::RepositoryDefaults)).void }
+  sig { params(repository_defaults: T.nilable(MonolithTwirp::Elm::Organizations::V1::ExportRepositoryDefaults)).void }
   def initialize(repository_defaults: nil); end
 
   sig { void }
@@ -15,9 +15,9 @@ class MonolithTwirp::Elm::Organizations::V1::ExportRepositoryDefaultsResponse < 
   sig { returns(Object) }
   def has_repository_defaults?; end
 
-  sig { returns(T.nilable(MonolithTwirp::Elm::Organizations::V1::RepositoryDefaults)) }
+  sig { returns(T.nilable(MonolithTwirp::Elm::Organizations::V1::ExportRepositoryDefaults)) }
   def repository_defaults; end
 
-  sig { params(value: T.nilable(MonolithTwirp::Elm::Organizations::V1::RepositoryDefaults)).void }
+  sig { params(value: T.nilable(MonolithTwirp::Elm::Organizations::V1::ExportRepositoryDefaults)).void }
   def repository_defaults=(value); end
 end

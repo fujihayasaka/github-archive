@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package github.turboscan;
+
+import "google/protobuf/timestamp.proto";
+import "turboscan/proto/turboscan.proto";
+
+option go_package = "./;proto";
+option ruby_package = "Turboscan::Proto";
+
+// Insights security overview
+service Insights {
+  // GetAlertsForInsightsBackfill returns data for staging alerts in insights per https://github.com/github/security-center/issues/1823
+  // See https://github.com/github/insights/blob/main/docs/engineering/design/cloud_ingestion/staging_contracts/code_scanning.md
+  rpc GetAlertsForInsightsBackfill(GetAlertsForInsightsBackfillRequest) returns (GetAlertsForInsightsBackfillRequestResponse);
+}
+
+message GetAlertsForInsightsBackfillRequest {
+  uint64 repository_id = 1;
+  string next_cursor = 2;
+
+  // Filter to only include alerts with a later `updated_at` timestamp.
+  // This filter forces API to page through alert records with a timestamp cursor on `updated_at` column
+  // and it is ignored when next_cursor is not nil.
+  google.protobuf.Timestamp updated_after = 3;
+}
+
+message GetAlertsForInsightsBackfillRequestResponse {
+  repeated InsightsAlert alerts = 1;
+  string next_cursor = 2;
+}
+
+message InsightsAlert {
+  // Internal ID of the alert in op-store
+  uint64 id = 1;
+  uint64 repository_id = 2;
+  google.protobuf.Timestamp created_at = 3;
+  // The time when alert was closed - either by manually dismissing or fixing the code
+  google.protobuf.Timestamp closed_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+  // Reflects that alert is generally resolved - either because it's fixed, or because it was manually resolved
+  bool closed = 6;
+  github.turboscan.ResultResolution resolution = 7;
+  string rule_name = 8;
+  string rule_sarif_identifier = 9;
+  string tool_name = 10;
+  github.turboscan.SecuritySeverity severity = 11;
+  bool present_on_default_ref = 12;
+  // Logical alert number mapped from the internal ID of the alert in op-store
+  uint32 number = 13;
+  bool has_autofix = 14;
+  bool autofix_accepted = 15;
+}

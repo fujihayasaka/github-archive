@@ -1,0 +1,1 @@
+-- Empty migration meant to separate a bugfix transition from the previous migration.

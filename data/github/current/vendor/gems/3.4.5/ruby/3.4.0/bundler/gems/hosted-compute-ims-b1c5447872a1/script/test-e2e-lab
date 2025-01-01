@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+
+set -e -o pipefail
+
+ENVIRONMENT="${ENVIRONMENT:=lab}"
+GOTEST_PARAMS="-timeout 30m -parallel 15"
+GOTEST_PATH="./internal/e2e"
+
+export TWIRP_SERVER_URL="https://hosted-compute-ims-$ENVIRONMENT.service.iad.github.net"
+export E2E_TWIRP_AUTH_HMAC_KEY=$E2E_TWIRP_AUTH_HMAC_KEY
+
+echo "Pinging $TWIRP_SERVER_URL"
+curl --get --silent "$TWIRP_SERVER_URL/_ping"
+echo
+
+echo "Running e2e tests"
+echo "# E2E tests on $ENVIRONMENT" > tests-output.md
+go test $GOTEST_PARAMS $GOTEST_PATH -json | tee "tests-output-raw.json" && GOTEST_EXIT_CODE=$? || GOTEST_EXIT_CODE=$?
+cat "tests-output-raw.json" | tparse -all -format=markdown >> tests-output.md
+
+exit $GOTEST_EXIT_CODE

@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: turboscan
+  annotations:
+    moda.github.net/canary-v2: "true"
+    moda.github.net/canary-label: "canary"
+spec:
+  replicas: 8
+  selector:
+    matchLabels:
+      app: turboscan
+      role: internal-service
+      canary: "production"
+  template:
+    metadata:
+      labels:
+        app: turboscan
+        role: internal-service
+        canary: "production"
+      annotations:
+        observability.github.com/logger: fluent-bit
+        fluentbit.io/parser: logfmt
+        observability.github.com/splunk_index: turboscan
+    spec:
+      dnsPolicy: ClusterFirst
+      containers:
+        - name: turboscan
+          image: turboscan
+          ports:
+            - name: http
+              containerPort: 8888
+              protocol: TCP
+          env:
+            - name: STATS_ADDR
+              value: "$(KUBE_NODE_HOSTNAME):28125"
+            - name: KAFKA_GROUP
+              value: "turboscan-consumer-prod"
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  containerName: turboscan
+                  resource: limits.cpu
+          envFrom:
+            - configMapRef:
+                name: environment
+            - secretRef:
+                name: vault-secrets
+            - configMapRef:
+                name: kube-cluster-metadata
+          readinessProbe:
+            httpGet:
+              path: /_ping
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: 2Gi
+              cpu: 2000m
+            limits:
+              memory: 4Gi
+              cpu: 4000m
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "10"]

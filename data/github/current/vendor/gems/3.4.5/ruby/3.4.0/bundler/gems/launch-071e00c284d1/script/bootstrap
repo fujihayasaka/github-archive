@@ -1,0 +1,103 @@
+#!/bin/bash
+#/ Usage: script/bootstrap [--ruby] [--no-app] [--dependabot-app]
+#/ Installs all the Go stuff so that you can develop in this repo.
+#/  --ruby
+#/      also install tooling for working on the github-launch ruby gem
+#/  --no-app
+#/      don't try to install the GitHub App (requires running local `github/github`)
+#/  --dependabot-app
+#/      try to create the Dependabot App (requires running local `github/github`)
+
+set -e
+set -o pipefail
+
+bootstrap_ruby=false
+install_app=true
+create_dependabot_app=false
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --no-app)
+      install_app=false
+      shift ;;
+    ---dependabot-app)
+      create_dependabot_app=true
+      shift ;;
+    --ruby)
+      bootstrap_ruby=true
+      shift ;;
+    *)
+      cat "$0" | grep ^#/ | cut -c4-
+      exit 1 ;;
+  esac
+done
+
+mkdir -p tmp
+
+if [[ "$(uname -s)" = "Darwin" ]]; then
+  echo Installing Go dependencies...
+  if ! brew bundle &> tmp/brew-bundle.log; then
+    echo "Failed to brew bundle:"
+    cat tmp/brew-bundle.log
+    exit 1
+  fi
+fi
+
+if [[ ! -x "$(which docker)" ]]; then
+    echo >&2 "launch requires an installation of Docker to build."
+    exit 1
+fi
+
+if [[ ! -x "$(which go)" ]]; then
+  echo >&2 "launch requires an installation of Go to build."
+  exit 1
+fi
+
+echo Setting up skeema...
+if ! script/skeema version &> tmp/build-skeema.log; then
+  cat tmp/build-skeema.log
+  exit 1
+fi
+
+echo Getting any necessary docker images...
+script/docker-compose up --no-start
+
+echo Installing Go tools...
+
+# Install tools that are listed as module dependencies
+script/install-tools
+go install ./cmd/migratorctl/...
+
+if $bootstrap_ruby; then
+  if [[ "$(uname -s)" = "Darwin" ]]; then
+    echo Installing Ruby dependencies...
+    if ! brew bundle --file=Brewfile.ruby &> tmp/brew-bundle.log; then
+      echo "Failed to brew bundle --file=Brewfile.ruby:"
+      cat tmp/brew-bundle.log
+      exit 1
+    fi
+
+    echo Setting up rbenv...
+    brew bootstrap-rbenv-ruby
+  fi
+
+  echo Installing Ruby gems...
+  bundle check --path=.bundler/gems >&/dev/null || bundle install --path=.bundler/gems --binstubs=.bundler/bin
+fi
+
+echo '*** Dev tool versions:'
+(
+  go version
+) | sed -e 's/^/  /'
+
+if $install_app; then
+  echo 'Trying to install GitHub App...'
+  script/create-github-app
+fi
+
+if $create_dependabot_app; then
+  echo 'Trying to install Dependabot App'
+  script/create-dependabot-app
+fi
+
+echo Done.

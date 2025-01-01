@@ -1,0 +1,2 @@
+DROP INDEX tenant_id_purl_predicate_type_attestations_idx ON attestations;
+ALTER TABLE attestations DROP COLUMN tenant_id;

@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20230707090130_populate_physical_alerts_last_stage_change_at.go on GHES

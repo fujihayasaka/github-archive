@@ -1,0 +1,1079 @@
+syntax = "proto3";
+
+package mvnd.migrations.api.v1;
+
+option go_package = "github.com/github/migrations-vnext/proto/mnvd/api/v1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+import "mvnd/v1/context.proto";
+
+// Resource is the definition for a resource which can be one of the currently
+// supported resources.
+message Resource {
+  oneof resource {
+    Mannequin mannequin = 1;
+    Organization organization = 2;
+    Team team = 3;
+    Repository repository = 4;
+    Issue issue = 5;
+    IssueComment issue_comment = 6;
+    IssueEventBatch issue_event_batch = 7;
+    PullRequest pull_request = 8;
+    MilestoneBatch milestone_batch = 9;
+    Attachment attachment = 10;
+    RepositoryLabelsBatch repository_labels_batch = 11;
+    Project project = 12;
+    IssueLabelsBatch issue_labels_batch = 13;
+    CommitComment commit_comment = 14;
+    ReactionsBatch reactions_batch = 15;
+    CloseIssueReferenceBatch close_issue_reference_batch = 16;
+    Noop noop = 17;
+    ProjectColumn project_column = 18;
+    ProjectCardsBatch project_cards_batch = 19;
+    InitialOrganizationSettings initial_organization_settings = 20;
+    InitialRepositorySettings initial_repository_settings = 21;
+    PullRequestReview pull_request_review = 22;
+    InitialActionsSettings initial_actions_settings = 23;
+    ProtectedBranch protected_branch = 24;
+    Release release = 25;
+    ReleaseAsset release_asset = 26;
+  }
+
+  // The resource that may be inlined in this protobuf, or for larger resources, in the object store.
+  ResourceLocationType location = 100;
+
+  // when location is RESOURCE_LOCATION_OBJECT_TYPE_STORE, this field contains
+  // the object store information.
+  ResourceLocationObjectStore object_store = 101;
+
+  // MigrationContext is the context of the migration that is passed around the pipeline.
+  MigrationContext migration_context = 102;
+}
+
+// ResourceLocation is the definition for the location of the resource.
+enum ResourceLocationType {
+  RESOURCE_LOCATION_TYPE_INVALID = 0;
+  // resource payload is in the protobuf
+  RESOURCE_LOCATION_TYPE_INLINE = 1;
+  // resource payload is in the object store
+  RESOURCE_LOCATION_TYPE_OBJECT_STORE = 2;
+}
+
+message ResourceLocationObjectStore {
+  // key is the key to retrieve the resource from the object store.
+  string key = 1;
+  // size is the size of the resource in bytes.
+  int64 size = 2;
+}
+
+// FailedResource is the definition for a resource that failed to be imported during a migration.
+message FailedResource {
+  // error_message is the error message that describes the failure.
+  string error_message = 1;
+
+  // failed_at is the time the resource failed for last time.
+  google.protobuf.Timestamp failed_at = 2;
+
+  // retries_attempted is the number of retries attempted.
+  int64 retries_attempted = 3;
+
+  // resource is the resource that failed.
+  Resource resource = 4;
+}
+
+// Organization is the definition for an organization resource.
+message Organization {
+  // resource_id is the ID that describes this resource in the context of the migration
+  // E.g: http://github.dev/acme (required)
+  string resource_id = 1;
+
+  // target_org_name is the name of the organization to be created. (required)
+  string name = 3;
+
+  // login is the login name of the organization to be created. (required)
+  string login = 4;
+}
+
+// Team is the definition for an team resource.
+message Team {
+  // resource_id is the ID that describes this resource in the context of the migration
+  // E.g: http://github.dev/orgs/acme/teams/a-team (required)
+  string resource_id = 1;
+
+  // parent_team_resource_id tje  ID that describes the parent team resource
+  // in the context of the migration.
+  // E.g: http://github.dev/orgs/acme/teams/b-team (required)
+  string parent_team_resource_id = 2;
+
+  // name is the name of the team to be created. (required)
+  string name = 3;
+
+  // description is the team description of the team to be created (required)
+  string description = 4;
+
+  // visibility is the team visibility of the team to be created. (required)
+  string visibility = 5;
+}
+
+// Mannequin is the definition for a mannequin that is used as a user.
+message Mannequin {
+  // resource_id is the ID that describes this resource
+  // in the context of the migration.
+  // E.g: http://github.dev/monalisa (required)
+  string resource_id = 1;
+
+  // org_resource_id is the ID that describes the organization resource
+  // this mannequin belongs to in the context of the migration.
+  // E.g: http://github.dev/acme (required)
+  string org_resource_id = 2;
+
+  // Profile name is the name that (if present) is displayed for the user.
+  string profile_name = 3;
+
+  // Email is the email (if present) of the user.
+  string email = 4;
+}
+
+message Repository {
+  // resource_id is the ID that describes this resource
+  // in the context of the migration.
+  //
+  // E.g: http://github.dev/acme/widgets (required)
+  string resource_id = 1;
+
+  // private is if the repository is private or not. (required)
+  bool is_private = 2;
+}
+
+message InitialOrganizationSettings {
+  // InitialOrganizationSettings have a virtual resource ID.
+  // eg. organizationsettings-{organization}
+  string resource_id = 1;
+  // organization_resource_id of the subject organization. (required)
+  string organization_resource_id = 2;
+  MemberPrivileges member_privileges = 3;
+  RepositoryDefault repository_default = 4;
+  repeated Webhook webhooks = 5;
+}
+
+message MemberPrivileges {
+// default_repository_permission determines the default setting for member access (clone, pull, and/or push) to repositories.
+  google.protobuf.StringValue default_repository_permission = 1;
+  // members_can_create_public_repositories determines whether members can create public repositories.
+  google.protobuf.BoolValue members_can_create_public_repositories = 2;
+  // members_can_create_private_repositories determines whether members can create private repositories.
+  google.protobuf.BoolValue members_can_create_private_repositories = 3;
+  // members_can_create_internal_repositories determines whether members can create internal repositories.
+  google.protobuf.BoolValue members_can_create_internal_repositories = 4;
+  // members_can_invite_outside_collaborators determines whether repository administrators can add outside collaborators to repositories.
+  google.protobuf.BoolValue members_can_invite_outside_collaborators = 5;
+  // allows_private_repository_forking determines whether private repositories can be forked by users with access.
+  google.protobuf.BoolValue allows_private_repository_forking = 6;
+  // members_can_create_pages determines whether members can create pages in repositories.
+  google.protobuf.BoolValue members_can_create_pages = 7;
+  // members_can_change_repo_visibility determines whether members can change repository visibility.
+  google.protobuf.BoolValue members_can_change_repo_visibility = 8;
+  // members_can_delete_repositories determines whether members can delete repositories.
+  google.protobuf.BoolValue members_can_delete_repositories = 9;
+  // members_can_delete_issues determines whether members can delete issues in repositories.
+  google.protobuf.BoolValue members_can_delete_issues = 10;
+  // display_commenter_full_name_setting_enabled determines whether members can see a comment author's profile name in private repositories.
+  google.protobuf.BoolValue display_commenter_full_name_setting_enabled = 11;
+  // readers_can_create_discussions determines whether users with read access can create discussions in repositories.
+  google.protobuf.BoolValue readers_can_create_discussions = 12;
+  // members_can_create_teams determines whether members can create teams.
+  google.protobuf.BoolValue members_can_create_teams = 13;
+  // members_can_view_dependency_insights determines whether members can view dependency insights.
+  google.protobuf.BoolValue members_can_view_dependency_insights = 14;
+}
+
+message RepositoryDefault {
+  // repository_default_branch is the name of the default branch in a repository.
+  google.protobuf.StringValue repository_default_branch = 1;
+  // commit_signoff determines whether web-based commits will require signoff.
+  google.protobuf.BoolValue commit_signoff = 2;
+  // labels is a list of repository labels that will be imported into the organization.
+  repeated Label labels = 3;
+}
+
+message Label {
+  // name is the label name. (required)
+  string name = 1;
+  // color is the label color string in hexadecimal format.
+  string color = 2;
+  // default indicates whether this is a default repository label.
+  bool default = 3;
+  // description is the label description.
+  string description = 4;
+}
+
+message InitialActionsSettings {
+  // resource_id is the ID is a virtual resource ID.
+  // eg. actionssettings-{repository}
+  string resource_id = 1;
+  // repository_resource_id of the subject repository. (required)
+  string repository_resource_id = 2;
+  ActionsPermissionType actions_permissions = 3;
+  bool allows_github_owned_actions = 4;
+  bool allows_verified_actions = 5;
+  repeated string patterns = 6;
+}
+
+enum ActionsPermissionType{
+  ACTIONS_PERMISSION_TYPE_INVALID = 0;
+  ACTIONS_PERMISSION_TYPE_ALL_ENABLED = 1;
+  ACTIONS_PERMISSION_TYPE_LOCAL_ENABLED = 2;
+  ACTIONS_PERMISSION_TYPE_SPECIFIC_ENABLED = 3;
+  ACTIONS_PERMISSION_TYPE_INHERITED = 4;
+}
+
+message InitialRepositorySettings {
+  // resource_id is the ID that describes this resource. InitialRepositorySettings
+  // have a virtual resource ID.
+  // eg. repositorysettings-{repository}
+  string resource_id = 1;
+
+  // repository_resource_id of the subject repository. (required)
+  string repository_resource_id = 2;
+  string description = 3;
+  // The following are all (required) parameters.
+  string default_branch = 4;
+  bool has_wiki = 5;
+  bool has_issues = 6;
+  bool has_downloads = 7;
+  bool has_dependency_graph = 8;
+  bool has_vulnerability_alerts = 9;
+  bool has_vulnerability_updates = 10;
+  bool has_advanced_security = 11;
+  bool has_token_scanning = 12;
+  bool has_token_scanning_push_protection = 13;
+
+  GeneralRepositorySettings general_repository_settings = 14;
+  Page page = 15;
+  repeated Webhook webhooks = 16;
+  repeated Autolink autolinks = 17;
+  // RepositoryTopics have creator_resource_ids that are dependencies.
+  repeated RepositoryTopic repository_topics = 18;
+}
+
+message Autolink {
+  // key_prefix the reference prefix for the autolink reference. (required)
+  string key_prefix = 1;
+  // url_template the target url for the autolink reference. (required)
+  string url_template = 2;
+  // is_alphanumeric the configuration for the autolink reference.
+  bool is_alphanumeric = 3;
+}
+
+message Webhook {
+  // payload_url the url to send the payload of the webhook (required)
+  string payload_url = 1;
+  // whether or not the webhook should be active (required)
+  bool active = 2;
+  // whether this webhook should use ssl (required)
+  bool enable_ssl_verification = 3;
+  // event_types is a list of events that will trigger this webhook. (required)
+  repeated string event_types = 4;
+  // the http method to use for the webhook (required)
+  string content_type = 5;
+}
+
+message RepositoryTopic {
+  // topic_name is the name of the topic to be imported (required).
+  string topic_name = 1;
+  // topic_url is the url of the topic to be imported (required).
+  string topic_url = 2;
+  // state is the state of the topic to be imported (required).
+  string state = 3;
+  // creator_resource_id is the resource id of the creator of the topic to be imported (required).
+  string creator_resource_id = 4;
+  // created_at is the creation date of the topic to be imported (required).
+  google.protobuf.Timestamp created_at = 5;
+  // updated_at is the last update date of the topic to be imported.
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+message Page {
+  // source is the repository's source page setting.
+  string source = 1;
+  // source_ref_name is the repository's source_ref_name page setting.
+  string source_ref_name = 2;
+  // source_subdir is the repository's source_subdir page setting.
+  string source_subdir = 3;
+  // is_public is the repository's is_public page setting.
+  bool is_public = 4;
+  // build_type is the repository's build_type page setting.
+  string build_type = 5;
+}
+
+message GeneralRepositorySettings {
+  // The following properties are nil-able and all optional.
+
+  // is_template indicates whether a repository is a template.
+  google.protobuf.BoolValue is_template = 1;
+  // has_allow_forking indicates whether a repository has forking allowed.
+  google.protobuf.BoolValue has_allow_forking = 2;
+  // has_sponsorships indicates whether sponsorships are enabled.
+  google.protobuf.BoolValue has_sponsorships = 3;
+  // has_discussions indicates whether discussions are enabled.
+  google.protobuf.BoolValue has_discussions = 4;
+  // has_merge_commit indicates whether merge commits are enabled.
+  google.protobuf.BoolValue has_merge_commit = 5;
+  // has_squash_merge indicates whether squash merges are enabled.
+  google.protobuf.BoolValue has_squash_merge = 6;
+  // has_rebase_merge indicates whether rebase merges are enabled.
+  google.protobuf.BoolValue has_rebase_merge = 7;
+  // has_auto_merge indicates whether auto merging is enabled.
+  google.protobuf.BoolValue has_auto_merge = 8;
+  // has_delete_branch_heads indicates whether branch heads will automatically be deleted upon merge.
+  google.protobuf.BoolValue has_delete_branch_heads = 9;
+  // has_update_branch indicates whether the "update branch" option will appear in pull requests.
+  google.protobuf.BoolValue has_update_branch = 10;
+  // has_git_lfs_in_archives indicates whether git lfs files are included in archives.
+  google.protobuf.BoolValue has_git_lfs_in_archives = 11;
+  // has_projects indicates whether projects are enabled.
+  google.protobuf.BoolValue has_projects = 12;
+}
+
+// Issue is the definition for the issue resource.
+message Issue {
+  // resource_id is theID that describes this resource
+  // in the context of the migration.
+  //
+  // This has an implicit dependency on the repository resource.
+  // E.g: http://github.dev/acme/widgets/issues/3
+  string resource_id = 1;
+
+  // user_resource_id is the ID that describes the author resource
+  // in the context of the migration.
+  // E.g: http://github.dev/monalisa (required)
+  string user_resource_id = 2;
+
+  // assignees_resource_ids are the  IDs that describe the user
+  // resources that  are assigned to the issue in the context of the migration.
+  //
+  // This is an explicit dependency on the user resources.
+  //
+  // E.g: http://github.dev/monalisa  http://github.dev/lisamona
+  repeated string assignees_resource_ids = 3;
+
+  // title is the title of the issue.
+  string title = 4;
+
+  // body is the body of the issue.
+  string body = 5;
+
+  // created_at is the time the issue was created.
+  google.protobuf.Timestamp created_at = 6;
+
+  repeated string attachment_resource_ids = 8;
+
+  // closed_at is the time the issue was closed
+  google.protobuf.Timestamp closed_at = 9;
+
+  // updated_at is the time the issue was last updated
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+// GitRef is the definition for the git ref.
+message RefDetails {
+  // name is the name of the ref.
+  string name = 3;
+
+  // commit_sha is the sha of the commit that the ref points to.
+  string commit_sha = 4;
+}
+
+// PullRequest is the definition for the pull request resource.
+message PullRequest {
+  // resource_id is the ID that describes this resource
+  // in the context of the migration.
+  //
+  // This has an implicit dependency on the repository resource and contains the PR number.
+  // E.g: http://github.dev/acme/widgets/pulls/3 (required)
+  string resource_id = 1;
+
+  // user_resource_id is the ID that describes the author resource
+  // in the context of the migration.
+  // E.g: http://github.dev/monalisa (required)
+  string user_resource_id = 2;
+
+  // assignees_resource_ids are the  IDs that describe the user
+  // resources that  are assigned to the PR in the context of the migration.
+  //
+  // This is an explicit dependency on the user resources.
+  //
+  // E.g: http://github.dev/monalisa  http://github.dev/lisamona
+  repeated string assignees_resource_ids = 3;
+
+  // reviewers_resource_ids are the  IDs that describe the user
+  // resources that  are assigned to the PR as reviewers in the context of the migration.
+  //
+  // This is an explicit dependency on the user resources.
+  //
+  // E.g: http://github.dev/monalisa  http://github.dev/lisamona
+  repeated string reviewers_resource_ids = 4;
+
+  // title is the title of the PR. (required)
+  string title = 5;
+
+  // body is the body of the PR.
+  string body = 6;
+
+  // is_draft is the flag that indicates if the PR is a draft.
+  bool is_draft = 7;
+
+  // base_ref is the base ref of the PR.
+  RefDetails base_ref = 8;
+
+  // head_ref is the head ref of the PR.
+  RefDetails head_ref = 9;
+
+  // merge_commit_sha is the sha of the merge commit.
+  string merge_commit_sha = 10;
+
+  // created_at is the time the PR was created.
+  google.protobuf.Timestamp created_at = 11;
+
+  // merged_at is the time the PR was created.
+  google.protobuf.Timestamp merged_at = 12;
+
+  // closed_at is the time the PR was closed
+  google.protobuf.Timestamp closed_at = 13;
+
+  // attachment_resource_ids are the  IDs that describe the attachments.
+  // this is an explicit dependency on the attachment resources.
+  repeated string attachment_resource_ids = 14;
+}
+
+// IssueComment is the definition for an issue comment resource.
+message IssueComment {
+  // resource_id is theID that describes this resource
+  // in the context of the migration.
+  //
+  // This has an implicit dependency on the issue resource.
+  //
+  // E.g: http://github.dev/guacamole-bowl/vim/issues/2#issuecomment-3 (required)
+  string resource_id = 1;
+
+  // user_resource_id is the  ID that describes the user
+  // resource that created the issue in the context of the migration.
+  //
+  // This is an explicit dependency on the user resource.
+  //
+  // E.g: http://github.dev/monalisa (required)
+  string user_resource_id = 2;
+
+  // body is the body of the comment.
+  string body = 3;
+
+  // created_at is the time the comment was created. (required)
+  google.protobuf.Timestamp created_at = 4;
+
+  repeated string attachment_resource_ids = 5;
+}
+
+// IssueEvent is the definition for an issue event resource.
+message IssueEvent {
+  // resource_id is the ID that describes this resource
+  // in the context of the migration.
+  //
+  // This has an implicit dependency on the issue resource.
+  //
+  // E.g: http://github.dev/guacamole-bowl/vim/issues/2#event-3 (required)
+  string resource_id = 1;
+
+  // actor_resource_id is the ID that describes the actor
+  // resource that created the issue in the context of the migration.
+  //
+  // This is an explicit dependency on the actor resource.
+  //
+  // E.g: http://github.dev/monalisa (required)
+  string actor_resource_id = 2;
+
+  // subject_user_resource_id is the ID that describes the subject
+  // resource of the issue event in the context of the migration.
+  //
+  // E.g: http://github.dev/monalisa
+  string subject_user_resource_id = 3;
+
+  // subject_issue_resource_id is the ID that describes the subject
+  // resource of the issue event in the context of the migration.
+  //
+  //  http://github/dev/guacamole-bowl/vim/issues/2
+  string subject_issue_resource_id = 4;
+
+  // subject_pull_request_resource_id is the ID that describes the subject
+  // resource of the pull_request event in the context of the migration.
+  //
+  //  http://github/dev/guacamole-bowl/vim/pull/2
+  string subject_pull_request_resource_id = 5;
+
+  // referencing_pull_request_resource_id is the ID that describes the pr
+  // resource that is referencing the event in the context of the migration.
+  //
+  // This is an explicit dependency on the pr resource.
+  //
+  // E.g http://github/dev/guacamole-bowl/vim/pull/2
+  string referencing_pull_request_resource_id = 6;
+
+  // commit_repository_resource_id is the ID that describes the repository
+  // resource that is referencing the event commit in the context of the migration.
+  //
+  // This is an explicit dependency on the repository resource.
+  //
+  // E.g http://github/dev/guacamole-bowl/vim
+  string commit_repository_resource_id = 7;
+
+  // commit_id is the ID of the commit that was referenced in the event.
+  string commit_id = 8;
+
+  // event is the event type (required)
+  string event = 9;
+
+  // created_at is the time the comment was created. (required)
+  google.protobuf.Timestamp created_at = 10;
+
+  // label_name is the name of the label that was added or removed.
+  string label_name = 11;
+
+  // title_is the title of the issue.
+  string title_is = 12;
+
+  // title_was is the title of the issue before the event.
+  string title_was = 13;
+
+  // milestone_title is the title of the milestone that was added or removed.
+  string milestone_title = 14;
+
+  // column_name is the name of the column that was added or removed.
+  string column_name = 15;
+
+  // previous_column_name is the name of the column before the event.
+  string previous_column_name = 16;
+
+  // lock_reason is the reason the issue was locked.
+  string lock_reason = 17;
+
+  // block_duration_days is the number of days that the user is blocked for.
+  int64 block_duration_days = 18;
+
+  // message is the message that was added to the issue.
+  string message = 19;
+
+  // before_commit_oid is the ID of the commit that was referenced in the event.
+  string before_commit_oid = 20;
+
+  // after_commit_id is the ID of the commit that was referenced in the event.
+  string after_commit_oid = 21;
+
+  // ref is the base ref of the PR.
+  string ref = 22;
+}
+
+// IssueEventBatch is the definition for an issue event batch resource.
+message IssueEventBatch {
+  // resource_id is the ID that describes this resource
+  // in the context of the migration.
+  // 
+  // This is a virtual resource that is created to represent a batch of issue events.
+  // 
+  // E.g: issue-event-batch-$uuid (required)
+  string resource_id = 1;
+
+  // issue_resource_ids are the IDs that describe the issue
+  // resources that are assigned to this event batch in the context of the migration.
+  //
+  // This is an explicit dependency on the issue resources.
+  //
+  // E.g: http://github/dev/guacamole-bowl/vim/issues/2  http://github/dev/guacamole-bowl/vim/issues/3
+  repeated string issue_resource_ids = 2;
+
+  // user_resource_ids are the IDs that describe the actor and subject
+  // resources that are assigned to this event batch in the context of the migration.
+  //
+  // This is an explicit dependency on the user resources.
+  //
+  // E.g: http://github.dev/monalisa  http://github.dev/lisamona
+  repeated string user_resource_ids = 3;
+
+  // pull_request_resource_ids are the IDs that describe the pull request
+  // resources that are referenced by this event batch in the context of the migration.
+  //
+  // This is an explicit dependency on the pull_request resources.
+  //
+  // E.g: http://github/dev/guacamole-bowl/vim/pull/2  http://github/dev/guacamole-bowl/vim/pull/3
+  repeated string pull_request_resource_ids = 4;
+
+  // repository_resource_ids are the IDs that describe the repository
+  // resources that are referenced by this event batch in the context of the migration.
+  //
+  // This is an explicit dependency on the repository resources.
+  //
+  // E.g: http://github/dev/guacamole-bowl/vim  http://github/dev/guacamole-bowl/neovim
+  repeated string repository_resource_ids = 5;
+
+  // events are the events that are part of this batch.
+  repeated IssueEvent events = 6;
+}
+
+// MilestoneBatch is the definition for a milestone batch resource.
+message MilestoneBatch {
+  // resource_id is the ID that describes this resource
+  // in the context of the migration.
+  // 
+  // This is a virtual resource that is created to represent a batch of milestones.
+  // 
+  // E.g: issue-event-batch-$uuid (required)
+  string resource_id = 1;
+
+  // issue_resource_ids are the IDs that describe the issue
+  // resources that are assigned to this milestone batch in the context of the migration.
+  //
+  // This is an explicit dependency on the issue resources.
+  //
+  // E.g: http://github/dev/guacamole-bowl/vim/issues/2  http://github/dev/guacamole-bowl/vim/issues/3
+  repeated string issue_resource_ids = 2;
+
+  // user_resource_ids are the IDs that describe the actor and subject
+  // resources that are assigned to this milestone batch in the context of the migration.
+  //
+  // This is an explicit dependency on the user resources.
+  //
+  // E.g: http://github.dev/monalisa  http://github.dev/lisamona
+  repeated string user_resource_ids = 3;
+
+  // milestones are the individual milestones that are part of this batch.
+  repeated Milestone milestones = 4;
+}
+
+// Milestone is the definition for the milestone resource.
+message Milestone {
+  string resource_id = 1;
+  string title = 2;
+  string user_resource_id = 3;
+  string description = 4;
+  string state = 5;
+  google.protobuf.Timestamp due_on = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  google.protobuf.Timestamp closed_at = 9;
+  repeated string issue_resource_ids = 10;
+}
+
+// Attachment is the definition for the attachment resource.
+message Attachment {
+  string resource_id = 1;
+  string type = 2;
+  string repository_id = 3;
+  string name = 4;
+  string content_type = 5;
+  string user_resource_id = 6;
+  string asset_url = 7;
+  string referenced_by_resource = 8;
+}
+
+// RepositoryLabel is the definition for the repository label resource.
+message RepositoryLabel {
+  // URL of the label
+  string resource_id = 1;
+  string name = 2;
+  string color = 3;
+  string description = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message RepositoryLabelsBatch {
+  // resource_id is a virtual id created to represent a batch of
+  // repository labels.
+  //
+  // eg.repository-labels-$repository-id-$uuid
+  string resource_id = 1;
+  // Explicit dependency, repository must exist to create repository labels.
+  string repository_id = 2;
+  // labels contains the batch of labels all belonging to the same repository.
+  repeated RepositoryLabel labels = 3;
+}
+
+// Project is the definition for the project resource.
+message Project {
+  // resource_id is the ID that describes this resource
+  string resource_id = 1;
+  // name is the name of the project
+  string name = 2;
+  // number is the number of the project
+  int64 number = 3;
+  // owner_resource_id indicates the resource ID of the owner (repository, organization, or user). (required)
+  string owner_resource_id = 4;
+  // owner_type is the type of project owner. (required)
+  OwnerType owner_type = 5;
+  // creator_resource_id is the resource ID of the project creator. (required)
+  string creator_resource_id = 6;
+  // created_at is the date and time the project was created. (required)
+  google.protobuf.Timestamp created_at = 7;
+  // body is the body of the project.
+  string body = 8;
+  // is_public indicates whether or not the project is a public project.
+  bool is_public = 9;
+  // updated_at is the date and time the project was updated.
+  google.protobuf.Timestamp updated_at = 10;
+  // closed_at is the date and time the project was closed.
+  google.protobuf.Timestamp closed_at = 11;
+}
+
+// OwnerType is the type of owner for a project.
+enum OwnerType {
+  OWNER_TYPE_INVALID = 0;
+  OWNER_TYPE_REPOSITORY = 1;
+  OWNER_TYPE_ORGANIZATION = 2;
+  OWNER_TYPE_USER = 3;
+}
+
+// ProjectColumn is the definition for the project column resource.
+message ProjectColumn {
+  // resource_id is a combination of the project URL and the column position.
+  string resource_id = 1;
+  // name is the name of the column.
+  string name = 2;
+  // color is the color of the column.
+  string color = 3;
+  // created_at is the date and time the column was created.
+  google.protobuf.Timestamp created_at = 4;
+  // updated_at is the date and time the column was updated.
+  google.protobuf.Timestamp updated_at = 5;
+  // purpose is the purpose of the column.
+  string purpose = 6;
+  // position is the position of the column.
+  int64 position = 7;
+  // hidden_at is the date and time the column was hidden.
+  google.protobuf.Timestamp hidden_at = 8;
+  // project_resource_id is the resource ID of the project this column belongs to.
+  string project_resource_id = 9;
+  // workflows are the list of workflows in the column.
+  repeated ProjectWorkflow workflows = 10;
+}
+
+// ProjectWorkflow is the definition for the project workflow resource.
+message ProjectWorkflow {
+  // creator_resource_id is the resource ID of the creator.
+  string creator_resource_id = 1;
+  // trigger_type is the trigger type of the workflow.
+  string trigger_type = 2;
+  // created_at is the date and time the card was created.
+  google.protobuf.Timestamp created_at = 3;
+  // last_updater_resource_id is the resource ID of the user to last update the workflow.
+  string last_updater_resource_id = 4;
+  // updated_at is the date and time the card was updated.
+  google.protobuf.Timestamp updated_at = 5;
+  // actions are the list of actions in the workflow.
+  repeated ProjectWorkflowAction actions = 6;
+}
+
+// ProjectWorkflowAction is the definition for the project workflow action resource.
+message ProjectWorkflowAction {
+  // creator_resource_id is the resource ID of the creator.
+  string creator_resource_id = 1;
+  // created_at is the date and time the card was created. (required)
+  google.protobuf.Timestamp created_at = 2;
+  // last_updater_resource_id is the resource ID of the user to last update the workflow action.
+  string last_updater_resource_id = 3;
+  // updated_at is the date and time the card was updated.
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+// ProjectCard is the definition for the project card resource.
+message ProjectCard {
+  // resource_id is a virtual id created to represent a project card
+  // eg. project-card-$uuid
+  string resource_id = 1;
+  // creator_resource_id is the resource ID of the project creator.
+  string creator_resource_id = 2;
+  // content_resource_id is the resource ID of the issue referenced by the card.
+  string content_resource_id = 3;
+  // note is the text of the note of the card.
+  string note = 4;
+  // priority is the priority of the card.
+  google.protobuf.UInt64Value priority = 5;
+  // created_at is the date and time the card was created.
+  google.protobuf.Timestamp created_at = 6;
+  // updated_at is the date and time the card was updated.
+  google.protobuf.Timestamp updated_at = 7;
+  // archived_at is the date and time the card was archived.
+  google.protobuf.Timestamp archived_at = 8;
+  // hidden_at is the date and time the card was hidden.
+  google.protobuf.Timestamp hidden_at = 9;
+  // project_column_resource_id is the resource ID of the column this card belongs to
+  string project_column_resource_id = 10;
+}
+
+// ProjectCardsBatch is a collection of project cards to add to a column.
+message ProjectCardsBatch {
+  // resource_id is a virtual id created to represent a batch of project cards
+  // eg. project-cards-batch-$uuid
+  string resource_id = 1;
+  // project_column_resource_id is the resource ID of the column these cards belong to
+  string project_column_resource_id = 2;
+  // cards is the list of cards that belong to this batch
+  repeated ProjectCard cards = 3;
+}
+
+// IssueLabelsBatch is a collection of issue labels to add to one issue.
+message IssueLabelsBatch {
+  // resource_id is a virtual id created to represent a batch of
+  // labels to add to an issue.
+  // eg. issue-labels-$issue-resource-id-$uuid
+  string resource_id = 1;
+  // Explicit dependency, the issue must already exist to add labels.
+  string issue_resource_id = 2;
+  // Explicit dependency, the labels must already exist.
+  repeated string label_resource_ids = 3;
+}
+
+// Reaction is the definition for the reaction resource.
+message Reaction {
+  // content is the type of reaction used (e.g. "+1", "laugh",
+  // etc).
+  string content = 1;
+
+  // user is the resource id of the user who reacted.
+  string user_resource_id = 2;
+
+  // created_at is the time the reaction was created.
+  google.protobuf.Timestamp created_at = 3;
+}
+
+// ReactionsBatch is a collection of reaction resources that can be imported as a batch.
+message ReactionsBatch {
+  // resource_id is a virtual id created to represent a batch of
+  // reactions to add to a subject
+  // eg. reactions-$subject-resource-id-$uuid
+  string resource_id = 1;
+  // Explicit dependency, the subject_resource_id must exist to
+  // add reactions.
+  string subject_resource_id = 2;
+  ReactionSubjectType subject_type = 3;
+  repeated Reaction reactions = 4;
+}
+
+enum ReactionSubjectType {
+  // REACTION_SUBJECT_TYPE_INVALID is present because because enums require a zero value. This should never be returned.
+  REACTION_SUBJECT_TYPE_INVALID = 0;
+  // REACTION_SUBJECT_TYPE_COMMIT_COMMENT is returned if the reaction is associated to a CommitComment model.
+  REACTION_SUBJECT_TYPE_COMMIT_COMMENT = 1;
+  // REACTION_SUBJECT_TYPE_DISCUSSION is returned if the reaction is associated to a Discussion model.
+  REACTION_SUBJECT_TYPE_DISCUSSION = 2;
+  // REACTION_SUBJECT_TYPE_DISCUSSION_COMMENT is returned if the reaction is associated to a DiscussionComment model.
+  REACTION_SUBJECT_TYPE_DISCUSSION_COMMENT = 3;
+  // REACTION_SUBJECT_TYPE_DISCUSSION_POST is returned if the reaction is associated to a DiscussionPost model.
+  REACTION_SUBJECT_TYPE_DISCUSSION_POST = 4;
+  // REACTION_SUBJECT_TYPE_DISCUSSION_POST_REPLY is returned if the reaction is associated to a DiscussionPostReply model.
+  REACTION_SUBJECT_TYPE_DISCUSSION_POST_REPLY = 5;
+  // REACTION_SUBJECT_TYPE_ISSUE is returned if the reaction is associated to a Issue model.
+  REACTION_SUBJECT_TYPE_ISSUE = 6;
+  // REACTION_SUBJECT_TYPE_ISSUE_COMMENT is returned if the reaction is associated to a IssueComment model.
+  REACTION_SUBJECT_TYPE_ISSUE_COMMENT = 7;
+  // REACTION_SUBJECT_TYPE_PULL_REQUEST_REVIEW is returned if the reaction is associated to a PullRequestReview model.
+  REACTION_SUBJECT_TYPE_PULL_REQUEST_REVIEW = 8;
+  // REACTION_SUBJECT_TYPE_PULL_REQUEST_REVIEW_COMMENT is returned if the reaction is associated to a PullRequestReviewComment model.
+  REACTION_SUBJECT_TYPE_PULL_REQUEST_REVIEW_COMMENT = 9;
+  // REACTION_SUBJECT_TYPE_RELEASE is returned if the reaction is associated to a Release model.
+  REACTION_SUBJECT_TYPE_RELEASE = 10;
+  // REACTION_SUBJECT_TYPE_REPOSITORY_ADVISORY is returned if the reaction is associated to a RepositoryAdvisory model.
+  REACTION_SUBJECT_TYPE_REPOSITORY_ADVISORY = 11;
+  // REACTION_SUBJECT_TYPE_REPOSITORY_ADVISORY_COMMENT is returned if the reaction is associated to a RepositoryAdvisoryComment model.
+  REACTION_SUBJECT_TYPE_REPOSITORY_ADVISORY_COMMENT = 12;
+}
+
+// Noop is a resource that is used to represent a resource that doesn't
+// need to be processed
+message Noop {
+  string resource_id = 1;
+  string reason = 2;
+}
+
+// CommitComment is the definition for commit comment resource.
+message CommitComment {
+  // resource_id is theID that describes this resource
+  // in the context of the migration.
+  //
+  // This has an implicit dependency on the repository resource.
+  //
+  // E.g: http://github.dev/guacamole-bowl/vim/commit/123456789abcdef#commitcomment-3 (required)
+  string resource_id = 1;
+
+  // user_resource_id is the  ID that describes the user
+  // resource that created the comment in the context of the migration.
+  //
+  // This is an explicit dependency on the user resource.
+  //
+  // E.g: http://github.dev/monalisa (required)
+  string user_resource_id = 2;
+
+  // path is the path of the file that the comment was made on.
+  string path = 3;
+
+  // body is the body of the comment. (required)
+  string body = 4;
+
+  // position is the line position the commit comment should be placed on
+  int64 position = 5;
+
+  // created_at is the time the comment was created. (required)
+  google.protobuf.Timestamp created_at = 6;
+}
+
+// CloseIssueReference is the definition of a close issue reference.
+message CloseIssueReference {
+  // resource_id is a virtual id used to identify a unique close issue reference
+  // eg. $pull_request_resource_id+$issue_resource_id
+  string resource_id = 1;
+  string pull_request_resource_id = 2;
+  string issue_resource_id = 3;
+}
+
+// CloseIssueReferenceBatch is a collection of CloseIssueReference resources.
+message CloseIssueReferenceBatch {
+  // resource id of the batch eg. (close-issue-references-batch-$uuid)
+  string resource_id = 1;
+  // the batch is dependent on all sub items.
+  repeated CloseIssueReference close_issue_references = 2;
+}
+
+// PullRequestReview is the definition of a pull request review
+message PullRequestReview {
+  string resource_id = 1;
+  string user_resource_id = 2;
+  string head_sha = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp submitted_at = 5;
+  PullRequestReviewState state = 6;
+  string body = 7;
+  repeated string attachment_resource_ids = 8;
+  repeated PullRequestReviewThread threads = 9;
+  repeated PullRequestReviewComment comments = 10;
+}
+
+enum PullRequestReviewState {
+  // PULL_REQUEST_REVIEW_STATE_INVALID is present because enums require a zero value. This
+  // should never be used.
+  PULL_REQUEST_REVIEW_STATE_INVALID = 0;
+  // PULL_REQUEST_REVIEW_STATE_PENDING is returned if the review is pending.
+  PULL_REQUEST_REVIEW_STATE_PENDING = 1;
+  // PULL_REQUEST_REVIEW_STATE_COMMENTED is returned if the review has a commented state.
+  PULL_REQUEST_REVIEW_STATE_COMMENTED = 2;
+  // PULL_REQUEST_REVIEW_STATE_CHANGES_REQUESTED is returned if the review has a changes requested state.
+  PULL_REQUEST_REVIEW_STATE_CHANGES_REQUESTED = 3;
+  // PULL_REQUEST_REVIEW_STATE_APPROVED is returned if the review has an approved state.
+  PULL_REQUEST_REVIEW_STATE_APPROVED = 4;
+  // PULL_REQUEST_REVIEW_STATE_DISMISSED is returned if the review is dismissed.
+  PULL_REQUEST_REVIEW_STATE_DISMISSED = 5;
+}
+
+// PullRequestReviewThread is the definition of a pull request review thread
+message PullRequestReviewThread {
+  string resource_id = 1;
+  string pull_request_review_resource_id = 2;
+  string resolved_user_resource_id = 3;
+  google.protobuf.Timestamp resolved_at = 4;
+  repeated PullRequestReviewComment comments = 5;
+  google.protobuf.Timestamp created_at = 6;
+  string base_commit_id = 7;
+  string commit_id = 8;
+  string path = 9;
+  google.protobuf.Int64Value  start_line = 10;
+  google.protobuf.Int64Value end_line = 11;
+  PullRequestReviewDiffSideType start_side = 12;
+  PullRequestReviewDiffSideType end_side = 13;
+  google.protobuf.StringValue diff_hunk = 14;
+  google.protobuf.Int64Value position = 15;
+  google.protobuf.Int64Value original_position = 16;
+  PullRequestReviewSubjectType subject_type = 17;
+  google.protobuf.Int64Value start_position_offset = 18;
+  google.protobuf.Int64Value blob_position = 19;
+  bool outdated = 20;
+}
+
+// PullRequestReviewDiffSideType denotes the side used when generating diffs (can be left or right)
+enum PullRequestReviewDiffSideType {
+  PULL_REQUEST_REVIEW_DIFF_SIDE_TYPE_INVALID = 0;
+  PULL_REQUEST_REVIEW_DIFF_SIDE_TYPE_LEFT = 1;
+  PULL_REQUEST_REVIEW_DIFF_SIDE_TYPE_RIGHT = 2;
+}
+
+enum PullRequestReviewSubjectType {
+  PULL_REQUEST_REVIEW_SUBJECT_TYPE_INVALID = 0;
+  PULL_REQUEST_REVIEW_SUBJECT_TYPE_LINE = 1;
+  PULL_REQUEST_REVIEW_SUBJECT_TYPE_FILE = 2;
+}
+
+// PullRequestReviewComment is the definition of a pull request review comment
+message PullRequestReviewComment {
+  string resource_id = 1;
+  string user_resource_id = 2;
+  string pull_request_review_resource_id = 3;
+  string in_reply_to_comment_resource_id = 4;
+  string pull_request_review_thread_resource_id = 5;
+  string body = 6;
+  google.protobuf.Timestamp created_at = 7;
+  repeated string attachment_resource_ids = 8;
+}
+
+// ProtectedBranch is the definition of the protected branch resource.
+message ProtectedBranch {
+  // ProtectedBranch is a virtual resource and has resource ids like
+  // protected-branch-{name}-{repository}
+  string resource_id = 1;
+
+  string repository_resource_id = 2;
+  // name is the protected branch pattern.
+  string name = 3;
+  google.protobuf.BoolValue requires_approving_reviews = 4;
+  google.protobuf.Int32Value required_approving_review_count = 5;
+  google.protobuf.BoolValue requires_commit_signatures = 6;
+  google.protobuf.BoolValue requires_linear_history = 7;
+  google.protobuf.BoolValue allows_force_pushes = 8;
+  google.protobuf.BoolValue allows_deletions = 9;
+  google.protobuf.BoolValue is_admin_enforced = 10;
+  google.protobuf.BoolValue requires_status_checks = 11;
+  google.protobuf.BoolValue requires_strict_status_checks = 12;
+  google.protobuf.BoolValue requires_code_owner_reviews = 13;
+  google.protobuf.BoolValue dismisses_stale_reviews = 14;
+  google.protobuf.BoolValue restricts_review_dismissals = 15;
+  google.protobuf.BoolValue restricts_pushes = 16;
+  repeated string required_status_check_contexts = 17;
+  google.protobuf.BoolValue requires_review_thread_resolution = 18;
+  google.protobuf.BoolValue require_last_push_approval = 19;
+}
+
+// Release is the definition of a release resource.
+message Release {
+  string resource_id = 1;
+  string repository_resource_id = 2;
+  string user_resource_id = 3;
+  string name = 4;
+  string tag_name = 5;
+  string body = 6;
+  string state = 7;
+  string pending_tag = 8;
+  bool is_pre_release = 9;
+  string target_commitish = 10;
+  google.protobuf.Timestamp published_at = 11;
+  google.protobuf.Timestamp created_at = 12;
+}
+
+// ReleaseAsset is the definition of a release asset that has been uploaded to blob_url.
+message ReleaseAsset {
+  // resource_id is the guid associated with the release asset.
+  string resource_id = 1;
+  string release_resource_id = 2;
+  string repository_resource_id = 3;
+  string file_name = 4;
+  // user is the original uploader of the asset.
+  string user_resource_id = 5;
+  string content_type = 6;
+  // size in bytes.
+  int64 size = 7;
+  // blob_key is the key in blob storage of the release asset.
+  string blob_key = 8;
+}

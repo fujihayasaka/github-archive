@@ -1,0 +1,28 @@
+#!/bin/bash
+# This script is run by the "launch" ci build.
+: ${IMAGE_NAME:="launch:$(git rev-parse HEAD)"}
+
+set -ea
+
+export LAUNCH_CI=1
+export SKEEMA_ENV=ci
+
+# Validate database schemas with MySQL8
+export MYSQL_CONTAINER_NAME=${MYSQL_CONTAINER_NAME:-launch-test-mysql8}
+export MYSQL_IMAGE_NAME=${MYSQL_IMAGE_NAME:-mysql:8.0.36}
+
+docker build -f Dockerfile.test -t "$IMAGE_NAME" .
+bash script/with-verify-db --clean --migrate-image "$IMAGE_NAME" --skeema-env ci -- bash <<CIBUILD
+docker run --rm \
+  -v$(pwd):/go/src/github.com/github/launch \
+  --link \$LAUNCH_TEST_DATABASE_CONTAINER_NAME:mysql \
+  --env MYSQL_HOST=mysql \
+  --env LAUNCH_ENV=test \
+  --env LAUNCH_MODE=hosted \
+  --env LAUNCH_CONTAINER=true \
+  --env GITHUB_ACTIONS=\$GITHUB_ACTIONS \
+  --env CI=\$CI \
+  --env LAUNCH_CI=1 \
+  "$IMAGE_NAME" \
+  bash -c 'env && cd schemas && /go/src/github.com/github/launch/script/skeema diff "$SKEEMA_ENV"'
+CIBUILD

@@ -1,0 +1,108 @@
+default_branch: main
+ok_for_moda_to_remove_from_deprecating_clusters: true
+notifications:
+  slack_channels:
+  - "#authnd-ops"
+# https://thehub.github.com/epd/engineering/products-and-services/internal/moda/reference/deployment-yaml/
+required_builds:
+- authnd-test / authnd-test
+- authnd-moda-config-bundle / authnd-moda-config-bundle
+- authnd-docker-security / authnd-docker-security
+- authnd-lint / authnd-lint
+- authnd-docker-image / authnd-docker-image
+- authnd-client-ruby / authnd-client-ruby
+auto_start_pipeline: production_rollout
+environments:
+- name: production
+  required_review_tasks: [ "deploy" ] # Require an approving PR review before deploying to prod.
+  cluster_selector:
+    profile: general
+    region: iad
+  extra_start_message: "Need to cancel? Run `.deploy cancel authnd`, then `.deploy authnd/main to production` to ensure the old code is restored. Check out the [authnd.deployment dashboard](https://app.datadoghq.com/dashboard/nvr-ydt-9pj) and [Sentry issues](https://sentry.io/organizations/github/releases/{{RELEASE_SHA}}/?environment=production&project=5391058) so you're the first to know if you've broken anything."
+  canaryable: true
+  require_canary: true
+  extra_completed_message: "Thanks for making Authnd better! You can now merge your associated PR :)"
+- name: staff-wus2-01
+  proxima: true
+  service_mesh:
+    enabled: true
+  cluster_selector:
+    profile: proxima
+    stamp: staff-wus2-01
+proxima:
+  environment_pattern:
+    service_mesh:
+      enabled: true
+  rollout_pattern:
+    - kind: deployment
+      start_message: We are now going to deploy {{app}}/{{ref}} to {{environment}}! Please pause or cancel the pipeline after the deploy if you want more time before the next stage.
+      config:
+        timeout: 300
+pipelines:
+  production_rollout:
+    append_proxima_stamps: true
+    # thread_notifications is an experimental feature to group Slack notifications about the deploy in a thread
+    # See https://github.com/github/heaven/discussions/11819
+    thread_notifications: true
+    timeout: 3600
+    stages:
+      - name: va3-canary
+        kind: canary_deployment
+        config:
+          environment: production
+          sites: ["va3-iad"]
+          hosts: canary
+          timeout: 320
+        gates:
+          - kind: datadog
+            monitor_id: "142801368" # https://app.datadoghq.com/monitors/142801368
+            execution_mode: continuous
+            display_name: Canary Availability Gate
+            evaluation_period: 300
+      - name: staff-wus2-01
+        kind: deployment
+        start_message: We are now going to deploy {{app}}/{{ref}} to {{environment}}! Please pause or cancel the pipeline after the deploy if you want more time before the next stage.
+        config:
+          environment: staff-wus2-01
+          timeout: 300
+        gates:
+          - kind: timer
+            duration: 300
+      - name: canary
+        kind: canary_deployment
+        config:
+          environment: production
+          hosts: canary
+          timeout: 320
+        gates:
+          - kind: datadog
+            monitor_id: "142801368" # https://app.datadoghq.com/monitors/142801368
+            execution_mode: continuous
+            display_name: Canary Availability Gate
+            evaluation_period: 300
+      - name: va3-iad
+        kind: deployment
+        start_message: We are now going to deploy {{app}}/{{ref}} to partitions in va3! Please pause or cancel the pipeline after the deploy if you want more time before your pull request(s) auto merges.
+        config:
+          environment: production
+          sites: ["va3-iad"]
+          timeout: 620
+        gates:
+          - kind: datadog
+            monitor_id: "142801368" # https://app.datadoghq.com/monitors/142801368
+            execution_mode: continuous
+            display_name: Production Availability Gate
+            evaluation_period: 300
+      - name: full_production
+        kind: deployment
+        start_message: We are now going to deploy {{app}}/{{ref}}! Please pause or cancel the pipeline after the deploy if you want more time before your pull request(s) auto merges.
+        config:
+          environment: production
+          skip_sites: ["va3-iad"]
+          timeout: 620
+        gates:
+          - kind: datadog
+            monitor_id: "142801368" # https://app.datadoghq.com/monitors/142801368
+            execution_mode: continuous
+            display_name: Production Availability Gate
+            evaluation_period: 300

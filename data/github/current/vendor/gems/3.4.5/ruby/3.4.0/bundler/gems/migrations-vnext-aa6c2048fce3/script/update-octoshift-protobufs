@@ -1,0 +1,33 @@
+#!/bin/bash
+
+# I cannot find an invocation of `sed -i` that works on macOS anymore.
+# It used to be `sed -i ''`, but this now throws an error. If someone knows
+# the right invocation feel free to change this. Until then, gsed it is.
+which gsed || (echo "ERROR: gsed must be installed to run this script. Install with 'brew install gnu-sed'")
+
+set -e
+
+WORKDIR=$(mktemp -d)
+echo ${WORKDIR}
+
+BRANCH=${1:-main}
+
+echo "=== Cloning Octoshift repository..."
+git clone --depth=1 github@github.ghe.com:github/octoshift.git "${WORKDIR}"/octoshift -b $BRANCH --single-branch
+
+echo "=== Adding 'go_package' header to protobuf files..."
+gsed -i '/option ruby_package/ioption go_package = "github.com/github/migrations-vnext/internal/pkg/octoshift/imports/v1";' "${WORKDIR}"/octoshift/proto/imports/v1/*.proto
+
+gsed -i '/option ruby_package/ioption go_package = "github.com/github/migrations-vnext/internal/pkg/octoshift/imports/v2";' "${WORKDIR}"/octoshift/proto/imports/v2/*.proto
+
+echo "=== Copying protobuf files into migrations-vnext..."
+rm -rf "$(pwd)"/internal/proto/octoshift/imports
+cp -a "${WORKDIR}"/octoshift/proto/imports "$(pwd)"/internal/proto/octoshift/
+
+echo "=== Done!"
+
+function cleanup {
+  rm -rf "${WORKDIR}"
+  echo "=== Deleted temporary directory: ${WORKDIR}"
+}
+trap cleanup EXIT

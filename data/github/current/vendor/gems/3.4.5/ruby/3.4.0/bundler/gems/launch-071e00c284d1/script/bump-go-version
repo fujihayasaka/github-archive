@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+#/ Usage: script/bump-go-version [VERSION]
+#/ Updates the version of Go(lang) used by Actions
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+test -z "${DEBUG:-}" || {
+    set -x
+}
+
+usage() {
+  cat "$0" | grep ^#/ | cut -c4-
+}
+
+function log() {
+  printf '[%s] %s\n' "$(date -R)" "${1}"
+}
+
+function replace() {
+  local pattern="${1}"
+  local file="${2}"
+
+  if [[ $(uname -s) == "Darwin" ]]; then
+    sed -i '' -E "${pattern}" "${file}"
+  else
+    sed -i -E "${pattern}" "${file}"
+  fi
+}
+
+version="${1:-}"
+majorVersion="$(echo $version | sed -e "s#\(1\.[0-9]*\)\(\.[0-9]*\)#\1#g")"
+echo majorVersion is $majorVersion
+
+if [[ -z "${version}" ]]; then
+  usage
+  exit 1
+fi
+
+log "testing for valid version pattern"
+regexp='^[0-9.]+$'
+if [[ ! "${version}" =~ $regexp ]]; then
+  log "error: ${version} is not a valid semver"
+  exit 1
+fi
+
+# Our Brewfile (to major version)
+log "updating brewfile"
+replace "s#go@[0-9.]+#go@${majorVersion}#g" Brewfile
+
+# Our base Dockerfiles
+for df in Dockerfile Dockerfile.test ./config/tools/protoc/Dockerfile; do
+  log "updating dockerfile ${df}"
+  replace "s#FROM golang:[0-9.]+#FROM golang:${version}#g" "${df}"
+done
+
+# Our supporting Dockerfiles (to major version)
+for df in ./config/tools/protoc/Dockerfile ./config/tools/skeema/Dockerfile; do
+  log "updating dockerfile ${df}"
+  replace "s#FROM golang:[0-9.]+#FROM golang:${majorVersion}#g" "${df}"
+done
+
+
+# Our CI script
+log "updating CI script"
+replace "s#go[0-9.]+.linux-amd64.tar.gz#go${version}.linux-amd64.tar.gz#g" script/cibuild-launch-docker
+
+# go.mod file
+# https://go.dev/doc/toolchain
+# Update go language version to major version
+replace "s#^go 1.[0-9.]*\$#go $majorVersion#g" go.mod
+# Update toolchain to match full version
+replace "s#^toolchain go1.[0-9.]*\$#toolchain go$version#g" go.mod

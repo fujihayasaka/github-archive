@@ -1,0 +1,72 @@
+# http://kubernetes.io/docs/user-guide/deployments/#what-is-a-deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: launch-worker
+    annotations:
+        heaven.githubapp.com/deploy-requirement: "true"
+        heaven.githubapp.com/image-placeholder: launch
+        # https://github.com/github/moda-linter/blob/75731cd9f59e29883cb363020804c83d1d7f4ab8/rules/docs/env_var_already_injected_by_annotation.md
+        heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: launch-worker
+spec:
+    selector:
+        matchLabels:
+            service: launch-worker
+    replicas: 2
+    strategy:
+        type: RollingUpdate
+        rollingUpdate:
+            # Allow $spec.replicas pods to be created immediately upon deploy
+            maxSurge: "35%"
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: prod-launch
+                observability.github.com/splunk_sourcetype: launch-fluentbit
+                observability.github.com/kafka_topic: launch
+        spec:
+            dnsPolicy: Default
+            terminationGracePeriodSeconds: 300
+            # volumes:
+            #   - name: github-metadata
+            #     hostPath:
+            #       path: /etc/github/metadata.json
+            containers:
+                - name: launch-worker
+                  # The image repository and tag are substituted on deploy.
+                  image: launch
+                  # The command to run when booting the containers.
+                  command:
+                    - "launch-worker"
+                  env: []
+                  # As per https://github.com/github/kube/blob/master/docs/handbook_files/next_steps.md#required-prestop-hook
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command: ["sleeper", "-seconds", "5"]
+                  # This port needs to match what is configured in Dockerfile.
+                  ports:
+                    - containerPort: 6824
+                  # volumeMounts:
+                  #   - mountPath: /etc/github/metadata.json
+                  #     name: github-metadata
+                  #     readOnly: true
+                  resources:
+                    requests:
+                        # Recommendations: https://app.datadoghq.com/s/59fe6c40c/ugb-7kn-txq
+                        cpu: "4000m"
+                        memory: "1050Mi"
+                    limits:
+                        # Adjust GOMAXPROCS in tandem. It's recommended the cpu limit be set to GOMAXPROCS+1.
+                        cpu: "9"
+                        memory: "1200Mi"
+                  # Definitions for liveness and readiness probes can be found at
+                  # http://kubernetes.io/docs/api-reference/v1/definitions/#_v1_probe
+                  readinessProbe:
+                    initialDelaySeconds: 5
+                    timeoutSeconds: 5
+                    httpGet:
+                        path: /_ping
+                        port: 6824

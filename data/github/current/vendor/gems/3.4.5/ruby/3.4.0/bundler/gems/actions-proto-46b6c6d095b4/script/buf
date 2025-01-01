@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+ROOT=$(git rev-parse --show-toplevel)
+CONFIG_PATH="$ROOT/config"
+VERSIONS_FILE="$CONFIG_PATH/versions.json"
+IMAGE="actions-proto-generate"
+
+function main() {
+    pushd "$ROOT" > /dev/null
+    trap "popd > /dev/null" EXIT
+
+    build
+    run "$@"
+}
+
+function build() {
+    build_flags=$(jq < "$VERSIONS_FILE" -r '[to_entries[] | "--build-arg \(.key)_version=\(.value)"] | join(" ")')
+    docker build ${build_flags} -f config/tools/generate/Dockerfile -t "$IMAGE" "$CONFIG_PATH/tools/generate"
+}
+
+function run() {
+    local args=${*:1}
+    local docker_args=""
+    if [ "$(uname -s)" == "Linux" ]; then
+        # This ensures the output files are owned by the current user rather than root.
+        docker_args="--user $(id -u):$(id -g) --tmpfs /.cache/"
+    fi
+
+    # Mount each dir separately, since we don't want to override the entire proto dir (where buf.yaml lives)
+    declare -a proto_dirs
+    for proto_dir in "$ROOT/proto"/*; do
+        proto_dirs+=("-v=$proto_dir:/go/src/github.com/github/actions-proto/proto/$(basename "$proto_dir")")
+    done
+
+    # Mount the gen dir, as well as the .git dir (used by script/breaking) as part of the docker run
+    docker run --rm \
+        --net=none \
+        -v="$ROOT/gen/:/go/src/github.com/github/actions-proto/gen/" \
+        -v="$ROOT/.git:/go/src/github.com/github/actions-proto/.git/" \
+        "${proto_dirs[@]}" \
+        ${docker_args} \
+        "$IMAGE" \
+        ${args}
+}
+
+main "${@:1}"

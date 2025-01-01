@@ -1,0 +1,48 @@
+# This workflow ensures that all new migrations have a timestamp older than the latest merged migration
+# This prevents migrations from being skipped on GHES, see https://github.com/github/c2c-actions-experience/issues/5972
+# From https://github.com/github/turboscan/blob/main/.github/workflows/migration-ordering-check.yml
+name: Migration Ordering Check
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/migration-ordering-check.yml
+      - migrations/**
+
+# Permissions needed to clone the repository
+permissions:
+  contents: read 
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check Migration Order
+        run: |
+          latest_target_branch_migration="$(git ls-tree -r --name-only HEAD^1 | grep -Po "^migrations/.*/\K.*\\.sql$" | sort | tail --lines 1)"
+          >&2 echo "The newest migration on the target branch is $latest_target_branch_migration."
+          >&2 echo
+          new_migrations="$(git diff --name-only --diff-filter=ACR HEAD^1..HEAD^2 | grep -Po "^migrations/.*/\K.*\\.sql$" | sort)"
+          >&2 echo "The new migrations introduced in this pull request are:"
+          >&2 echo "$new_migrations"
+          >&2 echo
+          sorted_migrations="$(printf "%s\n%s" "$latest_target_branch_migration" "$new_migrations" | sort)"
+          any_bad_migrations=0
+          while read migration; do
+            if [[ "$migration" == "" ]]; then
+              continue
+            fi
+            >&2 echo "Inspecting $migration."
+            if [[ "$migration" == "$latest_target_branch_migration" ]]; then
+              >&2 echo "Reached the newest migration on the target branch."
+              break
+            fi
+            >&2 echo "::error file=$migration::This migration has an older timestamp than the newest migration on the target branch. Please update the timestamp of your migration before merging."
+            any_bad_migrations=1
+          done <<< "$sorted_migrations"
+          exit "$any_bad_migrations"

@@ -85,28 +85,6 @@ module Repository::CreatorMethods
     user
   end
 
-  # https://github.com/github/special-projects/issues/1057
-  def creating_repo_in_personal_namespace_for_emu?
-    return @creating_repo_in_personal_namespace_for_emu if defined?(@creating_repo_in_personal_namespace_for_emu)
-    @user.is_enterprise_managed?
-  end
-
-  def creating_repo_in_personal_namespace?
-    @user.login == owner.login
-  end
-
-  def creating_repo_in_personal_namespace_enterprise_setting_enabled?
-    restrict_create_repositories_in_personal_namespace?(@user)
-  end
-
-  def creating_repo_in_personal_namespace_enterprise_setting_message
-    @user.is_enterprise_managed? ? "Repository creation using enterprise-managed user account inside this enterprise is not allowed." : "Repository creation using user account inside this enterprise is not allowed."
-  end
-
-  def is_enterprise_to_restrict_for_personal_namespace?
-    GitHub.single_business_environment?
-  end
-
   def check_visibility_and_public(repo)
     raise ArgumentError, "repo cannot have both :public and :visibility" if repo.key?(:visibility) && repo.key?(:public)
   end

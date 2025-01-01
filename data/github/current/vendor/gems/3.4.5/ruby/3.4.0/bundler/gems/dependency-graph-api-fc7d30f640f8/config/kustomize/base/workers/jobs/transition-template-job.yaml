@@ -1,0 +1,49 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: transition-template-job
+  annotations:
+    heaven.githubapp.com/inject-heaven-env-vars-into-containers: "transition"
+    heaven.githubapp.com/image-placeholder: "dependency-graph-api"
+    moda.github.net/inject-otel-env-vars-into-containers: "transition"
+spec:
+  template:
+    metadata:
+      labels:
+        app: dependency-graph-api
+        role: transition
+    spec:
+      containers:
+      - name: transition
+        image: dependency-graph-api
+        command: ["/usr/bin/tools/istio-job-wrapper", "./script/run-transition"]
+
+        env:
+          - name: DOGSTATSD_HOST
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+        envFrom:
+          - configMapRef:
+              name: environment
+          - secretRef:
+              name: vault-secrets
+        resources:
+          limits:
+              cpu: 3000m
+              memory: 4Gi
+          requests:
+              cpu: 1000m
+              memory: 1Gi
+        volumeMounts:
+          - mountPath: /etc/github/metadata.json
+            name: github-metadata
+            readOnly: true
+      dnsPolicy: ClusterFirst
+      volumes:
+        - name: github-metadata
+          hostPath:
+            path: /etc/github/metadata.json
+      restartPolicy: Never
+  backoffLimit: 0
+  activeDeadlineSeconds: 100

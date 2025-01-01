@@ -1,0 +1,49 @@
+name: Test
+
+on:
+  pull_request:
+    branches:
+      - main
+  merge_group:
+    reuse-previous-outcome: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    env:
+      GOPROXY: https://goproxy.githubapp.com/mod,https://proxy.golang.org,direct
+      GOPRIVATE: ''
+      GONOPROXY: ''
+      GONOSUMDB: github.com/github/*
+
+    steps:
+      - name: Login to Docker Registry
+        run: |
+          echo "${{ secrets.CONTAINER_BUILDER_TOKEN }}" | docker login containers.pkg.github.com --username gh-containers-bot --password-stdin
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Authenticate with goproxy
+        run: |
+          echo "machine goproxy.githubapp.com login nobody password ${{ secrets.GOPROXY_TOKEN }}" >> $HOME/.netrc
+
+      - name: Run tests
+        run: |
+          set -exuo pipefail
+          cleanup() {
+            docker compose down
+          }
+          trap cleanup EXIT
+          MYSQL_VERSION=8.0.28 docker compose up --wait --quiet-pull
+          script/migrate
+          GOEXPERIMENT=loopvar go test ./...

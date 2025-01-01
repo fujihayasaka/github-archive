@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Usage: script/integration-tests [-a] test_name
+# Run integration tests.
+# When run in a codespace, the -a flag can be used to run tests against Azure services,
+# by default it runs against the emulator.
+# When run as CI job, the -a flag is ignored and tests are run against dev.env configurations.
+set -e
+
+# Parse flags
+while getopts "a" opt; do
+  case ${opt} in
+    a )
+      AZURE=true
+      ;;
+    \? )
+      echo "Usage: $0 [-a] test_name"
+      echo "  -a  Run integration tests against Azure services when in a codespace"
+      exit 1
+      ;;
+  esac
+done
+
+# Shift off the options and optional --.
+shift $((OPTIND-1))
+
+echo "==> Testing... <=="
+SCRIPT_DIR=$(cd -P -- "$(dirname -- "$0")" && pwd -P)
+
+source ${SCRIPT_DIR}/../dev.env
+TEST_NAME="$1"
+
+if [ ! -n "$CI" ]; then
+  echo "Running integration tests in codespace"
+  if [[ $GITHUB_REPOSITORY == "github/billing-platform" ]]; then
+    # Looks like we need to start these services here, otherwise tests in repo_metadata_sync_integration_test.go fail,
+    # our integration workflow does this via a step, so only doing this for codespace billing-platform env
+    # (dotcom one is handled by ./script/server in dotcom)
+    script/dc up -d aqueduct-lite kafka-lite
+
+    # Only run against Azure if the -a flag is passed
+    if [ -n "$AZURE" ]; then
+      echo "Using Cosmos DB in Azure"
+      script/set-remote
+    else
+      echo "Using Cosmos DB emulator"
+      script/cosmos-emulator
+    fi
+
+    # Developer friendly output
+    echo "Running integration tests... (this may take a while)"
+    go test -tags=integration -timeout 45m -parallel=2 -v -run "$TEST_NAME" github.com/github/billing-platform/testing/integration-tests -json | tee >(tparse -all)
+    exit
+  fi
+fi
+
+# Running in CI
+CGO_ENABLED=1 gotestsum --format short-verbose --packages=github.com/github/billing-platform/testing/integration-tests -- -tags=integration -timeout 45m -parallel=8 -v -failfast -run "$TEST_NAME"

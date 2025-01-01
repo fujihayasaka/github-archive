@@ -58,7 +58,7 @@ class Api::UserEmails < Api::App
       allow_user_via_granular_actor: true
 
     if !current_user.change_email_enabled?
-      if current_user.is_enterprise_managed?
+      if current_user.scim_managed_user?
         deliver_error! 403, message: "Email addresses must be added in the Identity Provider."
       else
         deliver_update_denied_using_ldap_sync! "Email addresses must be added in the #{GitHub.auth.name} Identity Provider."
@@ -111,7 +111,7 @@ class Api::UserEmails < Api::App
       allow_user_via_granular_actor: true
 
     if !current_user.change_email_enabled?
-      if current_user.is_enterprise_managed?
+      if current_user.scim_managed_user?
         deliver_error! 403, message: "Email addresses must be removed in the Identity Provider."
       else
         deliver_update_denied_using_ldap_sync! "Email addresses must be removed in the #{GitHub.auth.name} Identity Provider."

@@ -1,0 +1,64 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    annotations:
+        heaven.githubapp.com/image-placeholder: turboscan
+        moda.github.net/vpa-updater-enabled: "true"
+    name: alert-link-processor
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app: turboscan
+            role: alert-link-processor
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: turboscan
+            labels:
+                app: turboscan
+                role: alert-link-processor
+        spec:
+            containers:
+                - command:
+                    - /app/bin/turboscan
+                    - service
+                    - start
+                    - alertlinkprocessorsvc
+                  env:
+                    - name: STATS_ADDR
+                      value: $(KUBE_NODE_HOSTNAME):28125
+                    - name: KAFKA_GROUP
+                      value: turboscan_alert_link_processor
+                    - name: GOMAXPROCS
+                      valueFrom:
+                        resourceFieldRef:
+                            containerName: turboscan
+                            resource: limits.cpu
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - configMapRef:
+                        name: background-environment
+                    - secretRef:
+                        name: vault-secrets
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                  image: turboscan
+                  name: turboscan
+                  readinessProbe:
+                    exec:
+                        command:
+                            - "true"
+                    initialDelaySeconds: 10
+                  resources:
+                    limits:
+                        cpu: 1000m
+                        memory: 4Gi
+                    requests:
+                        cpu: 500m
+                        memory: 1Gi
+            dnsPolicy: ClusterFirst

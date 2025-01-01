@@ -1,0 +1,62 @@
+#!/bin/bash
+root="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." >/dev/null 2>&1 && pwd )"
+cd "$root"
+
+source "script/helpers/_utils.sh"
+source "script/helpers/_mysql_utils.sh"
+
+set -e
+
+MYSQL_HOST=localhost
+MYSQL_PORT=3001
+SKEEMA_ENVIRONMENT=enterprise-schema-check
+if [ $CI == "true" ]; then
+  # host cannot be populated dynamically for 'skeema', so we have to hardcode it in a different skeema env
+  # https://www.skeema.io/docs/config/#env-variables
+  MYSQL_HOST=db
+  MYSQL_PORT=3306
+  SKEEMA_ENVIRONMENT=enterprise-schema-check-ci
+fi
+
+function mysql_exec () {
+  echo "$@" | exec $MYSQL_CMD --user=root --host=${MYSQL_HOST} --port=$MYSQL_PORT --protocol=tcp
+}
+
+function print_step() {
+  echo -e "\n>> $@"
+}
+
+export MYSQL_CMD=$(get_mysql_command)
+echo "found mysql cmd @ $MYSQL_CMD"
+
+echo "Ensuring enterprise migrations and schemas are in sync..."
+schema_name=enterprise_schema_check
+
+# ensure DB is running
+print_step "checking for authnd MySQL instance"
+if ! mysql_exec "SELECT 1" 2>&1 >> /dev/null; then
+    fatal "authnd MySQL instance is not running, run 'script/setup'"
+fi
+
+
+# drop database (if necessary)
+set +e
+print_step "dropping $schema_name database"
+mysql_exec "DROP DATABASE $schema_name"
+set -e
+
+# create migration check database
+print_step "creating $schema_name database"
+mysql_exec "CREATE DATABASE $schema_name"
+mysql_exec "ALTER DATABASE $schema_name CHARACTER SET latin1 COLLATE latin1_swedish_ci;"
+
+# run migrator
+print_step "running migrator"
+IS_ENTERPRISE_SERVER=true AUTHND_DATABASE=enterprise_schema_check DB_ADDR="$MYSQL_HOST:$MYSQL_PORT" ./bin/migrate
+
+# schema diff
+print_step "checking schema diff"
+cd $root/schemas/authnd/enterprise &&
+  "$root/_tools/bin/skeema" diff $SKEEMA_ENVIRONMENT --ignore-table "(authnd_schema_migrations|authentication_key_values)"
+
+highlight "schemas are up to date! 🎉"

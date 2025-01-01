@@ -1,0 +1,57 @@
+services:
+  azurite:
+    hostname: azurite
+    image: ${AZURITE_IMAGE:-mcr.microsoft.com/azure-storage/azurite:latest}
+    command: /bin/sh -c "mkdir -p /workspace && azurite --location /workspace --debug /workspace/debug.log --blobPort 10000 --blobHost 0.0.0.0 --queuePort 10001 --queueHost 0.0.0.0 --tablePort 10002 --tableHost 0.0.0.0"
+    ports:
+      - '10000'
+      - '10001'
+      - '10002'
+    volumes:
+      - ./testcerts:/testcerts
+  redis:
+    image: redis:latest  # Use the latest official Redis image
+    container_name: redis_container
+    ports:
+      - '6379'
+    tmpfs:
+      - /data
+    restart: unless-stopped  # Ensure the container restarts unless stopped manually
+  zookeeper:
+    image: bitnami/zookeeper:latest
+    container_name: zookeeper
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+    ports:
+      - "2181"
+  kafka:
+    image: 'bitnami/kafka:latest'
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_LISTENERS=INTERNAL://kafka:9092,EXTERNAL://0.0.0.0:19092
+      - KAFKA_ADVERTISED_LISTENERS=INTERNAL://kafka:9092,EXTERNAL://localhost:19092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    depends_on:
+      - zookeeper
+    ports:
+      - "19092:19092"
+    healthcheck:
+      test: [ "CMD-SHELL", "kafka-topics.sh --bootstrap-server kafka:9092 --list" ]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+  init-kafka:
+    image: 'bitnami/kafka:latest'
+    working_dir: /opt/bitnami/kafka/bin
+    entrypoint: /bin/bash
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: >
+          -c "kafka-topics.sh --create --if-not-exists --topic resources --replication-factor=1 --partitions=1 --bootstrap-server kafka:9092 &&
+              kafka-topics.sh --create --if-not-exists --topic failed-resources --replication-factor=1 --partitions=1 --bootstrap-server kafka:9092 &&
+              kafka-topics.sh --create --if-not-exists --topic failed-events --replication-factor=1 --partitions=1 --bootstrap-server kafka:9092 &&
+              kafka-topics.sh --create --if-not-exists --topic events --replication-factor=1 --partitions=1 --bootstrap-server kafka:9092"

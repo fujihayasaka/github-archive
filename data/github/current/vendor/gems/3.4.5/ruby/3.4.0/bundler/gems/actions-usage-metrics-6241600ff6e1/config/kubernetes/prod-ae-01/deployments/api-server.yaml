@@ -1,0 +1,116 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: api-server
+spec:
+    replicas: 2
+    selector:
+        matchLabels:
+            app: api-server
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt
+                observability.github.com/splunk_index: actions-usage-metrics
+            labels:
+                app: api-server
+        spec:
+            containers:
+                - command:
+                    - /api-server
+                  env:
+                    - name: SERVICE_PRINCIPAL_TENANT_ID
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn_actions_usage_metrics_prod_ae_01_tenant_id
+                            name: vault-secrets
+                    - name: SERVICE_PRINCIPAL_CLIENT_ID
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn_actions_usage_metrics_prod_ae_01_client_id
+                            name: vault-secrets
+                    - name: SERVICE_PRINCIPAL_CLIENT_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn_actions_usage_metrics_prod_ae_01
+                            name: vault-secrets
+                    - name: STORAGE_ACCOUNT_NAME
+                      value: aumprodae01
+                    - name: FAILBOT_HAYSTACK_URL
+                      valueFrom:
+                        secretKeyRef:
+                            key: FAILBOT_HAYSTACK_URL
+                            name: vault-secrets
+                    - name: HMAC_PRIMARY
+                      valueFrom:
+                        secretKeyRef:
+                            key: HMAC_PRIMARY
+                            name: vault-secrets
+                    - name: HMAC_SECONDARY
+                      valueFrom:
+                        secretKeyRef:
+                            key: HMAC_SECONDARY
+                            name: vault-secrets
+                    - name: DD_AGENT_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                    - name: DD_DOGSTATSD_PORT
+                      value: "28125"
+                    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                      value: https://opentelemetry-collector-production.service.iad.github.net/v1/traces
+                    - name: OTEL_EXPORTER_OTLP_TRACES_HEADERS
+                      valueFrom:
+                        secretKeyRef:
+                            key: OTEL_EXPORTER_OTLP_TRACES_HEADERS
+                            name: vault-secrets
+                    - name: GOMAXPROCS
+                      valueFrom:
+                        resourceFieldRef:
+                            containerName: api-server
+                            resource: limits.cpu
+                    - name: API_INTERNAL_TWIRP_HMAC_KEYS_FOR_ACTIONS_USAGE_METRICS
+                      valueFrom:
+                        secretKeyRef:
+                            key: API_INTERNAL_TWIRP_HMAC_KEYS_FOR_ACTIONS_USAGE_METRICS
+                            name: vault-secrets
+                    - name: KUBE_NAMESPACE
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.namespace
+                    - name: POD_NAME
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.name
+                    - name: KUBE_CONTAINER_NAME
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.labels['app']
+                  envFrom:
+                    - configMapRef:
+                        name: config-m628cbbf6c
+                  image: actions-usage-metrics
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command:
+                                - sleep
+                                - "5"
+                  name: api-server
+                  ports:
+                    - containerPort: 8080
+                      name: http
+                      protocol: TCP
+                  readinessProbe:
+                    httpGet:
+                        path: /health
+                        port: http
+                  resources:
+                    limits:
+                        cpu: 2000m
+                        memory: 4Gi
+                    requests:
+                        cpu: 1000m
+                        memory: 2Gi
+            dnsPolicy: ClusterFirst

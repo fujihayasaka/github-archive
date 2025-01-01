@@ -1,0 +1,285 @@
+# This file defines a series of services used to build and run tests and management tasks during development.
+# Each service is associated with others with `profiles`. With profiles we can rebuild and bootup
+# services without extensive `depends_on` options.
+#
+# Example: Run all the services needed for development (dev profile)
+#
+#   $ docker compose --profile dev up
+#
+# Profiles are used to manage not only services, but also make tasks.
+
+# GOPROXY configuration
+# ====================================
+# In order to make GOPROXY to work inside a container, the following
+# env vars must be present:
+#
+# - GOPROXY=https://nobody:$GITHUB_TOKEN@goproxy.githubapp.com/mod,https://proxy.golang.org/,direct
+# - GOPRIVATE=
+# - GONOPROXY=
+# - GONOSUMDB=github.com/github/*
+#
+# These use the $GITHUB_TOKEN present in the host environment.
+# Because they need an env var from the host, the can't be set in an env_file
+
+services:
+  # The tools service is used to run go tools like code generators, linter and formatter
+  tools:
+    platform: linux/amd64
+    profiles: ["tools"]
+    image: tools
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: tools
+    environment:
+      - GOPROXY=https://nobody:$GITHUB_TOKEN@goproxy.githubapp.com/mod,https://proxy.golang.org/,direct
+      - GOPRIVATE=
+      - GONOPROXY=
+      - GONOSUMDB=github.com/github/*
+    volumes:
+      - "./:/go/src"
+    working_dir: "/go/src"
+    # This ensures the container is idle so we can run docker compose exec on it
+    command: ["tail", "-f", "/dev/null"]
+
+  # The protoc-ruby service is used to run generate ruby code from protobuf definitions
+  protoc-ruby:
+    platform: linux/amd64
+    profiles: ["protoc-ruby"]
+    image: protoc-ruby
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: tools
+      args:
+        # This is the last version of Protobuf supported by the Monolith
+        PROTOBUF_VERSION: 3.19.4
+    environment:
+      - GOPROXY=https://nobody:$GITHUB_TOKEN@goproxy.githubapp.com/mod,https://proxy.golang.org/,direct
+      - GOPRIVATE=
+      - GONOPROXY=
+      - GONOSUMDB=github.com/github/*
+    volumes:
+      - "./:/go/src"
+    working_dir: "/go/src"
+    # This ensures the container is idle so we can run docker compose exec on it
+    command: ["tail", "-f", "/dev/null"]
+
+  # The migration service is used to run database migrations
+  migration:
+    platform: linux/amd64
+    profiles: ["migration"]
+    image: tools
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: tools
+    depends_on:
+      testdb:
+        # this waits until the db has loaded structure.sql
+        condition: service_healthy
+    environment:
+      - GOPROXY=https://nobody:$GITHUB_TOKEN@goproxy.githubapp.com/mod,https://proxy.golang.org/,direct
+      - GOPRIVATE=
+      - GONOPROXY=
+      - GONOSUMDB=github.com/github/*
+      - DB_HOST=testdb
+      - SKEEMA_PROFILE=development_docker
+    volumes:
+      - "./:/workspace/notifyd"
+    working_dir: "/workspace/notifyd"
+    # This ensures the container is idle so we can run docker compose exec on it
+    command: ["tail", "-f", "/dev/null"]
+
+  # Service used to run the rubygem's tests
+  test-ruby:
+    platform: linux/amd64
+    profiles: ["test-ruby"]
+    image: test-ruby
+    build:
+      context: .
+      dockerfile: Dockerfile.test-ruby
+    depends_on:
+      testdb:
+        condition: service_healthy
+    env_file:
+      - .env.ci
+    environment:
+      - GOPROXY=https://nobody:$GITHUB_TOKEN@goproxy.githubapp.com/mod,https://proxy.golang.org/,direct
+      - GOPRIVATE=
+      - GONOPROXY=
+      - GONOSUMDB=github.com/github/*
+    volumes:
+      - "./ruby:/usr/src/app"
+    working_dir: "/usr/src/app"
+    # This ensures the container is idle so we can run docker compose exec on it
+    command: ["tail", "-f", "/dev/null"]
+
+  # Service used to run notifyd's unit test. The only dependency is the database
+  test-unit:
+    platform: linux/amd64
+    profiles: ["test-unit"]
+    image: test-unit
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: test
+    depends_on:
+      testdb:
+        # this waits until the db has loaded structure.sql
+        condition: service_healthy
+    env_file:
+      - .env.ci
+    environment:
+      - GOPROXY=https://nobody:$GITHUB_TOKEN@goproxy.githubapp.com/mod,https://proxy.golang.org/,direct
+      - GOPRIVATE=
+      - GONOPROXY=
+      - GONOSUMDB=github.com/github/*
+    volumes:
+      - "./:/go/src"
+    working_dir: "/go/src"
+    # This ensures the container is idle so we can run docker compose exec on it
+    command: ["tail", "-f", "/dev/null"]
+
+  # Service used to run all tests, including integration ones
+  test:
+    platform: linux/amd64
+    profiles: ["test"]
+    image: test
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: test
+    depends_on:
+      testdb:
+        # this waits until the db has loaded structure.sql
+        condition: service_healthy
+      kafka-lite:
+        condition: service_started
+      aqueduct-lite:
+        condition: service_started
+      gh-lite:
+        condition: service_started
+    env_file:
+      - .env.ci
+    environment:
+      - GOPROXY=https://nobody:$GITHUB_TOKEN@goproxy.githubapp.com/mod,https://proxy.golang.org/,direct
+      - GOPRIVATE=
+      - GONOPROXY=
+      - GONOSUMDB=github.com/github/*
+    volumes:
+      - "./:/go/src"
+    working_dir: "/go/src"
+    # This ensures the container is idle so we can run docker compose exec on it
+    command: ["tail", "-f", "/dev/null"]
+
+  # Small GitHub dotcom mock for testing
+  gh-lite:
+    platform: linux/amd64
+    profiles: ["test", "dev"]
+    image: gh-lite
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: gh-lite
+    env_file:
+      - .env.ci
+    environment:
+      # NOTE: If the default .env file is loaded, these env var assignment will make tests fail
+      #   Use the option --env-file .env.ci to ensure they are properly set
+      - AUTHZD_URL=${AUTHZD_URL:-http://gh-lite:8088}
+      - MONOLITH_TWIRP_API_HMAC_KEY=${MONOLITH_TWIRP_API_HMAC_KEY:-secret}
+      - MONOLITH_TWIRP_API_URL=${MONOLITH_TWIRP_API_URL:-http://gh-lite:8088}
+      - GOPROXY=https://nobody:$GITHUB_TOKEN@goproxy.githubapp.com/mod,https://proxy.golang.org/,direct
+      - GOPRIVATE=
+      - GONOPROXY=
+      - GONOSUMDB=github.com/github/*
+    ports:
+      - "8088:8088"
+
+  mailhog:
+    platform: linux/amd64
+    profiles: ["dev"]
+    image: mailhog/mailhog
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+
+  # Database for tests
+  testdb:
+    platform: linux/amd64
+    profiles: ["test", "test-ruby", "dev", "test-unit", "migration"]
+    image: mysql/mysql-server:8.0
+    ports:
+      - "3306:3306"
+    logging:
+      driver: none
+    environment:
+      MYSQL_DATABASE: notifyd_test
+      MYSQL_ALLOW_EMPTY_PASSWORD: 1
+      MYSQL_ROOT_HOST: "%"
+    volumes:
+      - ${PWD}/schema/structure.sql:/docker-entrypoint-initdb.d/structure.sql
+
+  # Small kafka setup for testing
+  kafka-lite:
+    platform: linux/amd64
+    profiles: ["test", "dev"]
+    image: ghcr.io/github/kafka-lite/kafka-lite:fc4af5c95a767f7a6671739bc3d9e9784c31a595
+    env_file:
+      - .env.ci
+    environment:
+      - GOPROXY=https://nobody:$GITHUB_TOKEN@goproxy.githubapp.com/mod,https://proxy.golang.org/,direct
+      - GOPRIVATE=
+      - GONOPROXY=
+      - GONOSUMDB=github.com/github/*
+    command:
+      - "/kafka-lite"
+      - "--store"
+      - "redis"
+      - "--redis-address"
+      - "redis://redis:6379/0"
+      - "--listen-address"
+      - "kafka-lite:9092"
+      - "--admin-listener"
+      - "kafka-lite:9094"
+      - "--advertised-listener-address"
+      - "${KAFKA_ADVERTISED_LISTENER_ADDRESS:-kafka-lite:9092}"
+    ports:
+      - "9092:9092"
+      - "9094:9094"
+    depends_on:
+      - redis
+    logging:
+      driver: none
+
+  # Small aqueduct setup for testing
+  aqueduct-lite:
+    platform: linux/amd64
+    profiles: ["test", "dev"]
+    image: ghcr.io/github/aqueduct-lite/aqueduct-lite:44d13ea26b173ccdf67ae1e898bd3da26127aca7
+    env_file:
+      - .env.ci
+    environment:
+      - GOPROXY=https://nobody:$GITHUB_TOKEN@goproxy.githubapp.com/mod,https://proxy.golang.org/,direct
+      - GOPRIVATE=
+      - GONOPROXY=
+      - GONOSUMDB=github.com/github/*
+    command:
+      - "/app/bin/aqueduct-lite"
+      - "--redis-address=redis://redis:6379/0"
+      - "--listen-address=aqueduct-lite:8085"
+    ports:
+      - "8085:8085"
+    depends_on:
+      - redis
+    logging:
+      driver: none
+
+  # Redis, used by *-lite services
+  redis:
+    platform: linux/amd64
+    profiles: ["test", "dev"]
+    image: redis:latest
+    logging:
+      driver: none

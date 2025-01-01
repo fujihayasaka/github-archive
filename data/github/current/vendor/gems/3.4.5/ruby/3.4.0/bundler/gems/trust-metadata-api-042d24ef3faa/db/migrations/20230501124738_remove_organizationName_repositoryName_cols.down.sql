@@ -1,0 +1,2 @@
+ALTER TABLE attestations ADD COLUMN organization_name varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL; 
+ALTER TABLE attestations ADD COLUMN repository_name varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL;

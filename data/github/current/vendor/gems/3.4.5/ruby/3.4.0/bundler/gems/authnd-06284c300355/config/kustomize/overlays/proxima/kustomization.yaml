@@ -1,0 +1,47 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base/default
+  - servicemeshconfigs/config.yaml
+  - configmaps/common-config.yaml
+
+patches:
+  - path: patches/services/authnd.json
+    target:
+      kind: Service
+      name: authnd
+  - path: patches/deployments/authnd.json
+    target:
+      kind: Deployment
+      name: authnd
+  - target:
+      kind: Service
+      name: authnd
+    patch: |-
+      - op: replace
+        path: "/spec/type"
+        value: ClusterIP
+  - target:
+      kind: Service
+      name: authnd
+    patch: |-
+      - op: replace
+        path: "/metadata/annotations/opaque.github.net~1checks"
+        value: |
+          - http:
+              url: http://{{.Instance.Address}}:8080/_ping
+  - target:
+      kind: CronJob
+      name: authnd-notifier
+    patch: |-
+      - op: replace
+        path: "/metadata/annotations/moda.github.net~1cluster-preferences"
+        value: |-
+          {
+            "proxima-1-%stamp%-az1":  {
+              "spec": {
+                "suspend": false
+              }
+            }
+          }

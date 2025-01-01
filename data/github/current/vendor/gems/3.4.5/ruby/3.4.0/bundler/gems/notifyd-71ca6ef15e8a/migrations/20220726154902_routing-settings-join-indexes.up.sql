@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `unique_routing_setting_match_rules_no_shard` ON `routing_setting_match_rules` (`routing_setting_id`, `attribute`, `value`);

@@ -1,0 +1,275 @@
+syntax = "proto3";
+
+package github.secretscanning.scans.v2;
+
+option go_package = "github.com/github/secret-scanning-proto/gen/go/v2/scans";
+option ruby_package = "GitHub::Proto::SecretScanning::Scans::V2";
+
+import "api/v1/shared.proto";
+import "repositories/v1/repository.proto";
+import "types/v1/bypass.proto";
+import "types/v1/ref_update.proto";
+import "types/v1/token_metadata.proto";
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+
+service ScansAPI {
+    // ScanPush performs an on-demand scan immediately
+    rpc ScanPush(github.secretscanning.scans.v2.ScanPushRequest) returns (github.secretscanning.scans.v2.ScanPushResponse);
+    // ScanContents scans arbitrary content
+    rpc ScanBytes(github.secretscanning.scans.v2.ScanBytesRequest) returns (github.secretscanning.scans.v2.ScanBytesResponse);
+    // AddBypassReviewer adds a BypassReviewer to a repo or organization
+    rpc AddBypassReviewer(github.secretscanning.scans.v2.AddBypassReviewerRequest) returns (github.secretscanning.scans.v2.AddBypassReviewerResponse);
+    // RemoveBypassReviewer removes a BypassReviewer from a repo or organization
+    rpc RemoveBypassReviewer(github.secretscanning.scans.v2.RemoveBypassReviewerRequest) returns (google.protobuf.Empty);
+    // RemoveBypassReviewersForSource removes all the bypass reviewers for a source.
+    rpc RemoveBypassReviewersForSource(github.secretscanning.scans.v2.RemoveBypassReviewersForSourceRequest) returns (google.protobuf.Empty);
+    // UpdateBypassReviewers adds/removes bypass reviewers to set the list to what's in the request, for the given source.
+    rpc UpdateBypassReviewersForSource(github.secretscanning.scans.v2.UpdateBypassReviewersForSourceRequest) returns (github.secretscanning.scans.v2.UpdateBypassReviewersForSourceResponse);
+    // GetBypassReviewers gets the list of BypassReviewers for a repo or organization
+    rpc GetBypassReviewers(github.secretscanning.scans.v2.GetBypassReviewersRequest) returns (github.secretscanning.scans.v2.GetBypassReviewersResponse);
+}
+
+message ScanPushRequest {
+    // the repository that this scan is for.
+    // this should include the repo's owner information
+    github.secretscanning.repositories.v1.Repository repository = 1;
+
+    // reference_updates is the set of pushes to select.
+    repeated github.secretscanning.types.v1.ReferenceUpdate reference_updates = 2;
+
+    // The duration that should be spent inside the scan.  This is not a hard timeout, responses
+    // are not guaranteed in this timeframe - but all efforts will be made to cleanup and build a response once this
+    // timeout is reached.  Callers are still responsible for truly timing out.
+    // Default is the server timeout.
+    google.protobuf.Duration scan_duration = 3;
+
+    // Limit the number of discovered secrets to this number.
+    // Default: 2
+    // Maximum: 100
+    // This RPC is not meant to be exhaustive, so it will not provide any matches beyond the first 100.
+    uint32 limit = 4;
+
+    // actor_id is the database ID of the actor who pushed
+    uint64 actor_id = 5;
+
+    // an opaque object representing the push. This information is made available to branch policies that run as part of 
+    // _commit_refs
+    bytes push_state = 6;
+
+    // The ID of the business if the repository is part of a business
+    uint64 business_id = 7;
+
+    // Additional feature flags
+    repeated string feature_flags = 8;
+
+    // If set, the existing run will be queued for a scan push only in the background and 
+    // the push would not be blocked.
+    bool dark_ship_only = 9;
+
+    // If this repo has delegated bypass enabled, this parameter contains the approved, unexpired bypass requests for the current user and repo.
+    repeated github.secretscanning.types.v1.DelegatedBypassRequest delegated_bypass_requests = 10;
+
+    // indicates that this is a free public (non ghas) scan
+    bool public_scan = 11;
+}
+
+// ScanPushResponse
+message ScanPushResponse {
+    // True if the scan was complete,
+    bool completed = 1;
+
+    // The first {ScanPushRequest.limit} secrets discovered by the scan.
+    // If completed is true, and this is empty, then no secrets were discovered.
+    // Alternatively, when completed is false and this list is empty the results are incomplete.
+    repeated Secret secrets = 2;
+
+    // The number of secrets found over the limit passed in by ScanPushRequest
+    uint32 num_secrets_found_over_limit = 3;
+
+    // The IDs of any delegated bypass requests that were used in this push
+    repeated uint64 used_delegated_bypass_request_ids = 4;
+}
+
+message ScanBytesRequest {
+    // the contents that should be scanned
+    bytes content = 1;
+
+    // The duration that should be spent inside the scan.  This is not a hard timeout, responses
+    // are not guaranteed in this timeframe - but all efforts will be made to cleanup and build a response once this
+    // timeout is reached.  Callers are still responsible for truly timing out.
+    // Default is the server timeout.
+    google.protobuf.Duration scan_duration = 2;
+
+    // Limit the number of discovered secrets to this number.
+    // Default: 2
+    // Maximum: 100
+    // This RPC is not meant to be exhaustive, so it will not provide any matches beyond the first 100.
+    uint32 limit = 3;
+
+    // The optional repository details; required if the intent is to account for bypasses, existing alerts and
+    // path exclusions.  Repository.DefaultRef must be non-empty to fetch path-exclusions.
+    github.secretscanning.repositories.v1.Repository repository = 4;
+
+    // The optional path these bytes appear at within a repository.  Required if path-exclusions should be accounted for.
+    bytes path = 5;
+
+    // actor_id is the database ID of the actor who pushed
+    uint64 actor_id = 6;    
+
+    // The ID of the business if the repository is part of a business
+    uint64 business_id = 7;
+
+    // Additional feature flags
+    repeated string feature_flags = 8;
+
+    // If set, the existing run will be queued for a scan push only in the background and 
+    // the push would not be blocked.
+    bool dark_ship_only = 9;
+
+    // If this repo has delegated bypass enabled, this parameter contains the approved, unexpired bypass requests for the current user and repo.
+    repeated github.secretscanning.types.v1.DelegatedBypassRequest delegated_bypass_requests = 10;
+
+    // indicates that this is a free public (non ghas) scan
+    bool public_scan = 11;
+}
+
+message ScanBytesResponse {
+    // True if the scan was complete,
+    bool completed = 1;
+
+    // The first {ScanPushRequest.limit} secrets discovered by the scan.
+    // If completed is true, and this is empty, then no secrets were discovered.
+    // Alternatively, when completed is false and this list is empty the results are incomplete.
+    repeated Secret secrets = 2;
+
+    // The number of secrets found over the limit passed in by ScanPushRequest
+    uint32 num_secrets_found_over_limit = 3;
+
+    // The IDs of any delegated bypass requests that were used in this push
+    repeated uint64 used_delegated_bypass_request_ids = 4;
+}
+
+// Represents a detected secret
+message Secret {
+    // the type of secret
+    string type = 1;
+
+    // raw bytes of the actual secret discovered
+    bytes value = 2;
+
+    // the hex encoded sha256 checksum
+    string fingerprint = 3;
+
+    // the locations this secret was found in.
+    repeated Location locations = 4;
+
+    // the token metadata
+    github.secretscanning.types.v1.TokenMetadata token_metadata = 5;
+
+    // the bypass placeholder associated with this secret
+    string bypass_placeholder_ksuid = 6;    
+}
+
+// Represents a location for a detected secret
+message Location {
+    // commit that this secret was discovered at
+    string commit_oid = 1;
+    // the blob oid that contained this secret
+    string blob_oid = 2;
+
+    // the raw bytes path location
+    bytes path = 3;
+
+    // Line Number is determined by the LF (Newline, \n) character
+    uint64 start_line = 4;
+    uint64 end_line = 5;
+
+    // Since the byte position within the line that the secret was found, regardless of file encoding.
+    uint64 start_line_byte_position = 6;
+    uint64 end_line_byte_position = 7;
+}
+
+message BypassReviewer {
+    // The ID of the bypass reviewer
+    uint64 id = 1;
+    // The repo or organization ID
+    uint64 owner_id = 2;
+    // Either REPOSITORY_SCOPE, ORGANIZATION_SCOPE, or BUSINESS_SCOPE
+    github.secretscanning.v1.OwnerScope owner_scope = 3;
+    // ID of the reviewer
+    uint64 reviewer_id = 4;
+    enum BypassReviewerType {
+        UNKNOWN = 0;
+        reserved 1; // formerly USER = 1;
+        TEAM = 2;
+        ROLE = 3;
+        ORG_ADMIN = 4;
+    }
+    // Type of the reviewer
+    BypassReviewerType reviewer_type = 5;
+    // ID of the security configuration, if set
+    uint64 security_configuration_id = 6;
+}
+
+message AddBypassReviewerRequest {
+    // the bypass reviewer to add to the repo or org
+    BypassReviewer bypass_reviewer = 1;
+}
+
+message AddBypassReviewerResponse {
+    // the newly created bypass reviewer
+    BypassReviewer bypass_reviewer = 1;
+}
+
+message RemoveBypassReviewerRequest {
+    // the ID of the bypass reviewer to remove from the repo or org
+    uint64 id = 1;
+}
+
+message RemoveBypassReviewersForSourceRequest {
+    // the scope and ID of the repo or org to remove bypass reviewers for
+    oneof owner_scope { 
+        uint64 repository_id = 1; 
+        uint64 organization_id = 2;
+        uint64 business_id = 4;
+    }
+    // the security configuration ID, if set
+    uint64 security_configuration_id = 3; 
+}
+
+message UpdateBypassReviewersForSourceRequest {
+    // the bypass reviewers to set
+    repeated BypassReviewer bypass_reviewers = 1; 
+
+    // the owner scope to set them for
+    oneof owner_scope {
+        uint64 repository_id = 2;
+        uint64 organization_id = 3;
+        uint64 business_id = 5;
+    }
+    // the security configuration ID, if set
+    uint64 security_configuration_id = 4; 
+}
+
+message UpdateBypassReviewersForSourceResponse {
+    // the bypass reviewers that were just set
+    repeated BypassReviewer bypass_reviewers = 1; 
+}
+
+message GetBypassReviewersRequest {
+    // the scope and ID of the repo or org to retrieve bypass reviewers for
+    oneof owner_scope {
+        uint64 repository_id = 1;
+        uint64 organization_id = 2;
+        uint64 business_id = 4;
+    }
+    // the security configuration ID, if set
+    uint64 security_configuration_id = 3; 
+}
+
+message GetBypassReviewersResponse {
+    // the list of bypass reviewers for the given repo or org
+    repeated BypassReviewer bypass_reviewers = 1;
+}

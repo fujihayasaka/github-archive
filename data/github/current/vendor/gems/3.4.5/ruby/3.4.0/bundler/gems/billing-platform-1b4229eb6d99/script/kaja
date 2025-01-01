@@ -1,0 +1,29 @@
+#!/bin/bash
+
+GREEN='\033[0;32m'
+ORANGE='\033[0;33m'
+NC='\033[0m' # No Color
+
+KAJA_PORT=41520
+KAJA_URL="http://127.0.0.1:${KAJA_PORT}"
+
+# Stop and remove the container if it already exists
+docker rm -f kaja &> /dev/null || true
+
+# Run the container
+docker run --pull always --name kaja -d -p ${KAJA_PORT}:41520 \
+    -v /workspaces/billing-platform/proto:/workspace/proto \
+    -e BASE_URL="http://host.docker.internal:8989" --add-host=host.docker.internal:host-gateway kajatools/kaja:latest
+
+# Wait until the status endpoint returns "OK"
+echo -en "${GREEN}Waiting for kaja URL ${KAJA_URL}/status to become ready:${NC}"
+until [ "`curl -s ${KAJA_URL}/status`" == "OK" ]; do
+    echo -n "."
+    sleep 0.1;
+done;
+echo \n;
+
+# Open kaja in the default web browser
+echo -en "${GREEN}Opening kaja URL ${KAJA_URL} in your default web browser${NC}"
+python3 -m webbrowser ${KAJA_URL}
+echo -e "${ORANGE}Nothing happening? Try running this script again or open ${KAJA_URL} manually.${NC}"

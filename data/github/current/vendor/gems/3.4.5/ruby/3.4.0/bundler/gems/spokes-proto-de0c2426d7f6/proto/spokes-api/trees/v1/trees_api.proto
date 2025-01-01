@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package github.spokes.trees.v1;
+
+option go_package = "github.com/github/spokes-proto/gen/go/v1/trees";
+option ruby_package = "GitHub::Spokes::Proto::Trees::V1";
+
+import "spokes-api/types/v1/cursor.proto";
+import "spokes-api/types/v1/diff_entry.proto";
+import "spokes-api/types/v1/repository.proto";
+import "spokes-api/types/v1/tree_entry.proto";
+import "spokes-api/types/v1/request_context.proto";
+import "spokes-api/types/v1/object_id.proto";
+import "spokes-api/types/v1/path.proto";
+import "spokes-api/types/v1/object_type.proto";
+
+import "spokes-api/types/selectors/v1/range_selector.proto";
+import "spokes-api/types/selectors/v1/treeish_selector.proto";
+import "spokes-api/types/selectors/v1/treeish_and_path_selector.proto";
+
+// TreesAPI contains APIs for tree-related Git operations.
+service TreesAPI {
+    // ListTrees returns a list of tree entries associated with the tree.
+    rpc ListTrees(ListTreesRequest) returns (ListTreesResponse);
+
+    // CompareTree returns a list of differences between two trees.
+    rpc CompareTrees(CompareTreesRequest) returns (CompareTreesResponse);
+
+    // ReadTreeEntryOid returns the object id of a single entry in a tree, fetched by path.
+    rpc ReadTreeEntryOid(ReadTreeEntryOidRequest) returns (ReadTreeEntryOidResponse);
+}
+
+message ListTreesRequest {
+    // repository is the repository to scope the tree entries to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.Cursor cursor = 2;
+
+    github.spokes.types.v1.RequestContext request_context = 5;
+
+    // selector is which tree to select for.
+    oneof selector {
+        // treeish_selector is a selector for picking a tree by its treeish.
+        github.spokes.types.selectors.v1.TreeishSelector treeish_selector = 3;
+
+        // treeish_and_path_selector is a selector for picking a tree by its treeish and path.
+        github.spokes.types.selectors.v1.TreeishAndPathSelector treeish_and_path_selector = 6;
+    }
+
+    // recursive indicates whether the tree should be recursively traversed.
+    bool recursive = 4;
+}
+
+message ListTreesResponse {
+    // entries contains the tree entries for the request.
+    repeated github.spokes.types.v1.TreeEntry entries = 1;
+
+    github.spokes.types.v1.Cursor next_cursor = 2;
+}
+
+message CompareTreesRequest {
+    // repository is the repository to scope the tree entries to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    // TODO document cursors
+    github.spokes.types.v1.Cursor cursor = 2;
+
+    github.spokes.types.v1.RequestContext request_context = 6;
+
+    // selector is which trees to select for comparison.
+    oneof selector {
+        // range_selector is a selector for selecting a range of commits.
+        github.spokes.types.selectors.v1.RangeSelector range_selector = 3;
+    }
+
+    // recursive indicates whether the tree should be recursively traversed.
+    bool recursive = 4;
+
+    // include_renames indicates whether the diff should try to figure out which blobs were renamed.
+    bool include_renames = 5;
+}
+
+message CompareTreesResponse {
+    // entries contains the diff entries for the request.
+    repeated github.spokes.types.v1.DiffEntry entries = 1;
+
+    github.spokes.types.v1.Cursor next_cursor = 2;
+}
+
+message ReadTreeEntryOidRequest {
+    // repository is the repository to scope the tree entry to.
+    github.spokes.types.v1.Repository repository = 1;
+
+    // request_context contains additional information used by gitmon to determine
+    // which quotas to apply and how to enforce them
+    github.spokes.types.v1.RequestContext request_context = 2;
+
+    // selector is which tree to select for.
+    oneof selector {
+        // treeish_selector is a selector for picking a tree by its treeish.
+        github.spokes.types.selectors.v1.TreeishSelector treeish_selector = 3;
+    }
+
+    // (Optional) path is the path to the tree entry
+    // If no path is specified, the root tree entry's oid is returned
+    github.spokes.types.v1.Path path = 4;
+
+    // (Optional) type is the expected type of the git of object
+    // If the type is not matched, an exception is raised
+    // Defaults to returning any type
+    github.spokes.types.v1.ObjectType type = 5;
+}
+
+message ReadTreeEntryOidResponse {
+    // oid is the object id of the tree entry
+    github.spokes.types.v1.ObjectID oid = 1;
+}

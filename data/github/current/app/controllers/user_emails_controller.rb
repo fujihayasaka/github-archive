@@ -351,7 +351,7 @@ class UserEmailsController < ApplicationController
   end
 
   def disallow_for_enterprise_managed_user
-    return unless @user.is_emu_and_not_first_owner?
+    return unless @user.is_emu_and_not_first_owner? || @user.enterprise_server_scim_managed_user?
 
     flash[:error] = UserEmail::ENTERPRISE_MANAGED_USER_ERROR
 

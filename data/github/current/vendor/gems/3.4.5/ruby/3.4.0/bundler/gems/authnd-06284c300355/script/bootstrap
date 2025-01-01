@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+#/ Usage: script/bootstrap [--ruby]
+#/ Installs dependencies required to build and run authnd.
+#/
+#/  --ruby
+#/      install tooling for building the authnd-client ruby gem
+
+root="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." >/dev/null 2>&1 && pwd )"
+cd "$root"
+
+set -e
+
+source "script/helpers/_utils.sh"
+
+echo "Bootstrapping authnd..."
+
+bootstrap_ruby=false
+
+while [ $# -gt 0 ]; do
+  key="$1"
+  shift
+
+  case "$key" in
+    --ruby)
+      bootstrap_ruby=true
+      ;;
+    *)
+      cat "$0" | grep ^#/ | cut -c4-
+      exit 1 ;;
+  esac
+done
+
+# immediately check that there is an installation of Go
+if [[ ! -x "$(which go)" ]]; then
+  echo >&2 "authnd requires an installation of Go to build"
+  exit 1
+fi
+
+# verify the docker daemon is logged into ghcr.io
+if [ ! -f ~/.docker/config.json ] || ! jq -e '.auths["ghcr.io"]' ~/.docker/config.json > /dev/null; then
+  echo
+  echo "[warning] Missing login to ghcr.io which may be needed..."
+  echo "   Run '$(highlight docker login ghcr.io)' to login to the container registry before continuing."
+fi
+
+# if local dev on a Mac, install dependencies using homebrew 
+mkdir -p tmp
+if [[ "$(uname -s)" = "Darwin" ]]; then
+  echo "Installing dependencies..."
+  brew bundle --no-lock &> tmp/brew-bundle.log || (
+    echo "Failed to brew bundle:"
+    cat tmp/brew-bundle.log
+  )
+fi
+
+# install Golang tools
+echo "Installing tools"
+make tools
+
+# if enabled, bootstrap for ruby client development
+if $bootstrap_ruby; then
+  if [[ "$(uname -s)" = "Darwin" ]]; then
+    echo "Installing Ruby dependencies..."
+    if ! brew bundle --file=Brewfile.ruby &> tmp/brew-bundle.ruby.log; then
+      echo "Failed to brew bundle --file=Brewfile.ruby:"
+      cat tmp/brew-bundle.ruby.log
+      exit 1
+    fi
+
+    echo "Setting up rbenv..."
+    brew bootstrap-rbenv-ruby
+  fi
+
+  echo "Installing Rubygems..."
+  bundle check >&/dev/null || bundle install --path=.bundler/gems --binstubs=.bundler/bin --with="test development"
+fi
+
+if [ ! -e "$HOME/.authnd/chatops.development.private.pem" ]; then
+  echo "Generating new chatops development key..."
+  go run "$root/script/helpers/genchatopskey/main.go"
+fi
+
+# if there isn't a default gh mobile development keypair, generate them for dev testing purposes
+[ ! -f "dev/gh-mobile-dev.pem" ] && OUT="${root}/dev/gh-mobile-dev" script/gen-ecdsa-p256-keypair
+# if there isn't a TA signing keypair, generate them for dev testing purposes
+[ ! -f "dev/ta-singing-key.pem" ] && OUT="${root}/dev/ta-signing-key" script/gen-ecdsa-p256-keypair
+# if there isn't a TA signing keypair, generate them for dev testing purposes
+[ ! -f "dev/rsa256-priv-key.pem" ] && OUT="${root}/dev/" script/gen-rsa256-private-key
+
+echo "Finished authnd bootstrap"

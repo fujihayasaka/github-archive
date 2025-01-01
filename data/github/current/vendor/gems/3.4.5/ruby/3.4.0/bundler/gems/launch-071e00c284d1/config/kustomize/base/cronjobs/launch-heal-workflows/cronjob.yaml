@@ -1,0 +1,37 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: launch-heal-workflows
+    annotations:
+        # https://github.com/github/moda-linter/blob/75731cd9f59e29883cb363020804c83d1d7f4ab8/rules/docs/env_var_already_injected_by_annotation.md
+        heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: launch-heal-workflows
+spec:
+    # suspend is overwritten for a single cluster above.
+    suspend: true
+    concurrencyPolicy: Forbid
+    jobTemplate:
+        spec:
+            ttlSecondsAfterFinished: 86400
+            backoffLimit: 1
+            # Terminate runaway pods after 10 minutes.
+            activeDeadlineSeconds: 600
+            template:
+                spec:
+                    dnsPolicy: Default
+                    restartPolicy: Never
+                    containers:
+                        - name: launch-heal-workflows
+                          image: launch
+                          command:
+                            - /usr/bin/tools/istio-job-wrapper
+                            - job-cli
+                            - jobs
+                            - healWorkflows
+                          resources:
+                            requests:
+                                cpu: "1"
+                                memory: "256Mi"
+                            limits:
+                                # Adjust GOMAXPROCS in tandem. It's recommended the cpu limit be set to GOMAXPROCS+1.
+                                cpu: "3"
+                                memory: "512Mi"

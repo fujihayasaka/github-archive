@@ -1,0 +1,68 @@
+environments:
+  - name: lab
+    cluster_selector:
+      profile: general
+      region: iad
+    service_mesh:
+      enabled: true
+    status_tolerations: ["initializing"]
+  - name: production
+    cluster_selector:
+      profile: general
+      region: iad
+    service_mesh:
+      enabled: true
+    canaryable: true
+    require_canary: true
+    require_pipeline: true
+notifications:
+  slack_channels:
+    - "#hosted-compute-ims-ops"
+required_builds:
+  - "hosted-compute-ims-moda-config-bundle / hosted-compute-ims-moda-config-bundle"
+  - "hosted-compute-ims-docker-image / hosted-compute-ims-docker-image"
+  - "hosted-compute-ims-docker-security / hosted-compute-ims-docker-security"
+auto_start_pipeline: production_rollout
+pipelines:
+  production_rollout:
+    thread_notifications: true
+    timeout: 5400 # 90 minutes
+    rollback_on_timeout: true
+    stages:
+      - name: lab
+        kind: deployment
+        start_message: We are now going to deploy to lab with {{app}}/{{ref}}!
+        config:
+          environment: lab
+          timeout: 300
+        gates:
+          - kind: check_build
+            build_name: run_e2e_tests_lab
+            notification_delay: 2100 # 35 minutes
+            blocking: true
+            custom_message: |
+              View the [e2e test results](https://github.com/github/hosted-compute-ims/actions/workflows/e2e_tests_lab.yml?query=is%3Ain_progress)
+              for details.
+          - kind: acknowledgement
+            blocking: false
+      - name: canary
+        kind: canary_deployment
+        config:
+          environment: production
+          hosts: canary
+          timeout: 300
+        gates:
+          - kind: auto_datadog
+            match_tags:
+              app: "{{app}}"
+              environment: "production"
+              auto_pipeline_add: "true"
+      - name: full_production
+        kind: deployment
+        start_message: We are now going to deploy {{app}}/{{ref}} to production! Please pause or cancel the pipeline after the deploy if you want more time before your pull request(s) auto merges.
+        config:
+          environment: production
+          timeout: 900
+        gates:
+          - kind: timer
+            duration: 300

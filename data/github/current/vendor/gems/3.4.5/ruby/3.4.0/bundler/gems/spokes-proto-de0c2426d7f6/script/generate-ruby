@@ -1,0 +1,24 @@
+#!/bin/bash
+set -e
+set -u
+
+IMAGE=spokes-proto-generate-ruby
+
+tar cf - \
+    config/tools/generate-ruby \
+    config/tools/shared |
+docker build -f config/tools/generate-ruby/Dockerfile -t ${IMAGE} -
+
+docker_args=""
+if [ "$(uname -s)" == "Linux" ]; then
+	# This ensures the output files are owned by the current user rather than root.
+	docker_args="--user $(id -u):$(id -g) --tmpfs /.cache/"
+fi
+
+docker run --rm \
+	--net=none \
+	-v $(pwd)/_template:/go/src/github.com/github/spokes-proto/_template:ro \
+	-v $(pwd)/proto:/go/src/github.com/github/spokes-proto/proto \
+	-v $(pwd)/gen:/go/src/github.com/github/spokes-proto/gen \
+	$docker_args \
+	${IMAGE}

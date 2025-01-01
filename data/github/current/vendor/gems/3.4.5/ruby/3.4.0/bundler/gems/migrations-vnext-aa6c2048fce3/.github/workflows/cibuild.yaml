@@ -1,0 +1,62 @@
+name: cibuild
+on:
+  - push
+  - workflow_dispatch
+  - merge_group
+env:
+  GOPROXY: https://goproxy.githubapp.com/mod,https://proxy.golang.org/,direct
+  GOPRIVATE: ''
+  GONOPROXY: ''
+  GONOSUMDB: github.com/github/*
+  WORKFLOW_CI: 1
+  GOCACHE: /tmp/go-build
+  fetchdepth: 1
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  cibuild:
+    env:
+      cache_prefix: cibuild
+      run_cmd: script/cibuild
+      docker_login: true
+      docker_compose_pull: true
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ env.fetchdepth }}
+          ref: ${{ github.ref }}
+      - name: OIDC Setup for goproxy
+        uses: github/setup-goproxy@v1.1.0 # use the latest released version
+      - uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34
+        with:
+          go-version-file: go.mod
+      - name: start docker compose pull
+        if: ${{ env.docker_compose_pull == 'true' }}
+        run: |
+          fn() {
+            docker compose pull -q mysql || echo failed > /tmp/pulldone
+            echo done > /tmp/pulldone
+          }
+          fn &
+      - name: go build cache
+        uses: actions/cache@v4.2.1
+        with:
+          path: ${{ env.GOCACHE }}
+          key: ${{env.cache_prefix}}-gocache-${{ github.sha }}
+          restore-keys: ${{env.cache_prefix}}-gocache-
+      - name: fetch default branch
+        if: ${{  env.fetch_default == 'true' }}
+        run: |
+          [[ "$(git rev-parse --abbrev-ref HEAD)" = "$default_branch" ]] ||
+            git fetch origin "$default_branch:$default_branch"
+      - name: docker login
+        if: ${{ env.docker_login == 'true' }}
+        run: echo "${{ secrets.CONTAINER_BUILDER_TOKEN }}" | docker login ghcr.io --username gh-containers-bot --password-stdin
+      - name: wait for docker compose pull
+        if: ${{ env.docker_compose_pull == 'true' }}
+        run: |
+          while [ ! -f /tmp/pulldone ]; do sleep 0.1; done
+          cat /tmp/pulldone
+      - run: ${{ env.run_cmd }}

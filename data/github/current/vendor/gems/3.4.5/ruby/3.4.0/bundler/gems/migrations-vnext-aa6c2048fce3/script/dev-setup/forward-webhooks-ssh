@@ -1,0 +1,34 @@
+#!/bin/bash
+
+# webhook preparation: configure webhooks on GHES, remove fw rules and forward ports using SSH
+# to run ELM on local to avoid copying the binary over.
+
+if [ -z "$GHES_URL" ]; then
+	echo "GHES_URL is missing"
+	exit 0
+fi
+
+if [ -z "$GHES_TOKEN" ]; then
+	echo "GHES_TOKEN is missing"
+	exit 0
+fi
+
+host=$(echo "$GHES_URL" | sed -E 's#https?://##')
+
+fetch_private_ip(){
+	ssh -p122 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+	 admin@${host}  -- "/sbin/ifconfig eth0 | grep inet | head -n 1 | cut -d ' ' -f 10"
+}
+
+echo -n "fetching GHES instance private IP... "
+private_ip="$(fetch_private_ip)"
+if [ $? -ne 0 ]; then
+	echo "failed to fetch private ip"
+	exit 0
+fi
+echo $private_ip
+
+ssh -q -p122 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+	-R 127.0.0.1:9179:localhost:9178 admin@${host} \
+	-- "sudo ufw allow from $private_ip proto tcp port 9178 2>/dev/null || true; sudo iptables -D ufw-before-output -o lo -m owner --uid-owner hookshot -j REJECT 2>/dev/null || true; pkill socat; socat TCP-LISTEN:9178,fork,reuseaddr TCP:127.0.0.1:9179"
+

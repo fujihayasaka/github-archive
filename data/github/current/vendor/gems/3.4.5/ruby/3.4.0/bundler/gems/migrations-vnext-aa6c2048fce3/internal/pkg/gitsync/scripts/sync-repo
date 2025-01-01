@@ -1,0 +1,106 @@
+#!/bin/bash
+
+# This script syncs Git data from a GHES bare repo to GitHub.com, deleting stale branches and tags
+
+ERROR_COUNT=0        # Count of all failed pushes
+BRANCH_COUNT=0       # Count of branches pushed
+TOTAL_BRANCHES=0     # Total count of branches
+
+if [ -z "$MIGRATION_TARGET_URL" ]; then
+  echo "ERROR: MIGRATION_TARGET_URL environment variable is required"
+  exit 1
+fi
+
+echo "INFO: Git directory: $PWD"
+echo "INFO: Target URL: $MIGRATION_TARGET_URL"
+echo "INFO: Starting repository sync"
+
+# Get the list of local branches
+mapfile -t LOCAL_BRANCHES < <(git for-each-ref --format='%(refname:short)' refs/heads/)
+TOTAL_BRANCHES="${#LOCAL_BRANCHES[@]}"
+echo "INFO: Found $TOTAL_BRANCHES local branches"
+
+# Push local branches
+for BRANCH in "${LOCAL_BRANCHES[@]}"; do
+  ((BRANCH_COUNT++))
+  echo "INFO: Processing branch [$BRANCH_COUNT/$TOTAL_BRANCHES]: $BRANCH"
+  
+  if ! git push "$MIGRATION_TARGET_URL" "refs/heads/${BRANCH}:refs/heads/${BRANCH}" --force --no-verify --quiet; then
+    ((ERROR_COUNT++))
+    echo "ERROR: Push failed for branch: ${BRANCH}"
+  else
+    echo "SUCCESS: Pushed branch: ${BRANCH}"
+  fi
+done
+
+# Delete stale branches
+echo "INFO: Checking for stale branches on target"
+mapfile -t REMOTE_BRANCHES < <(git ls-remote --heads "$MIGRATION_TARGET_URL" | awk '{print $2}' | sed 's/refs\/heads\///')
+
+declare -A LOCAL_BRANCH_SET
+for branch in "${LOCAL_BRANCHES[@]}"; do
+  LOCAL_BRANCH_SET["$branch"]=1
+done
+
+for remote_branch in "${REMOTE_BRANCHES[@]}"; do
+  if [[ -z "${LOCAL_BRANCH_SET[$remote_branch]}" ]]; then
+    echo "INFO: Deleting stale branch on target: $remote_branch"
+    if ! git push "$MIGRATION_TARGET_URL" ":refs/heads/$remote_branch" --no-verify --quiet; then
+      ((ERROR_COUNT++))
+      echo "ERROR: Failed to delete branch: $remote_branch"
+    else
+      echo "SUCCESS: Deleted stale branch: $remote_branch"
+    fi
+  fi
+done
+
+# Tag handling: Push tags and delete stale ones
+echo "INFO: Syncing tags"
+if ! git push "$MIGRATION_TARGET_URL" --tags --no-verify --quiet; then
+  ((ERROR_COUNT++))
+  echo "ERROR: Failed to push tags"
+else
+  echo "SUCCESS: Pushed all tags"
+fi
+
+mapfile -t LOCAL_TAGS < <(git tag --list)
+mapfile -t REMOTE_TAGS < <(git ls-remote --tags "$MIGRATION_TARGET_URL" | awk '{print $2}' | sed 's/refs\/tags\///' | sed 's/\^{}$//')
+
+declare -A LOCAL_TAG_SET
+for tag in "${LOCAL_TAGS[@]}"; do
+  LOCAL_TAG_SET["$tag"]=1
+done
+
+for remote_tag in "${REMOTE_TAGS[@]}"; do
+  if [[ -z "${LOCAL_TAG_SET[$remote_tag]}" ]]; then
+    echo "INFO: Deleting stale tag on target: $remote_tag"
+    if ! git push "$MIGRATION_TARGET_URL" ":refs/tags/$remote_tag" --no-verify --quiet; then
+      ((ERROR_COUNT++))
+      echo "ERROR: Failed to delete tag: $remote_tag"
+    else
+      echo "SUCCESS: Deleted stale tag: $remote_tag"
+    fi
+  fi
+done
+
+# Hidden refs
+if grep -q -e "refs/pull/" -e "refs/notes/" -e "refs/__gh__/" packed-refs 2>/dev/null; then
+  echo "INFO: Found hidden refs, processing"
+  while read -r ref; do
+    if [[ "$ref" =~ "refs/pull/" || "$ref" =~ "refs/notes/" || "$ref" =~ "refs/__gh__/" ]]; then
+      refname=$(echo "$ref" | awk '{print $2}')
+      transformed_refname=$(echo "$refname" | sed 's:refs/:refs/mvn/:')
+      echo "INFO: Pushing $refname -> $transformed_refname"
+      if ! git push "$MIGRATION_TARGET_URL" "${refname}:${transformed_refname}" --force --no-verify --quiet; then
+        ((ERROR_COUNT++))
+        echo "ERROR: Push failed for ref: ${refname}"
+      else
+        echo "SUCCESS: Pushed ref: ${refname}"
+      fi
+    fi
+  done < <(git show-ref)
+fi
+
+echo "SUMMARY: Synced $BRANCH_COUNT of $TOTAL_BRANCHES branches"
+echo "SUMMARY: Errors: $ERROR_COUNT"
+exit $ERROR_COUNT

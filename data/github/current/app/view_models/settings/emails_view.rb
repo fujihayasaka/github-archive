@@ -133,7 +133,7 @@ module Settings
     end
 
     def hide_backup_email_options
-      user.is_enterprise_managed?
+      user.scim_managed_user?
     end
 
     # Internal: Determines the id of the user's currently configured backup

@@ -1,0 +1,62 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: authnd-notifier
+    annotations:
+        # do NOT make the deploy wait for this Job to complete before finishing the deployment
+        heaven.githubapp.com/deploy-requirement: "false"
+        # do NOT include the output of the Job in the deployment log
+        moda.github.net/log-job-output: "false"
+        # Deploy a single pod to 'general-1-ash1-iad'
+        moda.github.net/cluster-preferences: |
+            {
+              "general-1-ash1-iad":  {
+                "spec": {
+                  "suspend": false
+                }
+              }
+            }
+spec:
+    schedule: "0 * * * *" # run every hour
+    concurrencyPolicy: Forbid
+    successfulJobsHistoryLimit: 3
+    failedJobsHistoryLimit: 3
+    # don't run the CronJob by default https://kubernetes.io/docs/tasks/job/automated-tasks-with-cron-jobs/#suspend
+    # this gets overriden by the cluster-preferences annotation above, so the CronJob only runs in one Moda cluster.
+    # e.g. https://github.com/github/first-responder/blob/main/config/kubernetes/default/deployments/first-responder-cron.yml#L10
+    suspend: true
+    jobTemplate:
+        metadata:
+            annotations:
+                observability.github.com/logger: fluent-bit
+                fluentbit.io/parser: logfmt_sloppy
+        spec:
+            activeDeadlineSeconds: 1800 # 30 minutes job timeout
+            template:
+                spec:
+                    restartPolicy: Never
+                    containers:
+                        - name: authnd-notifier
+                          image: authnd
+                          command:
+                            - /usr/bin/tools/istio-job-wrapper
+                            - /app/bin/authnd-notifier
+                          envFrom:
+                            - secretRef:
+                                name: vault-secrets
+                            - configMapRef:
+                                name: kube-cluster-metadata
+                            - configMapRef:
+                                name: common-config
+                          env:
+                            - name: STATS_PERIOD
+                              value: "5s"
+                            - name: STATS_ADDR
+                              value: "$(KUBE_NODE_HOSTNAME):28125"
+                          volumeMounts:
+                            - name: authnd-configmap
+                              mountPath: /config
+                    volumes:
+                        - name: authnd-configmap
+                          configMap:
+                            name: authnd

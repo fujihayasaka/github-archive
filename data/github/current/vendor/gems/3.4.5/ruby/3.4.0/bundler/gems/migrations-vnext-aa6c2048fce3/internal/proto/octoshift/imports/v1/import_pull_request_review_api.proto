@@ -1,0 +1,127 @@
+syntax = "proto3";
+
+package octoshift.imports.v1;
+
+option go_package = "github.com/github/migrations-vnext/internal/pkg/octoshift/imports/v1";
+option ruby_package = "MonolithTwirp::Octoshift::Imports::V1";
+
+import "imports/v1/pull_request_review.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+// ImportPullRequestReviewAPI handles the pull request review import operation.
+service ImportPullRequestReviewAPI {
+  // ImportPullRequestReview imports a single pull request review to a pull request.
+  rpc ImportPullRequestReview(ImportPullRequestReviewRequest) returns (ImportPullRequestReviewResponse);
+}
+
+message ImportPullRequestReviewRequest {
+  // pull_request_id is the id of the associated pull request for this review. (required)
+  int64 pull_request_id = 1;
+  // user_login is the login of the user performing the review. (required)
+  string user_login = 2;
+  // state is the review state. (required)
+  PullRequestReviewState state = 3;
+  // head_sha is the sha associated with the review at the time of submission. (required)
+  string head_sha = 4;
+  // created_at is the date and time when the review was created. (required)
+  google.protobuf.Timestamp created_at = 5;
+  // submitted_at is the date and time when the review was submitted. (required)
+  google.protobuf.Timestamp submitted_at = 6;
+  // body is the text content for the body of the review.
+  google.protobuf.StringValue body = 7;
+  // threads is the list of review threads associated with this review.
+  repeated PullRequestReviewThread threads = 8;
+  // comments are comments associated with this review that are in reply to comments from another review.
+  repeated PullRequestReviewComment comments = 9;
+}
+
+message PullRequestReviewThread {
+  // resolved_by_user_login is the login for the user that resolved this thread.
+  string resolved_by_user_login = 1;
+  // resolved_at is the timestamp when this thread was resolved.
+  google.protobuf.Timestamp resolved_at = 2;
+  // comments are the list of comments associated with this thread, or the first comment that created this thread. (required; at least one comment)
+  repeated PullRequestReviewComment comments = 3;
+  // created_at indicates the date and time when the thread was created. (required)
+  google.protobuf.Timestamp created_at = 4;
+  // base_commit_id is used when creating the diff. (left)
+  string base_commit_id = 5;
+  // commit_id is used when creating the diff. (right) (required)
+  string commit_id = 6;
+  // path is the relative path of the file the comment is written in. (required)
+  string path = 7;
+  // line is the line (or end line for a multiline) number for the comment. (required)
+  int64 line = 8;
+  // side is the ending side for the comment. Can either be left or right. (required)
+  PullRequestReviewDiffSideType side = 9;
+  // start_line is the optional starting line in the case of a multiline comment.
+  google.protobuf.Int64Value start_line = 10;
+  // start_side is the optional starting side. Can either be left or right.
+  PullRequestReviewDiffSideType start_side = 11;
+  // diff_hunk is the unified diff from base_commit_id and commit_id.
+  google.protobuf.StringValue diff_hunk = 12;
+  // position is the current position of the thread in the diff. Nil signifies an outdated thread.
+  google.protobuf.Int64Value position = 13;
+  // original_position is the original position of the thread in the diff.
+  google.protobuf.Int64Value original_position = 14;
+  // original_start_line is the optional original starting line in the case of a multiline comment, where the original start line has since been deleted.
+  google.protobuf.Int64Value original_start_line = 15;
+  // subject_type denotes whether this thread is on a file, or a specific line in a file (required for file-level comments).
+  PullRequestReviewSubjectType subject_type = 16;
+  // start_position_offset is the starting offset for multiline threads.
+  google.protobuf.Int64Value start_position_offset = 17;
+  // blob_position is the zero-based end line in the diff.
+  google.protobuf.Int64Value blob_position = 18;
+  // outdated is a boolean indicating whether the thread is outdated.
+  bool outdated = 19;
+}
+
+message PullRequestReviewComment {
+  // user_login is the login of the user that created the comment (can be a mannequin). (required)
+  string user_login = 1;
+  // body is the text contents of the comment (with markup). (required)
+  string body = 2;
+  // created_at indicates the date and time when the comment was created. (required)
+  google.protobuf.Timestamp created_at = 3;
+  // reply_to_id is an ID for a comment that this comment is in reply to. (required if a non-thread-message comment)
+  google.protobuf.Int64Value reply_to_id = 4;
+  // thread_id is the database ID for the review thread this comment is attached to. (required if a non-thread-message comment)
+  google.protobuf.Int64Value thread_id = 5;
+  // subject_type denotes whether this thread is on a file, or a specific line in a file (required for file-level comments). (deprecated)
+  PullRequestReviewSubjectType subject_type = 6;
+}
+
+message ImportPullRequestReviewResponse {
+  // pull_request_review is the created pull request review. (required)
+  PullRequestReview pull_request_review = 1;
+}
+
+// PullRequestReviewDiffSideType denotes the side used when generating diffs (can be left or right)
+enum PullRequestReviewDiffSideType {
+  PULL_REQUEST_REVIEW_DIFF_SIDE_TYPE_INVALID = 0;
+  PULL_REQUEST_REVIEW_DIFF_SIDE_TYPE_LEFT = 1;
+  PULL_REQUEST_REVIEW_DIFF_SIDE_TYPE_RIGHT = 2;
+}
+
+enum PullRequestReviewSubjectType {
+  PULL_REQUEST_REVIEW_SUBJECT_TYPE_INVALID = 0;
+  PULL_REQUEST_REVIEW_SUBJECT_TYPE_LINE = 1;
+  PULL_REQUEST_REVIEW_SUBJECT_TYPE_FILE = 2;
+}
+
+enum PullRequestReviewState {
+  // PULL_REQUEST_REVIEW_STATE_INVALID is present because enums require a zero value. This
+  // should never be used.
+  PULL_REQUEST_REVIEW_STATE_INVALID = 0;
+  // PULL_REQUEST_REVIEW_STATE_PENDING is returned if the review is pending.
+  PULL_REQUEST_REVIEW_STATE_PENDING = 1;
+  // PULL_REQUEST_REVIEW_STATE_COMMENTED is returned if the review has a commented state.
+  PULL_REQUEST_REVIEW_STATE_COMMENTED = 2;
+  // PULL_REQUEST_REVIEW_STATE_CHANGES_REQUESTED is returned if the review has a changes requested state.
+  PULL_REQUEST_REVIEW_STATE_CHANGES_REQUESTED = 3;
+  // PULL_REQUEST_REVIEW_STATE_APPROVED is returned if the review has an approved state.
+  PULL_REQUEST_REVIEW_STATE_APPROVED = 4;
+  // PULL_REQUEST_REVIEW_STATE_DISMISSED is returned if the review is dismissed.
+  PULL_REQUEST_REVIEW_STATE_DISMISSED = 5;
+}

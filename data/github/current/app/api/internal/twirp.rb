@@ -78,6 +78,8 @@ class Api::Internal::Twirp < ::Api::Internal
 
   # Monolith Twirp tooling
   mount ::Api::Internal::Twirp::Examples::Octocat::V1::OctocatAPIHandler
+  mount ::Api::Internal::Twirp::Elm::Repositories::V1::ExportRepositorySettingsAPIHandler
+  mount ::Api::Internal::Twirp::Elm::Repositories::V1::ExportRepositoryTopicsAPIHandler
   mount ::Api::Internal::Twirp::Elm::Organizations::V1::ExportSettingsAPIHandler
   mount ::Api::Internal::Twirp::Modelsgateway::Telemetry::V1::ModelsLogAPIHandler
   mount ::Api::Internal::Twirp::Octoshift::Imports::V1::EditPullRequestReviewCommentAPIHandler

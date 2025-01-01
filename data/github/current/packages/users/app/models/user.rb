@@ -3937,6 +3937,7 @@ class User < ApplicationRecord::Domain::Users
   # Returns true otherwise.
   def change_email_enabled?
     return false if self.is_emu_and_not_first_owner?
+    return false if self.enterprise_server_scim_managed_user?
     GitHub.auth.user_change_email_enabled?(self)
   end
 

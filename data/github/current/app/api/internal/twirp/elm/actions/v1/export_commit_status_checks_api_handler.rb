@@ -79,13 +79,11 @@ module Api::Internal::Twirp::Elm
           pr_batch_size = [per_page * PR_BATCH_MULTIPLIER, MAX_PR_BATCH_SIZE].min
           pr_offset = (page - 1) * pr_batch_size
 
-          PullRequest.where(repository_id: repository_id)
-                     .where.not(head_sha: nil)
-                     .distinct
-                     .limit(pr_batch_size)
-                     .offset(pr_offset)
-                     .pluck(:head_sha)
-                     .compact
+          PullRequests::HeadShas.for_repository(
+            repository_id: repository_id,
+            limit: pr_batch_size,
+            offset: pr_offset
+          )
         end
 
         def map_state_to_protobuf_enum(state)

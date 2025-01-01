@@ -3,6 +3,8 @@
 
 # Public: A pending action changing the ownership of a repository.
 class RepositoryTransfer < ApplicationRecord::Domain::Repositories
+  include Repository::EnterpriseManagedUserMethods
+
   # Internal: The signed auth token name used for transfer requests.
   SCOPE = "RepositoryTransfer:request"
 
@@ -41,6 +43,7 @@ class RepositoryTransfer < ApplicationRecord::Domain::Repositories
   validate :repo_owner_is_not_spammy
   validate :repo_not_locked_on_migration
   validate :permission_on_new_org_repo
+  validate :target_owner_is_not_blocked_personal_namespace
   validate :from_org_to_self
   validate :org_repo_deletion_restriction
   validate :valid_emu_context, if: :dotcom?
@@ -368,6 +371,13 @@ class RepositoryTransfer < ApplicationRecord::Domain::Repositories
     new_is_org = target && target.organization?
     if new_is_org && !target.can_create_repository?(requester, visibility: repository.visibility)
       errors.add :base, "You don’t have the permission to create #{repository.visibility} repositories on #{target.login_for_api}"
+    end
+  end
+
+  # before_action
+  def target_owner_is_not_blocked_personal_namespace
+    if creation_blocked_for_repo_in_personal_namespace?(requester, target)
+      errors.add :base, creating_repo_in_personal_namespace_enterprise_setting_message(requester)
     end
   end
 

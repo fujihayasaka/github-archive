@@ -1,0 +1,90 @@
+# http://kubernetes.io/docs/user-guide/deployments/#what-is-a-deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: launch-chatops
+    annotations:
+        # https://github.com/github/moda-linter/blob/75731cd9f59e29883cb363020804c83d1d7f4ab8/rules/docs/env_var_already_injected_by_annotation.md
+        heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: launch-chatops
+spec:
+    selector:
+        matchLabels:
+            service: launch-chatops
+    replicas: 1
+    template:
+        metadata:
+            # Labels are applied to all pods created by this deployment so we can
+            # tell the service load balancer where to send traffic.
+            # http://kubernetes.io/docs/user-guide/labels/
+            labels:
+                service: launch-chatops
+            annotations:
+                fluentbit.io/parser: logfmt
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: prod-launch
+                observability.github.com/splunk_sourcetype: launch-fluentbit
+                observability.github.com/kafka_topic: launch
+        spec:
+            dnsPolicy: Default
+            containers:
+                - name: launch-chatops
+                  # The image repository and tag are substituted on deploy.
+                  image: launch
+                  # The command to run when booting the containers.
+                  command:
+                    - "launch-chatops"
+                  envFrom:  # order matters! Subsequent entries can override earlier entries.
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: KUBE_POD
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.name
+                    - name: KUBE_NAMESPACE
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.namespace
+                    - name: REGION
+                      valueFrom:
+                        configMapKeyRef:
+                            name: kube-cluster-metadata
+                            key: region
+                    # The HTTP_ADDR and INTERNAL_ADDR should be the same
+                    - name: HTTP_ADDR
+                      value: ":6824"
+                    - name: INTERNAL_ADDR
+                      value: ":6824"
+                    - name: TRACING_ENABLED
+                      value: "true"
+                    - name: TELEMETRY_ROUND_TRIPPER_ENABLE_LOGS
+                      value: "true"
+                    - name: GOMAXPROCS
+                      value: "1"
+                    - name: LAUNCH_LOG_DEBUG
+                      value: "true"
+                  # As per https://github.com/github/kube/blob/master/docs/handbook_files/next_steps.md#required-prestop-hook
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command: ["sleeper", "-seconds", "5"]
+                  # This port needs to match what is configured in Dockerfile.
+                  ports:
+                    - containerPort: 6824
+                  resources:
+                    requests:
+                        # Recommendations: https://app.datadoghq.com/s/59fe6c40c/kvm-d5x-4f4
+                        cpu: "25m"
+                        memory: "100Mi"
+                    limits:
+                        # Adjust GOMAXPROCS in tandem. It's recommended the cpu limit be set to GOMAXPROCS+1.
+                        cpu: "2"
+                        memory: "200Mi"
+                  # Definitions for liveness and readiness probes can be found at
+                  # http://kubernetes.io/docs/api-reference/v1/definitions/#_v1_probe
+                  readinessProbe:
+                    initialDelaySeconds: 5
+                    timeoutSeconds: 5
+                    httpGet:
+                        path: /_health
+                        port: 6824

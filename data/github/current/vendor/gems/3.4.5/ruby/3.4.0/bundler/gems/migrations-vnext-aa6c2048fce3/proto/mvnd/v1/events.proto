@@ -1,0 +1,129 @@
+syntax = "proto3";
+
+package mvnd.migrations.api.v1;
+
+option go_package = "github.com/github/migrations-vnext/proto/mnvd/api/v1";
+
+import "google/protobuf/timestamp.proto";
+import "mvnd/v1/resources.proto";
+import "mvnd/v1/context.proto";
+
+
+// EventAction represents the action of the event. A complete list may be found here:
+// https://docs.github.com/en/webhooks/webhook-events-and-payloads
+enum EventAction {
+  EVENT_ACTION_INVALID = 0;
+  EVENT_ACTION_EDITED = 1;
+  EVENT_ACTION_DELETED = 2;
+}
+
+// Event represents an event that occurred in the context of a migration.
+message Event {
+  // event_id represents the event's unique identifier
+  string event_id = 1;
+
+  // resource_id represents the resource that the event is associated with.
+  // e.g: an issue, an issue comment, a pull request, a pull request comment, etc.
+  string resource_id = 2;
+
+  // timestamp represents the time the event occurred. In most cases, this is the
+  // the updated_at field of the event.
+  google.protobuf.Timestamp timestamp = 3;
+
+  // event_action represents the action of the event.
+  EventAction event_action = 4;
+
+  // event_details represents the details of the event.
+  oneof event_details {
+    Issue issue_event = 50;
+    IssueComment issue_comment_event = 51;
+    PullRequest pull_request_event = 52;
+    PullRequestReviewEventEdit pull_request_review_event = 53;
+    PullRequestReviewCommentEventEdit pull_request_review_comment_event = 54;
+    PullRequestReviewThreadEventEdit pull_request_review_thread_event = 55;
+  }
+
+
+  // migration_context represents the context of the migration that this event belongs to.
+  MigrationContext migration_context = 100;
+}
+
+// FailedEvent is the definition for a event that failed to be handled during a migration.
+message FailedEvent {
+  // error_message is the error message that describes the failure.
+  string error_message = 1;
+
+  // failed_at is the time the resource failed for last time.
+  google.protobuf.Timestamp failed_at = 2;
+
+  // retries_attempted is the number of retries attempted.
+  int64 retries_attempted = 3;
+
+  // resource is the resource that failed.
+  Event event = 4;
+}
+
+// PullRequestReviewThreadEventEdit represents an event that occurred in the context of a migration.
+message PullRequestReviewThreadEventEdit {
+  // user_resource_id is the ID that describes the user that triggered the event.
+  // E.g: http://github.dev/monalisa (required)
+  string user_resource_id = 1;
+
+  // thead_id is the ID that describes the thread that triggered the event (not used for now)
+  int64 thread_id = 2;
+
+  // first_comment_id is the ID that describes the first comment of the thread that triggered the event.
+  int64 first_comment_id = 3;
+
+  // resolved is a boolean that indicates whether the thread was resolved.
+  bool resolved = 4;
+
+  // updated_at is the time resource was last updated, i.e: the time the event occurred.
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+// PullRequestReviewEventEdit represents an event that occurred in the context of a migration.
+message PullRequestReviewEventEdit {
+  // user_resource_id is the ID that describes the user that triggered the event.
+  // E.g: http://github.dev/monalisa (required)
+  string user_resource_id = 1;
+
+  // body is the body of the pull request review.
+  string body = 2;
+
+  // updated_at is the time resource was last updated, i.e: the time the event occurred.
+  google.protobuf.Timestamp updated_at = 3;
+}
+
+// PullRequestReviewCommentEventEdit represents an event that occurred in the context of a migration.
+message PullRequestReviewCommentEventEdit {
+  // user_resource_id is the ID that describes the user that triggered the event.
+  // E.g: http://github.dev/monalisa (required)
+  string user_resource_id = 1;
+
+  // body is the body of the pull request review comment.
+  string body = 2;
+
+  // updated_at is the time resource was last updated, i.e: the time the event occurred.
+  google.protobuf.Timestamp updated_at = 3;
+}
+
+// WALEvent represents the results of processing an event in the crawler
+// in a format that can be easily serialized by the write-ahead log.
+message WALEvent {
+  // events that were parsed from the webhook payload and need to be sent to gh/gh
+  repeated Event events = 1;
+
+  // resources (if any) that were generated from the webhook payload and need to be sent to gh/gh
+  repeated Resource resources = 2;
+
+  // source_url is the url of source instance
+  string source_url = 3;
+}
+
+message StoreEventRequest {
+  int64 migration_id = 1;
+  Event event = 2;
+}
+
+message StoreEventResponse {}

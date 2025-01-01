@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20210615094142_create_missing_global_tools_fixed.go on GHES

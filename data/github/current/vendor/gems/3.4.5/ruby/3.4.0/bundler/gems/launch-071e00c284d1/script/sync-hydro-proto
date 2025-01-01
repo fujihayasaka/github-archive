@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+#/ Usage: script/sync-hydro-proto [BRANCH]
+#/ Synchronizes the hydro-schemas for Launch
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+test -z "${DEBUG:-}" || {
+  set -x
+}
+
+APP_ROOT="$(git rev-parse --show-toplevel)"
+HYDRO_REPO_PATH="${APP_ROOT}/tmp/hydro-schemas"
+HYDRO_PROTO_OUT="${APP_ROOT}/hydro"
+HYDRO_SCHEMAS_PROTO_OUT="${APP_ROOT}/hydro/schemas"
+
+HYDRO_REPO="https://github.com/github/hydro-schemas.git"
+HYDRO_BRANCH="${HYDRO_BRANCH:-main}"
+[ $# -gt 0 ] && HYDRO_BRANCH="$1"
+
+rm -rf "$HYDRO_SCHEMAS_PROTO_OUT"
+mkdir -p "$HYDRO_SCHEMAS_PROTO_OUT"
+
+printf "Cloning %s ...\n" "$HYDRO_REPO"
+rm -rf "$HYDRO_REPO_PATH"
+git clone --quiet --depth 1 "$HYDRO_REPO" -b "$HYDRO_BRANCH" "$HYDRO_REPO_PATH"
+
+cd "$HYDRO_REPO_PATH"
+
+printf "Bootstrapping hydro-schemas ...\n"
+if ! script/bootstrap >&bootstrap.log; then
+  cat bootstrap.log
+  exit 1
+fi
+
+generate() {
+  pkg=$1
+  path=$2
+  set -- script/generate \
+    --go-out "$(dirname "$HYDRO_PROTO_OUT")" --go-prefix "$pkg" --protoc-gen-go github.com/golang/protobuf/protoc-gen-go@v1.3.0 $path
+
+  printf "Running: %s\n" "$*"
+  "$@"
+}
+
+generate github.com/github/launch proto/hydro/schemas/github/actions/v0/abuse_detection_event.proto
+generate github.com/github/launch proto/hydro/schemas/github/actions/v0/billing_plan_owner.proto
+generate github.com/github/launch proto/hydro/schemas/github/actions/v0/cache_usage.proto
+generate github.com/github/launch proto/hydro/schemas/github/actions/v0/invocation_blocked.proto
+generate github.com/github/launch proto/hydro/schemas/github/actions/v0/invocation_unblocked.proto
+generate github.com/github/launch proto/hydro/schemas/github/actions/v0/job_execution.proto
+generate github.com/github/launch proto/hydro/schemas/github/actions/v0/queue_run.proto
+generate github.com/github/launch proto/hydro/schemas/github/actions/v0/repo_enabled.proto
+generate github.com/github/launch proto/hydro/schemas/github/actions/v0/reputation_score_change.proto
+generate github.com/github/launch proto/hydro/schemas/github/actions/v0/workflow_cancel_request.proto
+generate github.com/github/launch proto/hydro/schemas/github/actions/v0/workflow_execution.proto
+generate github.com/github/launch proto/hydro/schemas/github/actions/v0/workflow_state_change.proto
+generate github.com/github/launch proto/hydro/schemas/github/actions/v0/workflow_update.proto
+
+generate github.com/github/launch proto/hydro/schemas/github/v1/abuse_classification.proto
+generate github.com/github/launch proto/hydro/schemas/github/v1/repository_archived_status_changed.proto
+generate github.com/github/launch proto/hydro/schemas/github/v1/repository_deleted.proto
+generate github.com/github/launch proto/hydro/schemas/github/v1/repository_restored.proto
+generate github.com/github/launch proto/hydro/schemas/github/v1/repository_transfer.proto
+generate github.com/github/launch proto/hydro/schemas/github/v1/user_destroy.proto
+generate github.com/github/launch proto/hydro/schemas/github/v1/organization_restore.proto
+
+generate github.com/github/launch proto/hydro/schemas/audit_log/v2/audit_entry.proto
+
+cd ..
+rm -rf "$HYDRO_REPO_PATH"

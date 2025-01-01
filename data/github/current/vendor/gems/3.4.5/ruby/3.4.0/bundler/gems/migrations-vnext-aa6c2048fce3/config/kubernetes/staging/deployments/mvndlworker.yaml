@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mvndlworker
+  annotations:
+    moda.github.net/cluster-preferences: |
+      {
+       "general-2-ac4-iad":  {
+         "spec": {
+           "replicas": 0
+         }
+       }
+      }
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: mvndlworker
+  template:
+    metadata:
+      labels:
+        app: mvndlworker
+      annotations:
+        fluentbit.io/parser: logfmt
+        observability.github.com/logger: fluent-bit
+        observability.github.com/splunk_index: migrations-vnext
+    spec:
+      dnsPolicy: Default
+      containers:
+        - name: mvndlworker
+          image: migrations-vnext
+          command:
+            - /mvndlworker
+          env:
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  containerName: mvndlworker
+                  resource: limits.cpu
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: kube-cluster-metadata
+          # Zero-downtime deploys
+          # https://thehub.github.com/engineering/products-and-services/internal/moda/feature-documentation/pod-lifecycle/#required-prestop-hook
+          # https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#container-hooks
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          readinessProbe:
+            initialDelaySeconds: 5
+            exec:
+              command: ["true"]

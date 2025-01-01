@@ -1,0 +1,26 @@
+#!/bin/bash
+
+# This script tries to extract test failure annotations from the 
+# integration test logs and render them in the PR
+
+annotations=$(cat $1 | sed -nr "s/^.*blackbird-mw\/(.*\.go:[0-9]+).*$/\1/p" | uniq | head -n 20)
+while IFS= read -r line; do
+   line_number=$(echo $line | sed -nr "s/.*\.go:([0-9]+).*$/\1/p")
+   filename=$(echo $line | sed -nr "s/(^.*\.go):[0-9]+.*$/\1/p")
+
+   error_context=$(cat $1 | egrep --color -A 5 -i "blackbird-mw/$line")
+   prefix=$(echo "$error_context" | sed -nr "s/(^.*)(Error Trace|panic):.*$/\1/p")
+   if [[ ${#prefix} -gt 0 ]]; then
+     error_context=$(echo "$error_context" | head -n 3 | cut -c ${#prefix}-)
+     error_context="${error_context//'%'/'%25'}"
+     error_context="${error_context//$'\n'/'%0A'}"
+     error_context="${error_context//$'\r'/'%0D'}"
+
+     echo "::error file=$filename,line=$line_number::Integration test failure%0A$error_context"
+     continue
+   fi
+
+   error_context=$(echo "$error_context" | head -n 3)
+   echo "::error file=$filename,line=$line_number::Integration test failure"
+done <<< $annotations
+

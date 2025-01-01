@@ -1,0 +1,107 @@
+#!/usr/bin/env ruby
+
+require 'fileutils'
+
+# Working directory
+BASE_DIR = File.expand_path("..", __dir__)
+
+# List of proto files to generate
+PROTO_FILES = Dir[File.join(BASE_DIR, "rpc/**/*proto")]
+
+# List of proto directories
+PROTO_DIRS = [
+  "tma/v0",
+  "google/api/",
+  "sigstore/",
+]
+
+# Run the protoc command in a Docker container to generate Ruby protobuf & twirp files
+# This is used when production protobuf version is not the latest version
+#
+# @param [String] proto_file the proto file to generate
+def cmd_generate_proto_container(proto_file)
+  cmd = %{
+    docker run --platform=linux/amd64 --volume #{BASE_DIR}/rpc/:/home/tma/rpc \
+    --volume #{BASE_DIR}/ruby/trust-metadata-api/lib/proto/trust-metadata-api/v0:/home/tma/proto \
+    --tty --interactive tma-protos:latest \
+    protoc --experimental_allow_proto3_optional \
+    --ruby_out=/home/tma/proto \
+    --twirp_ruby_out=/home/tma/proto \
+    --proto_path=/usr/local/include \
+    --proto_path=/home/tma/rpc:/home/tma/rpc/sigstore \
+    /home/tma/#{proto_file.gsub("#{BASE_DIR}/", "")}
+  }
+  puts cmd
+  system(cmd, exception: true)
+end
+
+# Rewrite the generated Ruby protobuf files to use require_relative instead of require
+# when matching certain conditions
+#
+# @param [String] file path of the file to rewrite
+def rewrite_requires(filename)
+  new_file = ""
+  File.read(filename).each_line do |line|
+    # replace "require" with "require_relative" but not if it's any of the following dependencies:
+    # - google/protobuf
+    # - twirp
+    if line.include?("require") && !line.include?("google/protobuf") && !line.include?("twirp")
+      # replace "require" with "require_relative" and remove the "sigstore/" or "google/api" part
+      line = line.gsub(/require\s+'(sigstore\/|google\/api\/)|require\s+'/, "require_relative '")
+    end
+    new_file += line
+  end
+
+  File.write(filename, new_file)
+end
+
+# Run the script
+def run!
+  # Ensure the protoc docker file is built
+  puts "Building protoc docker image..."
+  Dir.chdir("#{BASE_DIR}/ruby/trust-metadata-api")
+  system("rake docker_build", exception: true)
+  Dir.chdir(BASE_DIR)
+
+  # Loop through all proto files and generate Ruby protobuf and twirp files
+  puts "Generating Ruby protobuf files..."
+  PROTO_FILES.each do |file|
+    cmd_generate_proto_container(file)
+  end
+
+  # Loop through all proto directories and move the generated files to the correct directory
+  puts "Moving generated files to the correct directory..."
+  PROTO_DIRS.each do |dir|
+    files = Dir.glob("#{BASE_DIR}/ruby/trust-metadata-api/lib/proto/trust-metadata-api/v0/#{dir}/*")
+    files.each do |file|
+      FileUtils.mv(file, "#{BASE_DIR}/ruby/trust-metadata-api/lib/proto/trust-metadata-api/v0/")
+    end
+  end
+
+  # rewrite the require statements to use require_relative
+  puts "Rewriting require statements..."
+  files = Dir.glob("#{BASE_DIR}/ruby/trust-metadata-api/lib/proto/trust-metadata-api/v0/*_{pb,twirp}.rb")
+  files.each do |file|
+    puts "Rewriting #{file}..."
+    rewrite_requires(file)
+  end
+end
+
+# Tidy up
+def cleanup!
+  puts "Cleaning up..."
+
+  # remove the directories that were generated since we're putting everything in a single directory
+  ["tma", "google", "sigstore"].each do |dir|
+    if Dir.exist?("#{BASE_DIR}/ruby/trust-metadata-api/lib/proto/trust-metadata-api/v0/#{dir}")
+      FileUtils.rm_rf("#{BASE_DIR}/ruby/trust-metadata-api/lib/proto/trust-metadata-api/v0/#{dir}")
+    end
+  end
+end
+
+at_exit do
+  cleanup!
+  puts "Finished."
+end
+
+run!

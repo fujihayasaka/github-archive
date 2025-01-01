@@ -1,0 +1,62 @@
+apiVersion: skaffold/v4beta11
+kind: Config
+metadata:
+  name: hosted-compute-ims
+build:
+  local:
+    useBuildkit: true
+    push: false
+  artifacts:
+    - image: hosted-compute-ims
+      docker:
+        dockerfile: Dockerfile
+        buildArgs:
+          DEV: "true"
+        secrets:
+          - id: netrc
+            src: ~/.netrc
+deploy:
+  statusCheckDeadlineSeconds: 180
+  kubectl: {}
+
+profiles:
+- name: dev
+  manifests:
+    kustomize:
+      paths:
+        - config/kustomize/devoverlays/dev
+- name: e2e-tests
+  manifests:
+    kustomize:
+      paths:
+        - config/kustomize/devoverlays/e2e-tests
+  patches:
+  - op: add
+    path: /build/artifacts/-
+    value:
+      image: ims-oidc-shim
+      context: tools/oidc-shim
+      docker:
+        dockerfile: Dockerfile
+
+- name: base-resources
+  manifests:
+    kustomize:
+      paths:
+        - config/kustomize/devoverlays/base-resources
+  patches:
+  - op: remove
+    path: /build/artifacts
+
+# Map debugging ports explicitly
+portForward:
+- resourceType: deployment
+  resourceName: hosted-compute-ims-api
+  namespace: hosted-compute-ims
+  port: 56268
+  localPort: 56300 
+- resourceType: deployment
+  resourceName: hosted-compute-ims-worker
+  namespace: hosted-compute-ims
+  port: 56268
+  localPort: 56301

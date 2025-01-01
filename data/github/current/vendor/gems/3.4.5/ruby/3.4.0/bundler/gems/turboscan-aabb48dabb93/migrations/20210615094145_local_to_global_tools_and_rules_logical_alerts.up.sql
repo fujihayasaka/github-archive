@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20210615094145_local_to_global_tools_and_rules_logical_alerts.go on GHES

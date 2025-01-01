@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mvndagworker
+  annotations:
+    moda.github.net/cluster-preferences: |
+      {
+       "proxima-1-prod-weu-01-az1":  {
+         "spec": {
+           "replicas": 0
+         }
+       }
+      }
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: mvndagworker
+  template:
+    metadata:
+      labels:
+        app: mvndagworker
+      annotations:
+        fluentbit.io/parser: logfmt
+        observability.github.com/logger: fluent-bit
+        observability.github.com/splunk_index: migrations-vnext
+    spec:
+      dnsPolicy: Default
+      containers:
+        - name: mvndagworker
+          image: migrations-vnext
+          command:
+            - /mvndagworker
+          env:
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  containerName: mvndagworker
+                  resource: limits.cpu
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: kube-cluster-metadata
+          # Zero-downtime deploys
+          # https://thehub.github.com/engineering/products-and-services/internal/moda/feature-documentation/pod-lifecycle/#required-prestop-hook
+          # https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#container-hooks
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          readinessProbe:
+            initialDelaySeconds: 5
+            exec:
+              command: [ "true" ]

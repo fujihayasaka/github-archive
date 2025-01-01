@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: transition-template-job
+spec:
+  activeDeadlineSeconds: 100
+  backoffLimit: 0
+  template:
+    metadata:
+      annotations:
+        fluentbit.io/parser: logfmt
+        observability.github.com/logger: fluent-bit
+        observability.github.com/splunk_index: turboghas
+      labels:
+        app: turboghas
+        role: internal-service
+    spec:
+      containers:
+        - command:
+            - transition
+          env:
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  containerName: transition
+                  resource: limits.cpu
+          envFrom:
+            - configMapRef:
+                name: environment
+            - configMapRef:
+                name: kube-cluster-metadata
+            - secretRef:
+                name: vault-secrets
+          image: turboghas
+          name: transition
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "250m"
+            limits:
+              memory: "256Mi"
+              cpu: "1000m"
+      dnsPolicy: ClusterFirst
+      restartPolicy: Never

@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Check for flags
+FORCE=false
+PERFORM_AUTH_TASKS=true
+PROTO=true
+while [[ $# -gt 0 ]]; do
+  case $1 in
+  -f | --force)
+    FORCE=true
+    shift
+    ;;
+  --no-auth)
+    PERFORM_AUTH_TASKS=false
+    shift
+    ;;
+  --no-proto)
+    PROTO=false
+    shift
+    ;;
+  -* | --*)
+    echo "Unknown option $1"
+    exit 1
+    ;;
+  esac
+done
+
+printf "🌐 Installing public dependencies...\n"
+
+# Kubernetes Stuff
+(! "$FORCE" && [ -f "/usr/local/bin/skaffold" ]) || (curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64 && sudo install skaffold /usr/local/bin/ && rm -f skaffold)
+(! "$FORCE" && [ -f "/usr/local/bin/kubectl" ]) || (curl -Lo kubectl https://dl.k8s.io/release/v1.27.3/bin/linux/amd64/kubectl && sudo install kubectl /usr/local/bin/ && rm -f kubectl)
+(! "$FORCE" && [ -f "/usr/local/bin/k9s" ]) || (curl -Ls https://github.com/derailed/k9s/releases/download/v0.27.4/k9s_Linux_amd64.tar.gz | tar xfz - k9s && sudo install k9s /usr/local/bin/ && rm -f k9s)
+if ! command -v minikube &>/dev/null; then
+  echo "🚀  Installing minikube"
+  curl -sS -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64 &&
+    sudo install minikube-linux-amd64 /usr/local/bin/minikube &&
+    rm minikube-linux-amd64
+fi
+skaffold config set --global collect-metrics false >/dev/null
+
+# Twirp / Protobuf Stuff
+if "$PROTO"; then
+  PROTOC_VER="22.3"
+  if "$FORCE" || [ ! -f "/usr/local/bin/protoc" ]; then
+    curl -Lo protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VER/protoc-$PROTOC_VER-linux-x86_64.zip &&
+      unzip -o -j protoc.zip bin/protoc &&
+      sudo unzip -o protoc.zip -d /usr/local 'include/*' &&
+      rm -f protoc.zip &&
+      sudo install protoc /usr/local/bin/protoc && rm -f protoc
+  fi
+
+  (! "$FORCE" && [ -f "/go/bin/protoc-gen-go" ]) || go install github.com/golang/protobuf/protoc-gen-go@v1.5.3
+  (! "$FORCE" && [ -f "/go/bin/protoc-gen-twirp" ]) || go install github.com/twitchtv/twirp/protoc-gen-twirp@v8.1.3
+  (! "$FORCE" && [ -f "/go/bin/protoc-gen-twirp_ruby" ]) || go install github.com/arthurnn/twirp-ruby/protoc-gen-twirp_ruby@v1.11.0
+  (! "$FORCE" && [ -f "/go/bin/protoc-gen-doc" ]) || go install github.com/pseudomuto/protoc-gen-doc/cmd/protoc-gen-doc@v1.5.1
+
+  (! "$FORCE" && [ -f "/go/bin/buf" ]) || go install github.com/bufbuild/buf/cmd/buf@v1.28.1
+fi
+
+script/installers/install-terraform.sh >/dev/null
+
+script/installers/install-azcli.sh
+
+printf "✅ Done installing public dependencies!\n\n"
+
+# init goproxy if not in CI
+if [ -v CODESPACES ]; then
+  /usr/local/share/goproxy-init.sh --override
+fi
+
+token=
+if [ -v GITHUB_TOKEN ]; then
+  token="$GITHUB_TOKEN"
+elif [ -v CONTAINER_BUILDER_TOKEN ]; then
+  token="$CONTAINER_BUILDER_TOKEN"
+else
+  echo "❌ No token found for docker login"
+  exit 1
+fi
+exit_code=0
+output=$(echo "$token" | docker login -u "${GITHUB_USER:=ci}" --password-stdin ghcr.io 2>&1) || exit_code=$?
+if [ "$exit_code" -ne 0 ]; then
+  echo "❌ Failed to login to ghcr.io"
+  echo "$output"
+  exit 1
+fi
+sudo cp "$HOME/.docker/config.json" "/var/docker.config.json"

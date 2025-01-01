@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: aqueduct-resqued-worker
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "aqueduct-resqued-worker"
+        heaven.githubapp.com/image-placeholder: "dependency-graph-api"
+        heaven.githubapp.com/deploy-requirement: "true"
+        moda.github.net/vpa-updater-enabled: "true"
+spec:
+    replicas: 20
+    strategy:
+        type: RollingUpdate
+        rollingUpdate:
+            maxSurge: 10%
+            maxUnavailable: 90%
+    selector:
+        matchLabels:
+            app: dependency-graph-api
+            role: aqueduct-resqued-worker
+    template:
+        metadata:
+            labels:
+                app: dependency-graph-api
+                role: aqueduct-resqued-worker
+        spec:
+            dnsPolicy: ClusterFirst
+            volumes:
+                - name: github-metadata
+                  hostPath:
+                    path: /etc/github/metadata.json
+            containers:
+                - name: aqueduct-resqued-worker
+                  image: dependency-graph-api
+                  resources:
+                    requests:
+                        cpu: 100m
+                        memory: "1Gi"
+                    limits:
+                        # This should be 1 + the value of the environment variable below
+                        cpu: 6000m
+                        memory: "2Gi"
+                  command: ["./bin/resqued"]
+                  args: ["config/resqued_aqueduct.rb"]
+                  env:
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                    - name: DG_POD_TYPE
+                      value: "aqueduct-resqued-worker"
+                    - name: AQUEDUCT_WORKER_PROCESS_COUNT
+                      value: "5"
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - secretRef:
+                        name: vault-secrets
+                  volumeMounts:
+                    - mountPath: /etc/github/metadata.json
+                      name: github-metadata
+                      readOnly: true

@@ -220,6 +220,14 @@ module Platform
         @flags[:is_enterprise_server]
       end
 
+      # Private: A convenience method to check if the enterprise server has SCIM enabled
+      #
+      # Returns a Boolean
+      def is_enterprise_server_scim?
+        return false unless GitHub.enterprise?
+        !!GitHub.global_business&.enterprise_server_scim_enabled?
+      end
+
       # Private: A convenience method to get is_emu flag
       #
       # Returns a Boolean
@@ -553,6 +561,13 @@ module Platform
               # setting primary email does not remove old primary email
               # add it to old_emails to be removed
               old_emails[user_primary.downcase] = user_primary unless user_primary.blank?
+
+              # In GHES SCIM, we will set the secondary email as the primary if that is what the IdP sent.
+              # In this scenario, the old secondary (now primary) can be removed from the old_emails to prevent it
+              # from being deleted. This is a no-op if the emails were not swapped.
+              if is_enterprise_server_scim?
+                old_emails.delete(primary_email&.downcase)
+              end
             end
 
             # Add new emails only
@@ -641,7 +656,24 @@ module Platform
 
         log("setting primary user email", "gh.user.login" => user.login, "gh.user.email" => primary_email) # rubocop:disable GitHub/DoNotAllowLogin - used in logging
 
-        primary_user_email = user.emails.build(email: primary_email, skip_reserved_domain: @flags[:skip_reserved_domain])
+        # In GHES SCIM, if we find that the email sent via SCIM is already associated with the user, but is not the
+        # primary email, we will set it as the new primary email.
+        primary_user_email = if is_enterprise_server_scim?
+          # primary_email is the email sent by the IdP
+          existing_email = user.emails.find_by_email(primary_email&.downcase)
+
+          # Return the existing email if we find it in the user's emails. Note that we will skip this method
+          # altogether if the email sent via SCIM is already the primary email.
+          if existing_email
+            existing_email
+          # Otherwise attempt to build a new email to set as the primary.
+          else
+            user.emails.build(email: primary_email, skip_reserved_domain: @flags[:skip_reserved_domain])
+          end
+        else
+          user.emails.build(email: primary_email, skip_reserved_domain: @flags[:skip_reserved_domain])
+        end
+
         # If a invalid primary email is provided, reject the user.
         unless primary_user_email.valid?
           return Error.new(reason: :email_taken, message: EMAIL_TAKEN, fatal: @error_options[:email_taken]) if primary_user_email.duplicate?

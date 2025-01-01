@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+
+source script/helpers/wait_for_db
+
+# docker-compose uses this to decide which config file(s) to use
+# If another script sets COMPOSE_FILE already we will use that one
+export COMPOSE_FILE=${COMPOSE_FILE:-docker-compose.yml:docker-compose.test.yml:docker-compose.mysql8.yml}
+export DEPENDENCY_SNAPSHOTS_DB=dependency_snapshots_test
+echo "running CI with DB ${DEPENDENCY_SNAPSHOTS_DB}"
+
+# Run tests using the Docker image created by building Dockerfile
+# This is primarily intended to be run on CI, but you can run it locally, too.
+
+
+echo "::group::Building test image..."
+docker-compose build tests
+echo "::endgroup::"
+
+echo "::group::Starting supporting containers..."
+docker-compose down -v -f --remove-orphans
+docker-compose up -d
+container_name=$(docker inspect -f '{{.Name}}' $(docker-compose ps -q db) | cut -c2-)
+wait_for_db_healthy "${container_name}"
+echo "::endgroup::"
+
+echo "::group::Running Go tests..."
+# If you're trying to run this locally, you need to get a PAT with similar permissions to a build token into a file at the repo root called
+#  `.goproxytoken` -- This is what lets the test container connect with Go modules.
+# If you're trying to run this locally, you might see some odd image caching behavior. You can get around it by doing something like this:
+# docker-compose -f docker-compose.yml -f docker-compose.test.yml build tests
+docker-compose run --rm tests
+TEST_EXIT_CODE=$?
+echo "::endgroup::"
+
+if [[ -z "$SNAPSHOTS_DEVCONTAINER" && -z "$DS_DEVCONTAINER" ]]; then
+  echo "::group::Saving docker container logs..."
+  docker-compose logs --no-color --no-log-prefix dsapi_azure_storage > "/tmp/$JOB_NAME-artifacts/azurite.log"
+  docker-compose logs --no-color --no-log-prefix db
+  echo "::endgroup::"
+fi
+
+exit $TEST_EXIT_CODE

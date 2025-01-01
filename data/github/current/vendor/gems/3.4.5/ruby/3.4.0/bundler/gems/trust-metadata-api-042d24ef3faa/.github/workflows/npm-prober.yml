@@ -1,0 +1,148 @@
+name: Reusable npm Prober Workflow
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment to run the prober in'
+        required: true
+        type: string
+      report-prober-status:
+        description: 'Whether to report prober status to DataDog'
+        required: true
+        type: boolean
+      tma-host:
+        description: 'TMA hostname to probe'
+        required: true
+        type: string
+      hmac-writer-client-id:
+        description: 'HMAC writer client ID'
+        required: true
+        type: string
+      hmac-reader-client-id:
+        description: 'HMAC reader client ID'
+        required: true
+        type: string
+    secrets:
+      hmac-writer-key:
+        description: 'HMAC writer key'
+        required: true
+      hmac-reader-key:
+        description: 'HMAC reader key'
+        required: true
+      npm-publish-signing-key:
+        description: 'Key for signing npm publish attestation'
+        required: true
+      datadog-api-key:
+        description: 'DataDog API key'
+        required: false
+
+jobs:
+  tma-probe:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      PACKAGE_NAME: foo-bar
+      PACKAGE_VERSION: 1.0.0-${{ github.run_id }}.${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - name: Set Node
+        uses: actions/setup-node@v4.1.0
+        with:
+          node-version: 20.x
+
+      - name: Generate artifact
+        run: |
+          date > artifact
+
+      - name: Generate attestation
+        id: attest
+        uses: ./.github/actions/attest-npm-publish
+        with:
+          subject-path: ./artifact
+          package-name: ${{ env.PACKAGE_NAME }}
+          package-version: ${{ env.PACKAGE_VERSION }}
+          private-key: ${{ secrets.npm-publish-signing-key }}
+
+      - name: Upload Attestation
+        env:
+          PURL: pkg:npm/${{ env.PACKAGE_NAME }}@${{ env.PACKAGE_VERSION }}
+        run: |
+          # Create payload
+          jq --compact-output --join-output \
+            '{"purl":"${{ env.PURL }}","bundle":.}' \
+            ${{ steps.attest.outputs.bundle-path }} > payload.json
+
+          # Calculate HMAC
+          cat payload.json | openssl sha256 -binary -hmac ${{ secrets.hmac-writer-key }} | base64 > hmac
+
+          # Send request
+          curl --fail-with-body --silent \
+            "https://${{ inputs.tma-host }}/twirp/github.trust_metadata_api.PackageInfoWriteAPI/CreatePackageAttestation" \
+            -H "Content-Type: application/json" \
+            -H "X-HMAC-Client-Id: ${{ inputs.hmac-writer-client-id }}" \
+            -H "Request-Body-HMAC: $(cat hmac)" \
+            -d @payload.json
+
+      - name: Retrieve Package Attestations
+        env:
+          PURL: pkg:npm/${{ env.PACKAGE_NAME }}@${{ env.PACKAGE_VERSION }}
+        run: |
+          # Assemble payload
+          jq --compact-output --join-output --null-input \
+            '{"purl":"${{env.PURL}}"}' > payload.json
+
+          # Calculate HMAC
+          cat payload.json | openssl sha256 -binary -hmac ${{ secrets.hmac-reader-key }} | base64 > hmac
+
+          # Send request
+          curl --fail-with-body --silent \
+            "https://${{ inputs.tma-host }}/twirp/github.trust_metadata_api.PackageInfoReadAPI/GetPackageAttestations" \
+            -H "Content-Type: application/json" \
+            -H "X-HMAC-Client-Id: ${{ inputs.hmac-reader-client-id }}" \
+            -H "Request-Body-HMAC: $(cat hmac)" \
+            -d @payload.json | tee response.json
+
+          if [[ $(jq '.attestations | length' response.json) != "1" ]]
+          then
+            echo "Missing attestation"
+            exit 1
+          fi
+
+      - name: Report TMA npm prober success
+        if: ${{ inputs.report-prober-status && success() }}
+        uses: masci/datadog@a5d283e78e33a688ed08a96ba64440505e645a8c # v1.7.1
+        with:
+          api-key: '${{ secrets.datadog-api-key }}'
+          service-checks: |
+            - check: "trust-metadata-api.actions.prober.npm"
+              status: 0
+              host_name: ${{ inputs.tma-host }}
+              tags:
+                - "catalog_service:trust-metadata-api"
+                - "deployed_to:${{ inputs.environment }}"
+                - "env:${{ inputs.environment }}"
+                - "repo:${{ github.repository }}"
+                - "service:trust-metadata-api"
+                - "team:package-security"
+
+      - name: Report TMA npm prober failure
+        if: ${{ inputs.report-prober-status && failure() }}
+        uses: masci/datadog@a5d283e78e33a688ed08a96ba64440505e645a8c # v1.7.1
+        with:
+          api-key: '${{ secrets.datadog-api-key }}'
+          service-checks: |
+            - check: "trust-metadata-api.actions.prober.npm"
+              message: "${{ github.repository_owner }} failed prober check"
+              status: 2
+              host_name: ${{ inputs.tma-host }}
+              tags:
+                - "catalog_service:trust-metadata-api"
+                - "deployed_to:${{ inputs.environment }}"
+                - "env:${{ inputs.environment }}"
+                - "repo:${{ github.repository }}"
+                - "service:trust-metadata-api"
+                - "team:package-security"

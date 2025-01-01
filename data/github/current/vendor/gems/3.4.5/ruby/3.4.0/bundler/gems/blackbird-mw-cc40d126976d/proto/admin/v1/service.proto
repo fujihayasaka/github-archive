@@ -1,0 +1,590 @@
+
+syntax = "proto3";
+
+package blackbirdmw.admin.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/wrappers.proto";
+
+import "hydro/schemas/blackbird/v0/entities/epoch_mode.proto";
+
+option go_package = "admin/v1";
+option ruby_package = "Blackbird::Admin::V1";
+
+service AdminAPI {
+  // Repo management
+  rpc GetRepoStatus(GetRepoStatusRequest) returns (GetRepoStatusResponse);
+  rpc IndexRepo(IndexRepoRequest) returns (IndexRepoResponse);
+  rpc IndexRepoList(IndexRepoListRequest) returns (IndexRepoListResponse);
+  rpc ProbeRepo(ProbeRepoRequest) returns (ProbeRepoResponse);
+  rpc GetSimilarRepos(GetSimilarReposRequest) returns (GetSimilarReposResponse);
+
+  // User management
+  rpc GetRateLimitQuota(GetRateLimitQuotaRequest) returns (GetRateLimitQuotaResponse);
+  rpc ResetRateLimitQuota(ResetRateLimitQuotaRequest) returns (ResetRateLimitQuotaResponse);
+
+  // Corpus management
+  rpc ListStamps(ListStampsRequest) returns (ListStampsResponse);
+  rpc GetCorpusStatus(GetCorpusStatusRequest) returns (GetCorpusStatusResponse);
+  rpc GetDeployAheadBehind(GetDeployAheadBehindRequest) returns (GetDeployAheadBehindResponse);
+  rpc BackfillCorpus(BackfillCorpusRequest) returns (BackfillCorpusResponse);
+  rpc BeginBackfillCorpus(BeginBackfillCorpusRequest) returns (BeginBackfillCorpusResponse);
+  rpc CompactCorpus(CompactCorpusRequest) returns (CompactCorpusResponse);
+  rpc PinCorpus(PinCorpusRequest) returns (PinCorpusResponse);
+  rpc UnpinCorpus(UnpinCorpusRequest) returns (UnpinCorpusResponse);
+  rpc SetCorpusIndexingState(SetCorpusIndexingStateRequest) returns (SetCorpusIndexingStateResponse);
+  rpc SetCorpusQueryState(SetCorpusQueryStateRequest) returns (SetCorpusQueryStateResponse);
+  rpc SetServingCorpus(SetServingCorpusRequest) returns (SetServingCorpusResponse);
+  rpc SetCorpusFilterBlobs(SetCorpusFilterBlobsRequest) returns (SetCorpusFilterBlobsResponse);
+  rpc SetCorpusCacheCluster(SetCorpusCacheClusterRequest) returns (SetCorpusCacheClusterResponse);
+  rpc SetEpochDescription(SetEpochDescriptionRequest) returns (SetEpochDescriptionResponse);
+  rpc SetCorpusHealingState(SetCorpusHealingStateRequest) returns (SetCorpusHealingStateResponse);
+  rpc SetCorpusShadowTraffic(SetCorpusShadowTrafficRequest) returns (SetCorpusShadowTrafficResponse);
+
+  // Computes the minimum spanning tree based on repository similarity and
+  // return some stats about it.
+  rpc ComputeMst(ComputeMstRequest) returns (ComputeMstResponse);
+
+  // Return the current shard assignments for a cluster.
+  rpc ShardAssignments(ShardAssignmentsRequest) returns (ShardAssignmentsResponse);
+
+  // Return the hosts tagged with a cluster.
+  rpc ClusterHosts(ClusterHostsRequest) returns (ClusterHostsResponse);
+
+  // Change the epoch that a cache cluster is serving.
+  rpc ChangeEpoch(ChangeEpochRequest) returns(ChangeEpochResponse);
+
+  // Kicks off epoch branching using the provided source epoch and branch timestamp.
+  rpc BranchEpoch(BranchEpochRequest) returns (BranchEpochResponse);
+}
+
+message GetRepoStatusRequest {
+  string repo_nwo = 1;
+  string corpus = 2;
+  uint32 repo_id = 3;
+}
+
+message GetRepoStatusResponse {
+  uint32 repo_id = 1;
+  string repo_nwo = 2;
+  bool is_public = 3;
+  repeated RepoIngest serving_ingests = 8;
+  repeated RepoIngest indexer_ingests = 9;
+  GitHubRepositoryAPIResponse github_details = 6;
+  google.protobuf.Timestamp deleted_at = 7;
+  DatabaseRepository database_repository = 11;
+
+  reserved 4; // ingests; split into serving_ingests, indexer_ingests, database_ingests
+
+  reserved "database_ingests";
+  reserved 10;
+
+  reserved "failure";
+  reserved 5;
+}
+
+message RepoIngest {
+  string corpus = 1;
+  uint32 epoch_id = 2;
+  repeated SnapshotEntry snapshot_entries = 6;
+
+  reserved 3; // entries; replaced by snapshot_entries
+  reserved 4, 5; // failed_at and failure_reason
+}
+
+message GitHubRepositoryAPIResponse {
+  string error = 1;
+  GitHubRepositoryDetails repository = 2;
+}
+
+message GitHubRepositoryDetails {
+  uint32 id = 1;
+  uint32 network_id = 2;
+  uint32 owner_id = 3;
+  string owner_login = 4;
+  bool owner_spammy = 17;
+  string name = 5;
+  bool public = 6;
+  bool archived = 7;
+  uint64 disk_usage = 8;
+  google.protobuf.Timestamp pushed_at = 9;
+  google.protobuf.Timestamp created_at = 10;
+  string license_name = 11;
+  int32 num_watchers = 12;
+  int32 num_stars = 13;
+  bool has_readme = 14;
+  int32 public_fork_count = 15;
+  bool paying_customer = 16;
+  bool is_fork = 18;
+  map<string, string> experiments = 19;
+  google.protobuf.Timestamp updated_at = 20;
+
+  reserved 21;
+  reserved "archived_at";
+}
+
+message DatabaseRepository {
+  uint32 repo_id = 1;
+  uint32 owner_id = 2;
+  string owner_login = 3;
+  string name = 4;
+  bool is_public = 5;
+  string source_topic = 6;
+  google.protobuf.Timestamp deleted_at = 7;
+  bool is_archived = 8;
+  google.protobuf.Timestamp pushed_at = 9;
+  google.protobuf.Timestamp created_at = 10;
+  bool has_license = 11;
+  int32 num_watchers = 12;
+  int32 num_stars = 13;
+  bool has_readme = 14;
+  int32 public_fork_count = 15;
+  int64 commit_seq_no = 16;
+  string commit_oid = 17;
+  int32 network_id = 18;
+  string license_name = 19;
+  bool is_fork = 20;
+  map<string, string> experiments = 21;
+  int64 repo_seq_no = 22;
+}
+
+message SnapshotEntry {
+  uint64 entry_id = 1;
+  uint64 parent_entry_id = 2;
+  string base_oid = 3;
+  string head_oid = 4;
+  google.protobuf.Timestamp crawl_started_at = 5;
+  google.protobuf.Timestamp crawl_finished_at = 6;
+  google.protobuf.Timestamp serving_ts = 7;
+  int64 serving_offset = 8;
+  string entry_state = 9;
+  map<string, string> experiments = 10;
+  uint32 repo_id = 11;
+  uint32 owner_id = 12;
+  uint32 network_id = 13;
+  string nwo = 14;
+  bool is_repo_public = 15;
+  bool is_repo_archived = 16;
+  float repo_score = 17;
+  string ref_name = 18;
+  string permanent_error = 19;
+}
+
+message IndexRepoRequest {
+  string repo_nwo = 1;
+  bool force_reindex = 3;
+  // Corpus to index the repository in. If not set, will index in all corpora.
+  string corpus = 4;
+  // If repo_id is set, repo_nwo is ignored.
+  uint32 repo_id = 5;
+
+  reserved 2; // reset_failures
+}
+
+message IndexRepoResponse {
+  uint32 repository_id = 1;
+
+  reserved "reset_failure";
+  reserved 2;
+}
+
+message IndexRepoListRequest {
+  // List of repository IDs to index.
+  repeated uint32 repo_ids = 1;
+  string corpus = 2;
+}
+
+message IndexRepoListResponse {
+  // Number of repositories queued for indexing.
+  uint32 repos_queued = 1;
+}
+
+message ProbeRepoRequest {
+  string corpus = 1;
+  string repo_nwo = 2;
+  string path = 3;
+}
+
+message ProbeRepoResponse {
+  uint32 verified = 1;
+  repeated string missing = 2;
+  repeated string extra = 3;
+  uint32 num_trailing_zeros = 4;
+}
+
+message BackfillCorpusRequest {
+  string corpus = 1;
+  string reason = 2;
+  // Bootstrap a brand new corpus with an empty backfill. Implies skip_mst, epoch_id, limit.
+  bool bootstrap = 14;
+  // Limit number of repositories backfilled. Ignored if equal to 0.
+  uint32 limit = 5;
+  // The epoch ID to use for backfilling. Epoch ID is required field and used to
+  // ensure that cache cluster has the desired epoch loaded before computing MST.
+  uint32 epoch_id = 9;
+  // Specifies the number of random masks and therewith the number of refinement
+  // iterations. 0 means use some predefined value.
+  uint32 num_masks = 15;
+  // Specifies a query to use for constructing the MST to limit it to a smaller
+  // set of repositories. Ignored if empty string.
+  string query = 16;
+  hydro.schemas.blackbird.v0.entities.EpochMode epoch_mode = 17;
+  uint32 num_shards = 18;
+
+  reserved 3, 4, 6, 7, 8, 10, 11, 12, 13;
+}
+
+message BackfillCorpusResponse {
+  uint32 epoch_id = 1;
+  uint32 num_repositories = 2;
+}
+
+message BeginBackfillCorpusRequest {
+  string corpus = 1;
+  string reason = 2;
+  uint32 epoch_id = 3; // Required. Used to determine the MST to fetch from the cache cluster.
+  bool skip_mst = 4;   // Skip MST computation and build an index with flat tree instead.
+  bool bootstrap = 5;
+  hydro.schemas.blackbird.v0.entities.EpochMode epoch_mode = 6;
+  uint32 num_shards = 7;
+}
+
+message BeginBackfillCorpusResponse {
+}
+
+enum CompactionType {
+  COMPACTION_TYPE_INVALID = 0;
+  COMPACTION_TYPE_INCREMENTAL = 1;
+  COMPACTION_TYPE_FULL = 2;
+}
+
+message IncrementalCompactionOptions {
+  uint32 radix = 1;
+  uint32 min_subtree_byte_size = 2;
+}
+
+message CompactCorpusRequest {
+  string corpus = 1;
+  CompactionType compaction_type = 2;
+  IncrementalCompactionOptions incremental_options = 3;
+}
+
+message CompactCorpusResponse {
+  uint32 epoch_id = 1;
+  uint64 serving_offset = 2;
+}
+
+message PinCorpusRequest {
+  string corpus = 1;
+  int64 serving_ts = 2;
+}
+
+message PinCorpusResponse {}
+
+message UnpinCorpusRequest {
+  string corpus = 1;
+}
+
+message UnpinCorpusResponse {}
+
+message CorpusStatus {
+  string corpus_name = 1;
+  uint32 corpus_id = 2;
+  string status = 3;
+  uint64 staleness_seconds = 4;
+  float corruption = 5;
+  bool serving = 8;
+  bool indexing = 9;
+  uint32 epoch_id = 10;
+  string shard_error = 12;
+  string ingest_mode = 13;
+  bool filter_blobs = 14;
+  string cluster_name = 15;
+  google.protobuf.Int64Value pinned_serving_ts = 16;
+  string cache_cluster = 17;
+  float health_score = 18;
+  string epoch_description = 19;
+  uint64 max_repos_indexed = 20;
+  bool healing = 21;
+  float shadow_traffic_percent = 22;
+  bool active_epoch = 23;
+  hydro.schemas.blackbird.v0.entities.EpochMode epoch_mode = 24;
+  string binary_version = 25;
+  uint32 index_version = 26;
+  int64 serving_ts = 27;
+  int64 serving_offset = 28;
+  repeated HostStatus hosts = 29;
+  uint32 num_shards = 30;
+
+  reserved 7; // bool disabled;
+  reserved 6; // float traffic_allocation;
+  reserved 11; // ShardStatus shard_status;
+}
+
+message HostStatus {
+  string hostname = 1;
+  uint32 epoch_id = 2;
+  string binary_version = 3;
+  uint32 index_version = 4;
+  repeated ShardStatus shards = 5;
+}
+
+message ShardStatus {
+  uint32 shard_id = 1;
+  int64 serving_ts = 2;
+  int64 serving_offset = 3;
+}
+
+message ListStampsRequest {}
+
+message ListStampsResponse {
+  repeated string stamps = 1;
+}
+
+message GetCorpusStatusRequest {
+}
+
+message GetCorpusStatusResponse {
+  string deploy_env = 1;
+  repeated CorpusStatus statuses = 2;
+}
+
+message GetDeployAheadBehindRequest {
+  repeated string commit_shas = 1;
+}
+
+message GetDeployAheadBehindResponse {
+  // Head sha of main on github/blackbird
+  string head_sha = 1;
+  repeated DeployedShaStatus statuses = 4;
+}
+
+message DeployedShaStatus {
+  string commit_sha = 1;
+  DeployedPR pr = 2;
+  uint32 commits_behind = 3;
+  uint32 commits_ahead = 4;
+}
+
+message DeployedPR {
+  string html_url = 1;
+  uint32 number = 2;
+  string title = 3;
+  string author = 4;
+  string ref = 5;
+}
+
+message SetCorpusQueryStateRequest {
+  string corpus = 1;
+  bool serving = 2;
+  bool force = 3;
+}
+
+message SetCorpusQueryStateResponse {}
+
+message SetServingCorpusRequest {
+  string corpus = 1;
+}
+
+message SetServingCorpusResponse {}
+
+message SetCorpusIndexingStateRequest {
+  string corpus = 1;
+  bool indexing = 2;
+}
+
+message SetCorpusIndexingStateResponse {}
+
+message SetCorpusHealingStateRequest {
+	string corpus = 1;
+	bool healing = 2;
+}
+
+message SetCorpusHealingStateResponse {}
+
+message SetCorpusShadowTrafficRequest {
+	string corpus = 1;
+	float percent = 2;
+}
+
+message SetCorpusShadowTrafficResponse {}
+
+message SetCorpusFilterBlobsRequest {
+  string corpus = 1;
+  bool filter_blobs = 2;
+}
+
+message SetCorpusFilterBlobsResponse {}
+
+message SetCorpusCacheClusterRequest {
+  string corpus = 1;
+  string cache_cluster = 2;
+}
+
+message SetCorpusCacheClusterResponse {}
+
+message SetEpochDescriptionRequest {
+  uint32 epoch_id = 1;
+  string description = 2;
+}
+
+message SetEpochDescriptionResponse {}
+
+message GetSimilarReposRequest {
+  string repo_nwo = 1;
+  string corpus = 2;
+  uint32 epoch_id = 3;
+  uint32 num_snapshots = 4;
+  uint32 entries_per_snapshot = 5;
+}
+
+message GetSimilarReposResponse { repeated SimilarRepo similar_repos = 1; }
+
+message SimilarRepo {
+  string repo_nwo = 1;
+  bool is_public = 2;
+  uint32 repo_id = 3;
+  bool is_archived = 4;
+  float repo_score = 5;
+}
+
+message GetRateLimitQuotaRequest {
+  string login = 1;
+}
+
+message GetRateLimitQuotaResponse {
+  // Current state of this user's quotas.
+  repeated Quota quotas = 1;
+}
+
+message Quota {
+  // Type of quota (e.g. user-query, suggest, etc)
+  string type = 1;
+	// Usage rate (cost/second) over the past ~10 seconds
+  double short_term_rate = 2;
+	// Usage rate (cost/second) over the past ~12 hours
+  double long_term_rate = 3;
+  // Time in seconds until this quota is reset.
+  double banned_seconds = 4;
+}
+
+message ResetRateLimitQuotaRequest {
+  string login = 1;
+}
+
+message ResetRateLimitQuotaResponse {}
+
+message ComputeMstRequest {
+  // Limit is the number of repositories to include in the MST.
+  uint32 limit = 5;
+  uint32 epoch_id = 9;
+  // Specifies the number of random masks and therewith the number of refinement
+  // iterations. 0 means use some predefined value.
+  uint32 num_masks = 10;
+  uint32 num_shards = 11;
+
+  // Specifies a query to use for constructing the MST to limit it to a smaller
+  // set of repositories. Ignored if empty string.
+  string query = 8;
+
+  // Reserve source option since it's not supported by cache cluster.
+  reserved "source";
+  reserved 1;
+
+  // Reserve cluster option: Use source instead (with the corpus name).
+  reserved "cluster";
+  reserved 6;
+
+  // Reserve shard option: With DSA, you should not pick a shard yourself.
+  reserved "shard";
+  reserved 7;
+}
+
+message ComputeMstResponse {
+  // The amount of server-size time for all processing of this RPC.
+  google.protobuf.Duration total_time = 1;
+  // The amount of time to load the edges from the database.
+  google.protobuf.Duration query_time = 2;
+  // The amount of time to calculate the MST.
+  google.protobuf.Duration mst_time = 3;
+  // The amount of time to traverse the MST.
+  google.protobuf.Duration traverse_time = 4;
+  // The number of repository nodes in the MST.
+  uint32 num_repos = 5;
+  // The height of the MST.
+  uint32 max_depth = 6;
+  // The sum of a flat tree (every node connected to the root).
+  uint64 flat_cost = 7;
+  // The sum of all the edge costs in the MST.
+  uint64 mst_cost = 8;
+  // The host that this MST calculation ran on
+  string host = 9;
+  // The maximum byte encoding of a treepath.
+  uint32 max_encoding_size = 10;
+  // The maximum number of descendents a node in the MST has.
+  // The root node is obviously excluded from this statistic.
+  uint32 max_subtree_size = 11;
+  // The number of children directly associated with the root.
+  uint32 root_children = 12;
+}
+
+message ShardAssignmentsRequest {
+  string corpus = 1;
+
+  // Offset of the ShardAssignmentSnapshotTopic to return the shard assignments
+  // from. Shard assignments from the latest offset are returned when one is not
+  // provided.
+  google.protobuf.Int64Value offset = 2;
+}
+
+message ShardAssignmentsResponse {
+  repeated HostAssignment host_assignments = 1;
+  uint32 algorithm_version = 2;
+  uint32 epoch_id = 3;
+  string cluster = 4;
+  uint32 index_version = 5;
+  int64 offset = 6;
+  google.protobuf.Timestamp snapshot_time = 7;
+}
+
+message HostAssignment {
+  string hostname = 1;
+  repeated AssignedShards assigned_shards = 2;
+}
+
+message AssignedShards {
+  uint32 shard_id = 1;
+  string state = 2;
+}
+
+message ClusterHostsRequest {
+  string corpus = 1;
+}
+
+message ClusterHostsResponse {
+  repeated string hosts = 1;
+}
+
+message ChangeEpochRequest {
+  uint32 epoch_id = 1;
+  string cluster = 2;
+  hydro.schemas.blackbird.v0.entities.EpochMode epoch_mode = 3;
+  uint32 num_shards = 4;
+}
+
+message ChangeEpochResponse {}
+
+message BranchEpochRequest{
+  uint32 source_epoch = 1;
+  string source_corpus = 2;
+  string corpus = 3;
+  int64 branch_ts = 4;
+  string reason = 5;
+  hydro.schemas.blackbird.v0.entities.EpochMode epoch_mode = 6;
+  uint32 num_shards = 7;
+}
+
+message BranchEpochResponse{
+  uint32 epoch_id = 1;
+}

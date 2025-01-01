@@ -1,0 +1,1 @@
+RENAME TABLE tenants TO domains;

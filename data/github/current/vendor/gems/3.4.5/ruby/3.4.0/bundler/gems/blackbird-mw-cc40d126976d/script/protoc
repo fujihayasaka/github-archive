@@ -1,0 +1,40 @@
+#! /usr/bin/env bash
+#
+#/ Usage: script/protoc
+#/
+#/ Generate code from .proto files
+
+set -euo pipefail
+IFS=$'\n\t'
+
+function usage {
+    grep "^#/" "${BASH_SOURCE[0]}" | cut -c 4-
+}
+
+cd "$(dirname "$0")/.."
+
+while (( $# )); do
+    case $1 in
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        *)
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+image=blackbird-mw-protoc
+docker build -t $image -f Dockerfile.protoc .
+
+project="github.com/github/blackbird-mw"
+
+codespace=$(docker ps --filter "label=Type=codespaces" -q)
+if [ -z "$codespace" ]; then
+    docker run --platform=linux/amd64 --rm -e UID=$(id -u) -e GID=$(id -g) -v $(pwd):/go/src/$project -w /go/src/$project $image
+else
+    echo "You are in a codespace!"
+    docker run --rm -e UID=$(id -u) -e GID=$(id -g) --volumes-from $(docker ps --filter "label=Type=codespaces" -q) --workdir $(pwd) $image
+fi

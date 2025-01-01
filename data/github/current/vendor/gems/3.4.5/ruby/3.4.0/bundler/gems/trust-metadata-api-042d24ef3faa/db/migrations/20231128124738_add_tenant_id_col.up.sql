@@ -1,0 +1,1 @@
+ALTER TABLE attestations ADD COLUMN tenant_id  bigint(20) unsigned NOT NULL DEFAULT 0;

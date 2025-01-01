@@ -1,0 +1,1 @@
+ALTER TABLE `ts_analyses` ADD KEY `idx_analyses_on_sarif_cleaned` (`sarif_cleaned`,`most_recent`,`processing_completed_at`), ADD KEY `idx_analyses_on_alerts_cleaned` (`alerts_cleaned`,`most_recent`,`processing_completed_at`);

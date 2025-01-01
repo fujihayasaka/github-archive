@@ -1,0 +1,51 @@
+#!/bin/bash
+#
+# Script to start a package-manager adaptor when testing locally.
+
+set -xe
+
+cd "$(dirname "$0")/.."
+
+PACKAGE_MANAGER=$1
+
+usage() {
+  echo "Usage: script/start PACKAGE_MANAGER [args]"
+  echo
+  echo "Start a package manager adapter"
+}
+
+. script/utils
+
+validate
+shift
+
+script/build "$PACKAGE_MANAGER"
+script/stop "$PACKAGE_MANAGER"
+
+if [ -t 1 ]; then
+  MODE="--interactive --tty"
+else
+  MODE="--detach"
+fi
+
+if [ "$(uname)" == "Darwin" ]; then
+  SINK_PROXY_URL="http://host.docker.internal:7777"
+  FJORD_URL="http://host.docker.internal:8085"
+  API_URL="http://host.docker.internal:9596"
+else
+  SINK_PROXY_URL="http://localhost:7777"
+  FJORD_URL="http://localhost:8085"
+  API_URL="http://localhost:9596"
+fi
+
+
+exec docker run $MODE \
+  --network host \
+  --name $(container-name) \
+  --volume "$(pwd)/data:/data" \
+  --env SINK_PROXY_URL=$SINK_PROXY_URL \
+  --env FJORD_URL=$FJORD_URL \
+  --env API_URL=$API_URL \
+  --env FAILBOT_HAYSTACK_URL=$FAILBOT_HAYSTACK_URL \
+  $(container-tag) \
+  run "$@"

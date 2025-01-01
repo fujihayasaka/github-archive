@@ -1,0 +1,32 @@
+# Docker-compose (service orchestration) configuration for script/cibuild only.
+
+version: "3.6"
+
+services:
+  db:
+    image: mysql:8.0
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --sql_mode=NO_ENGINE_SUBSTITUTION
+      - --information_schema_stats_expiry=0
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: 1
+    volumes:
+      - "db-data:/var/lib/mysql"
+  app:
+    image: "dependency-graph-api"
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test-moda
+      args:
+        - GOPROXY_TOKEN=${BP_GITHUB_TOKEN}
+      cache_from:
+        - octofactory.service.private-us-east-1.github.net/github-golden-docker/github-dependency-graph-api:dependency-graph-api
+    depends_on:
+      - db
+    environment:
+      - DEPENDENCYGRAPH_DB_HOST=db
+
+volumes:
+  db-data:

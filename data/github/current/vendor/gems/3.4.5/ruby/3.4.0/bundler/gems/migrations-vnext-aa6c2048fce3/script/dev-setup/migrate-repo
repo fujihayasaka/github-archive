@@ -1,0 +1,60 @@
+#!/bin/bash
+
+# migrate repo
+
+# GHES_URL is the GHES URL to fetch GHES resources via public API from
+GHES_URL=${GHES_URL}
+
+# GHES_TOKEN is the token to fetch GHES resources via public API
+GHES_TOKEN=${GHES_TOKEN}
+
+# TARGET_URL is the migration target URL to import resources to
+TAGET_URL=${TARGET_URL:=http://api.avocado-gmbh.ghe.localhost}
+
+# TARGET_PAT is the token with enterprsie:admin permission on the TARGET_URL instance
+TARGET_PAT=${TARGET_PAT}
+
+# MIGRATE_REPO is the repo to migrate on the source system
+MIGRATE_REPO=${MIGRATE_REPO:=acme/smc}
+
+if [ -z "$GHES_URL" ]; then
+	echo "GHES_URL is empty"
+	exit 1
+fi
+
+if [ -z "$GHES_TOKEN" ]; then
+	echo "GHES_TOKEN is empty"
+	exit 1
+fi
+
+if [ -z "$TARGET_PAT" ]; then
+	echo "TARGET_PAT is empty"
+	exit 1
+fi
+
+host=$(echo "$GHES_URL" | sed -E 's#https?://##')
+
+fetch_private_ip(){
+	ssh -p122 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+	 admin@${host}  -- "/sbin/ifconfig eth0 | grep inet | head -n 1 | cut -d ' ' -f 10"
+}
+
+webhooks_args=""
+if [ "$DISABLE_WEBHOOKS" != "1" ]; then
+	echo -n "fetching GHES instance private IP... "
+	private_ip="$(fetch_private_ip)"
+	if [ $? -ne 0 ]; then
+		echo "failed to fetch private ip"
+		exit 0
+	fi
+	echo $private_ip
+	webhooks_args="--wal-dir-path wal --webhook-url \"http://$private_ip:9178/api/v1/webhook\""
+fi
+
+
+script/preseed-key-value "$GHES_URL" --str "$TARGET_URL"
+
+go run cmd/ghes-resource-migrator/main.go --ghes-token "$GHES_TOKEN"  --ghes-url "$GHES_URL" \
+	--migration-target-url "$TARGET_URL" --migration-target-pat $TARGET_PAT \
+	--ghes-url "$GHES_URL" --ghes-token "$GHES_TOKEN" --repository "$MIGRATE_REPO" \
+	$webhooks_args "$@"

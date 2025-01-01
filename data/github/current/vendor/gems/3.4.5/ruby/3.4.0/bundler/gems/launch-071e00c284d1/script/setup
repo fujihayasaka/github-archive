@@ -1,0 +1,56 @@
+#!/bin/bash
+#/ Usage: script/setup [--force] [--no-app]
+#/ with:
+#/  --force
+#/      the database will be reset, too.
+#/  --no-app
+#/      don't try to install the GitHub App (requires running local `github/github`)
+
+set -e
+
+force=false
+install_app=true
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --force)
+      force=true
+      shift ;;
+    --no-app)
+      install_app=false
+      shift ;;
+    *)
+      cat "$0" | grep ^#/ | cut -c4-
+      exit 1 ;;
+  esac
+done
+
+if $force; then
+  script/docker-compose down -v || true # ignore errors
+fi
+
+if $install_app; then
+  script/bootstrap
+else
+  script/bootstrap --no-app
+fi
+
+echo Build Launch binaries...
+script/build
+
+echo Starting database...
+script/start-db
+
+echo Granting database access...
+script/sql-grant-access
+
+echo Creating and migrating databases...
+script/migrate-mysql-setup
+script/migrate-mysql
+
+echo Creating test databases...
+if $force; then
+  script/setup-test-db-for-dev --force
+else
+  script/setup-test-db-for-dev
+fi

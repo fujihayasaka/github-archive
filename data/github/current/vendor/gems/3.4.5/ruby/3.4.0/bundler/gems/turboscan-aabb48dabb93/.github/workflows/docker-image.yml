@@ -1,0 +1,109 @@
+on:
+  push:
+    branches-ignore:
+      - gh-readonly-queue/**
+  merge_group: {}
+  workflow_dispatch:
+    inputs:
+      publish-prerelease:
+        description: Publish the image publicly to the GitHub container registry so it can be distributed to customers outside of the normal Enterprise Server release process.
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  attestations: write
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  docker-image:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+
+      - name: Fetch ANG Token
+        run: |
+          set -exuo pipefail
+
+          OIDC_TOKEN="$(curl --silent --fail --retry 5 -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=ang-custom-audience" | jq -r '.value')"
+          cat <<< $(jq --arg token "${OIDC_TOKEN}" '.HttpHeaders = {"X-Meta-X-Ang-Authentication": $token}' ~/.docker/config.json) > ~/.docker/config.json
+
+      - name: Login to Docker Registry
+        env:
+          OCTOFACTORY_USER: ${{ secrets.OCTOFACTORY_USER }}
+          OCTOFACTORY_TOKEN: ${{ secrets.OCTOFACTORY_TOKEN }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$OCTOFACTORY_TOKEN" | docker login octofactory-ang.githubapp.com --username "$OCTOFACTORY_USER" --password-stdin
+          echo "$GHCR_TOKEN" | docker login ghcr.io --username x-oauth-token --password-stdin
+
+      - name: Build Images
+        env:
+          DSP_CODE_SCANNING_TOKEN: ${{ secrets.DSP_CODE_SCANNING_TOKEN }}
+        run: |
+          echo "::group::Main Image"
+          image_name="octofactory-ang.githubapp.com/moda-artifacts-docker/turboscan"
+          image="turboscan:$GITHUB_SHA"
+
+          image_from_cache=0
+          if [ "$GITHUB_EVENT_NAME" = "merge_group" ]; then
+            tree_sha="$(git rev-parse "HEAD^{tree}")"
+            git fetch --deepen 1 origin "$GITHUB_SHA"
+            merge_commit_parent="$(git rev-parse "$GITHUB_SHA^2")"
+            parent_tree_sha="$(git rev-parse "$merge_commit_parent^{tree}")"
+            if [ "$tree_sha" = "$parent_tree_sha" ]; then
+              >&2 echo "Using same image as $merge_commit_parent because the tree-SHA matches $tree_sha..."
+              docker pull "octofactory-ang.githubapp.com/moda-artifacts-docker/turboscan:$merge_commit_parent" && image_from_cache=1 || true
+              >&2 echo "Retagging image..."
+              docker tag "octofactory-ang.githubapp.com/moda-artifacts-docker/turboscan:$merge_commit_parent" "$image"
+            else
+              >&2 echo "Not using same image as $merge_commit_parent because the tree-SHA ($parent_tree_sha) does not match $tree_sha..."
+            fi
+          fi
+
+          if [ "$image_from_cache" -eq 0 ]; then
+            docker build --secret id=GH_TOKEN,src=<(echo "${DSP_CODE_SCANNING_TOKEN}") --tag "$image" .
+          fi
+          echo "::endgroup::"
+
+          echo "::group::Shell Image"
+          docker build --secret id=GH_TOKEN,src=<(echo "${DSP_CODE_SCANNING_TOKEN}") --file Dockerfile.shell --build-arg "base_image=$image" --tag "turboscan-shell:$GITHUB_SHA" .
+          echo "::endgroup::"
+
+      - name: Push to Octofactory
+        run: |
+          docker tag "turboscan:$GITHUB_SHA" "octofactory-ang.githubapp.com/moda-artifacts-docker/turboscan:$GITHUB_SHA"
+          docker push "octofactory-ang.githubapp.com/moda-artifacts-docker/turboscan:$GITHUB_SHA"
+
+          docker tag "turboscan-shell:$GITHUB_SHA" "octofactory-ang.githubapp.com/moda-artifacts-docker/turboscan:$GITHUB_SHA-shell"
+          docker push "octofactory-ang.githubapp.com/moda-artifacts-docker/turboscan:$GITHUB_SHA-shell"
+
+      - name: Push to GitHub Packages
+        run: |
+          docker tag "turboscan:$GITHUB_SHA" "ghcr.io/github/turboscan/turboscan:$GITHUB_SHA"
+          docker push "ghcr.io/github/turboscan/turboscan:$GITHUB_SHA"
+
+          docker tag "turboscan-shell:$GITHUB_SHA" "ghcr.io/github/turboscan/turboscan/shell:$GITHUB_SHA"
+          docker push "ghcr.io/github/turboscan/turboscan/shell:$GITHUB_SHA"
+
+      - name: Publish to GitHub Packages Prerelease
+        if: ${{ github.event.inputs.publish-prerelease == 'true' }}
+        run: |
+          docker tag "turboscan:$GITHUB_SHA" "ghcr.io/github/turboscan/turboscan-prereleases:$GITHUB_SHA"
+          docker push "ghcr.io/github/turboscan/turboscan-prereleases:$GITHUB_SHA"
+
+      - name: Get Digest
+        id: digest
+        run: |
+          DIGEST="$(docker inspect --format="{{index .RepoDigests 0}}" "octofactory-ang.githubapp.com/moda-artifacts-docker/turboscan:$GITHUB_SHA" | cut --delimiter "@" --fields 2)"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Attest Build Provenance
+        uses: actions/attest-build-provenance@v2.2.3
+        with:
+          subject-name: "octofactory-ang.githubapp.com/moda-artifacts-docker/turboscan:${{ github.sha }}"
+          subject-digest: ${{ steps.digest.outputs.digest }}
+          push-to-registry: false

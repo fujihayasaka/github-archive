@@ -1,0 +1,116 @@
+#!/bin/bash
+
+# set up dev environment by:
+#
+# - creating a PAT for monalisa_avo
+# - start docker
+# - wait for containers to be ready
+# - create a tmux session with 8 panes and place each service on one pane
+# - set env variables
+
+set -e
+
+export MIGRATE_REPO="${MIGRATE_REPO:=acme/smc}"
+export TARGET_PAT="${TARGET_PAT:=ghp_MonalisaTheOctoAvoMonalisaTheOctoAvo}"
+
+if [ -z "$GHES_URL" ]; then
+        echo "GHES_URL is empty"
+        exit 1
+fi
+
+if [ -z "$GHES_TOKEN" ]; then
+        echo "GHES_TOKEN is empty"
+        exit 1
+fi
+
+if [ -z "$TARGET_PAT" ]; then
+        echo "TARGET_PAT is empty"
+        exit 1
+fi
+
+ITERM_DISABLED=${ITERM_DISABLED:=false}
+
+create_pat(){
+	cwd=$(pwd)
+	trap "cd $cwd" EXIT
+	cd /workspaces/github
+	echo -n "creating ghp_MonalisaTheOctoAvoMonalisaTheOctoAvo for monalisa_avo... "
+	bin/rails console < "$cwd/script/dev-setup/mona.rb" &> /tmp/mona.log || {
+	      echo "failed to create PAT for mona_avo, check /tmp/mona.log"
+	      exit 1
+	}
+	echo "done"
+	cd "$cwd"
+}
+
+set_command(){
+	pane="$1"
+	name="$2"
+	cmd="$3"
+
+	tmux send-keys -t "$pane" 'echo -ne "\033]0;'$name'\007"; clear' C-m
+	tmux send-keys -t "$pane" "$cmd" C-m
+}
+
+check_ssh(){
+	host=$(echo "$GHES_URL" | sed -E 's#https?://##')
+
+	echo -n "checking SSH connection to ${host}... "
+
+	ssh -p122 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@${host} true >& /tmp/ssh.log || {
+		echo "can't SSH into ${host}, please make sure you are forwarding your SSH agent"
+		echo "did you run 'ssh-add' on your local machine?"
+		echo "try to debug it by running 'ssh -p122 admin@${host} in this terminal'"
+		echo "ssh output: "
+		cat /tmp/ssh.log
+		exit 1
+	}
+
+	echo "OK"
+}
+
+check_ssh
+rm -rf wal
+
+SESSION_NAME="elm-dev"
+
+# Start a new tmux session with one window
+tmux new-session -E -d -s "$SESSION_NAME"
+
+# Split horizontally into 4 columns
+tmux split-window -h
+tmux split-window -h
+tmux split-window -h
+
+# Select each column and split it into 2 rows
+tmux select-pane -t 0; tmux split-window -v
+tmux select-pane -t 2; tmux split-window -v
+tmux select-pane -t 4; tmux split-window -v
+tmux select-pane -t 3; tmux split-window -v
+
+
+# Ensure all panes are equally sized
+tmux select-layout tiled
+
+# Run different commands in each pane
+set_command 0 docker "script/docker"
+
+# create PAT while docker is starting
+create_pat
+
+# wait for containers to be ready
+script/dev-setup/wait-for-containers
+
+set_command 1 "ssh-forwarding" "script/dev-setup/forward-webhooks-ssh"
+set_command 2 "mvn-server" "OBJECT_STORE_KIND=azure DAG_KIND=redis script/mvnd"
+set_command 3 "resource-worker" "BASE_URL=http://api.avocado-gmbh.ghe.localhost/internal script/mvnworker  --enterprise-id 4"
+set_command 4 "dag-worker" "script/mvndagworker"
+set_command 5 "event-worker" "BASE_URL=http://api.avocado-gmbh.ghe.localhost/internal script/eventworker" 
+tmux send-keys -t 6 "script/dev-setup/migrate-repo # press return to start migrating the repo"
+
+# Attach to the session
+if [ "$ITERM_DISABLED" = "true" ]; then
+	tmux attach-session -t "$SESSION_NAME"
+else
+	tmux -CC attach-session -t "$SESSION_NAME"
+fi

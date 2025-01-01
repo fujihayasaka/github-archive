@@ -1,0 +1,186 @@
+name: Actions CI
+on:
+  push:
+    paths-ignore:
+      - "docs/**"
+    reuse-previous-outcome: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest-xl
+    permissions:
+      id-token: write # for setup-goproxy
+      contents: read
+
+    steps:
+      - name: OIDC Setup for goproxy
+        uses: github/setup-goproxy@v1.1.0
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: ./go/src/github.com/github/launch
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ./go/src/github.com/github/launch/go.mod
+          cache-dependency-path: ./go/src/github.com/github/launch/go.sum
+
+      - run: go version
+
+      - name: Install Linter
+        env:
+          GOPATH: /home/runner/work/launch/go
+        run: script/install-golangci-lint
+        working-directory: /home/runner/work/launch/launch/go/src/github.com/github/launch
+
+      # Vendor dependencies before running linters
+      - run: go mod vendor
+        working-directory: /home/runner/work/launch/launch/go/src/github.com/github/launch
+
+      - name: Run Lint
+        env:
+          GOPATH: /home/runner/work/launch/go
+        run: |
+          export PATH="$GOPATH/bin:$PATH"
+          script/lint --timeout 180s ./...
+        working-directory: /home/runner/work/launch/launch/go/src/github.com/github/launch
+
+  semconv:
+    name: Semantic Conventions Check
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # for setup-goproxy
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: ./go/src/github.com/github/launch
+
+      - name: OIDC Setup for goproxy
+        uses: github/setup-goproxy@v1.1.0
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ./go/src/github.com/github/launch/go.mod
+          cache-dependency-path: ./go/src/github.com/github/launch/go.sum
+
+      - name: Run Checks
+        run: script/check-semconv --namespace-check
+        working-directory: /home/runner/work/launch/launch/go/src/github.com/github/launch
+
+  modules:
+    name: Modules Check
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # for setup-goproxy
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/setup-goproxy@v1.1.0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go mod tidy
+      - name: Check diff
+        run: git diff --exit-code
+
+  mocks:
+    name: Mock Check
+    runs-on: ubuntu-latest
+    env:
+      GOPATH: /home/runner/work/launch/go
+
+    permissions:
+      id-token: write # for setup-goproxy
+      contents: read
+
+    steps:
+      - name: OIDC Setup for goproxy
+        uses: github/setup-goproxy@v1.1.0
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: ./go/src/github.com/github/launch
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ./go/src/github.com/github/launch/go.mod
+          cache-dependency-path: ./go/src/github.com/github/launch/go.sum
+
+      - run: go version
+
+      - name: Install tools
+        run: script/install-tools
+        working-directory: /home/runner/work/launch/launch/go/src/github.com/github/launch
+
+      # Vendor dependencies before running mock check
+      - run: go mod vendor
+        working-directory: /home/runner/work/launch/launch/go/src/github.com/github/launch
+
+      - name: Run Mocks Check
+        run: |
+          export PATH="$GOPATH/bin:$PATH"
+          script/mock-check
+        working-directory: /home/runner/work/launch/launch/go/src/github.com/github/launch
+
+  mu-counter:
+    name: Mu Counter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Mu Counter
+        run: |
+          script/check-mu-uses
+
+  schema-id-column-check:
+    name: schema-id-column-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: schema-id-column-check
+        run: |
+          script/schema-id-column-check
+
+  protoc-check:
+    name: Protoc Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run protoc-check
+        run: |
+          script/protoc-check
+
+  generate-check:
+    name: Check generated files are up to date.
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write # for setup-goproxy
+      contents: read
+
+    steps:
+      - name: OIDC Setup for goproxy
+        uses: github/setup-goproxy@v1.1.0
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - run: go version
+
+      - run: 'go generate ./... && git diff --quiet proto || { echo "FAIL (run: go generate ./...)"; exit 1; }'

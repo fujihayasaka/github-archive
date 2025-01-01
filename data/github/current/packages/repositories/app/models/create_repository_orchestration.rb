@@ -4,6 +4,7 @@
 class CreateRepositoryOrchestration < RepositoryOrchestration
   include GitHub::Memoizer
   include Repository::CreatorMethods
+  include Repository::EnterpriseManagedUserMethods
 
   DEFAULT_FAILURE_MESSAGE = "Repository creation failed.".freeze
 
@@ -51,13 +52,11 @@ class CreateRepositoryOrchestration < RepositoryOrchestration
       return
     end
 
-    if creating_repo_in_personal_namespace_for_emu? || is_enterprise_to_restrict_for_personal_namespace?
-      if creating_repo_in_personal_namespace_enterprise_setting_enabled? && creating_repo_in_personal_namespace?
-        error_msg = creating_repo_in_personal_namespace_enterprise_setting_message
-        errors.add(:repository, error_msg)
-        @allowed = false
-        return
-      end
+    if creation_blocked_for_repo_in_personal_namespace?(@user, owner)
+      error_msg = creating_repo_in_personal_namespace_enterprise_setting_message(@user)
+      errors.add(:repository, error_msg)
+      @allowed = false
+      return
     end
 
     if @repo_visibility == Repository::INTERNAL_VISIBILITY

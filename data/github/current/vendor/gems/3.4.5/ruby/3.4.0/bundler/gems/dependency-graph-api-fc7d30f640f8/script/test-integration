@@ -1,0 +1,44 @@
+#!/bin/bash
+# Run the containerized integration tests.
+#
+# Usage:
+#
+#   script/test-integration
+
+set -e
+
+cd "$(dirname "$0")/.."
+source "script/_env"
+
+# Explicitly set the docker-compose files we want to consider here.
+export COMPOSE_FILE="docker-compose.yml"
+
+# This is the default HMAC key for clients created during these tests.
+# It should match the value set in integration.env
+export DEPENDENCY_GRAPH_API_HMAC_KEYS=integration
+export DEPENDENCY_GRAPH_PLATFORM_HMAC_KEYS=integration
+
+if [[ -n "$DG_CONTAINER_TAG" ]] && [[ "$DG_CONTAINER_TAG" != "latest" ]]; then
+  echo -e "DG_CONTAINER_TAG is set to: $DG_CONTAINER_TAG"
+  echo -e "Will try to use image: ghcr.io/github/dependency-graph-api/dependency-graph-api-production:$DG_CONTAINER_TAG"
+else
+  echo -e "Using latest version of dependency-graph-api-production container."
+  export DG_CONTAINER_TAG=latest
+fi
+
+docker pull "ghcr.io/github/dependency-graph-api/dependency-graph-api-production:$DG_CONTAINER_TAG"
+
+cd integration/ || exit 1
+
+if ! docker compose up --wait; then
+  echo -e "Failed to start the containers."
+  docker compose logs api
+  docker compose down --remove-orphans
+  exit 1
+fi
+
+
+
+bundle exec rspec .
+
+docker compose down --remove-orphans

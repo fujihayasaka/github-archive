@@ -1,0 +1,19 @@
+CREATE TABLE `attestations` (
+  `domain_id` int unsigned NOT NULL,
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `purl` varchar(512) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `owner_id` bigint DEFAULT NULL,
+  `repository_id` bigint DEFAULT NULL,
+  `certificate` varchar(4096) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `media_type` varchar(4096) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `predicate_type` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `statement_type` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `statement` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` datetime NOT NULL,
+  `tenant_id` bigint unsigned NOT NULL DEFAULT '0',
+  `statement_preview` varchar(1024) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `domain_id_purl_predicate_type_attestations_idx` (`domain_id`,`purl`,`predicate_type`),
+  KEY `domain_id_owner_id_repository_id_predicate_type_attestations_idx` (`domain_id`,`owner_id`,`repository_id`,`predicate_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

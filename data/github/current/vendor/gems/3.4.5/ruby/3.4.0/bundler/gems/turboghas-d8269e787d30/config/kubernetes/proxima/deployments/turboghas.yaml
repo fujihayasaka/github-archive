@@ -1,0 +1,63 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: turboghas
+spec:
+    replicas: 3
+    selector:
+        matchLabels:
+            app: turboghas
+            role: twirp
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: turboghas
+            labels:
+                app: turboghas
+                role: twirp
+        spec:
+            containers:
+                - env:
+                    - name: STATS_ADDR
+                      value: $(KUBE_NODE_HOSTNAME):28125
+                    - name: GOMAXPROCS
+                      valueFrom:
+                        resourceFieldRef:
+                            containerName: turboghas
+                            resource: limits.cpu
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - secretRef:
+                        name: vault-secrets
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                  image: turboghas
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command:
+                                - sleep
+                                - "5"
+                  name: turboghas
+                  ports:
+                    - containerPort: 8866
+                      name: http
+                      protocol: TCP
+                  readinessProbe:
+                    httpGet:
+                        path: /_ping
+                        port: http
+                    initialDelaySeconds: 10
+                    periodSeconds: 5
+                  resources:
+                    limits:
+                        cpu: 1000m
+                        memory: 256Mi
+                    requests:
+                        cpu: 250m
+                        memory: 128Mi
+            dnsPolicy: ClusterFirst

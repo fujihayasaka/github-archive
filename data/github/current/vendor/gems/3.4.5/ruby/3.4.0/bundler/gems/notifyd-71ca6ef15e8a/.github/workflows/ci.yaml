@@ -1,0 +1,40 @@
+name: ci
+on:
+  pull_request:
+    types: [opened, synchronize]
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+# This allows a subsequently queued workflow run to interrupt previous runs
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  notifyd-tests:
+    runs-on: ubuntu-latest-xl
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to registry
+        run: echo "${{ secrets.CONTAINER_BUILDER_TOKEN }}" | docker login ghcr.io -u ${{github.actor}} --password-stdin
+      - name: Run CI
+        run: 'make ci'
+
+  notifyd-rubygem-tests:
+    runs-on: ubuntu-latest-xl
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to registry
+        run: echo "${{ secrets.CONTAINER_BUILDER_TOKEN }}" | docker login ghcr.io -u ${{github.actor}} --password-stdin
+      - name: "Run RBI checks"
+        run: 'make tapioca'
+      - name: "Run type checks"
+        run: 'make sorbet'
+      - name: "Run tests"
+        run: 'make ci-test-ruby'

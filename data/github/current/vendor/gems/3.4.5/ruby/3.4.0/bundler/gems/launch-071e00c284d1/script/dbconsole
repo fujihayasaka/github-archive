@@ -1,0 +1,46 @@
+#!/bin/bash
+#/ Usage: script/dbconsole [service]
+#/ The supported services are:  deployer and payloads. Append "-test" to connect to the test databases.
+
+. script/_serverenv
+
+mysql() {
+  script/start-db
+  script/docker-compose exec db mysql -h db -p${MYSQL_ROOT_PASSWORD} "$@"
+}
+
+dbconsole() {
+  local dbname="$1"; shift
+  mysql --prompt "$dbname> " "$@" "$dbname"
+}
+
+usage_and_exit() {
+  cat "$0" | grep '^#/' | cut -c4-
+  exit 1
+}
+
+if [ $# -eq 0 ]; then
+  usage_and_exit
+fi
+
+case "$1" in
+  deployer|--deployer)
+    shift
+    dbconsole launch_deployer_development "$@" ;;
+  deployer-test|--deployer-test)
+    shift
+    dbconsole launch_deployer_test "$@" ;;
+  payloads|--payloads)
+    shift
+    dbconsole actions_workflow_payloads_development "$@" ;;
+  payloads-test|--payloads-test)
+    shift
+    dbconsole actions_workflow_payloads_test "$@" ;;
+  --mysql-help)
+    mysql --help ;;
+  *)
+    usage_and_exit
+esac
+
+
+# vim: sw=2 et

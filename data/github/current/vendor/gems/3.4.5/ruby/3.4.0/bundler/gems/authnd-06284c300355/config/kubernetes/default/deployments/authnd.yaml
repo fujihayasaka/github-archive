@@ -1,0 +1,128 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    annotations:
+        moda.github.net/canary-label: canary
+        moda.github.net/canary-v2: "true"
+    name: authnd
+spec:
+    replicas: 8
+    selector:
+        matchLabels:
+            app: authnd
+            canary: production
+    strategy:
+        rollingUpdate:
+            maxSurge: 25%
+            maxUnavailable: 0
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt_sloppy
+                observability.github.com/logger: fluent-bit
+            labels:
+                app: authnd
+                canary: production
+        spec:
+            affinity:
+                podAntiAffinity:
+                    preferredDuringSchedulingIgnoredDuringExecution:
+                        - podAffinityTerm:
+                            labelSelector:
+                                matchExpressions:
+                                    - key: app
+                                      operator: In
+                                      values:
+                                        - authnd
+                            topologyKey: kubernetes.io/hostname
+                          weight: 100
+            containers:
+                - command:
+                    - ./bin/authnd
+                  env:
+                    - name: STATS_ADDR
+                      value: $(KUBE_NODE_HOSTNAME):28125
+                    - name: CHATOPS_BASE_URL
+                      value: https://authnd-$(HEAVEN_DEPLOYED_ENV).service.iad.github.net/_chatops
+                    - name: FIDO_URL
+                      value: https://fido-challenger.githubapp.com
+                    - name: MYSQL_PRIMARY_READS_ENABLED
+                      value: "true"
+                    - name: IDENTITY_PRIVATE_KEY
+                      valueFrom:
+                        secretKeyRef:
+                            key: IDENTITY_PRIVATE_KEY
+                            name: vault-secrets
+                    - name: IDENTITY_PUBLIC_KEY
+                      valueFrom:
+                        secretKeyRef:
+                            key: IDENTITY_PUBLIC_KEY
+                            name: vault-secrets
+                    - name: IDENTITY_CERTIFICATE
+                      valueFrom:
+                        secretKeyRef:
+                            key: IDENTITY_CERTIFICATE
+                            name: vault-secrets
+                    - name: CHATOPS_BOT_PUBLIC_KEY
+                      valueFrom:
+                        secretKeyRef:
+                            key: CHATOPS_AUTH_PUBLIC_KEY
+                            name: vault-secrets
+                    - name: CHATOPS_MANUAL_PUBLIC_KEY
+                      value: |
+                        -----BEGIN RSA PUBLIC KEY-----
+                        MIIBCgKCAQEA4tN6q+o20onBruCnXVhtJ/1i5hSOPKhcscDo9o1U8jY2hDITnQC9
+                        g6Eq4/dy5Zs0FHFfFp06l32SN1XGuJte5WqBv+PmaPNB+tyurg4eSYz0A+jC62uz
+                        0o8CLShVCyWwPY6PunkYXmJTjGKyFSZeIvMQswhJ/hqz6h8quqD5x//hH5wk8WWJ
+                        CcwmdJXvaVP4K4Mkxr9Nt4+KiUBnbpMrRKU5Jtx7Ue1TkEJhQFPsYG8bNN2ZetdO
+                        UR5Jxmr+6H9UM3Gddy4hoiYUxu0J/HRHxf64/8zRawN56Ojg79T5VoUVCBJmoBxX
+                        vYW5QyHRHno9I/O+RE5jou1X53nyl8+c1wIDAQAB
+                        -----END RSA PUBLIC KEY-----
+                    - name: SECURITY_CONFIG_FILE
+                      value: /config/security-config.yaml
+                  envFrom:
+                    - secretRef:
+                        name: vault-secrets
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - configMapRef:
+                        name: common-config
+                  image: authnd
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command:
+                                - sleep
+                                - "5"
+                  livenessProbe:
+                    httpGet:
+                        path: /_ping
+                        port: 8000
+                    initialDelaySeconds: 3
+                    timeoutSeconds: 1
+                  name: authnd
+                  ports:
+                    - containerPort: 8000
+                      name: http
+                      protocol: TCP
+                  readinessProbe:
+                    httpGet:
+                        path: /_ping
+                        port: 8000
+                    initialDelaySeconds: 3
+                    timeoutSeconds: 1
+                  resources:
+                    limits:
+                        cpu: "3.0"
+                    requests:
+                        cpu: 250m
+                        memory: 250Mi
+                  volumeMounts:
+                    - mountPath: /config
+                      name: authnd-configmap
+            dnsPolicy: Default
+            volumes:
+                - configMap:
+                    name: authnd
+                  name: authnd-configmap

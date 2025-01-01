@@ -1,0 +1,52 @@
+name: "CodeQL Analysis"
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    reuse-previous-outcome: true
+  pull_request:
+    branches:
+      - master
+      - main
+    reuse-previous-outcome: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write # for setup-goproxy
+      security-events: write # CodeQL
+      actions: read
+      contents: read
+
+    steps:
+      - name: OIDC Setup for goproxy
+        uses: github/setup-goproxy@v1.1.0
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - run: go version
+
+      # Vendor dependencies for CodeQL to analyze
+      - run: go mod vendor
+
+      - uses: github/codeql-action/init@v2
+        with:
+          languages: go
+          config-file: ./.github/codeql/codeql-config.yml
+          tools: latest
+
+      - uses: github/codeql-action/analyze@v2
+        env:
+          GOFLAGS: "-mod=vendor"

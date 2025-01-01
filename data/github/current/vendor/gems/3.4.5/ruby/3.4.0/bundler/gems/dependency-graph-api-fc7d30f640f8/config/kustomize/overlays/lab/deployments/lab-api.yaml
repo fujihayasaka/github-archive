@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: lab-api
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "lab-api"
+        heaven.githubapp.com/image-placeholder: "dependency-graph-api"
+        heaven.githubapp.com/deploy-requirement: "true"
+spec:
+    replicas: 2
+    selector:
+        matchLabels:
+            app: dependency-graph-api
+            role: lab-api
+    template:
+        metadata:
+            labels:
+                app: dependency-graph-api
+                role: lab-api
+        spec:
+            dnsPolicy: ClusterFirst
+            volumes:
+                - name: github-metadata
+                  hostPath:
+                    path: /etc/github/metadata.json
+            containers:
+                - name: lab-api
+                  image: dependency-graph-api
+                  resources:
+                    requests:
+                        cpu: 1000m
+                        memory: "1Gi"
+                    limits:
+                        cpu: 1000m
+                        memory: "1.5Gi"
+                  command: ["./script/kube-server"]
+                  ports:
+                    - name: http
+                      containerPort: 9596
+                      protocol: TCP
+                  readinessProbe:
+                    timeoutSeconds: 1
+                    httpGet:
+                        path: /_ping
+                        port: 9596
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command: ["sleep", "5"]
+                  env:
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                    # used by puma statsd plugin
+                    - name: STATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                    - name: STATSD_PORT
+                      value: "28125"
+                    - name: STATSD_METRIC_PREFIX
+                      value: "dependency_graph"
+                    - name: DG_POD_TYPE
+                      # used by puma, matches API to get similar characteristics
+                      value: "lab-api"
+                    - name: MY_POD_NAME
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.name
+                    - name: STATSD_GROUPING
+                      value: lab-api
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - secretRef:
+                        name: vault-secrets
+                  volumeMounts:
+                    - mountPath: /etc/github/metadata.json
+                      name: github-metadata
+                      readOnly: true

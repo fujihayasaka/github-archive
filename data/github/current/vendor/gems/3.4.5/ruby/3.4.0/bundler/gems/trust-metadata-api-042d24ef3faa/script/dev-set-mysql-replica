@@ -1,0 +1,149 @@
+#!/usr/bin/env ruby
+
+require 'logger'
+require 'mkmf'
+require 'open3'
+
+at_exit do
+  # cleanup the files created during the process
+  File.delete('mkmf.log') if File.exist?('mkmf.log')
+  File.delete('dev_dump.sql') if File.exist?('dev_dump.sql')
+end
+
+class ReplicaSetup
+  attr_reader :env, :logger
+
+  def initialize
+    @env    = parse_env_file
+    @logger = Logger.new($stdout)
+  end
+
+  def run!
+    logger.info('Setting up the MySQL replica...')
+    get_primary_status
+    create_primary_dump
+    import_dump
+    set_replica
+    start_replication
+    check_replication_status
+  end
+
+  # get the status of the primary server
+  def get_primary_status
+    return @_primary_status if @_primary_status
+
+    logger.info('checking primary server status...')
+    primary_status_query = mysql_command(env['TMA_MYSQL_PORT'], env['TMA_MYSQL_ROOT_PASSWORD'], 'SHOW MASTER STATUS\G')
+    output, status = Open3.capture2(primary_status_query)
+    if !status.success?
+      logger.error('Failed to get the primary server status!')
+      exit 1
+    end
+
+    @_primary_status = {
+      file:     output.match(/File:\s*(\S+)/)[1],
+      position: output.match(/Position:\s*(\d+)/)[1]
+    }
+  end
+
+  # export current state of the primary server
+  def create_primary_dump
+    logger.info('Creating a dump of the primary server...')
+    _, status = Open3.capture2("docker exec tma-dev-db mysqldump --user=root --password=#{env['TMA_MYSQL_ROOT_PASSWORD']} --all-databases > dev_dump.sql")
+    if !status.success?
+      logger.error('Failed to create a dump of the primary server')
+      exit 1
+    end
+  end
+
+  # import the dump on the replica so that it can be used as the initial data
+  def import_dump
+    logger.info('Importing the dump on the replica...')
+    _, status = Open3.capture2("docker exec -i tma-dev-db-replica mysql --user=root --password=#{env['TMA_MYSQL_RO_ROOT_PASSWORD']} < dev_dump.sql")
+    if !status.success?
+      logger.error('Failed to import the dump on the replica')
+      exit 1
+    end
+  end
+
+  # set the primary server on the replica
+  def set_replica
+    logger.info('changing primary server on the replica...')
+    primary_status = get_primary_status
+    change_primary_query = %Q{
+      CHANGE MASTER TO
+      MASTER_HOST='mysql-primary',
+      MASTER_USER='replica_user',
+      MASTER_PASSWORD='replica_p4ssw0rd',
+      MASTER_LOG_FILE='#{primary_status[:file]}',
+      MASTER_LOG_POS=#{primary_status[:position]};
+    }
+
+    change_primary_query = mysql_command(env['TMA_MYSQL_RO_PORT'], env['TMA_MYSQL_RO_ROOT_PASSWORD'], change_primary_query)
+    _, status = Open3.capture2(change_primary_query)
+    if !status.success?
+      logger.error('Failed to set the primary server on the replica')
+      exit 1
+    end
+  end
+
+  # start replication on the replica
+  def start_replication
+    logger.info('Starting the replication on the replica...')
+    start_replication_query = mysql_command(env['TMA_MYSQL_RO_PORT'], env['TMA_MYSQL_RO_ROOT_PASSWORD'], 'START SLAVE;')
+    _, status = Open3.capture2(start_replication_query)
+    if !status.success?
+      logger.error('Failed to start the replication on the replica')
+      exit 1
+    end
+  end
+
+  # check the replication status
+  def check_replication_status
+    show_replica_status_query = mysql_command(env['TMA_MYSQL_RO_PORT'], env['TMA_MYSQL_RO_ROOT_PASSWORD'], 'SHOW SLAVE STATUS\G')
+    _, status = Open3.capture2(show_replica_status_query)
+    if !status.success?
+      logger.error('Failed to show the replica status')
+      exit 1
+    end
+  end
+
+  def mysql_exists?
+    return @_mysql_exists if @_mysql_exists
+    @_mysql_exists = find_executable('mysql')
+  end
+
+  def mysql_command(port, password, query)
+    if !mysql_exists?
+      logger.error('mysql command is not available')
+      exit 1
+    end
+
+    "mysql --host=127.0.0.1 --port=#{port} --user=root --password=#{password} -e \"#{query}\""
+  end
+
+  private
+
+  # parse the .env file and return a hash with the environment variables
+  def parse_env_file
+    if !File.exist?('.env')
+      logger.error('The .env file does not exist')
+      exit 1
+    end
+
+    env_vars = {}
+    File.open('.env', 'r') do |file|
+      file.each_line do |line|
+        # Skip empty lines and lines starting with a hash (#) symbol (comments)
+        next if line.strip.empty? || line.strip.start_with?('#')
+
+        key, value = line.strip.split('=', 2)
+        env_vars[key] = value
+      end
+    end
+
+    env_vars
+  end
+end
+
+ReplicaSetup.new.run!

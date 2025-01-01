@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+
+#/ Usage: script/db-shell [--execute <command> | --file <file>]
+
+set -e
+
+function usage() {
+    cat <<EOF
+Usage: script/db-shell [--execute] [--file]
+  Mode 1:
+    - script/db-shell                                       Runs mysql shell on IMS database
+  Mode 2:
+    - script/db-shell --execute 'select 1'                  Runs command on IMS database and returns table view results
+    - script/db-shell --execute 'select 1' --raw-output     Runs command on IMS database and returns unformatted results
+  Mode 3:
+    - script/db-shell --file 'script.sql'                   Runs SQL script on IMS database
+
+  Common parameters:
+    --no-db                                                 Execute in context of mysql cluster
+
+  Environment variables:
+    MY_SQL_DATABASE                 Overrides MySQL database name
+
+EOF
+}
+
+MODE=""
+MODE_ARGUMENT=""
+NO_DB=false
+RAW_OUTPUT=false
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --execute)
+            MODE="execute"; MODE_ARGUMENT=$2; shift; shift ;;
+        --file)
+            MODE="file"; MODE_ARGUMENT=$2; shift; shift ;;
+        --no-db)
+            NO_DB=true; shift ;;
+        --raw-output)
+            RAW_OUTPUT=true; shift ;;
+        --help)
+        usage; exit 0 ;;
+        *)
+        echo "Unknown option $1"; usage; exit 1 ;;
+    esac
+done
+
+MY_SQL_HOST=$(script/helpers/kube-ip)
+MY_SQL_PORT=28142
+MY_SQL_USER=root
+MY_SQL_DATABASE=${MY_SQL_DATABASE:-hosted_compute_ims_development}
+if [[ $NO_DB == true ]]; then
+    MY_SQL_DATABASE=""
+fi
+
+PARAMS="--host=${MY_SQL_HOST} --port=${MY_SQL_PORT} --user=${MY_SQL_USER}"
+
+if [[ -n "${MY_SQL_DATABASE}" ]]; then
+    PARAMS="${PARAMS} --database=${MY_SQL_DATABASE}"
+fi
+
+if [[ $RAW_OUTPUT == true ]]; then
+    PARAMS="${PARAMS} --silent --skip-column-names"
+fi
+
+if [[ $MODE == "execute" ]]; then
+    mysql $PARAMS -e "$MODE_ARGUMENT"
+elif [[ $MODE == "file" ]]; then
+    mysql $PARAMS < $MODE_ARGUMENT
+else
+    mysql $PARAMS
+fi

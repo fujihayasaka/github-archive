@@ -1,0 +1,69 @@
+# Run script/gogenerate to update grammar.peg.go.
+
+package parser
+
+import "context"
+
+type queryParser Peg {
+    stack []*Query
+    runeMapping RuneMapping
+    ctx context.Context
+}
+
+Search          <- Whitespace* FinalExpression? (Whitespace* FinalExpression)* Whitespace* END
+FinalExpression <- { p.startExpression(position) } Expression { p.finishExpression(AndQuery) }
+
+Expression      <- AndSeq / OrSeq / SubExpression / NotExpr / Regex / Term
+InternalExpr    <- IntAndSeq / IntOrSeq / SubExpression / IntNotExpr / Regex / IntTerm
+
+SubExpression   <- !EmptyParens '(' { p.startGroup(position-1) } Whitespace* InternalExpr ( Whitespace+ { p.startExpression(position) } ( InternalExpr / { p.cancelExpression() } Impossible ) { p.finishExpression(AndQuery) } )* Whitespace* ( ')' { p.endGroup(position) } / { p.cancelGroup() } Impossible )
+AndSeq          <- (SubExpression / NotExpr / Regex / Term) Whitespace+ 'AND' Whitespace+ { p.startExpression(position) } ( AndSeq / OrSeq / SubExpression / NotExpr / Regex / Term ) { p.finishExpression(AndQuery) }
+OrSeq           <- (SubExpression / NotExpr / Regex / Term) Whitespace+ 'OR'  Whitespace+ { p.startExpression(position) } ( OrSeq / AndSeq / SubExpression / NotExpr / Regex / Term ) { p.finishExpression(OrQuery) }
+NotExpr         <- < 'NOT ' Whitespace* Expression > { p.captureNot(position, text) }
+
+IntAndSeq       <- (SubExpression / IntNotExpr / Regex / IntTerm) Whitespace+ 'AND' Whitespace+ { p.startExpression(position) } ( IntAndSeq / IntOrSeq / SubExpression / IntNotExpr / Regex / IntTerm ) { p.finishExpression(AndQuery) }
+IntOrSeq        <- (SubExpression / IntNotExpr / Regex / IntTerm) Whitespace+ 'OR'  Whitespace+ { p.startExpression(position) } ( IntOrSeq / IntAndSeq / SubExpression / IntNotExpr / Regex / IntTerm ) { p.finishExpression(OrQuery) }
+IntNotExpr      <- < 'NOT ' Whitespace* InternalExpr > { p.captureNot(position, text) }
+
+Term            <- NegaQualifier / Qualifier / SExpression / QuotedString / BareWord
+IntTerm         <- NegaQualifier / Qualifier / SExpression / QuotedString / IntBareWord
+
+NegaQualifier   <- < '-' Qualifier > { p.captureNot(position, text) }
+
+Qualifier       <- (
+        # Simple qualifiers
+        < ("lang:" / "language_id:" / "language:") (QuotedString / IntBareWord) >  { p.captureLanguage(position, text) } /
+        < ("repo_id:") IntBareWord > { p.captureRepo(position, text) } /
+        < ("user:" / "owner:" / "org:" ) IntBareWord > { p.captureOwner(position, text) } /
+        < ("owner_id:" / "user_id:" / "org_id:" ) [0-9]+ > { p.captureOwnerID(position, text) } /
+        < ("symbol:" / "def:" ) ( Regex / QuotedString / IntBareWord ) > { p.captureSymbol(position, text) } /
+        < ("ref:" ) ( QuotedString / IntBareWord ) > { p.captureSymbolRef(position, text) } /
+        < "is:" ( QuotedString / IntBareWord )  > { p.captureIs(position, text) } /
+        < "prompt:" QuotedStringAt > { p.capturePrompt(position, text) } /
+        < "bm25:" (QuotedString / IntBareWord ) > { p.captureBM25(position, text) } /
+
+        # Complicated qualifiers
+        < "repo:" ( Regex / QuotedString / IntBareWord ) > { p.convertToQualifier(position, text, RepoQualifier) } /
+        < "path:" ( Regex / QuotedString / IntBareWord ) > { p.convertToQualifier(position, text, PathQualifier) } /
+        < "content:" ( Regex / QuotedString / IntBareWord ) > { p.convertToQualifier(position, text, ContentQualifier) } /
+        < "trait:" ( QuotedString / IntBareWord ) > { p.convertToQualifier(position, text, TraitQualifier) } /
+        < ("scope:" / "saved:") ( QuotedString / IntBareWord ) > { p.convertToQualifier(position, text, ScopeQualifier) }
+)
+
+EmptyParens     <- '(' Whitespace* ')'
+Whitespace      <- ( ' ' / '\t' / '\n' / '\r' )
+BareWord        <- < (!Whitespace .)+ > { p.captureText(position, text) }
+IntBareWord     <- < (!Whitespace !")".)+ > { p.captureText(position, text) }
+
+SExpression     <- < (!('"' / '(' / '/' / Whitespace) .)+ '(' (!')' .)+ ')' > { p.captureText(position, text) }
+Regex           <- '/' < ( "\\" . / !'/' !"\\" . )+ > '/' &(')' / FINISH) { p.captureRegex(position, text) }
+QuotedString    <- '"' < ( "\\" . / !'"' !"\\" . )* > '"' &(')' / FINISH) { p.captureQuotedText(position, text) }
+QuotedStringNT  <- '"' < ( "\\" . / !'"' !"\\" . )* > '"' { p.captureQuotedText(position, text) }
+QuotedStringOpt <- '@' < [0-9]+ > { p.captureQuotedTextOpt(position, text) }
+QuotedStringT   <-  &(')' / FINISH)
+QuotedStringAt  <- QuotedStringNT QuotedStringOpt? QuotedStringT
+
+Impossible      <- !. .
+
+FINISH          <- (Whitespace / !.)
+END             <- !.

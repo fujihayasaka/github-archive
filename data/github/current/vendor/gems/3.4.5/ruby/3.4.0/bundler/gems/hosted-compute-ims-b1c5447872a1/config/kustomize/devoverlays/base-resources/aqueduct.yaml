@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ims-aqueduct
+spec:
+  ports:
+  - port: 28141
+    nodePort: 28141
+  selector:
+    app: ims-aqueduct
+  type: NodePort
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ims-aqueduct
+spec:
+  selector:
+    matchLabels:
+      app: ims-aqueduct
+  template:
+    metadata:
+      labels:
+        app: ims-aqueduct
+    spec:
+      initContainers:
+      - name: wait-for-redis
+        image: redis:7.0.4
+        command: ["sh", "-c", "until redis-cli -h ims-aqueduct-redis -p 6379 ping; do echo waiting for redis; sleep 0.1; done"]
+      containers:
+      - image: ghcr.io/github/aqueduct-lite/aqueduct-lite:24d6a7197f57ceda9510224350efc538f505f094
+        # ghcr.io/github/aqueduct-lite/aqueduct-lite:24d6a7197f57ceda9510224350efc538f505f094@sha256:9faf79550ed437fddb9ff9a5c0ce7ae19c91111c3c6b7c7331ce0b3d04eb13ed
+        # aqueduct-lite docker image is pre-pulled from private registry to bypass auth in minikube
+        imagePullPolicy: Never
+        name: ims-aqueduct
+        command:
+        - "bin/aqueduct-lite"
+        env:
+        - name: AQUEDUCT_LITE_LISTEN_ADDRESS
+          value: 0.0.0.0:28141
+        - name: AQUEDUCT_LITE_REDIS_ADDRESS
+          value: ims-aqueduct-redis:6379
+        ports:
+        - containerPort: 28141
+          name: aqueduct

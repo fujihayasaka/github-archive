@@ -1,0 +1,87 @@
+#!/usr/bin/env ruby
+#
+# Parse a manifest for debugging.
+# Usage: bin/rails r script/dev/parse-manifest -f FILE
+
+unless defined?(Rails)
+  puts "Don't call this script directly, use Rails Runner: `bin/rails r script/dev/parse-manifest`"
+  exit
+end
+
+require "optparse"
+require "terminal-table"
+
+options = { file: nil, pry: false }
+begin
+  OptionParser.new do |opts|
+    opts.banner = "Usage: bin/rails r script/dev/parse-manifest [options]"
+
+    opts.on("-f", "--file FILE", String, "Path to the file you'd like to parse") do |file|
+      options[:file] = file
+    end
+
+    opts.on("-d", "--show-dependencies", "List dependencies in the Manifest") do |dependencies|
+      options[:dependencies] = dependencies
+    end
+
+    opts.on("-p", "--pry", "Run Pry after parsing, for debugging") do |pry|
+      options[:pry] = pry
+    end
+  end.parse!
+rescue OptionParser::MissingArgument => e
+  puts e.message
+  puts "Run with --help to list arguments"
+end
+
+begin
+  manifest_file = File.open(options[:file])
+  parsed_manifest = ManifestAdapters.parse(
+    filename: File.basename(manifest_file.path),
+    path: File.dirname(manifest_file.path),
+    content: manifest_file.read,
+    git_ref: "000000000",
+    pushed_at: Time.now,
+    github_repository_id: 1234,
+    github_owner_id: 4321,
+    repository_nwo: "github/dependency-graph-api",
+    repository_stargazer_count: 6,
+    visibility_private: true,
+    fork: false,
+    is_backfill: false,
+  )
+rescue => e
+  puts "Error parsing manifest!"
+  puts e.message
+  exit
+end
+
+rows = []
+rows << ["Package Manager", parsed_manifest.package_manager.human_name]
+rows << ["Manifest Type", parsed_manifest.manifest_type.human_name]
+rows << ["Malformed?", parsed_manifest.malformed? ? "\e[01;31mYes!\e[0m" : "No"]
+rows << :separator
+rows << ["Name", parsed_manifest.try(:dependent_name)]
+rows << ["# of Dependencies", parsed_manifest.dependencies.count]
+
+puts "\nManifest successfully parsed! 🎉"
+
+puts Terminal::Table.new(rows: rows).tap { |table|
+  table.align_column(0, :right)
+}
+
+if options[:dependencies]
+  dependency_rows = parsed_manifest.dependencies.each_with_object([]) do |dependency, dep_rows|
+    dep_rows << [dependency.package_name, dependency.requirements, dependency.scope, dependency.malformed?]
+  end
+
+  puts Terminal::Table.new(
+    title: "Dependencies",
+    headings: ["Package Name", "Requirements", "Scope", "Malformed"],
+    rows: dependency_rows
+  )
+end
+
+if options[:pry]
+  puts "\nStarting Pry on the Manifest object..."
+  binding.pry(parsed_manifest)
+end

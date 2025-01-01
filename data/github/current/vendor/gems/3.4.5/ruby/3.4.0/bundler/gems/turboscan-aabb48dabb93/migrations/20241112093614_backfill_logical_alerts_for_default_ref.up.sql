@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20241112093614_backfill_logical_alerts_for_default_ref.go on GHES

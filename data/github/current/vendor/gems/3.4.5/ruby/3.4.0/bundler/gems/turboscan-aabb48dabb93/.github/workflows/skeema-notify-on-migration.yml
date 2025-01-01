@@ -1,0 +1,32 @@
+name: Notify on Skeema Migration
+
+on:
+  pull_request_target:
+    types:
+      - labeled
+      - unlabeled
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    permissions: {}
+
+    if: ${{ github.event.label.name == 'migration:skeefree:queued' }}
+
+    steps:
+      - name: Migration Starting
+        if: ${{ github.event.action == 'labeled' }}
+        run: |
+          echo "MIGRATION_MESSAGE=started" >> $GITHUB_ENV
+          echo "MESSAGE_EMOJI=:crossed_fingers:" >> $GITHUB_ENV
+      - name: Migration Finished
+        if: ${{ github.event.action == 'unlabeled' }}
+        run: |
+          echo "MIGRATION_MESSAGE=completed" >> $GITHUB_ENV
+          echo "MESSAGE_EMOJI=:tadaco:" >> $GITHUB_ENV
+      - name: Send Notification
+        uses: tokorom/action-slack-incoming-webhook@d57bf1eb618f3dae9509afefa70d5774ad3d42bf
+        env:
+          INCOMING_WEBHOOK_URL: ${{ secrets.SLACK_SKEEMA_MIGRATION_WEBHOOK }}
+        with:
+          text: "${{ env.MESSAGE_EMOJI }} The migration in \"<${{ github.event.pull_request._links.html.href }}|${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}>\" has ${{ env.MIGRATION_MESSAGE }}."

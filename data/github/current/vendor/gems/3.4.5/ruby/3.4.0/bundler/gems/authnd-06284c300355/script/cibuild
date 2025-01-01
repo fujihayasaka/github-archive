@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+
+# Janky fold markers
+begin_fold() {
+	echo "%%%FOLD {$*}%%%"
+}
+
+end_fold() {
+	echo "%%%END FOLD%%%"
+}
+
+# CI test & build script
+set -eu
+
+# docker-compose uses this to decide which config file(s) to use
+# If another script sets COMPOSE_FILE already we will use that one
+export COMPOSE_FILE=${COMPOSE_FILE:-docker-compose.yml:docker-compose.ci.yml}
+
+echo "==> running CI build/test script <=="
+MODMODE=vendor
+
+script/automation/set-modmode
+
+
+export MODMODE
+
+begin_fold Building containers...
+docker-compose up --build --no-start
+end_fold
+
+begin_fold Starting database...
+docker-compose up -d --remove-orphans
+script/wait-for-db
+end_fold
+
+begin_fold Migrating databases...
+docker-compose run --no-deps --rm authnd script/db-migrate test-ci --allow-unsafe
+docker-compose run --no-deps --rm authnd script/db-migrate test-ci-proxima --allow-unsafe
+end_fold
+
+begin_fold Running tests ...
+docker-compose run --rm -e DB_ADDR="db:3306" -e KAFKA_YUKON_BROKERS="kafka-lite:9092" authnd make test-ci
+end_fold
+
+begin_fold Running tests in Proxima mode...
+docker-compose run --rm -e DB_ADDR="db:3306" -e KAFKA_YUKON_BROKERS="kafka-lite:9092" authnd make test-ci-proxima
+end_fold
+
+begin_fold Checking GHES migrations and schemas are in sync...
+docker-compose run --no-deps --rm -e CI="true" authnd script/enterprise-schema-check
+end_fold

@@ -1,0 +1,71 @@
+required_builds:
+  - docker-image
+  - moda-config-bundle / moda-config-bundle
+auto_start_pipeline: production_rollout
+ok_for_moda_to_remove_from_deprecating_clusters: true
+notifications:
+  slack_channels:
+    - "#dsp-code-scanning-ops"
+environments:
+  - name: production
+    service_mesh:
+      enabled: true
+    require_pipeline: true
+    cluster_selector:
+      profile: general
+      region: iad
+    extra_start_message: "Make sure you keep an eye on the [Code Scanning dashboard](https://app.datadoghq.com/dashboard/pgc-w9p-pr4/code-scanning) and [TurboScan dashboard](https://app.datadoghq.com/dashboard/7hs-9i2-epr/turboscan). If anything seems to be going wrong look at [Sentry](https://sentry.io/organizations/github/issues/?project=2466720&project=5177956&project=1885898&query=is%3Aunresolved+gh.exception.catalog_service%3Agithub%2Fcode_scanning&statsPeriod=1h) to see if it's related to your change."
+    extra_completed_message: "Make sure you keep an eye on the [Code Scanning dashboard](https://app.datadoghq.com/dashboard/pgc-w9p-pr4/code-scanning) and [TurboScan dashboard](https://app.datadoghq.com/dashboard/7hs-9i2-epr/turboscan). If anything seems to be going wrong look at [Sentry](https://sentry.io/organizations/github/issues/?project=2466720&project=5177956&project=1885898&query=is%3Aunresolved+gh.exception.catalog_service%3Agithub%2Fcode_scanning&statsPeriod=1h) to see if it's related to your change."
+    canaryable: true
+  - name: staff-wus2-01
+    service_mesh:
+      enabled: true
+    cluster_selector:
+      profile: proxima
+      stamp: staff-wus2-01
+    proxima: true
+    required_review_tasks: []
+
+proxima:
+  environment_pattern:
+    service_mesh:
+      enabled: true
+  rollout_pattern:
+    - kind: deployment
+      config: {}
+  rings:
+    timeout: 900
+    timer_gate_duration: 300
+
+pipelines:
+  production_rollout:
+    append_proxima_stamps: true
+    # thread_notifications is an experimental feature to group Slack notifications about the deploy in a thread
+    # See https://github.com/github/heaven/discussions/11819
+    thread_notifications: true
+    notify_users_via_dm: false
+    rollback_in_parallel: true
+    timeout: 3600
+    stages:
+      - name: staff-wus2-01
+        kind: deployment
+        config:
+          environment: staff-wus2-01
+          timeout: 900
+        gates:
+          - kind: check_build
+            build_name: TurboTest
+            notification_delay: 600
+            blocking: true
+            custom_message: |
+              A basic check that Code Scanning is working on the [Proxima staffship](https://staffship-01.ghe.com/). See [workflow runs](https://github.com/github/turboscan/actions/workflows/turbotest.yml) for more information.
+          - kind: timer
+            duration: 10
+      - name: dotcom
+        kind: deployment
+        config:
+          environment: production
+          timeout: 900
+        gates:
+          - kind: timer
+            duration: 300

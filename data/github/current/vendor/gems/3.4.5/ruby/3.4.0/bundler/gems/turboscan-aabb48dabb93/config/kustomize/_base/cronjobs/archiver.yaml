@@ -1,0 +1,64 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: turboscan-archiver
+  annotations:
+    turboscan.github.net/single-cluster: "true"
+spec:
+  schedule: "6/10 * * * *"
+  # we use cluster-preferences to override this for a single cluster only
+  suspend: true
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: turboscan
+            role: archiver
+          annotations:
+            observability.github.com/logger: fluent-bit
+            fluentbit.io/parser: logfmt
+            observability.github.com/splunk_index: turboscan
+        spec:
+          dnsPolicy: ClusterFirst
+          containers:
+            - name: turboscan
+              image: turboscan
+              envFrom:
+                - configMapRef:
+                    name: environment
+                - configMapRef:
+                    name: background-environment
+                - configMapRef:
+                    name: kube-cluster-metadata
+                - secretRef:
+                    name: vault-secrets
+              env:
+                - name: STATS_ADDR
+                  value: "$(KUBE_NODE_HOSTNAME):28125"
+                - name: KAFKA_GROUP
+                  value: "turboscan-consumer-prod"
+                - name: GOMAXPROCS
+                  valueFrom:
+                    resourceFieldRef:
+                      containerName: turboscan
+                      resource: limits.cpu
+              command:
+                - /app/script/istio-job-wrapper
+                - /app/bin/turboscan-archiver
+                - --age=1
+                - --limit=10000
+                - --deadline=9
+                - --delete
+                - --threads=4
+              resources:
+                requests:
+                  memory: 1Gi
+                  cpu: 2000m
+                limits:
+                  memory: 4Gi
+                  cpu: 3000m
+          restartPolicy: OnFailure
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 60

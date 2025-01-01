@@ -1,0 +1,103 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    annotations:
+        heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: hosted-compute-ims-api
+        moda.github.net/canary-label: role
+        moda.github.net/canary-replicas: "1"
+        moda.github.net/canary-v2: "true"
+    name: hosted-compute-ims-api
+spec:
+    replicas: 2
+    selector:
+        matchLabels:
+            app: hosted-compute-ims-api
+            role: production
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt
+                observability.github.com/kafka_topic: launch
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: hosted_compute_ims
+            labels:
+                app: hosted-compute-ims-api
+                role: production
+        spec:
+            containers:
+                - command:
+                    - /app/bin/hosted-compute-ims-api
+                  env:
+                    - name: HMAC_AUTH_ENABLED
+                      value: "true"
+                    - name: TWIRP_HTTP_PORT
+                      value: "21010"
+                    - name: TWIRP_HTTP_TIMEOUT
+                      value: 5s
+                    - name: VSSF_AUTH_ENABLED
+                      value: "true"
+                    - name: GOMAXPROCS
+                      valueFrom:
+                        resourceFieldRef:
+                            containerName: hosted-compute-ims-api
+                            resource: limits.cpu
+                    - name: STATSD_ADDR
+                      value: $(KUBE_NODE_HOSTNAME):28125
+                    - name: STATS_ADDR
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                      value: http://otelcol-mesh.otelcol-production.svc.cluster.local:14318/v1/traces
+                    - name: DOTCOM_INTERNAL_TWIRP_URL
+                      value: https://internal-api.service.{{stamp}}.github.net/internal
+                    - name: GITHUB_TELEMETRY_LOGS_LEVEL
+                      value: info
+                    - name: ENVIRONMENT
+                      value: production
+                    - name: HTTP_PROXY
+                      value: network-proxy.service.github.net:3128
+                    - name: HTTPS_PROXY
+                      value: network-proxy.service.github.net:3128
+                    - name: NO_PROXY
+                      value: '*.github.net,*.cluster.local'
+                    - name: AQUEDUCT_API_KEY_VERSION
+                      value: "0"
+                    - name: AQUEDUCT_APP
+                      value: hosted-compute-ims-production
+                    - name: AQUEDUCT_URL
+                      value: https://aqueduct-gateway-production.service.iad.github.net
+                    - name: FEATURE_FLAGS_SUPPORTED_STAMPS
+                      value: dotcom staff-wus2-01 prod-weu-01 prod-sdc-01 prod-ae-01
+                  envFrom:
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  image: hosted-compute-ims
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command:
+                                - sleep
+                                - "5"
+                  name: hosted-compute-ims-api
+                  ports:
+                    - containerPort: 21010
+                      name: http
+                      protocol: TCP
+                  readinessProbe:
+                    httpGet:
+                        path: /_ping
+                        port: 21010
+                    initialDelaySeconds: 5
+                    timeoutSeconds: 1
+                  resources:
+                    limits:
+                        cpu: 500m
+                        memory: 500Mi
+                    requests:
+                        cpu: 25m
+                        memory: 100Mi
+            dnsPolicy: ClusterFirst

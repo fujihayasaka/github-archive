@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# This script runs from inside the Docker container, and performs code gen
+# Before landing breaking changes, please update the README documentation!
+
+PROTO_BASE="/proto"
+GEN_BASE="/gen"
+GO_OUT="/${GEN_BASE}/go"
+RUBY_OUT="/${GEN_BASE}/ruby/lib"
+
+mkdir -p "$GO_OUT"
+mkdir -p "$RUBY_OUT"
+
+for PROTOFILE in $(find "$PROTO_BASE" -name '*.proto'); do
+  # Generate Twirp RPC code for Golang and Ruby
+  protoc --twirp_out=paths=source_relative:"$GO_OUT" \
+         --go_out=paths=source_relative:"$GO_OUT" \
+         --twirp_ruby_out="$RUBY_OUT" \
+         --ruby_out="$RUBY_OUT" \
+         --proto_path="$PROTO_BASE" \
+         --experimental_allow_proto3_optional \
+         "$PROTOFILE"
+done
+
+# Create the base app ruby file
+echo "Creating base app file..."
+BASE_APP_FILE="./gen/ruby/lib/dependency-graph-platform-proto.rb"
+echo "# Auto-generated file. Do not edit!" > "$BASE_APP_FILE"
+for TWIRP_FILE in $(find ./gen/ruby/lib -name '*_twirp.rb'); do
+  # Convert the file path to a require path
+  REQUIRE_PATH="${TWIRP_FILE#./gen/ruby/lib/}"
+  REQUIRE_PATH="${REQUIRE_PATH%.rb}"
+  echo "require '$REQUIRE_PATH'" >> "$BASE_APP_FILE"
+done
+echo "Base app file created."

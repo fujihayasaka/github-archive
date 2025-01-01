@@ -1,0 +1,42 @@
+#!/bin/bash
+
+set -e
+
+want_version="$( cat .go-version | cut -d' ' -f1 )"
+
+if ! [ -x "$(command -v go)" ]; then
+  echo "go is not installed: https://golang.org/dl/"
+  exit 1
+fi
+
+# check go version, this makes sure we're all on the same page. Comment out
+# patch section if we need to also restrict according to patch version
+want_minor=$(echo ${want_version} | cut -d "." -f2)
+want_patch=$(echo ${want_version} | cut -d "." -f3)
+
+got_version=$(go version | cut -d ' ' -f3 | tr -d 'go' | sed -e 's/rc[0-9]*$//')
+got_minor=$(echo ${got_version} | cut -d "." -f2)
+got_patch=$(echo ${got_version} | cut -d "." -f3)
+
+echo "==> checking for Go version: ${want_version} ... found ${got_version}"
+
+show_warning=false
+# this means that we support everything greater or equal to the minor
+# version. So if our want_version is `v1.12.10`, we're allowing people to
+# use `v1.12`, `v1.13`, etc...
+if [[ ! "${got_minor}" -ge "${want_minor}" ]]; then
+  show_warning=true
+fi
+
+# comment out if we care about patch version, sometime this is needed to
+# enforce certain things, such as security fixes. But we don't need to be strict.
+#
+# if [[ ! "${got_patch}" -ge "${want_patch}" ]]; then
+#   show_warning=true
+# fi
+
+if [[ "${show_warning}" ==  true ]]; then
+  printf "WARNING: Go version doesn't meet requirements\n    want: ${want_version}\n    got : ${got_version}\n"
+  printf "Please update your Go version: https://golang.org/dl/\n"
+  exit 1
+fi

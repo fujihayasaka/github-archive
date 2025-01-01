@@ -204,6 +204,14 @@ module User::EnterpriseManagedDependency
     is_enterprise_managed?
   end
 
+  def enterprise_server_scim_managed_user?
+    return false unless user?
+    return false unless GitHub.enterprise?
+
+    # It's possible for a user to be part of SCIM enabled single enterprise but uses basic auth
+    GitHub.global_business&.enterprise_server_scim_enabled? && GitHub.auth.external_user?(self)
+  end
+
   # Public: Is deletion of this user disabled because it is managed by an IdP?
   #
   # Returns true for EMU

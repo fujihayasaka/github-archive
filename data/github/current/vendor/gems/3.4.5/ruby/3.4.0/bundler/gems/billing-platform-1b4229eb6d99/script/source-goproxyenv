@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+# export all the values of the .goproxyenv file that do not start with '#'
+echo "sourcing .goproxyenv"
+export $(grep -v '^#' .goproxyenv | xargs)
+
+# Emit .goproxytoken so we can build the Docker container
+echo ${GITHUB_TOKEN} > .goproxytoken
+
+# Update ~/.netrc with the proxy authentication
+script/update-netrc-for-goproxy
+
+# Log in to private NuGet package service
+if command -v dotnet &> /dev/null; then
+    dotnet nuget list source | grep "github" && dotnet nuget remove source github
+    dotnet nuget add source --username PAT --password ${GITHUB_TOKEN} --store-password-in-clear-text --name github "https://nuget.pkg.github.com/github/index.json"
+fi

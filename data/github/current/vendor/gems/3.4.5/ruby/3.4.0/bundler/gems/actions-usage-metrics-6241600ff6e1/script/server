@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+#
+# Builds and deploys the app
+set -e
+dir=$(dirname $0)
+
+MINIKUBE_PROFILE=aum
+
+DEBUG=false
+DEV=false
+while [[ $# -gt 0 ]]; do
+  case $1 in
+  --debug)
+    DEBUG=true
+    shift
+    ;;
+  --dev)
+    DEV=true
+    shift
+    ;;
+  -* | --*)
+    echo "Unknown option $1"
+    exit 1
+    ;;
+  esac
+done
+
+echo "Ensuring k8s cluster is running..."
+if ! kubectl cluster-info --context $MINIKUBE_PROFILE >/dev/null 2>&1; then
+  echo >&2 "Cluster not found. Please run script/setup to start cluster."
+  exit 1
+fi
+
+kubectl delete --ignore-not-found=true -n actions-usage-metrics-dev jobs/transition-template-job
+
+if "$DEBUG"; then
+  echo "Building and applying resources in DEBUG mode. After startup, use the appropriate 'Skaffold Debug' VSCode debug configuration under 'Run and Debug' to attach to the app."
+  # Note: Skaffold always runs dlv on port 56268 on the pod, but for multiple pods the 'debug' port forwarding doesn't guarantee consistent ports
+  # on the host. So we disable automatic 'debug' port forwarding and instead manually (in skaffold.yaml) forward the port to a fixed port on the host.
+  skaffold debug --cleanup=false --port-forward=user $@
+elif "$DEV"; then
+  echo "Building and applying resources in dev mode (watching file changes)..."
+  skaffold dev $@
+else
+  echo "Building and applying resources..."
+  skaffold run $@
+fi
+
+$dir/update-hosts

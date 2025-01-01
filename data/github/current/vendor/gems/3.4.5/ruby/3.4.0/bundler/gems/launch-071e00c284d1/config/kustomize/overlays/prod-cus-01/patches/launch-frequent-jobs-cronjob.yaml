@@ -1,0 +1,88 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: launch-frequent-jobs
+    annotations:
+        heaven.githubapp.com/image-placeholder: "launch"
+        heaven.githubapp.com/deploy-requirement: "true"
+        moda.github.net/cluster-preferences: |
+            {
+              "proxima-1-prod-cus-01-az1":  {
+                "spec": {
+                  "suspend": false
+                }
+              }
+            }
+spec:
+    schedule: "*/2 * * * *"
+    jobTemplate:
+        spec:
+            template:
+                metadata:
+                    annotations:
+                        fluentbit.io/parser: logfmt
+                        observability.github.com/logger: fluent-bit
+                        observability.github.com/splunk_index: prod-launch
+                        observability.github.com/splunk_sourcetype: launch-fluentbit
+                        observability.github.com/kafka_topic: launch
+                spec:
+                    dnsPolicy: ClusterFirst
+                    containers:
+                        - name: launch-frequent-jobs
+                          envFrom:  # order matters! Subsequent entries can override earlier entries.
+                            - configMapRef:
+                                name: kube-cluster-metadata
+                            - secretRef:
+                                name: vault-secrets
+                            - configMapRef:
+                                name: static-config
+                          env:
+                            - name: GOMAXPROCS
+                              value: "2"
+                            - name: KUBE_POD
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: metadata.name
+                            - name: KUBE_NAMESPACE
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: metadata.namespace
+                            - name: LAUNCH_ENV
+                              value: production
+                            - name: LAUNCH_IS_MULTI_TENANT
+                              value: "true"
+                            - name: LAUNCH_MODE
+                              value: hosted
+                            - name: STATS_PREFIX
+                              value: launch
+                            - name: STATS_ADDR
+                              value: "$(KUBE_NODE_HOSTNAME):28125"
+                            - name: DEPLOYER_DATABASE_URL
+                              valueFrom:
+                                secretKeyRef:
+                                    name: launch-%stamp%
+                                    key: mysql-deployer-rw-db
+                            - name: DEPLOYER_DATABASE_READ_ONLY_URL
+                              valueFrom:
+                                secretKeyRef:
+                                    key: mysql-deployer-ro-db
+                                    name: launch-%stamp%
+                            - name: API_HOST
+                              value: "https://internal-api.service.%stamp%.github.net"
+                            - name: GITHUB_APP_PRIVATE_KEY
+                              valueFrom:
+                                secretKeyRef:
+                                    name: launch-%stamp%
+                                    key: github-app-private-key
+                            - name: EARTHSMOKE_KEYSTORE_AZP_ORGANIZATION
+                              valueFrom:
+                                secretKeyRef:
+                                    name: launch-%stamp%
+                                    key: earthsmoke-keystore-azp-organization
+                            - name: AZP_ORG_CREATE_API_BASE_URL
+                              value: "https://pipelines.actions.githubusercontent.com/serviceDeployments/pipelinesproxcus1"
+                            - name: "PIPELINE_SCALE_UNIT_URLS"
+                              value: |
+                                https://pipelinesproxcus1.actions.githubusercontent.com
+                            - name: TELEMETRY_ROUND_TRIPPER_ENABLE_LOGS
+                              value: "true"

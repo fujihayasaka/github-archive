@@ -1,0 +1,44 @@
+FROM ghcr.io/github/gh-base-image/gh-builder-focal:latest as base
+
+ENV CGO_ENABLED=0
+ENV GOBIN=/app/bin
+
+WORKDIR /app
+
+FROM base as build
+
+ARG MODMODE=vendor
+ENV MODMODE=${MODMODE}
+
+COPY . .
+
+# modmode=vendor for ci and local docker build
+RUN script/automation/set-modmode
+
+# If a token was specified, store it in the gitconfig
+ARG GITHUB_TOKEN
+RUN script/automation/set-github-token "$GITHUB_TOKEN"
+
+RUN make tools && make api cli notifier migrate
+
+### build the final container
+FROM ghcr.io/github/gh-base-image/gh-base-focal:latest AS run
+
+# match enterprise2 user in https://github.com/github/enterprise2/blob/master/chroot-prepare-base.sh
+RUN groupadd -g 656 authnd && \
+    useradd -r -u 656 -g authnd authnd
+
+COPY --from=build /app/bin/ /app/bin/
+COPY --from=build /app/migrations/ /app/migrations/
+COPY --from=build /app/schemas/authnd/enterprise/.skeema /app/schemas/authnd/enterprise/.skeema
+COPY --from=build /app/config/databases-enterprise.yml /app/config/databases-enterprise.yml
+
+# create file for liveness probe
+RUN touch tmp/heartbeat
+WORKDIR /app
+EXPOSE 8080
+
+USER authnd
+
+# Nomad job file: https://github.com/github/enterprise2/tree/master/vm_files/etc/consul-templates/etc/nomad-jobs/authnd/authnd.hcl.ctmpl
+ENTRYPOINT ["echo 'ERROR: specify ENTRYPOINT in nomad job file or when manually running the docker image'; exit 1"]

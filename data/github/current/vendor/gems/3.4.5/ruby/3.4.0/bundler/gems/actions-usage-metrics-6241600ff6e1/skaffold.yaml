@@ -1,0 +1,37 @@
+apiVersion: skaffold/v4beta9
+kind: Config
+metadata:
+  name: actions-usage-metrics
+build:
+  local:
+    useBuildkit: true
+    push: false
+  artifacts:
+    - image: actions-usage-metrics
+      docker:
+        dockerfile: Dockerfile
+        buildArgs:
+          DEV: "true"
+          BUILD_TAG: "dev"
+        secrets:
+          - id: netrc
+            src: ~/.netrc
+          - id: azure
+            src: ~/.azure
+
+deploy:
+  statusCheckDeadlineSeconds: 120
+  tolerateFailuresUntilDeadline: true # api-server currently can fail until database is ready
+  kubectl: {}
+
+manifests:
+  kustomize:
+    paths:
+      - config/kustomize/devoverlays/dev
+
+portForward:
+  # Consistently map debug ports so we can reference them in launch.json
+  - resourceType: deployment
+    resourceName: api-server
+    port: 56268
+    localPort: 56201

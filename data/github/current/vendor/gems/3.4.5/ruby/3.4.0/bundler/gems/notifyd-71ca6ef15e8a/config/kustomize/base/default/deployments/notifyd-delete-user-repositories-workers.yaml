@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: notifyd-delete-user-repositories-workers
+    annotations:
+        heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: "delete-user-repositories-worker"
+spec:
+    selector:
+        matchLabels:
+            app: notifyd-delete-user-repositories-workers
+    template:
+        metadata:
+            labels:
+                app: notifyd-delete-user-repositories-workers
+            annotations:
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: notifyd
+                fluentbit.io/parser_stdout: logfmt
+                fluentbit.io/parser_stderr: json
+        spec:
+            dnsPolicy: ClusterFirst
+            containers:
+                - name: delete-user-repositories-worker
+                  image: notifyd
+                  resources:
+                    requests:
+                        cpu: 75m
+                        memory: 100Mi
+                    limits:
+                        cpu: 500m
+                        memory: 500Mi
+                  command: ["/go/bin/delete-user-repositories"]
+                  readinessProbe:
+                    exec:
+                        command: ["pgrep", "-f", "delete-user-repositories"]
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command: ["sleep", "5"]
+                  envFrom:
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: AQUEDUCT_QUEUE
+                      value: notifyd_delete_user_repositories
+                    - name: EXCEPTION_HTTP_EXPORTER
+                      value: "true"
+                    - name: GOMAXPROCS
+                      valueFrom:
+                        resourceFieldRef:
+                          containerName: delete-user-repositories-worker
+                          resource: limits.cpu
+                    - name: RETRIES_MAX_ATTEMPTS
+                      value: "100"
+                    - name: RETRIES_EXPONENTIAL_FACTOR
+                      value: "0"
+                    - name: RETRIES_BASE_BACKOFF
+                      value: "30m"
+                    - name: STATSD_ADDR
+                      value: "$(KUBE_NODE_HOSTNAME):28125"
+                    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                      value: http://otelcol-mesh.otelcol-production.svc.cluster.local:14318/v1/traces
+                  ports:
+                    - name: pprof
+                      containerPort: 8081
+                      protocol: TCP

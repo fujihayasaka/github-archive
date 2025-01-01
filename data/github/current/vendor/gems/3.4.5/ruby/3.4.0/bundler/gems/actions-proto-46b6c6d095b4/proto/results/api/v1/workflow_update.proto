@@ -1,0 +1,154 @@
+syntax = "proto3";
+
+import "results/events/v1/gate_request_updated.proto";
+import "results/events/v1/workflow_job_run_updated.proto";
+import "results/events/v1/workflow_run_updated.proto";
+import "results/events/v1/workflow_orchestration_context_create.proto";
+import "results/entities/v1/concurrency.proto";
+import "results/entities/v1/environment.proto";
+import "results/entities/v1/step.proto";
+import "google/protobuf/timestamp.proto";
+import "checks/v1/annotation.proto";
+import "checks/v1/conclusion.proto";
+import "checks/v1/status.proto";
+
+package github.actions.results.api.v1;
+
+service WorkflowUpdateService {
+  rpc WorkflowUpdate(WorkflowUpdateRequest) returns (WorkflowUpdateResponse);
+  rpc WorkflowRunCreate(WorkflowRunCreateRequest) returns (WorkflowRunCreateResponse);
+  rpc WorkflowJobCreate(WorkflowJobCreateRequest) returns (WorkflowJobCreateResponse);
+  rpc GetWorkflowRunState(GetWorkflowRunStateRequest) returns (GetWorkflowRunStateResponse);
+  rpc GetWorkflowOrchestrationContexts(GetWorkflowOrchestrationContextsRequest) returns (GetWorkflowOrchestrationContextsResponse);
+}
+
+service WorkflowStepUpdateService {
+  rpc WorkflowStepsUpdate(WorkflowStepsUpdateRequest) returns (WorkflowStepsUpdateResponse);
+}
+
+message WorkflowUpdateRequest {
+  oneof event {
+    results.events.v1.WorkflowJobRunUpdated workflow_job_run_updated = 1;
+    results.events.v1.WorkflowRunUpdated workflow_run_updated = 2;
+    results.events.v1.GateRequestUpdated gate_request_updated = 3;
+    results.events.v1.WorkflowOrchestrationContextCreate workflow_orchestration_context_create = 4;
+  }
+}
+
+message WorkflowUpdateResponse {
+  bool ok = 1;
+}
+
+message WorkflowRunCreateRequest {
+  string workflow_run_backend_id = 1;
+  int64 repository_id = 2;
+  int64 check_suite_id = 3;
+  int64 log_retention_days = 4;
+  google.protobuf.Timestamp event_created_at = 5;
+  string event_name = 6;
+  bool ignore_from_run_start_delay = 7;
+  string customer_label = 8;
+  string dynamic_workflow_integrator = 9;
+  string previous_attempt_workflow_run_backend_id = 10;
+  bool is_run_from_lab = 11;
+}
+
+message WorkflowRunCreateResponse {
+  bool ok = 1;
+}
+
+message WorkflowJobCreateRequest {
+  // ID used to keep track of requests through each service (workflow_run_backend_id in Results)
+  string workflow_run_backend_id = 1;
+
+  // CheckRun/WorkflowJobRun status
+  checks.v1.Status status = 2;
+
+  // CheckRun/WorkflowJobRun conclusion
+  checks.v1.Conclusion conclusion = 3;
+
+  // Unique ID for job, generated in Run Service (workflow_job_run_backend_id in Results)
+  string job_id = 4;
+
+  // Zero indexed job number in the workflow run
+  int64 job_order_number = 5;
+
+  // Name for the job displayed in the UI
+  string display_name = 6;
+
+  // Environment of the job
+  results.entities.v1.Environment environment = 7;
+
+  // If the job was intentionally delayed (i.e. concurrency groups, runner assignment)
+  bool delayed = 8;
+
+  // Job key is the job identifier of a job (ie: build.__default)
+  string job_key = 9;
+
+  // Parent job ID is the name of the parent job
+  string parent_job_id = 10;
+
+  // Concurrency of the job
+  results.entities.v1.Concurrency concurrency = 11;
+
+  // User-defined identifier for the job within the workflow definition
+  // NOTE: this is the _identifier_ in the jobs map, not the optional user-defined _name_
+  // This is unique in the workflow file, but may be repeated in events due to matrix workflows
+  // This is different compares to the `job_key, ie: build vs. build.__default
+  string job_user_identifier = 12;
+
+  // the URL of the stamp the workflow ran on
+  // Note: this should really be at the run-level
+  string stamp_url = 13;
+
+  // Plan ID for the previous attempt (used for partial rerun only)
+  string previous_attempt_plan_id = 14;
+
+  // Job ID for the previous attempt (used for partial rerun only)
+  string previous_attempt_job_id = 15;
+
+  // CheckRun/WorkflowJobRun start time
+  google.protobuf.Timestamp started_at = 16;
+
+  // CheckRun/WorkflowJobRun completed time
+  google.protobuf.Timestamp completed_at = 17;
+
+  // Labels requested
+  repeated string labels = 18;
+}
+
+message WorkflowJobCreateResponse {
+  uint64 check_run_id = 1;
+}
+
+message WorkflowStepsUpdateRequest {
+  repeated results.entities.v1.Step steps = 1;
+  int64 change_order = 2;
+  string workflow_job_run_backend_id = 3;
+  string workflow_run_backend_id = 4;
+  // If set true, steps will be persisted to Blob Storage within Results Service
+  bool persist_steps = 5;
+}
+
+message WorkflowStepsUpdateResponse {
+  bool ok = 1;
+}
+
+
+message GetWorkflowRunStateRequest {
+  string workflow_run_backend_id = 1;
+}
+
+message GetWorkflowRunStateResponse {
+  checks.v1.Status status = 1;
+  google.protobuf.Timestamp completed_at = 2;
+
+}
+
+message GetWorkflowOrchestrationContextsRequest {
+  string workflow_run_backend_id = 1;
+}
+
+message GetWorkflowOrchestrationContextsResponse {
+  repeated string orchestration_contexts = 1;
+}

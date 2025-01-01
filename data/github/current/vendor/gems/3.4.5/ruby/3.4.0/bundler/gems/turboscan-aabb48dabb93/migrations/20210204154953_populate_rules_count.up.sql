@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20210204154953_populate_rules_count.go on GHES

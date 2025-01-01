@@ -1,0 +1,2 @@
+ALTER TABLE workflow_schedules
+DROP KEY `by_locked_environment_tier_next_run_at`;

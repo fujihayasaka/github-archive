@@ -1,0 +1,24 @@
+#!/bin/bash
+# This script is run by the "launch-docker" ci build to test interactions with
+# the docker daemon. This only runs tests in the workflowbuild package for now.
+
+set -ex
+
+# Use gcr.io/cloud-builders/docker to run this test in a container that doesn't
+# leave behind any trash but mount the socket in so we can use docker.
+if [ -z "$CIBUILD_LAUNCH_DOCKER" ]; then
+  exec docker run --rm -i \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v $(pwd):/go/src/github.com/github/launch \
+    -e GOPATH=/go \
+    -e CIBUILD_LAUNCH_DOCKER=true \
+    --entrypoint /bin/sh \
+    gcr.io/cloud-builders/docker \
+    -c 'cd /go/src/github.com/github/launch && script/cibuild-launch-docker'
+fi
+
+# Install go and gcc. TODO: build a combined container
+apt-get -y update && apt-get -y install build-essential
+curl -sL https://dl.google.com/go/go1.23.1.linux-amd64.tar.gz > /tmp/go.tgz
+tar -C /usr/local -xzf /tmp/go.tgz
+exec /usr/local/go/bin/go test -count=1 -v -race github.com/github/launch/workflowbuild/...

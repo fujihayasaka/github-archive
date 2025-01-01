@@ -1,0 +1,1 @@
+-- this is a wrapper migration to run 20241114150730_backfill_remaining_logical_alerts.go on GHES
