@@ -110,6 +110,29 @@ module SecurityOverviewAnalytics
           end
         end
 
+        test "does not run owner reconciliation in dotcom if feature flag is enabled and user repos are not available", skip_enterprise: true do
+          FeatureFlagHelper.stubs(:check_for_user_repositories?).returns(true)
+          AdvancedSecurity::Features::Business::AdvancedSecurity::ForEMUs.any_instance.stubs(:feature_available_for_user_repositories?).returns(false)
+
+          OwnerReconciliationJob.expects(:perform_later).never
+          perform_enqueued_jobs only: [BusinessReconciliationJob] do
+            assert_nothing_raised do
+              BusinessReconciliationJob.perform_later(business_id: @biz.id, source_event: "stubbed", entity_type: SecurityCenter::Serializers::BusinessReconciliationJobEntityType::EntityType::User)
+            end
+          end
+        end
+
+        test "does not run owner reconciliation in GHES if user repos are not available", skip_with_all_emus: true, enterprise_only: true do
+          AdvancedSecurity::Features::Business::AdvancedSecurity::ForGHES.any_instance.stubs(:feature_available_for_user_repositories?).returns(false)
+
+          OwnerReconciliationJob.expects(:perform_later).never
+          perform_enqueued_jobs only: [BusinessReconciliationJob] do
+            assert_nothing_raised do
+              BusinessReconciliationJob.perform_later(business_id: @biz.id, source_event: "stubbed", entity_type: SecurityCenter::Serializers::BusinessReconciliationJobEntityType::EntityType::User)
+            end
+          end
+        end
+
         test "raises if organization is not found" do
           perform_enqueued_jobs only: BusinessReconciliationJob do
             assert_raises ActiveRecord::RecordNotFound do

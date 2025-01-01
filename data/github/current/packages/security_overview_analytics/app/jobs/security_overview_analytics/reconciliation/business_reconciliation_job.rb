@@ -52,22 +52,27 @@ module SecurityOverviewAnalytics
             .limit(BATCH_SIZE)
             .pluck(:id)
         when EntityType::User
-          if business&.enterprise_managed? && business&.external_provider_enabled?
-            ExternalIdentity
-              .by_provider(business&.external_provider)
-              .where("user_id > ?", offset_item_id)
-              .order(:user_id)
-              .limit(BATCH_SIZE)
-              .pluck(:user_id)
-          elsif GitHub.enterprise?
-            User
-              .where(type: "User")
-              .where("id > ?", offset_item_id)
-              .order(:id)
-              .limit(BATCH_SIZE)
-              .pluck(:id)
+          if FeatureFlagHelper.check_for_user_repositories?(T.must(business))
+            ghas_instance = ::AdvancedSecurity::Features::Business::AdvancedSecurity.new(T.must(business))
+            ghas_instance.list_enterprise_users_ids_offset(offset_id: offset_item_id, per_page: BATCH_SIZE)
           else
-            []
+            if business&.enterprise_managed? && business&.external_provider_enabled?
+              ExternalIdentity
+                .by_provider(business&.external_provider)
+                .where("user_id > ?", offset_item_id)
+                .order(:user_id)
+                .limit(BATCH_SIZE)
+                .pluck(:user_id)
+            elsif GitHub.enterprise?
+              User
+                .where(type: "User")
+                .where("id > ?", offset_item_id)
+                .order(:id)
+                .limit(BATCH_SIZE)
+                .pluck(:id)
+            else
+              []
+            end
           end
         else
           T.absurd(entity_type)
@@ -115,7 +120,7 @@ module SecurityOverviewAnalytics
 
       sig { override.returns(T::Array[T.class_of(ApplicationJob)]) }
       def fanout_jobs
-        [OwnerReconciliationJob]
+        [OwnerReconciliationJob, OrganizationReconciliationJob]
       end
 
       protected

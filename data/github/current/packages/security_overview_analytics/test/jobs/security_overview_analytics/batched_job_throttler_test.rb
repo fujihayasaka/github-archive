@@ -20,12 +20,28 @@ module SecurityOverviewAnalytics
       now = Time.now.utc
       Timecop.freeze(now) do
         assert_nothing_raised do
-          queued_job = TestJob.perform_later(owner_id: 1)
-          assert_equal expected_wait.seconds.from_now, queued_job.scheduled_at
+          assert_enqueued_with(job: TestJob, at: expected_wait.seconds.from_now, args: [{ owner_id: 1 }]) do
+            TestJob.perform_later(owner_id: 1)
+          end
         end
       end
 
       assert_dogstats_distribution 1, "security_overview_analytics.batched_job_throttler.wait_with_jitter.dist"
+    end
+
+    test "does not override job scheduled_at if already set" do
+      Kernel.stubs(:rand).returns(0.5)
+
+      now = Time.now.utc
+      Timecop.freeze(now) do
+        assert_nothing_raised do
+          assert_enqueued_with(job: TestJob, at: 5.minutes.from_now, args: [{ owner_id: 1 }]) do
+            TestJob.set(wait: 5.minutes).perform_later(owner_id: 1)
+          end
+        end
+      end
+
+      refute_dogstats_distribution "security_overview_analytics.batched_job_throttler.wait_with_jitter.dist"
     end
 
     test "job delay can be adjust with flags" do
@@ -41,8 +57,9 @@ module SecurityOverviewAnalytics
       now = Time.now.utc
       Timecop.freeze(now) do
         assert_nothing_raised do
-          queued_job = TestJob.perform_later(owner_id: 1)
-          assert_equal expected_wait.seconds.from_now, queued_job.scheduled_at
+          assert_enqueued_with(job: TestJob, at: expected_wait.seconds.from_now, args: [{ owner_id: 1 }]) do
+            TestJob.perform_later(owner_id: 1)
+          end
         end
       end
     end

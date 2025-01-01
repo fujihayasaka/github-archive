@@ -116,6 +116,12 @@ module SecurityOverviewAnalytics
       feature_flag :security_overview_analytics_enablement_trends_load_async, actors: actors.compact
     end
 
+    sig { params(actors: Actor).returns(T::Boolean) }
+    def self.check_for_user_repositories?(*actors)
+      return true if GitHub.enterprise?
+      feature_flag :security_overview_analytics_check_for_user_repositories, actors: actors
+    end
+
     # Determines whether the given feature is enabled for any of the given actors.
     # Also handles private beta feature enablement.
     #
