@@ -7,7 +7,7 @@ module GitHub::Goomba::Async::AssetLoaders
 
     def initialize(current_user)
       super(current_user)
-      @node_asset = {}
+      @node_src_asset = {}
     end
 
     def is_uri_valid?(uri)
@@ -29,8 +29,8 @@ module GitHub::Goomba::Async::AssetLoaders
         next nil unless asset.present?
         next nil unless asset.user_id == asset_user_id
 
-        @node_asset[node] = asset
-        next @node_asset
+        @node_src_asset[node["src"]] = asset
+        next @node_src_asset
       end
     end
 

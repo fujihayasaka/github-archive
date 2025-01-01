@@ -259,6 +259,16 @@ class Integrations::ShowView < ViewModel # rubocop:todo ViewComponent/NoMoreView
     (integration.owner.is_a?(Organization) || integration.owner.is_a?(Business)) && integration.owner.admins.include?(current_user)
   end
 
+  def self.show_copilot_tab?(integration)
+    return false if GitHub.enterprise?
+
+    !FeatureFlag.vexi.enabled?(:copilot_extensions_hide_copilot_settings_tab, integration.owner, default: false)
+  end
+
+  def show_copilot_tab?
+    self.class.show_copilot_tab?(integration)
+  end
+
   def app_managers_path
     if integration.owner.is_a?(Organization)
       Rails.application.routes.url_helpers.settings_org_permissions_integrations_managers_path(integration.owner, integration)

@@ -2573,7 +2573,9 @@ GitHub::Application.routes.draw do
     post "/advisories/:id/improve", to: "global_advisory_improvements#create", as: :create_global_advisory_improvement
     post "/advisories/calculate_cvss_score", to: "advisories#calculate_cvss_score", as: :calculate_cvss_score
     get "/advisories/cwe-autocomplete", to: "advisories#cwe_autocomplete", as: :cwe_autocomplete
-    get "/advisories/package-url", to: "advisories#get_package_url", as: :get_package_url
+    unless GitHub.enterprise?
+      get "/advisories/package-url", to: "advisories#get_package_url", as: :get_package_url
+    end
   end
 
   get "/advisories/cwes/:id", to: "repos/security_and_analysis/cwe#show", as: :cwe_details
