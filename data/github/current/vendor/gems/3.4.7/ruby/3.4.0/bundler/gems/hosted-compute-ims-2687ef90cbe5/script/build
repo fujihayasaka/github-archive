@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+
+set -e
+
+function usage() {
+    cat <<EOF
+Usage: script/build [--local]
+  Builds application
+
+  Optional parameters:
+    --local                         Builds app locally instead of building Docker image. Used in CI to speed up jobs.
+
+EOF
+}
+
+LOCAL_BUILD=false
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --local)
+      LOCAL_BUILD=true; shift ;;
+    --help)
+      usage; exit 0 ;;
+    *)
+      echo "Unknown option $1"; usage; exit 1 ;;
+  esac
+done
+
+if [[ $LOCAL_BUILD == true ]]; then
+    go build -o bin/worker ./cmd/worker
+    go build -o bin/twirp ./cmd/twirp
+    go build -o bin/cronjobs ./cmd/cronjobs
+    go build -o bin/transitions ./cmd/transitions
+    go build -o bin/dev-client ./tools/dev-client
+
+    exit 0
+fi
+
+script/helpers/ensure-minikube-is-running
+skaffold build --profile dev

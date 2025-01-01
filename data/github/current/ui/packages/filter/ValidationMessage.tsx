@@ -1,4 +1,4 @@
-import {UnsafeHTMLBox} from '@github-ui/safe-html/UnsafeHTML'
+import {UnsafeHTMLText} from '@github-ui/safe-html/UnsafeHTML'
 import {testIdProps} from '@github-ui/test-id-props'
 import {Banner} from '@primer/react/experimental'
 
@@ -22,13 +22,13 @@ export const ValidationMessage = ({id, messages}: ValidationMessageProps) => {
         <ul className={styles.Box_2} {...testIdProps('validation-error-list')}>
           {/* We are setting the HTML dangerously below in order to have <pre> tags show up as HTML properly */}
           {messages.map(message => (
-            <UnsafeHTMLBox
-              as="li"
-              key={message.replaceAll(' ', '-')}
-              html={message}
-              domPurifyConfig={{ALLOWED_TAGS: ['pre']}}
-              className={styles.SafeHTMLBox_0}
-            />
+            <li key={message.replaceAll(' ', '-')}>
+              <UnsafeHTMLText
+                html={message}
+                domPurifyConfig={{ALLOWED_TAGS: ['pre'], ALLOWED_ATTR: [], ALLOW_DATA_ATTR: false}}
+                className={styles.SafeHTMLBox_0}
+              />
+            </li>
           ))}
         </ul>
       </div>

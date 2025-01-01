@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: primary-hydro-processor
+    annotations:
+        heaven.githubapp.com/deploy-requirement: "true"
+        heaven.githubapp.com/image-placeholder: advisory-db
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: primary-hydro-processor
+        heaven.githubapp.com/replace-pods-even-if-unchanged: "true"
+spec:
+    minReadySeconds: 10
+    replicas: 1
+    selector:
+        matchLabels:
+            app: primary-hydro-processor
+    template:
+        metadata:
+            labels:
+                app: primary-hydro-processor
+            annotations:
+                observability.github.com/logger: fluent-bit
+                fluentbit.io/parser: logfmt_sloppy
+        spec:
+            containers:
+                - name: primary-hydro-processor
+                  image: advisory-db
+                  command:
+                    - bin/rake
+                    - advisory_db:primary_hydro_processor
+                  envFrom:
+                    - configMapRef:
+                        name: rails
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: ADVISORY_DB_ROLE
+                      value: "primary_hydro_processor"
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                      value: "https://opentelemetry-collector-production.service.iad.github.net/v1/traces"
+                    - name: GITHUB_API_BASE_URL
+                      value: "https://api.github.com"
+                  resources:
+                    requests:
+                        memory: 1Gi
+                    limits:
+                        memory: 2Gi

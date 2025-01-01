@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: hosted-compute-ims-api
+    annotations:
+        heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: "hosted-compute-ims-api"
+spec:
+    selector:
+        matchLabels:
+            app: hosted-compute-ims-api
+    template:
+        metadata:
+            labels:
+                app: hosted-compute-ims-api
+            annotations:
+                fluentbit.io/parser: logfmt
+                observability.github.com/logger: fluent-bit
+                observability.github.com/kafka_topic: launch
+                observability.github.com/splunk_index: hosted_compute_ims
+        spec:
+            dnsPolicy: ClusterFirst
+            containers:
+                - name: hosted-compute-ims-api
+                  image: hosted-compute-ims
+                  # If you adjust CPU resources, adjust GOMAXPROCS accordingly
+                  resources:
+                    requests:
+                        cpu: 25m
+                        memory: 100Mi
+                    limits:
+                        cpu: 500m
+                        memory: 500Mi
+                  command: ["/app/bin/hosted-compute-ims-api"]
+                  readinessProbe:
+                    initialDelaySeconds: 5
+                    timeoutSeconds: 1
+                    httpGet:
+                        path: /_ping
+                        port: 21010
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command: ["sleep", "5"]
+                  envFrom:
+                    - configMapRef:
+                        name: application-config
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                  - name: HMAC_AUTH_ENABLED
+                    value: "true"
+                  - name: TWIRP_HTTP_PORT
+                    value: "21010"
+                  - name: TWIRP_HTTP_TIMEOUT # Add a timeout to Twirp handlers
+                    value: 5s
+                  - name: VSSF_AUTH_ENABLED
+                    value: "true"
+                  - name: GOMAXPROCS
+                    valueFrom:
+                      resourceFieldRef:
+                          containerName: hosted-compute-ims-api
+                          resource: limits.cpu
+                  - name: STATSD_ADDR
+                    value: $(KUBE_NODE_HOSTNAME):28125
+                  - name: STATS_ADDR
+                    valueFrom:
+                      fieldRef:
+                        fieldPath: spec.nodeName
+                  ports:
+                    - name: http
+                      containerPort: 21010
+                      protocol: TCP

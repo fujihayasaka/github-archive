@@ -1,0 +1,83 @@
+<% content_for :title, "CVEs" %>
+<div class="mb-3 d-flex flex-justify-between flex-items-center">
+  <%= render Primer::Beta::Details.new(reset: true, overlay: :default, display: :inline_block, position: :relative) do |details| %>
+    <% details.with_summary(aria: { haspopup: true }) do %>
+      Year: <%= year.presence || "All" %>
+      <div class="dropdown-caret"></div>
+    <% end %>
+
+    <% details.with_body(classes: "SelectMenu") do %>
+      <div class="SelectMenu-modal width-full">
+        <div class="SelectMenu-list">
+          <a role="menuitem" class="SelectMenu-item no-wrap text-semibold"
+            href="<%= url_for(request.query_parameters.merge(year: nil, page: nil)) %>">
+          <%= render IconComponent.new(icon: "check", classes: "SelectMenu-icon", visibility: (year.blank? ? :visible : :hidden)) %>
+            All years
+          </a>
+          <% year_options.each do |year_option| %>
+            <a role="menuitem" class="SelectMenu-item no-wrap"
+              href="<%= url_for(request.query_parameters.merge(year: year_option, page: nil)) %>">
+              <%= render IconComponent.new(icon: "check", classes: "SelectMenu-icon", visibility: (year == year_option.to_s ? :visible : :hidden)) %>
+              <%= year_option %>
+            </a>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+  <% end %>
+
+  <div class="flex-1 ml-3">
+    <%= render "progress", {
+      published_count: cves.where.not(assigned_at: nil).count,
+      total_count: cves.count,
+    } %>
+  </div>
+
+  <% if year.blank? || year == Time.zone.now.year.to_s %>
+    <%= button_to "Reserve CVEs", cves_path, method: :post, class: "btn ml-3", data: { confirm: "Additional CVEs will be reserved even if there are already enough CVEs available for the current year. Are you sure?" } %>
+  <% end %>
+</div>
+
+<%= render(Primer::Beta::BorderBox.new) do |component| %>
+  <% component.with_header(display: :flex) do |component_header| %>
+    <div class="flex-1">
+      CVE ID
+    </div>
+    <div class="flex-1">
+      Assigned
+    </div>
+    <div class="flex-1">
+      CVE Review
+    </div>
+    <div class="flex-1">
+      Assigner
+    </div>
+  <% end %>
+  <% if @cves.size == 0 %>
+    <% component.with_row(text_align: :center) do %>
+      No CVEs to show
+    <% end %>
+  <% end %>
+  <% @cves.each do |cve| %>
+    <% component.with_row(display: :flex) do %>
+      <div class="flex-1 text-bold">
+        <%= cve.cve_id %>
+      </div>
+      <div class="flex-1">
+        <% if cve.assigned_at %>
+          <%= render(Primer::Beta::Octicon.new(icon: :"check-circle-fill", color: :success, title: "Assigned")) %> <%= render(Primer::Beta::RelativeTime.new(datetime: cve.assigned_at, tense: :past)) %>
+        <% end %>
+      </div>
+      <div class="flex-1">
+        <% if cve.cve_review %>
+          <%= link_to cve.cve_review.ghsa_id, cve_review_path(cve.cve_review) %>
+        <% end %>
+      </div>
+      <div class="flex-1">
+        <%= cve.assigner ? "@#{cve.assigner.login}" : "" %>
+      </div>
+    <% end %>
+  <% end %>
+<% end %>
+
+<%= pagination(@cves) %>

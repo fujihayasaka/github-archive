@@ -1,0 +1,1 @@
+DROP INDEX attestations_id_attestations_subjects_idx ON attestations_subjects;

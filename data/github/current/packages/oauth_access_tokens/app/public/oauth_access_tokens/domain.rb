@@ -427,7 +427,7 @@ module OauthAccessTokens
     # @param token_id [Integer] The ID of the token to update
     # @param user_id [Integer] The user ID who owns the token
     # @param data [Hash] A hash of parameters to update from the API request
-    # @option data ["scopes"] [Array<String>, nil] Replace scopes with these values
+    # @option data ["scopes"] [Array<String>, nil] Replace scopes with these values, if nil does nothing, if empty clears all scopes
     # @option data ["add_scopes"] [Array<String>, nil] Add these scopes to existing ones
     # @option data ["remove_scopes"] [Array<String>, nil] Remove these scopes from existing ones
     # @option data ["note_url"] [String, nil] Update the note URL
@@ -439,7 +439,9 @@ module OauthAccessTokens
       access = OauthAccess.find_by(id: token_id, user_id: user_id)
       return GH::Result::Error::NotFound.new unless access
 
-      if (scopes = Array(data["scopes"])).present?
+      if data.key?("scopes") && data["scopes"].is_a?(Array)
+        access.scopes = data["scopes"]
+      elsif (scopes = Array(data["scopes"])).present?
         access.scopes = scopes
       elsif (scopes = Array(data["add_scopes"])).present?
         access.scopes |= scopes

@@ -174,6 +174,7 @@ module GitHub::CSP::Policy
     GitHub.api_host_name,
 
     THIRD_PARTY_CONNECT_SOURCES,
+    *CDN_SOURCES # Needed to allow sourcemaps to load in browser devtools.
   ].flatten.uniq.compact
 
   CONNECT_SOURCES << GitHub.memory_alpha_url if !GitHub.multi_tenant_enterprise?

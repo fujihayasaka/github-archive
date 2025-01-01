@@ -29,7 +29,7 @@ class GateApprover < ApplicationRecord::ActionsEnvironments
     else
       # All closed (non-secret) teams with repo access, including nested.
       repository.
-        teams(immediate_only: false).
+        teams(immediate_only: false, include_all_repo_roles: true).
         closed.
         where(organization_id: repository.organization.id, id: approver.id).
         map { |team| team.id }.

@@ -55,6 +55,8 @@ class OauthTokensController < ApplicationController
   NORMALIZED_MESSAGE = "Some of the scopes you’ve selected are included in" \
     " other scopes. Only the minimum set of necessary scopes has been saved."
 
+  FAILURE_MESSAGE = "An error occurred when creating this token, please try again."
+
   # It is preferable to synchronously revoke all personal access tokens at once,
   # so that the tokens will already be gone when the user is redirected back to
   # their personal access tokens page. But, if the user has a large number of
@@ -145,6 +147,9 @@ class OauthTokensController < ApplicationController
     when GH::Result::Ok
       @access = result.value
       redirect_to settings_user_tokens_path
+    when GH::Result::Error
+      flash[:error] = FAILURE_MESSAGE
+      render "oauth_tokens/show"
     else
       render "oauth_tokens/show"
     end

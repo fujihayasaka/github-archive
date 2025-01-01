@@ -31,24 +31,7 @@ class Stafftools::Repositories::Actions::WorkflowSchedulesController < Stafftool
     error_message = "Error fetching workflow schedules" unless result.call_succeeded?
 
     if error_message.nil?
-      workflow_data = Data.define(:schedule, :actor)
-
-      # The ListSchedules API will only return a maximum of 100 records, so we can lookup all the actors with one query
-      actor_ids = result.value.workflow_schedules.map do |workflow_schedule|
-        # [0] is the entity type, [1] is the database id
-        Platform::Helpers::NodeIdentification.from_global_id(workflow_schedule.actor_next_id.global_id)[1]
-      end
-      actors = User.where(id: actor_ids.uniq).index_by(&:next_global_id)
-
-      workflow_schedule_data = result.value.workflow_schedules.map do |workflow_schedule|
-        actor_global_id = workflow_schedule.actor_next_id.global_id
-        workflow_data.new(
-          schedule: workflow_schedule,
-          actor: actors[actor_global_id],
-        )
-      end
-
-      workflow_schedule_data.sort_by! { |data| data.schedule.workflow_file_path }
+      workflow_schedule_data = build_workflow_schedule_data(result.value)
     else
       workflow_schedule_data = []
       flash[:error] = error_message
@@ -120,4 +103,27 @@ class Stafftools::Repositories::Actions::WorkflowSchedulesController < Stafftool
     redirect_to actions_workflow_schedules_stafftools_repository_path
   end
 
+  private
+
+  sig { params(value: GitHub::Launch::Pbtypes::Deploy::ListSchedulesResponse).returns(T::Array[Data]) }
+  def build_workflow_schedule_data(value)
+    workflow_data = Data.define(:schedule, :actor)
+
+    # The ListSchedules API will only return a maximum of 100 records, so we can lookup all the actors with one query
+    actors_to_schedule = value.workflow_schedules.map do |workflow_schedule|
+      # [0] is the entity type, [1] is the database id
+      database_id = Platform::Helpers::NodeIdentification.from_global_id(workflow_schedule.actor_next_id.global_id)[1]&.to_i
+      [database_id, workflow_schedule]
+    end
+    actors = User.where(id: actors_to_schedule.map(&:first).uniq).index_by(&:id)
+
+    workflow_schedule_data = actors_to_schedule.map do |actor_id, workflow_schedule|
+      workflow_data.new(
+        schedule: workflow_schedule,
+        actor: actors[actor_id],
+      )
+    end
+
+    workflow_schedule_data.sort_by! { |data| data.schedule.workflow_file_path }
+  end
 end

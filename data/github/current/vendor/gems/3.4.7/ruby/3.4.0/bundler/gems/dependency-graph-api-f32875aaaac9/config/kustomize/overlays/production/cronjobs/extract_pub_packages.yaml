@@ -1,0 +1,51 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: extract-pub-packages
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "extract-pub-packages"
+        heaven.githubapp.com/image-placeholder: "dependency-graph-api"
+spec:
+    schedule: "15 */4 * * *" # weather and traffic, every 4 hours on the :15's
+    concurrencyPolicy: Forbid # Do not allow concurrent runs of this job
+    successfulJobsHistoryLimit: 2
+    failedJobsHistoryLimit: 2
+    jobTemplate:
+        spec:
+            template:
+                spec:
+                    dnsPolicy: ClusterFirst
+                    volumes:
+                        - name: github-metadata
+                          hostPath:
+                            path: /etc/github/metadata.json
+                    restartPolicy: Never
+                    containers:
+                        - name: extract-pub-packages
+                          image: dependency-graph-api
+                          workingDir: "/src/app/package_manager_adapters"
+                          resources:
+                            requests:
+                                cpu: 1000m
+                                memory: "2Gi"
+                                ephemeral-storage: "100Mi"
+                            limits:
+                                cpu: 4000m
+                                memory: "4Gi"
+                                ephemeral-storage: "1Gi"
+                          command: ["/usr/bin/tools/istio-job-wrapper"]
+                          args: ["script/start_kube", "pub"]
+                          envFrom:
+                            - configMapRef:
+                                name: environment
+                            - secretRef:
+                                name: vault-secrets
+                          env:
+                            - name: DOGSTATSD_HOST
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: spec.nodeName
+                          volumeMounts:
+                            - mountPath: /etc/github/metadata.json
+                              name: github-metadata
+                              readOnly: true

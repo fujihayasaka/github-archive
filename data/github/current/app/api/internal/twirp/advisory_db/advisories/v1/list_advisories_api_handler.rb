@@ -160,12 +160,12 @@ module Api::Internal::Twirp::AdvisoryDB
               first_patched_version: vvr.fixed_in,
             }
 
-            if GitHub.flipper[:vea_api_empty_values].enabled?
-              vvr_list.merge!(affected_functions: [], affected_functions_json: "")
-            else
+            if FeatureFlag.vexi.enabled?(:vea_api_populate_values_enabled, default: false)
               vvr_list.merge!(
                 affected_functions: vvr.affected_functions, affected_functions_json: vvr.affected_functions_json.to_s
               )
+            else
+              vvr_list.merge!(affected_functions: [], affected_functions_json: "")
             end
 
             vvr_list

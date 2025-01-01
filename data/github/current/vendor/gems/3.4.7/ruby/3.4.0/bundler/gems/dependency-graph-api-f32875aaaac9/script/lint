@@ -1,0 +1,87 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "open3"
+require "pathname"
+
+class Linter
+  def initialize(run:, filename_matches: nil, contents_matches: nil)
+    @exe, @filename_regex, @contents_regex = run, filename_matches, contents_matches
+  end
+
+  def scan_first_line(filename)
+    File.open(filename, &:readline)
+  end
+
+  def match?(filename)
+    File.exist?(filename) && (
+      @filename_regex&.match?(filename) ||
+      contents_match?(filename)
+    )
+  end
+
+  def contents_match?(filename)
+    @contents_regex&.match?(scan_first_line(filename))
+  # ArgumentError raised on invalid byte sequence (eg trying to scan binary file)
+  rescue ArgumentError
+    false
+  end
+
+  def run(filenames)
+    filenames = filenames.map { |f| "\"#{f}\"" }
+    command = "#{@exe} #{filenames.join(" ")}"
+    stdout, stderr, status = Open3.capture3(command)
+    [command, status.success?, [stdout, stderr].join("\n")]
+  end
+end
+
+LINTERS = [
+  Linter.new(run: "bin/bundle exec rubocop -a",
+             filename_matches: /\.ruby|\.rake|\.rb$|^Gemfile$/.freeze,
+             # also match files with a Ruby shebang, if the filename doesn't match
+             contents_matches: %r{^#!/usr/bin/env ruby}.freeze),
+  Linter.new(run: "shellcheck",
+             filename_matches: /\.sh$|\.bash$/.freeze,
+             # also match files with a sh/bash shebang, if the filename doesn't match
+             contents_matches: %r{^#!(/usr)?/bin/(env )?(ba)?sh}.freeze)
+]
+
+staged_files = `git diff --name-only --staged`.lines.map { |l| l.strip }
+unchecked_files = []
+all_pass = true
+
+staged_files_by_linter = {}
+staged_files.each do |current|
+  linters = LINTERS.select { |l| l.match?(current) }
+  unchecked_files << current if linters.empty?
+  linters.each { |l| staged_files_by_linter[l] = (staged_files_by_linter[l] ||= []) << current }
+end
+
+staged_files_by_linter.each do |linter, files|
+  command, success, output = linter.run(files)
+  all_pass &&= success
+  if success
+    files.each do |f|
+      `git add #{f}`  # if the linter ran and made autocorrections, add the file to staging again
+      puts "\n✅ #{command}"
+    end
+  else
+    puts "\n❌ #{command}"
+    puts output
+  end
+end
+
+if unchecked_files.any?
+  puts "\nThe following files were not checked:"
+  unchecked_files.each do |file|
+    puts "- #{file}"
+  end
+end
+
+if all_pass
+  puts "\nAll required linting checks passed!"
+  exit(0)
+else
+  puts "\nSome changed files failed linting required checks. See above for details."
+  exit(1)
+end

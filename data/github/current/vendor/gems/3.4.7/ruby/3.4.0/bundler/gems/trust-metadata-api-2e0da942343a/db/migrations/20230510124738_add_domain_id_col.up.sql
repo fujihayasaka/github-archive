@@ -1,0 +1,1 @@
+ALTER TABLE attestations ADD COLUMN domain_id int(10) unsigned DEFAULT NULL FIRST;

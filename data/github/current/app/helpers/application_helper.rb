@@ -1013,23 +1013,19 @@ module ApplicationHelper
   end
 
   def luau_worker_src
-    name = AssetBundles.new.expand_bundle_name("socket-worker.js")
-    web_worker_path(name)
+    web_worker_url("socket-worker.js")
   end
 
   def service_worker_path
-    name = AssetBundles.new.expand_bundle_name("service-worker.js")
-    web_worker_path(name)
+    web_worker_url("service-worker.js")
   end
 
   def find_file_worker_path
-    name = AssetBundles.new.expand_bundle_name("find-file-worker.js")
-    web_worker_path(name)
+    web_worker_url("find-file-worker.js")
   end
 
   def find_in_file_worker_path
-    name = AssetBundles.new.expand_bundle_name("find-in-file-worker.js")
-    web_worker_path(name)
+    web_worker_url("find-in-file-worker.js")
   end
 
   def current_ui_release_sha

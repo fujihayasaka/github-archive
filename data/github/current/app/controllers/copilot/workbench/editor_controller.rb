@@ -162,7 +162,7 @@ class Copilot::Workbench::EditorController < Copilot::Workbench::AbstractWorkben
         app_payload_generator: -> {
           {
             markdownDocsUrl: GitHub.markdown_docs_url,
-            monacoWorkerUrls: monaco_worker_paths(asset_bundles, method(:web_worker_path)),
+            monacoWorkerUrls: monaco_worker_paths(method(:web_worker_url)),
             **copilot_data,
           }
         },
@@ -335,15 +335,9 @@ class Copilot::Workbench::EditorController < Copilot::Workbench::AbstractWorkben
     }
   end
 
-  sig { returns(AssetBundles) }
-  memoize def asset_bundles
-    AssetBundles.new
-  end
-
   sig { params(worker: String).returns(String) }
   def find_worker_path(worker)
-    name = asset_bundles.expand_bundle_name(worker)
-    web_worker_path(name)
+    web_worker_url(worker)
   end
 
   def editor_settings

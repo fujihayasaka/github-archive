@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+
+#/ Usage:
+#     script/delete-dev-resources
+#     script/delete-dev-resources --no-wait
+#     script/delete-dev-resources --alias <dev_alias>
+#     script/delete-dev-resources --resource-group <group_name>
+#     script/delete-dev-resources --subscription <subscription_id>
+
+
+set -e
+
+AZURE_SUBSCRIPTION_ID="9a8bfc7d-d62b-45e0-89fa-af3ee76dd7c5" # GitHub - NonProd - Dev - Hosted Compute IMS - 001
+DEV_ALIAS=$GITHUB_USER
+NO_WAIT=false
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -s|--subscription)
+      AZURE_SUBSCRIPTION_ID=$2
+      shift
+      shift
+      ;;
+    -a|--alias)
+      DEV_ALIAS=$2
+      shift
+      shift
+      ;;
+    --resource-group)
+      RESOURCE_GROUP_NAME=$2
+      shift
+      shift
+      ;;
+    --no-wait)
+      NO_WAIT=true
+      shift
+      ;;
+    -*|--*)
+        echo "Unknown option $1"
+        exit 1
+        ;;
+  esac
+done
+
+if [[ -n "$RESOURCE_GROUP_NAME" ]]; then
+  : # No actions required if resource group is provided
+elif [[ -n "$DEV_ALIAS" ]]; then
+  FORMATTED_DEV_ALIAS=${DEV_ALIAS//-/}
+  RESOURCE_GROUP_NAME="hostedcomputeims-$FORMATTED_DEV_ALIAS"
+else
+  echo 'no resource group is specified. Pass '--resource-group' argument or pass '--alias' argument or set $GITHUB_USER environment variable'
+  exit 1
+fi
+
+script/helpers/ensure-azure-auth 1> /dev/null
+az account set --subscription $AZURE_SUBSCRIPTION_ID
+
+if [ $(az group exists --name $RESOURCE_GROUP_NAME) = false ]; then
+  echo "Resource group '$RESOURCE_GROUP_NAME' is not found"
+  exit 0
+fi
+
+echo "Deleting resource group '$RESOURCE_GROUP_NAME'..."
+if [[ $NO_WAIT == true ]]; then
+  az group delete --name $RESOURCE_GROUP_NAME --yes --no-wait
+  echo "Done. Resources will be deleted in background."
+else
+  echo "Operation may take a few minutes"
+  DELETING_START_TIME=$(date +%s)
+  az group delete --name $RESOURCE_GROUP_NAME --yes
+  DELETING_END_TIME=$(date +%s)
+  echo "Done. Deleting resources took $(($DELETING_END_TIME-$DELETING_START_TIME)) seconds."
+fi

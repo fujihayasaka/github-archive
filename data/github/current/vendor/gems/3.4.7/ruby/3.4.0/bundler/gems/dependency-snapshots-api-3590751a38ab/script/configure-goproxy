@@ -1,0 +1,24 @@
+#!/bin/bash
+# Configure go proxy token during a Docker build
+# If .netrc already exists and contains an entry for goproxy.githubapp.com then
+# do nothing. Presumably this is set up when using buildkit secrets. If there is
+# no entry but GOPROXY_TOKEN is set then we write an entry. It is unsafe to use
+# the environment variable path in the final image of a build as the token will
+# remain in the docker image.
+
+# copied from https://github.com/github/dependency-graph-api/blob/4bb1ba8ea664c02723e4fa8f09f789b9e36aa527/script/configure-goproxy#L21
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+if ! grep -q goproxy.githubapp.com "$HOME/.netrc"; then
+    if [ -e .goproxytoken ]; then
+       echo "machine goproxy.githubapp.com login nobody password $(cat .goproxytoken)" > "$HOME/.netrc"
+    elif [ -n "$GOPROXY_TOKEN" ]; then
+        echo "machine goproxy.githubapp.com login nobody password $GOPROXY_TOKEN" >> "$HOME/.netrc"
+    else
+        echo "Failed to find go proxy token in any source" >&2
+        exit 1
+    fi
+fi

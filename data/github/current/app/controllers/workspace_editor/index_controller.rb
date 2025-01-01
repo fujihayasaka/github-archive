@@ -54,7 +54,7 @@ class WorkspaceEditor::IndexController < WorkspaceEditor::ControllerBase
       render_react_app(
         title: "#{title_start}Editor · #{pull.title} by #{pull.user.display_login} · Pull Request ##{pull.number}",
         payload: app_payload,
-        app_payload_generator: -> { { markdownDocsUrl: GitHub.markdown_docs_url, monacoWorkerUrls: monaco_worker_paths(asset_bundles, method(:web_worker_path)) } },
+        app_payload_generator: -> { { markdownDocsUrl: GitHub.markdown_docs_url, monacoWorkerUrls: monaco_worker_paths(method(:web_worker_url)) } },
         page_data: {
           hide_footer: true,
           hide_header_content: true,
@@ -187,15 +187,9 @@ class WorkspaceEditor::IndexController < WorkspaceEditor::ControllerBase
     }
   end
 
-  sig { returns(AssetBundles) }
-  memoize def asset_bundles
-    AssetBundles.new
-  end
-
   sig { params(worker: String).returns(String) }
   def find_worker_path(worker)
-    name = asset_bundles.expand_bundle_name(worker)
-    web_worker_path(name)
+    web_worker_url(worker)
   end
 
   def base_pull_request_data

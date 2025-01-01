@@ -1,0 +1,35 @@
+#!/bin/bash
+# This script sets up and tests Dependency Graph
+# It is meant for Dockerized CI builds and will not work locally unless running script/cibuild
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+export RAILS_ENV=test
+export TEST_ENV=ci
+
+# Set the DB host to use Docker
+export DEPENDENCYGRAPH_DB_HOST=db
+export GITHUB_MYSQL_HOST=db
+export GITHUB_NOTIFY_MYSQL_HOST=db
+
+echo "===> Setting up DB..." # Reset database to a fresh state.
+script/poll-for-db && echo OK
+
+bundle exec rake parallel:create RAILS_ENV=test || {
+    # Rake is memory-hungry and its OOM message is a cryptic "Killed".
+    # When running Docker containers on a Mac, the default resources are only 2GB RAM + 1GB Swap,
+    # but empirically their sum needs to be 4GB.
+    echo "(Insufficient swap? Set Docker Dashboard > Preferences > Resources > Swap to 2GB)"
+    exit 1
+} >&2
+bundle exec rake parallel:rake\[db:github:create\] RAILS_ENV=test
+bundle exec rake db:reset parallel:setup RAILS_ENV=test
+bin/rails db:environment:set RAILS_ENV=test
+
+echo "===> Verifying seed data loads idempotently..."
+bin/rails db:seed RAILS_ENV=test && bin/rails db:seed RAILS_ENV=test
+
+echo "===> Testing..."
+exec script/parallel-test

@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Run Linter
+        run: script/lint
+      - name: Check for misformatted Go extension files
+        # Start with a call to `go mod download` to ensure `go fmt` output isn't polluted by module download notifications.
+        # Then, call `go fmt`, using `tee` to mirror any stdout (i.e. the list of incorrectly formatted files, if any)
+        # to stderr so that the user can still review it.  (Otherwise, it would be swallowed entirely by the subsequent pipe.)
+        # Finally, infer an exit code by using `wc` to count lines of stdout (0 lines of stdout indicates SUCCESS).
+        run:  |
+          go mod download
+          echo "Files listed below (if any) have incorrect formatting."
+          go fmt -C proto ./... | tee /dev/stderr | (exit `wc -l`)
+  breaking:
+    # On PRs, if a user includes [SKIP_BREAKING_CI] in the title of the PR, they can bypass the check
+    if: ${{ github.event_name != 'pull_request' || !contains(github.event.pull_request.title, '[SKIP_BREAKING_CI]') }} 
+    name: Breaking
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Run Breaking
+        run: script/breaking
+  generate:
+    name: Generate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Run Generate
+        run: script/generate
+      - name: Check for uncommitted changes
+        run: |
+          changed_files_count=$(git status --porcelain | wc -l)
+          if [ $changed_files_count -ne 0 ]; then
+            echo 'uncommitted changes after running script/generate:'
+            echo '```diff' >> $GITHUB_STEP_SUMMARY
+            git diff >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+      - name: Generate pseudo version
+        run: |
+          echo "Use this pseudo version in your go.mod file:"
+          TZ=UTC git --no-pager show \
+            --quiet \
+            --abbrev=12 \
+            --date='format-local:%Y%m%d%H%M%S' \
+            --format="%cd-%h" \
+

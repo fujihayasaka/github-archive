@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: scripts
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "scripts"
+        heaven.githubapp.com/image-placeholder: "dependency-graph-api"
+        heaven.githubapp.com/deploy-requirement: "true"
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app: dependency-graph-api
+            role: scripts
+    template:
+        metadata:
+            labels:
+                app: dependency-graph-api
+                role: scripts
+        spec:
+            dnsPolicy: ClusterFirst
+            volumes:
+                - name: github-metadata
+                  hostPath:
+                    path: /etc/github/metadata.json
+            containers:
+                - name: scripts
+                  image: dependency-graph-api
+                  resources:
+                    requests:
+                        cpu: 1000m
+                        memory: "1Gi"
+                    limits:
+                        cpu: 3000m
+                        memory: "4Gi"
+                  command: ["./script/kube-shell"]
+                  env:
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - secretRef:
+                        name: vault-secrets
+                  volumeMounts:
+                    - mountPath: /etc/github/metadata.json
+                      name: github-metadata
+                      readOnly: true

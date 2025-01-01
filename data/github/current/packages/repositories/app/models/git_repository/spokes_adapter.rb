@@ -169,7 +169,12 @@ module GitRepository::SpokesAdapter
         map_tag(obj)
       elsif obj.error_object != nil
         if skip_bad
-          map_error(obj)
+          if obj.object&.type != :TYPE_BLOB
+            nil
+          else
+            # We still want to return basic object info if the large object is a blob to mimic GitRPC behavior
+            map_error(obj)
+          end
         else
           case obj.error_object.error_reason
           when :ERROR_REASON_MISSING
@@ -182,11 +187,16 @@ module GitRepository::SpokesAdapter
             raise GitRPC::InvalidObject.new(obj.error_object.error)
           when :ERROR_REASON_TOO_LARGE
             # The caller asked to raise an exception (skip_bad = false) when an error occurs.
-            # However, we are in a special case (object too big) and we still want to return the basic object info
+            # However, we are in a special case (object too big) and we still want to return the basic object info for
+            # blob objects.
             # Note this is the behavior of the existing read_objects method and we are keeping it to avoid breaking
             # callers.
             # A client using the Spokes API to read objects doesn't necessarly needs to mimic this behavior.
-            map_error(obj)
+            if obj.object&.type != :TYPE_BLOB
+              raise GitRPC::InvalidObject.new(obj.error_object.error)
+            else
+              map_error(obj)
+            end
           else
             raise GitRPC::Error.new(obj.error_object.error)
           end

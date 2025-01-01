@@ -1,0 +1,92 @@
+syntax = "proto3";
+
+package capevaluator;
+
+import "authorizer.proto";
+
+option go_package = "github.com/github/authzd/pkg/capevaluator";
+option ruby_package = "Authzd::CapEvaluator";
+
+enum Outcome {
+  OUTCOME_UNKNOWN = 0;
+  UNSATISFIED = 1;
+  SATISFIED = 2;
+  INAPPLICABLE = 3;
+}
+
+enum Visibility {
+  VISIBILITY_UNKNOWN = 0;
+  VISIBILITY_PUBLIC = 1;
+  VISIBILITY_PRIVATE = 2;
+  VISIBILITY_INTERNAL = 3;
+}
+
+// Enforcement
+
+message SingleResourceRequest { 
+  repeated authorizer.Attribute attributes = 1;
+}
+
+message SingleResourceResponse {
+  // An array providing the evaluation outcome for each policy that was evaluated
+  repeated Result results = 1;
+}
+
+message Result {
+  // The policy name
+  string policy = 1;
+
+  // The outcome of the evaluation for this policy
+  Outcome outcome = 2;
+  
+  // When Outcome == UNSATISFIED, callsites need to enforce the decision
+  // Some policies require specific details to build a message for enforcement_message
+  // enforcement_message will be set for policies that require information that would otherwise
+  // require lookups at the callsite/client
+  string enforcement_message = 3;
+}
+
+// Filtering
+
+message FilterResult {
+  // The policy name
+  string policy = 1;
+
+  // The outcome of the evaluation for this policy
+  Outcome outcome = 2;
+
+  // The resource visibility this result applies to
+  Visibility visibility = 3;
+}
+
+message Target {
+  uint64 id = 1;
+  // The target type (User, Organization, Business, no_target_for_conditional_access
+  string type = 2;
+  // The visibilities of the associated resources being filtered for this target 
+  repeated Visibility visibilities = 3;
+}
+
+message TargetResult {
+  uint64 id = 1;
+  string type = 2;
+  // A TargetResult may have X filter results based on the visibilities
+  //  provided in the FilterRequest targets
+  // Each result represents the policy outcome for the specified visibilities 
+  repeated FilterResult results = 3;
+}
+
+message FilterRequest {
+  repeated authorizer.Attribute attributes = 1;
+  repeated Target targets = 2;
+}
+
+message FilterResponse {
+  repeated TargetResult results = 1;
+}
+
+
+service CapEvaluator {
+  rpc EvaluatePoliciesForSingleResource(SingleResourceRequest) returns (SingleResourceResponse);
+  rpc EvaluatePoliciesForFiltering(FilterRequest) returns (FilterResponse);
+}

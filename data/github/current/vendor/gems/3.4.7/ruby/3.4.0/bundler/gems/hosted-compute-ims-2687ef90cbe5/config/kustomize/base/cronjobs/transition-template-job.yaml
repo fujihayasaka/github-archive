@@ -1,0 +1,57 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: transition-template-job
+spec:
+  template:
+    metadata:
+      labels:
+        app: hosted-compute-ims-transition
+      annotations:
+        observability.github.com/logger: fluent-bit
+        observability.github.com/kafka_topic: launch
+        observability.github.com/splunk_index: hosted_compute_ims
+        fluentbit.io/parser: logfmt
+    spec:
+      containers:
+        - name: transition
+          image: hosted-compute-ims
+          command:
+            - /usr/bin/tools/istio-job-wrapper
+            - /app/bin/hosted-compute-ims-transitions
+          envFrom:
+            - configMapRef:
+                name: kube-cluster-metadata
+            - configMapRef:
+                name: application-config
+            - secretRef:
+                name: vault-secrets
+          env:
+          - name: HMAC_AUTH_ENABLED
+            value: "true"
+          - name: TWIRP_HTTP_PORT
+            value: "21010"
+          - name: TWIRP_HTTP_TIMEOUT # Add a timeout to Twirp handlers
+            value: 5s
+          - name: VSSF_AUTH_ENABLED
+            value: "true"
+          - name: GOMAXPROCS
+            valueFrom:
+              resourceFieldRef:
+                  containerName: transition
+                  resource: limits.cpu
+          - name: STATSD_ADDR
+            value: $(KUBE_NODE_HOSTNAME):28125
+          - name: STATS_ADDR
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+          - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+            value: http://otelcol-mesh.otelcol-production.svc.cluster.local:14318/v1/traces
+          - name: DOTCOM_INTERNAL_TWIRP_URL
+            value: https://internal-api.service.{{stamp}}.github.net/internal
+          - name: GITHUB_TELEMETRY_LOGS_LEVEL
+            value: info
+      restartPolicy: Never
+  backoffLimit: 0
+  activeDeadlineSeconds: 100

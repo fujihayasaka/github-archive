@@ -1,0 +1,212 @@
+<% content_for :title, "CVE triage" %>
+<triage-control class="d-flex">
+  <div class="col-3 pr-4">
+    <% if related_cve_counts[:assigned] > 0 %>
+      <div class="Toast Toast--success ml-0 width-full">
+        <span class="Toast-icon"><%= render IconComponent.new(icon: "check") %></span>
+        <span class="Toast-content">
+          <%= pluralize related_cve_counts[:assigned], "assigned CVE" %>  in this repo
+        </span>
+      </div>
+    <% end %>
+
+    <% if related_cve_counts[:closed] > 0 %>
+      <div class="Toast Toast--error ml-0 width-full">
+        <span class="Toast-icon"><%= render IconComponent.new(icon: "stop") %></span>
+        <span class="Toast-content">
+          <%= pluralize related_cve_counts[:closed], "closed CVE" %>  in this repo
+        </span>
+      </div>
+    <% end %>
+  </div>
+
+  <div class="col-6">
+    <%= render "progress", {
+      opened_count: opened_count,
+      closed_count: closed_count,
+      skipped_count: skipped_count,
+      total_count: total_count,
+    } %>
+
+    <div class="BtnGroup d-flex width-full mt-3 mb-5">
+      <details data-action="toggle:triage-control#switchContext" class="BtnGroup-parent flex-auto details-reset details-overlay details-overlay-dark">
+        <summary data-targets="triage-control.triageButtons" class="BtnGroup-item width-full btn btn-large btn-outline text-center" tabindex="0" data-shortcut="O,o,[">
+          Open
+          <span class="hotkey ml-2" aria-label="Shortcut keys: O [">O [</span>
+        </summary>
+        <details-dialog class="Box Box--overlay no-outline js-comment-template-container">
+          <div class="Box-header">
+            <button class="Box-btn-octicon btn-octicon float-right" type="button" aria-label="Close dialog" tabindex="-1" data-close-dialog>
+              <%= render IconComponent.new(icon: "x") %>
+            </button>
+            <h3 class="Box-title">Open CVE review</h3>
+          </div>
+          <form-tracker>
+            <%= form_tag open_cve_review_triage_path, method: :put, "data-target": "triage-control.dialogForm form-tracker.form", remote: true do %>
+              <div class="Box-body p-0">
+                <% unless AdvisoryDB.cve_automatic_assignment_enabled? %>
+                  <div class="pt-2 px-3">
+                    <label for="assigned-cve-id">Enter a CVE ID</label>
+                    <auto-check src="<%= cve_id_validations_path %>" csrf="<%= form_authenticity_token %>" required>
+                      <%= render FormFieldWithErrorsComponent.new do %>
+                        <input type="text" class="form-control width-full" id="assigned-cve-id" name="assigned_cve_id" autocomplete="off" placeholder="e.g. CVE-<%= Date.current.year %>-12345" required>
+                      <% end %>
+                    </auto-check>
+                  </div>
+                <% end %>
+
+                <div class="py-2">
+                  <div id="templated-open-cve-comments" class="px-3 text-bold">Select a comment template or write your own</div>
+                  <%= render Primer::Beta::Details.new(reset: true, overlay: :default, position: :relative, px: 3) do |details| %>
+                    <% details.with_summary(
+                      pr: 2,
+                      classes: "color-bg-default width-full",
+                      aria: { disabled: false, haspopup: true },
+                    ) do %>
+                      <div class="d-flex flex-row flex-justify-between">
+                        <span class="overflow-hidden" data-menu-button>
+                          <%= render(Primer::Truncate.new(color: :subtle)) { "Select a comment" } %>
+                        </span>
+                        <span class="dropdown-caret m-2"></span>
+                      </div>
+                    <% end %>
+                    <% details.with_body(tag: :"details-menu", classes: "SelectMenu mr-3 js-comment-template-dropdown", aria: { labelledby: "templated-open-cve-comments" }) do %>
+                      <div class="SelectMenu-modal width-full">
+                        <div class="SelectMenu-list SelectMenu-list--borderless">
+                          <% comment_templates["cve-id-issued"].each do |description, comment| %>
+                            <button type="button" role="menuitem" class="SelectMenu-item text-normal">
+                              <span data-menu-button-contents>
+                                <%= render(Primer::Truncate.new()) { description } %>
+                              </span>
+                              <span class="js-comment-template" hidden><%= comment %></span>
+                            </button>
+                          <% end %>
+                        </div>
+                      </div>
+                    <% end %>
+                  <% end %>
+                  <%= render MarkdownEditorComponent.new(attribute: :comment, id_prefix: "cve-review-triage-open", toolbar: false, px: 3, required: true, text_area_classes: "js-comment-template-target") %>
+                  <div class="color-fg-muted f6 px-3">
+                    The placeholder ${{CVEID}} will be automatically substituted with the assigned CVE ID after submission.
+                  </div>
+                </div>
+              </div>
+              <div class="Box-footer d-flex flex-justify-end">
+                <button type="button" class="btn mr-2" data-close-dialog>
+                  Cancel
+                </button>
+                <button type="submit" class="btn btn-primary" data-targets="form-tracker.disableWhenInvalid">
+                  Open
+                </button>
+              </div>
+            <% end %>
+          </form-tracker>
+        </details-dialog>
+      </details>
+
+      <details data-action="toggle:triage-control#switchContext" class="BtnGroup-parent flex-auto details-reset details-overlay details-overlay-dark">
+        <summary data-targets="triage-control.triageButtons" class="BtnGroup-item width-full btn btn-large btn-danger text-center" tabindex="0" data-shortcut="C,c,]">
+          Close
+          <span class="hotkey ml-2" aria-label="Shortcut keys: C ]">C ]</span>
+        </summary>
+        <details-dialog class="Box Box--overlay no-outline overflow-hidden js-comment-template-container">
+          <div class="Box-header">
+            <button class="Box-btn-octicon btn-octicon float-right" type="button" aria-label="Close dialog" tabindex="-1" data-close-dialog>
+              <%= render IconComponent.new(icon: "x") %>
+            </button>
+            <h3 class="Box-title">Close CVE review</h3>
+          </div>
+          <form-tracker>
+            <%= form_tag close_cve_review_triage_path, method: :put, "data-target": "triage-control.dialogForm form-tracker.form", remote: true do %>
+              <div class="Box-body px-0 py-2">
+                <div id="templated-close-cve-comments" class="px-3 text-bold">Select a comment template or write your own</div>
+                <%= render Primer::Beta::Details.new(reset: true, overlay: :default, position: :relative, px: 3) do |details| %>
+                  <% details.with_summary(
+                    pr: 2,
+                    classes: "color-bg-default width-full",
+                    aria: { disabled: false, haspopup: true },
+                  ) do %>
+                    <div class="d-flex flex-row flex-justify-between">
+                      <span class="overflow-hidden" data-menu-button>
+                        <%= render(Primer::Truncate.new(color: :subtle)) { "Select a comment" } %>
+                      </span>
+                      <span class="dropdown-caret m-2"></span>
+                    </div>
+                  <% end %>
+                  <% details.with_body(tag: :"details-menu", classes: "SelectMenu mr-3 js-comment-template-dropdown", aria: { labelledby: "templated-close-cve-comments" }) do %>
+                    <div class="SelectMenu-modal width-full">
+                      <div class="SelectMenu-list SelectMenu-list--borderless">
+                        <% comment_templates["cve-id-declined"].each do |description, comment| %>
+                          <button type="button" role="menuitem" class="SelectMenu-item text-normal">
+                            <span data-menu-button-contents>
+                              <%= render(Primer::Truncate.new()) { description } %>
+                            </span>
+                            <span class="js-comment-template" hidden><%= comment %></span>
+                          </button>
+                        <% end %>
+                      </div>
+                    </div>
+                  <% end %>
+                <% end %>
+                <%= render MarkdownEditorComponent.new(attribute: :comment, id_prefix: "cve-review-triage-close", toolbar: false, px: 3, required: true, text_area_classes: "js-comment-template-target") %>
+              </div>
+              <div class="Box-footer d-flex flex-justify-end">
+                <button type="button" class="btn mr-2" data-close-dialog>
+                  Cancel
+                </button>
+                <button type="submit" class="btn btn-primary" data-targets="form-tracker.disableWhenInvalid">
+                  Close
+                </button>
+              </div>
+            <% end %>
+          </form-tracker>
+        </details-dialog>
+      </details>
+
+      <%= form_tag skip_cve_review_triage_path, method: :put, class: "BtnGroup-parent flex-auto", remote: true do %>
+        <button data-targets="triage-control.triageButtons" type="submit" class="BtnGroup-item width-full btn btn-large" tabindex="0" data-shortcut="S,s,\">
+          Skip
+          <span class="hotkey ml-2" aria-label="Shortcut keys: S \">S \</span>
+        </button>
+      <% end %>
+    </div>
+
+    <div class="d-flex flex-items-center mb-3">
+      <% if cve_request.title? %>
+        <div class="flex-1 h2 css-truncate css-truncate-overflow" <%= test_selector("title") %>><%= cve_request.title %></div>
+      <% else %>
+        <div class="flex-1 h2 color-fg-subtle" <%= test_selector("no-title") %>>No title</div>
+      <% end %>
+
+      <% if cve_request.severity? %>
+        <div class="flex-grow-0 ml-2">
+          <%= render CVEReviews::SeverityIconComponent.new(severity: cve_request.severity, size: :large, test_selector: "severity") %>
+        </div>
+      <% end %>
+    </div>
+
+    <div class="Box mb-4">
+      <%= render CVEReviewTriage::AffectedProductsComponent.new(affected_products_payload: cve_request&.affected_products_payload) %>
+
+      <% if cve_request.description? %>
+        <div class="Box-row f4 triage-description" <%= test_selector("description") %>><%= simple_format(html_escape(cve_request.description)) %></div>
+      <% else %>
+        <div class="Box-row f4 triage-description color-fg-subtle" <%= test_selector("no-description") %>>No description</div>
+      <% end %>
+    </div>
+
+    <ol class="list-style-none f4">
+      <% if cve_request.advisory_permalink? %>
+        <li class="d-flex flex-items-center position-relative" <%= test_selector("reference") %>>
+          <%= render IconComponent.new(icon: "mark-github", color: :muted, position: :absolute, ml: -4) %>
+          <%= render Primer::Truncate.new do %>
+            <%= link_to cve_request.advisory_permalink, cve_request.advisory_permalink, target: "_blank", **test_selector_data_hash("advisory-permalink") %>
+          <% end %>
+        </li>
+      <% else %>
+        <li class="color-fg-subtle" <%= test_selector("no-advisory-permalink") %>>No security advisory</li>
+      <% end %>
+    </ol>
+
+  </div>
+</triage-control>

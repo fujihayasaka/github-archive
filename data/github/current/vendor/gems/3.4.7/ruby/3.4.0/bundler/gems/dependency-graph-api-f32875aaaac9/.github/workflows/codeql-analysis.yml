@@ -1,0 +1,46 @@
+name: "CodeQL"
+
+on:
+  push:
+    branches: [ main, master, enterprise-*.*-release* ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'go', 'ruby' ]
+
+    steps:
+    - name: Configure goproxy access
+      if: ${{ matrix.language == 'go' }}
+      run: |
+        echo "machine goproxy.githubapp.com login nobody password ${{ secrets.GOPROXY_TOKEN }}" >> $HOME/.netrc
+
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Go
+      if: ${{ matrix.language == 'go' }}
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go/go.mod'
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+        source-root: ${{ matrix.language == 'go' && 'go' || '' }}
+        config-file: .github/codeql/codeql-${{matrix.language}}-config.yml
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3

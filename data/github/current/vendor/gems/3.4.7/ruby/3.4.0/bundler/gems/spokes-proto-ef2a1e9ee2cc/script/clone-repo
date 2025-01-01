@@ -1,0 +1,61 @@
+#!/bin/bash
+#/ Usage: script/clone-repo URL [--sha COMMIT_SHA]
+#/ Makes a copy of URL in Spokes API and reports the new repository ID.
+
+set -e
+set -o nounset
+
+function usage {
+    cat "$0" | grep ^#/ | cut -c4-
+}
+
+url=
+sha=
+while (( $# )); do
+    case $1 in
+        -h | --help)
+            usage
+            exit 1
+            ;;
+        --sha)
+            sha="$2"
+            shift
+            shift
+            ;;
+        *)
+            url="$1"
+            shift
+            ;;
+    esac
+done
+
+if [ ! $url ]; then
+    usage
+    exit 1
+fi
+
+if [ $sha ]; then
+  echo "Cloning $url@$sha"
+else
+  echo "Cloning $url"
+fi
+
+info="$(script/create-repo)"
+
+nw_id="$(echo "$info" | grep ^NETWORK_ID= | cut -d = -f 2 | tr -d '\r')"
+repo_id="$(echo "$info" | grep ^REPOSITORY_ID= | cut -d = -f 2 | tr -d '\r')"
+shard="$(echo "$info" | grep ^SHARD_PATH= | cut -d = -f 2 | tr -d '\r')"
+
+if [ -z "$nw_id" ] || [ -z "$repo_id" ] || [ -z "$shard" ]; then
+  echo error running script/create-repo:
+  echo "$info"
+  exit 1
+fi
+
+dest_dir="repositories/${shard}/${repo_id}.git"
+git clone --quiet --mirror "$url" "$dest_dir"
+if [ $sha ]; then
+    git --git-dir="$dest_dir" update-ref HEAD $sha
+fi
+printf 'Repository %d is ready to go! You can now use it via Spokes API with "types.NewRepository(%d)".\n' "$repo_id" "$repo_id"
+printf 'If you need to make changes to it:\n  git clone %s\n' "$dest_dir"

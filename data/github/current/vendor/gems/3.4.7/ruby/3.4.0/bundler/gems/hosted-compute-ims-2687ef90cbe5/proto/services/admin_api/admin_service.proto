@@ -1,0 +1,229 @@
+syntax = "proto3";
+
+// Defines the application top level name used as the REST API prefix
+package github.ims.api.admin.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "shared/enums.proto";
+
+option go_package = "github.com/github/hosted-compute-ims/gen/twirp/go/services/admin_api";
+option ruby_package = "GitHub::HostedComputeIms::AdminApi";
+
+service ImageManagementAdminService {
+  // CREATE
+  rpc CreateCuratedImageDefinition(CreateCuratedImageDefinitionRequest) returns (CreateCuratedImageDefinitionResponse) {}
+  rpc CreateCuratedImageVersion(CreateCuratedImageVersionRequest) returns (CreateCuratedImageVersionResponse) {}
+  rpc CreateCuratedImageDefinitionPointer(CreateCuratedImageDefinitionPointerRequest) returns (CreateCuratedImageDefinitionPointerResponse) {}
+
+  // READ
+  rpc ListCuratedImageDefinitions(ListCuratedImageDefinitionsRequest) returns (ListCuratedImageDefinitionsResponse) {}
+  rpc GetCuratedImageDefinition(GetCuratedImageDefinitionRequest) returns (GetCuratedImageDefinitionResponse) {}
+  rpc ListCuratedImageVersions(ListCuratedImageVersionsRequest) returns (ListCuratedImageVersionsResponse) {}
+  rpc GetCuratedImageVersion(GetCuratedImageVersionRequest) returns (GetCuratedImageVersionResponse) {}
+
+  // UPDATE
+  rpc UpdateCuratedImageDefinition(UpdateCuratedImageDefinitionRequest) returns (UpdateCuratedImageDefinitionResponse);
+  rpc UpdateCuratedImageVersion(UpdateCuratedImageVersionRequest) returns (UpdateCuratedImageVersionResponse) {}
+  rpc UpdateCuratedImageDefinitionPointer(UpdateCuratedImageDefinitionPointerRequest) returns (UpdateCuratedImageDefinitionPointerResponse) {}
+
+  // DELETE
+  rpc DeleteCuratedImageDefinition(DeleteCuratedImageDefinitionRequest) returns (DeleteCuratedImageDefinitionResponse) {}
+  rpc DeleteCuratedImageVersion(DeleteCuratedImageVersionRequest) returns (DeleteCuratedImageVersionResponse) {}
+  rpc DeleteCuratedImageDefinitionPointer(DeleteCuratedImageDefinitionPointerRequest) returns (DeleteCuratedImageDefinitionPointerResponse) {}
+}
+
+message ImageDefinition {
+  uint64 id = 1;
+  string name = 2;
+  shared.v1.OsType os_type = 3;
+  shared.v1.Architecture architecture = 4;
+  bool enabled = 5;
+  uint64 points_to_image_definition_id = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  string feature_flag = 9;
+  shared.v1.ImageDefinitionState state = 10;
+  string owner_id = 11;
+  string latest_version = 12;
+  int32 latest_version_size_gb = 13;
+  int32 image_versions_count = 14;
+  bool is_image_generation_supported = 15;
+}
+
+message ImageVersion {
+  uint64 image_definition_id = 1;
+  string version = 2;
+  shared.v1.ImageVersionState state = 3;
+  string state_details = 4;
+  int32 size_gb = 5;
+  bool enabled = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  uint64 id = 9;
+  string resource_id = 10;
+  shared.v1.VmGeneration vm_generation = 11;
+  string agent_user = 12;
+  string azure_purchase_plan = 13;
+  shared.v1.OsState os_state = 14;
+}
+
+message GetCuratedImageDefinitionRequest {
+  uint64 image_definition_id = 1 [(buf.validate.field).required = true];
+}
+
+message GetCuratedImageDefinitionResponse {
+  ImageDefinition image_definition = 1;
+}
+
+message GetCuratedImageVersionRequest {
+  uint64 image_definition_id = 1 [(buf.validate.field).required = true];
+  string version = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.pattern = "^\\d+\\.\\d+\\.\\d+$"
+  ];
+}
+
+message GetCuratedImageVersionResponse {
+  ImageVersion image_version = 1;
+}
+
+message ListCuratedImageDefinitionsRequest {
+  // No request parameters
+}
+
+message ListCuratedImageDefinitionsResponse {
+  repeated ImageDefinition image_definitions = 1;
+}
+
+message ListCuratedImageVersionsRequest {
+  uint64 image_definition_id = 1 [(buf.validate.field).required = true];
+}
+
+message ListCuratedImageVersionsResponse {
+  repeated ImageVersion image_versions = 1;
+}
+
+message CreateCuratedImageDefinitionRequest {
+  string name = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.pattern = "^[a-zA-Z0-9()._ -]{1,100}$"
+  ];
+  bool enabled = 2;
+  shared.v1.OsType os_type = 3 [(buf.validate.field).enum.defined_only = true];
+  shared.v1.Architecture architecture = 4 [(buf.validate.field).enum.defined_only = true];
+  string feature_flag = 5;
+  string owner_id = 6 [(buf.validate.field).required = true];
+  bool is_image_generation_supported = 7;
+}
+
+message CreateCuratedImageDefinitionResponse {
+  ImageDefinition image_definition = 1;
+}
+
+message CreateCuratedImageVersionRequest {
+  uint64 image_definition_id = 1 [(buf.validate.field).required = true];
+  string version = 2 [
+    // false for required allows passing an empty string to automatically bump the version
+    (buf.validate.field).required = false,
+    (buf.validate.field).string.pattern = "^(\\d+\\.(\\d+|\\*)(|\\.(\\d+|\\*)))?$"
+  ];
+  string source_vhd_url = 3 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uri = true
+  ];
+  bool enabled = 4;
+  shared.v1.VmGeneration vm_generation = 5 [(buf.validate.field).enum.defined_only = true];
+  string agent_user = 6;
+  string azure_purchase_plan = 7 [
+    (buf.validate.field).required = false,
+    (buf.validate.field).string.pattern = "^([a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+)?$"
+  ];
+  shared.v1.OsState os_state = 8 [(buf.validate.field).enum.defined_only = true];
+}
+
+message CreateCuratedImageVersionResponse {
+  ImageVersion image_version = 1;
+}
+
+message CreateCuratedImageDefinitionPointerRequest {
+  string name = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.pattern = "^[a-zA-Z0-9()._ -]{1,100}$"
+  ];
+  bool enabled = 2;
+  uint64 points_to_image_definition_id = 3 [(buf.validate.field).required = true];
+  string feature_flag = 4;
+  string owner_id = 5 [(buf.validate.field).required = true];
+}
+
+message CreateCuratedImageDefinitionPointerResponse {
+  ImageDefinition image_definition = 1;
+}
+
+message UpdateCuratedImageDefinitionRequest {
+  uint64 image_definition_id = 1 [(buf.validate.field).required = true];
+  string name = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.pattern = "^[a-zA-Z0-9()._ -]{1,100}$"
+  ];
+  bool enabled = 3;
+  string feature_flag = 4;
+  bool is_image_generation_supported = 5;
+}
+
+message UpdateCuratedImageDefinitionResponse {
+  ImageDefinition image_definition = 1;
+}
+
+message UpdateCuratedImageVersionRequest {
+  uint64 image_definition_id = 1 [(buf.validate.field).required = true];
+  string version = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.pattern = "^\\d+\\.\\d+\\.\\d+$"
+  ];
+  bool enabled = 3;
+}
+
+message UpdateCuratedImageVersionResponse {
+  ImageVersion image_version = 1;
+}
+
+message UpdateCuratedImageDefinitionPointerRequest {
+  uint64 image_definition_id = 1 [(buf.validate.field).required = true];
+  string name = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.pattern = "^[a-zA-Z0-9()._ -]{1,100}$"
+  ];
+  bool enabled = 3;
+  uint64 points_to_image_definition_id = 4 [(buf.validate.field).required = true];
+  string feature_flag = 5;
+}
+
+message UpdateCuratedImageDefinitionPointerResponse {
+  ImageDefinition image_definition = 1;
+}
+
+message DeleteCuratedImageDefinitionRequest {
+  uint64 image_definition_id = 1 [(buf.validate.field).required = true];
+}
+
+message DeleteCuratedImageDefinitionResponse {}
+
+message DeleteCuratedImageVersionRequest {
+  uint64 image_definition_id = 1 [(buf.validate.field).required = true];
+  string version = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.pattern = "^\\d+\\.\\d+\\.\\d+$"
+  ];
+}
+
+message DeleteCuratedImageVersionResponse {
+  ImageVersion image_version = 1;
+}
+
+message DeleteCuratedImageDefinitionPointerRequest {
+  uint64 image_definition_id = 1 [(buf.validate.field).required = true];
+}
+
+message DeleteCuratedImageDefinitionPointerResponse {}

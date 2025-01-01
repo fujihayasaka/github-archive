@@ -237,8 +237,7 @@ class CommitController < GitContentController
   end
 
   def find_in_diff_worker_path # rubocop:todo GitHub/UseRestfulActions
-    name = AssetBundles.new.expand_bundle_name("find-in-diff-worker.js")
-    web_worker_path(name)
+    web_worker_url("find-in-diff-worker.js")
   end
 
   def rich_diff # rubocop:todo GitHub/UseRestfulActions

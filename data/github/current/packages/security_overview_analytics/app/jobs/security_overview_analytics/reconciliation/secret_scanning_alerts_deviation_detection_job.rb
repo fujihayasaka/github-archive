@@ -267,7 +267,7 @@ module SecurityOverviewAnalytics
       sig { override.returns(T::Array[T.class_of(ApplicationJob)]) }
       def fanout_jobs
         # If any of the below job queue is being throttled, delay the entire batch.
-        [SecretScanningAlertRevisionIngestionJob, SecretScanningAlertsDeletionJob]
+        [SecretScanningAlertRevisionIngestionJob, SecretScanningAlertsDeletionJob, UpdateFeatureStatusSummaryJob]
       end
 
       sig { override.params(finished_successfully: T::Boolean, options: T.untyped).returns(T.untyped) }

@@ -1,0 +1,114 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: trust-metadata-api
+spec:
+    replicas: 2
+    selector:
+        matchLabels:
+            app: trust-metadata-api
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt
+                heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: trust-metadata-api
+                observability.github.com/splunk_index: trust-metadata
+            labels:
+                app: trust-metadata-api
+        spec:
+            containers:
+                - env:
+                    - name: TMA_AZURE_BLOB_ACCOUNT
+                      value: tmaprodae01
+                    - name: TMA_AZURE_BLOB_CONTAINER
+                      value: attestations
+                    - name: AZURE_TENANT_ID
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn_trust_metadata_api_prod_ae_01_tenant_id
+                            name: vault-secrets
+                    - name: AZURE_CLIENT_ID
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn_trust_metadata_api_prod_ae_01_client_id
+                            name: vault-secrets
+                    - name: AZURE_CLIENT_SECRET
+                      valueFrom:
+                        secretKeyRef:
+                            key: spn_trust_metadata_api_prod_ae_01
+                            name: vault-secrets
+                    - name: GITHUB_TELEMETRY_ENVIRONMENT
+                      value: production
+                    - name: HTTP_PROXY
+                      value: http://network-proxy.service.$(KUBE_CLUSTER_STAMP).github.net:3128
+                    - name: HTTPS_PROXY
+                      value: http://network-proxy.service.$(KUBE_CLUSTER_STAMP).github.net:3128
+                    - name: TMA_TRUSTED_KEYS
+                      value: |
+                        {}
+                    - name: TMA_PKG_READ_AUTH_CONFIG
+                      value: |
+                        []
+                    - name: TMA_PKG_WRITE_AUTH_CONFIG
+                      value: |
+                        []
+                    - name: TMA_TUF_MIRROR
+                      value: https://tuf-repo.github.com
+                    - name: TMA_STAMP
+                      value: prod-ae-01
+                    - name: TMA_LOG_LEVEL
+                      value: debug
+                    - name: NO_PROXY
+                      value: '*.github.net,*.cluster.local'
+                    - name: TMA_DOGSTATSD_HOST
+                      value: $(KUBE_NODE_HOSTNAME):28125
+                    - name: GOMAXPROCS
+                      value: "2"
+                    - name: TMA_TUF_DIRECTORY
+                      value: /mnt/tuf/cache
+                    - name: TMA_APP_ENV
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.labels['moda_deployment_env']
+                  envFrom:
+                    - secretRef:
+                        name: vault-secrets
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                  image: trust-metadata-api
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command:
+                                - sleep
+                                - "5"
+                  name: trust-metadata-api
+                  ports:
+                    - containerPort: 8080
+                      name: http
+                      protocol: TCP
+                  readinessProbe:
+                    failureThreshold: 1
+                    httpGet:
+                        path: /status
+                        port: 8080
+                    initialDelaySeconds: 5
+                    periodSeconds: 10
+                    successThreshold: 1
+                    timeoutSeconds: 5
+                  resources:
+                    limits:
+                        cpu: "3.0"
+                        memory: 1G
+                    requests:
+                        cpu: "0.5"
+                        memory: 128Mi
+                  volumeMounts:
+                    - mountPath: /mnt/tuf
+                      name: tufdata
+                  workingDir: /mnt/tuf
+            dnsPolicy: ClusterFirst
+            volumes:
+                - emptyDir: {}
+                  name: tufdata

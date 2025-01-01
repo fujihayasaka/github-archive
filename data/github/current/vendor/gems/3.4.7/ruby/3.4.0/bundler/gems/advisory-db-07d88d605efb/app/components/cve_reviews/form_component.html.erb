@@ -1,0 +1,178 @@
+<% content_for :title, "CVE: #{cve_review.ghsa_id}" %>
+<%= form_for cve_review, html: { id: "cve-review-form", "data-target" => "form-tracker.form" }.merge(test_selector_data_hash("cve-review-form")) do |form| %>
+  <% if show_ghsl_banner? %>
+    <%= render(Primer::Beta::Flash.new(scheme: :warning, mb: 2, test_selector: "cve-review-ghsl-request-banner")) { "This record was created for a GHSL request. Make sure to cross-check with the GHSL team issue to see if it is ready for publication. All the details should be properly filled before clicking to publish." } %>
+  <% end %>
+
+  <% if can_edit_internal? %>
+    <%= form.fields_for :ghsl_request, cve_review.ghsl_request do |ghsl_request_fields| %>
+      <details class="position-relative" <%= "open" if expanded_internal? %> <%= test_selector("cve-review-fields-for-internal-use") %>>
+        <summary class="position-absolute text-right" style="right: 8px; top: 4px;">
+          For internal use
+        </summary>
+        <%= render(Primer::Beta::BorderBox.new(mb: 4)) do |component| %>
+          <% component.with_body do %>
+            <div class="d-flex">
+              <div class="flex-1">
+                <h2 class="h4 mb-2">
+                  <%= ghsl_request_fields.label :ghsl_id, "GHSL" %>
+                </h2>
+                <%= ghsl_request_fields.text_field :ghsl_id, class: "form-control width-full", placeholder: "e.g. GHSL-2022-001", **test_selector_data_hash("cve-review-ghsl-request-ghsl-id") %>
+              </div>
+              <div class="flex-2 ml-3">
+                <h2 class="h4 mb-2">
+                  <%= ghsl_request_fields.label :ghsl_id, "Issue" %>
+                </h2>
+                <%= ghsl_request_fields.text_field :ghsl_issue, class: "form-control width-full", placeholder: "e.g. https://github.com/github/securitylab-vulnerabilities/issues/912", **test_selector_data_hash("cve-review-ghsl-request-ghsl-issue") %>
+              </div>
+            </div>
+          <% end %>
+        <% end %>
+      </details>
+    <% end %>
+  <% end %>
+
+  <h2 class="mb-2 h4">Version values</h2>
+  <% if cve_review.version_values && cve_review.version_values.size != cve_review.version_values.uniq.size %>
+    <%= render(Primer::Beta::Flash.new(scheme: :danger, mb: 2)) { "You have duplicate entries" } %>
+  <% end %>
+  <form-table class="d-block" data-action="initialized:form-tracker#reset">
+    <div class="Box">
+      <div data-target="form-table.body">
+        <% cve_review.version_values.each do |version_value| %>
+          <%= render FormRowComponent.new(value: version_value, name: "cve_review[version_values][]", placeholder: "e.g. < 0.2.13", disabled: read_only?) %>
+        <% end %>
+      </div>
+    </div>
+
+    <template data-target="form-table.rowTemplate">
+      <%= render FormRowComponent.new(name: "cve_review[version_values][]", placeholder: "e.g. < 0.2.13", disabled: read_only?) %>
+    </template>
+
+    <%= render Primer::ButtonComponent.new(
+      scheme: :link,
+      mt: 2,
+      classes: "Link--secondary no-underline",
+      data: { action: "click:form-table#addRow" },
+      hidden: read_only? ) do |button| %>
+      <%= render IconComponent.new(icon: "plus", mr: 1) %>
+      Add a version value
+    <% end %>
+  </form-table>
+
+  <% if can_edit_vendor_name_and_product %>
+    <div class="d-flex mt-4">
+      <div class="flex-1">
+        <h2 class="h4 mb-2">
+          <%= form.label :vendor_name %>
+        </h2>
+        <%= form.text_field :vendor_name, class: "form-control width-full", placeholder: "e.g. github", disabled: read_only? %>
+      </div>
+      <div class="flex-1 ml-3">
+        <h2 class="h4 mb-2">
+          <%= form.label :product %>
+        </h2>
+        <%= form.text_field :product, class: "form-control width-full", placeholder: "e.g. advisory-inbox", disabled: read_only? %>
+      </div>
+    </div>
+  <% end %>
+
+  <h2 class="mt-4 mb-2 h4">
+    <label for="cve_review_cvss_vectorString">CVSS vector string</label>
+    <%= render(Primer::Beta::Link.new(href: "https://www.first.org/cvss/calculator/4.0", muted: true, target: :_blank, font_size: 6, ml: 1)) do %>
+      Use calculator
+      <%= render IconComponent.new(icon: "link-external") %>
+    <% end %>
+  </h2>
+  <%= render FormFieldWithErrorsComponent.new(object: cve_review, attribute: :cvss_vectorString) do %>
+    <%= form.text_field :cvss_vectorString, class: "form-control width-full", placeholder: "e.g. CVSS:3.1/AV:_/AC:_/PR:_/UI:_/S:_/C:_/I:_/A:_", disabled: read_only?, **test_selector_data_hash("cvss-vector-string") %>
+  <% end %>
+
+  <%= render CWEs::AutocompleteComponent.new(name_prefix: "cve_review", cwes: cwe_payloads, disabled: read_only?) %>
+
+  <div class="position-relative">
+    <h2 class="mt-4 mb-2 h4">
+      <%= form.label :confirm_reference %>
+    </h2>
+    <% if show_confirm_reference_reminder? %>
+      <%= render(Primer::Beta::Flash.new(scheme: :warning, mb: 2)) { "Don't forget to update this field with the published GHSL advisory." } %>
+    <% end %>
+    <% if confirm_reference.present? %>
+      <%= render(Primer::Beta::Link.new(href: confirm_reference, target: :_blank, test_selector: "confirm-reference")) { confirm_reference } %>
+    <% end %>
+
+    <% if can_edit_confirm_reference? %>
+      <details <%= "open" if expanded_edit_confirm_reference? %>>
+        <summary class="position-absolute" style="right: 4px; top: 8px;">
+          Edit
+        </summary>
+        <%= render FormFieldWithErrorsComponent.new(object: cve_review, attribute: :confirm_reference, classes: "mt-2") do %>
+          <%= form.text_field :confirm_reference, class: "form-control width-full", placeholder: "e.g. https://github.com/dsp-testing/pub_test/security/advisories/GHSA-w2hj-vpc4-3gpg", disabled: read_only?, **test_selector_data_hash("cve-review-form-confirm-reference") %>
+        <% end %>
+      </details>
+    <% end %>
+  </div>
+
+  <h2 class="mt-4 mb-2 h4">Misc references</h2>
+  <form-table class="d-block" data-action="initialized:form-tracker#reset">
+    <div class="Box">
+      <div data-target="form-table.body">
+        <% cve_review.misc_references.each do |url| %>
+          <%= render FormRowComponent.new(value: url, name: "cve_review[misc_references][]", placeholder: "e.g. https://github.com/github/github/issues/123", disabled: read_only?) %>
+        <% end %>
+      </div>
+    </div>
+
+    <template data-target="form-table.rowTemplate">
+      <%= render FormRowComponent.new(name: "cve_review[misc_references][]", placeholder: "e.g. https://github.com/github/github/issues/123", disabled: read_only?) %>
+    </template>
+
+    <%= render Primer::ButtonComponent.new(
+      scheme: :link,
+      mt: 2,
+      classes: "Link--secondary no-underline",
+      data: { action: "click:form-table#addRow" },
+      hidden: read_only? ) do |button| %>
+      <%= render IconComponent.new(icon: "plus", mr: 1) %>
+      Add a reference
+    <% end %>
+  </form-table>
+
+  <div class="Box border mt-5">
+    <div class="p-2">
+      <%= render FormFieldWithErrorsComponent.new(object: cve_review, attribute: :title) do %>
+        <%= form.text_field :title, placeholder: "Title", class: "form-control input-lg width-full", disabled: read_only?, **test_selector_data_hash("title") %>
+      <% end %>
+    </div>
+
+    <%= render(Primer::Alpha::TabPanels.new(label: "Descriptions", my: 2, px: 2)) do |c| %>
+      <% c.with_tab(selected: true, classes: "no-outline", panel_id: "cve-reviews-form-component-panel-1", id: "cve-reviews-form-component-tab-1") do |t| %>
+        <% t.with_text { "Write" } %>
+        <% t.with_panel(mx: 2, my: 2, p: 0) do %>
+          <%= render FormFieldWithErrorsComponent.new(object: cve_review, attribute: :description) do %>
+            <%= form.text_area :description, placeholder: "Write a description", class: "form-control width-full", rows: 10, disabled: read_only?, **test_selector_data_hash("description") %>
+          <% end %>
+        <% end %>
+      <% end %>
+      <% c.with_tab(classes: "no-outline", panel_id: "cve-reviews-form-component-panel-2", id: "cve-reviews-form-component-tab-2") do |t| %>
+        <% t.with_text { "Current request" } %>
+        <% t.with_panel(mx: 2, mt: 3, mb: 2, border: :bottom) do %>
+          <%= render Primer::Beta::Markdown.new(id: "md-preview", font_size: 5, p: 1, pb: 3, border: :bottom, style: "min-height: 219px") do %>
+            <include-fragment src="<%= markdown_preview_path(content: current_request_description) %>">
+              <p>Loading preview…</p>
+            </include-fragment>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <div class="d-flex flex-items-center pt-2 pb-3 color-fg-muted f6">
+      <%= render IconComponent.new(icon: "markdown", ml: 2, mr: 1) %>
+      <%= render IconComponent.new(icon: "x", size: :medium, color: :danger, position: :absolute) %>
+        Styling with Markdown is NOT supported
+    </div>
+  </div>
+
+  <h2 class="mt-4 mb-2 h4">Internal review notes</h2>
+  <%= form.text_area :review_notes, rows: 10, placeholder: "Notes", class: "form-control input-contrast width-full", disabled: read_only?, **test_selector_data_hash("cve-review-notes") %>
+<% end %>

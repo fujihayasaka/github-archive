@@ -1,0 +1,1 @@
+ALTER TABLE attestations DROP INDEX domain_id_owner_id_subject_digest_attestations_idx;

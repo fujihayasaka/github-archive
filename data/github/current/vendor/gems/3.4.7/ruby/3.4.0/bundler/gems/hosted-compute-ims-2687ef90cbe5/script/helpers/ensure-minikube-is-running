@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+
+set -e
+
+function usage() {
+    cat <<EOF
+Usage: script/helpers/ensure-minikube-is-running [--restart] [--recreate] [--stop]
+  Starts minikube
+
+  Optional parameters:
+    --restart                       Restarts minikube.
+    --recreate                      Recreates minikube profile. It might cause lost of all deployments and data.
+    --stop                          Stops minikube
+
+EOF
+}
+
+ACTION="start"
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --restart)
+        ACTION="restart"; shift ;;
+    --recreate)
+        ACTION="recreate"; shift ;;
+    --stop)
+        ACTION="stop"; shift ;;
+    --help)
+      usage; exit 0 ;;
+    *)
+      echo "Unknown option $1"; usage; exit 1 ;;
+  esac
+done
+
+
+MINIKUBE_CPUS=4
+MINIKUBE_MEMORY=8g
+KUBE_VERSION='v1.23.13'
+CLUSTER_NAME=actions-dev
+STATIC_IP="192.168.49.2" # This is the ip minikube on docker driver always has when chosen dynamically.
+
+if [[ -n "$CI" ]]; then
+    # ubuntu-latest-xl (16-core, 64 RAM)
+    MINIKUBE_CPUS=12
+    MINIKUBE_MEMORY=48g
+fi
+
+function start-docker() {
+    if ! docker ps > /dev/null 2>&1; then
+        echo "Docker is not running. Restarting... "
+
+        # Restart docker
+        sudo killall -9 dockerd
+        sudo /usr/local/share/docker-init.sh
+
+        # Wait for docker to start, one second at a time, up to 5 seconds
+        counter=0
+        while ! docker ps > /dev/null 2>&1; do
+            sleep 1
+            counter=$((counter + 1))
+            if [ $counter -ge 5 ]; then
+                echo "Docker did not start within 5 seconds."
+                exit 1
+            fi
+        done
+    fi
+}
+
+# start the minikube cluster (if it's not already running)
+function start-minikube-cluster() {
+    local minikube_exit_code
+    set +e # allow minikube to return nonzero
+    minikube status --profile "$CLUSTER_NAME" >/dev/null
+    minikube_exit_code="$?"
+    set -e # re-enable "fail on error"
+
+    if [[ "$minikube_exit_code" -ne 0 ]] ; then
+        echo "Starting minikube cluster '$CLUSTER_NAME' in IMS Codespace 🚀"
+        minikube start \
+            --profile "$CLUSTER_NAME" \
+            --kubernetes-version="$KUBE_VERSION" \
+            --extra-config=apiserver.service-node-port-range=1-65535 \
+            --memory="$MINIKUBE_MEMORY" \
+            --cpus="$MINIKUBE_CPUS" \
+            --static-ip="$STATIC_IP" \
+            --mount="true" \
+            --force \
+            --wait=all # default wait time is "6m0s"
+    fi
+}
+
+function stop-minikube-cluster() {
+    echo "Stopping minikube cluster '$CLUSTER_NAME'"
+    minikube stop --profile "$CLUSTER_NAME" || true
+}
+
+function delete-minikube-cluster() {
+    echo "Deleting minikube cluster '$CLUSTER_NAME'"
+    minikube delete --profile "$CLUSTER_NAME"
+}
+
+if [[ $ACTION == "stop" ]]; then
+    stop-minikube-cluster
+    exit 0
+elif [[ $ACTION == "recreate" ]]; then
+    delete-minikube-cluster
+elif [[ $ACTION == "restart" ]]; then
+    stop-minikube-cluster
+fi
+
+start-docker
+start-minikube-cluster

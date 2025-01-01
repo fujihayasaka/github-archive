@@ -1,0 +1,54 @@
+#!/bin/bash
+
+set -e
+
+function check_fm_lite_health() {
+  local status_code=$(curl -s -o /dev/null -w "%{http_code}" localhost:8090/ready)
+  if [[ "$status_code" -eq 200 ]]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+# Check if fm binary is available
+if ! command -v fm &> /dev/null; then
+  echo "fm binary not found. Installing fm lite"
+	go install github.com/github/feature-management-lite@latest
+  # Rename the binary to `fm` as this is what it's called when used with codespaces feature
+  bin_path="$(command -v feature-management-lite)"
+  if [ -n "$bin_path" ]; then
+    mv "$bin_path" "${bin_path%/*}/fm"
+  fi
+fi
+
+# Start fm lite server if it's not running
+if ! check_fm_lite_health; then
+  echo "Starting fm server on port 8090"
+  fm server > /dev/null 2>&1 &
+  while ! check_fm_lite_health; do
+    echo "Waiting for fm server to be ready..."
+    sleep 1
+  done
+fi
+
+FEATURE_FLAG_FILE="config/kustomize/devoverlays/feature-flags.yml"
+echo "Using feature flag file: $FEATURE_FLAG_FILE"
+
+echo "Resetting all existing flags owned by IMS service"
+EXISTING_FEATURE_FLAGS=$(fm feature list --all | awk '{print $2}' | grep '^ims_' || true)
+echo $EXISTING_FEATURE_FLAGS | xargs -r -n1 fm feature delete --feature-names > /dev/null
+
+echo "Enabling predefined feature flags for IMS service"
+yq -e '.enabledGlobally[]' "$FEATURE_FLAG_FILE" | while read -r flag; do
+  fm feature enable --create --feature-names "$flag" > /dev/null
+  echo -e "\t enabled feature [$flag]"
+done
+
+yq e '.enabledPerActor[]' "$FEATURE_FLAG_FILE" --output-format=json --indent=0 | while read -r item; do
+  flag=$(echo "$item" | yq e '.flag' -)
+  actor=$(echo "$item" | yq e '.actor' -)
+  fm feature create --feature-names "$flag" > /dev/null
+  fm feature actor add -n "$flag" -i "$actor" > /dev/null
+  echo -e "\t enabled feature [$flag] for actor [$actor]"
+done

@@ -12,7 +12,7 @@ module GitHub
         CSV.generate do |csv|
           csv << header
           anonymous_git_access_repo_ids = Repository.with_anonymous_git_access.pluck(:id).to_set
-          Repository.find_each do |r|
+          Repository.includes(:owner, :internal_repository).find_each do |r|
             owner = r.owner
             row = [r.created_at, r.owner_id, (owner ? owner.type : "N/A"),
                    (owner ? owner.login : "N/A"), r.id, r.name,

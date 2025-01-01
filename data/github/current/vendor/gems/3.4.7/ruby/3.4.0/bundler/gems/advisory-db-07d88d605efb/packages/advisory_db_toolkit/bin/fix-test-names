@@ -1,0 +1,36 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# This was used to convert ActiveSupport test names to flat minitest names.
+# It can be deleted before checkin but was just here for illustrative purposes
+
+require "bundler/setup"
+
+paths = Dir["/workspaces/advisory-db/packages/advisory_db_toolkit/**/*_test.rb"]
+paths.each do |p|
+  File.open(p, "r+") do |file|
+    old_contents = file.read
+    contents_to_write
+
+    old_contents.scan(/(test "(.*)" do)/) do |match|
+      test_name_to_swap = match[1]
+      altered_name = test_name_to_swap.tr(" ", "_").tr(",", "_").tr("`", "_")
+      altered_name = altered_name.gsub(">=", "greater_than_or_equal_")
+      altered_name = altered_name.gsub(">", "greater_than_")
+      altered_name = altered_name.gsub("<=", "less_than_or_equal_")
+      altered_name = altered_name.gsub("<", "less_than_")
+      altered_name = altered_name.gsub("=", "equal_to_")
+      altered_name = altered_name.tr(".", "_")
+      altered_name = altered_name.delete("'")
+      new_test_name = "test_#{altered_name}"
+      old_contents = old_contents.sub(match[0], "def #{new_test_name}")
+    end
+
+    file.truncate(0)
+    file.seek(0)
+    file.write(old_contents)
+    file.flush
+  end
+end
+
+# test "`< a.b.c` range without patched version adds zeroed introduced event and rehydration hint" do

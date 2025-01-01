@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trust-metadata-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: trust-metadata-api
+  template:
+    metadata:
+      labels:
+        app: trust-metadata-api
+      annotations:
+        # If you emit structured logs, you can specify a parser to use so your logs are parsed
+        # properly and are much nicer to query in splunk. For more details, see
+        # https://thehub.github.com/engineering/development-and-ops/observability/logging/fluent-bit/
+        fluentbit.io/parser: logfmt
+        observability.github.com/splunk_index: trust-metadata
+        heaven.githubapp.com/inject-kube-metadata-env-vars-into-containers: trust-metadata-api
+    spec:
+      # The following line is to fix transient dns issues in deployed environments
+      # https://moda.githubapp.com/docs/frequently-asked-questions/#i-m-seeing-a-lot-of-dns-exceptions-what-gives
+      dnsPolicy: Default
+      containers:
+        - name: trust-metadata-api
+          image: trust-metadata-api
+          # Dir used by TUF client as root for TUF cache
+          workingDir: /mnt/tuf
+          resources:
+            requests:
+              cpu: "0.5"
+              memory: "128Mi"
+            limits:
+              cpu: "3.0"
+              memory: "1G"
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: NO_PROXY
+              value: "*.github.net,*.cluster.local"
+            - name: TMA_DOGSTATSD_HOST
+              value: "$(KUBE_NODE_HOSTNAME):28125"
+            - name: HTTP_PROXY
+              value: "http://network-proxy.service.github.net:3128"
+            - name: HTTPS_PROXY
+              value: "http://network-proxy.service.github.net:3128"
+            - name: GOMAXPROCS
+              value: "2"
+            - name: TMA_TUF_DIRECTORY
+              value: /mnt/tuf/cache
+            - name: TMA_APP_ENV
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['moda_deployment_env']
+          envFrom:
+            - configMapRef:
+                name: kube-cluster-metadata
+            - secretRef:
+                name: vault-secrets
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          # https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#define-readiness-probes
+          readinessProbe:
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 1
+            httpGet:
+              path: /status
+              port: 8080
+          volumeMounts:
+            - name: tufdata
+              mountPath: /mnt/tuf
+      volumes:
+        - name: tufdata
+          emptyDir: {}
