@@ -8,7 +8,7 @@ Gem::Specification.new do |s|
   s.required_rubygems_version = Gem::Requirement.new(">= 0".freeze) if s.respond_to? :required_rubygems_version=
   s.require_paths = ["gen/ruby/lib".freeze]
   s.authors = ["GitHub".freeze]
-  s.date = "2025-08-21"
+  s.date = "2025-08-25"
   s.files = ["gen/ruby/lib/alerting/v1/alerting_api_pb.rb".freeze, "gen/ruby/lib/alerting/v1/alerting_api_twirp.rb".freeze, "gen/ruby/lib/dependency-graph-platform-proto.rb".freeze, "gen/ruby/lib/health/v1/health_api_pb.rb".freeze, "gen/ruby/lib/health/v1/health_api_twirp.rb".freeze, "gen/ruby/lib/reachability/v1/dependencies_api_pb.rb".freeze, "gen/ruby/lib/reachability/v1/dependencies_api_twirp.rb".freeze, "gen/ruby/lib/repo-insights/v1/repo_insights_api_pb.rb".freeze, "gen/ruby/lib/repo-insights/v1/repo_insights_api_twirp.rb".freeze, "gen/ruby/lib/sbom/v1/sbom_api_pb.rb".freeze, "gen/ruby/lib/sbom/v1/sbom_api_twirp.rb".freeze, "gen/ruby/lib/types/v1/dependency_pb.rb".freeze, "gen/ruby/lib/types/v1/dependency_twirp.rb".freeze, "gen/ruby/lib/types/v1/manifest_pb.rb".freeze, "gen/ruby/lib/types/v1/manifest_twirp.rb".freeze, "gen/ruby/lib/v1/experimental/dependencies_pb.rb".freeze, "gen/ruby/lib/v1/experimental/dependencies_twirp.rb".freeze]
   s.homepage = "https://github.com/github/dependency-graph-platform-proto".freeze
   s.licenses = ["Nonstandard".freeze]

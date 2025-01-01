@@ -57,6 +57,7 @@ module GitHub
     DEVELOPER_BASE_URL             = "https://developer.github.com".freeze
     STAGING_DOMAIN                 = "github-staging-lab.com".freeze
 
+    ELASTOMER_INDEX_LOCK_BACKOFF_ATTEMPTS     = 20
     ES_QUERY_TIMEOUT                          = "250ms"
     ES_DATACENTER                             = "default"
     ES_AUDIT_LOG_CLUSTER                      = "default"
@@ -3923,6 +3924,12 @@ module GitHub
         GitHub.environment.fetch("ENTERPRISE_REPO_SEARCH_FILTER_ENABLED", nil).to_s
       )
     end
+
+    def elastomer_index_lock_backoff_attempts
+      env_setting = ENV["ELASTOMER_INDEX_LOCK_BACKOFF_ATTEMPTS"]&.to_i
+      @elastomer_index_lock_backoff_attempts = env_setting || ELASTOMER_INDEX_LOCK_BACKOFF_ATTEMPTS
+    end
+    attr_writer :elastomer_index_lock_backoff_attempts
 
     # Whether or not we want to use the channel event builder for PRs live updates
     # This is specifically for GHES, and populated by the env var ENTERPRISE_USE_CHANNEL_EVENT_BUILDER

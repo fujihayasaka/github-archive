@@ -8,7 +8,7 @@ Gem::Specification.new do |s|
   s.required_rubygems_version = Gem::Requirement.new(">= 0".freeze) if s.respond_to? :required_rubygems_version=
   s.require_paths = [".".freeze]
   s.authors = ["@github/compute-flex".freeze]
-  s.date = "2025-08-21"
+  s.date = "2025-08-25"
   s.files = ["buf/validate/validate_pb.rb".freeze, "hosted-compute-ims.rb".freeze, "services/admin_api/admin_service_pb.rb".freeze, "services/admin_api/admin_service_twirp.rb".freeze, "services/images_api/images_service_pb.rb".freeze, "services/images_api/images_service_twirp.rb".freeze, "services/internal_api/internal_service_pb.rb".freeze, "services/internal_api/internal_service_twirp.rb".freeze, "shared/actor_pb.rb".freeze, "shared/actor_twirp.rb".freeze, "shared/enums_pb.rb".freeze, "shared/enums_twirp.rb".freeze]
   s.homepage = "https://github.com/github/hosted-compute-ims".freeze
   s.rubygems_version = "3.5.22".freeze

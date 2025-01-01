@@ -8,7 +8,7 @@ Gem::Specification.new do |s|
   s.required_rubygems_version = Gem::Requirement.new(">= 0".freeze) if s.respond_to? :required_rubygems_version=
   s.require_paths = ["lib".freeze]
   s.authors = ["John Crepezzi".freeze]
-  s.date = "2025-08-21"
+  s.date = "2025-08-25"
   s.email = "john.crepezzi@gmail.com".freeze
   s.files = ["lib/prelude.rb".freeze, "lib/prelude/enumerator.rb".freeze, "lib/prelude/method.rb".freeze, "lib/prelude/preloadable.rb".freeze, "lib/prelude/preloader.rb".freeze, "lib/prelude/version.rb".freeze, "spec/prelude_spec.rb".freeze, "spec/spec_helper.rb".freeze]
   s.licenses = ["MIT".freeze]
