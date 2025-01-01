@@ -3,6 +3,7 @@
 
 class TransferRepositoryOrchestration < RepositoryOrchestration
   include GitHub::Memoizer
+  include Repository::EnterpriseManagedUserMethods
 
   # define a wrapper around RepositoryOrchestration#step
   # to ensure that certain transfer steps have these restrictions in place
@@ -20,6 +21,8 @@ class TransferRepositoryOrchestration < RepositoryOrchestration
   step :validate do
     # disallow transfer when user has blocked repo's owner
     return :skipped if repository.owner.blocked_by?(new_owner)
+
+    return :skipped if creation_blocked_for_repo_in_personal_namespace?(actor, new_owner)
 
     # disallow transfer when user (not organization) owns a repo in the same network
     return :skipped if new_owner.user? && repository.network.find_fork_for(new_owner)

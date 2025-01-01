@@ -2736,9 +2736,12 @@ class Business < ApplicationRecord::Domain::Users
   # include_org_billing_managers - include organization billing managers (not business billing managers), default is true
   #
   # Returns: an array of (de-duplicated) user_id's
-  def admin_and_organization_member_ids(include_org_billing_managers: true)
-    Set.new(owner_ids + billing_manager_ids +
-      business_org_abilities(include_billing_managers: include_org_billing_managers).pluck(:actor_id)).to_a
+  def admin_and_organization_member_ids(actor_ids: nil, include_org_billing_managers: true)
+    abilities = business_org_abilities(actor_ids: actor_ids, include_billing_managers: include_org_billing_managers).pluck(:actor_id)
+
+    ids = Set.new(owner_ids + billing_manager_ids + abilities).to_a
+    return ids & actor_ids if actor_ids
+    ids
   end
 
   # Public: Get the Organizations within the Business where the specified

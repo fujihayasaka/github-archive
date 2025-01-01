@@ -28,6 +28,7 @@ module Search
       const :relocating_shards, Integer
       const :initializing_shards, Integer
       const :unassigned_shards, Integer
+      const :unassigned_primary_shards, T.nilable(Integer)
       const :delayed_unassigned_shards, Integer
       const :number_of_pending_tasks, Integer
       const :number_of_in_flight_fetch, Integer
@@ -46,6 +47,7 @@ module Search
           relocating_shards: relocating_shards,
           initializing_shards: initializing_shards,
           unassigned_shards: unassigned_shards,
+          unassigned_primary_shards: unassigned_primary_shards,
           delayed_unassigned_shards: delayed_unassigned_shards,
           number_of_pending_tasks: number_of_pending_tasks,
           number_of_in_flight_fetch: number_of_in_flight_fetch,
