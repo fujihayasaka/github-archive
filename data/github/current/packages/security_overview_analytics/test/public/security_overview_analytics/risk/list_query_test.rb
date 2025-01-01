@@ -621,66 +621,75 @@ module SecurityOverviewAnalytics
               @org1.repositories.find_by!(name: r.repo_metadata.name).tap do |repo|
                 assert_equal urls.repository_security_overview_path(repo.owner, repo), r.repo_metadata.href
                 assert_equal repo.visibility, r.repo_metadata.visibility
+                assert_equal UrlHelpers.security_center_risk_path(@org1, { query: "is:private" }), r.repo_metadata.visibility_href
                 assert_equal repo.pushed_at, r.repo_metadata.updated_at
               end
             end
           end
         end
 
-        test "does not return results for security features disabled at the instance level" do
-          SecurityCenter::SecurityFeatures.stubs(
-            code_scanning_enabled_for_instance?: false,
-            secret_scanning_enabled_for_instance?: true,
-            dependabot_alerts_enabled_for_instance?: true,
-          )
+        context "for security features disabled at the instance level" do
+          test "does not return results for dependabot" do
+            SecurityCenter::SecurityFeatures.stubs(:dependabot_alerts_enabled_for_instance?).returns(false)
+            UrlHelpers.expects(:repository_alerts_path).never
 
-          assert_queries(count: 6) do
-            ListQuery.for_organization(user: @owner, user_session: @owner_session, organization: @org1, parser: RiskQueryParser.new("")).perform
-          end.tap do |result|
-            result.list_items.each do |r|
-              assert_nil(r.repo_alert_count_map[:code_scanning])
+            assert_queries(count: 6) do
+              ListQuery.for_organization(user: @owner, user_session: @owner_session, organization: @org1, parser: RiskQueryParser.new("")).perform
+            end.tap do |result|
+              result.items.each do |r|
+                assert_nil(r.repo_alert_count_map[:dependabot])
+              end
             end
           end
 
-          SecurityCenter::SecurityFeatures.stubs(
-            code_scanning_enabled_for_instance?: true,
-            secret_scanning_enabled_for_instance?: false,
-            dependabot_alerts_enabled_for_instance?: true,
-          )
+          test "does not return results for code scanning" do
+            SecurityCenter::SecurityFeatures.stubs(:code_scanning_enabled_for_instance?).returns(false)
+            UrlHelpers.expects(:repository_code_scanning_results_path).never
 
-          assert_queries(count: 6) do
-            ListQuery.for_organization(user: @owner, user_session: @owner_session, organization: @org1, parser: RiskQueryParser.new("")).perform
-          end.tap do |result|
-            result.list_items.each do |r|
-              assert_nil(r.repo_alert_count_map[:secret_scanning])
+            assert_queries(count: 6) do
+              ListQuery.for_organization(user: @owner, user_session: @owner_session, organization: @org1, parser: RiskQueryParser.new("")).perform
+            end.tap do |result|
+              result.items.each do |r|
+                assert_nil(r.repo_alert_count_map[:code_scanning])
+              end
             end
           end
 
-          SecurityCenter::SecurityFeatures.stubs(
-            code_scanning_enabled_for_instance?: true,
-            secret_scanning_enabled_for_instance?: true,
-            dependabot_alerts_enabled_for_instance?: false,
-          )
+          test "does not return results for secret scanning" do
+            SecurityCenter::SecurityFeatures.stubs(:secret_scanning_enabled_for_instance?).returns(false)
 
-          assert_queries(count: 6) do
-            ListQuery.for_organization(user: @owner, user_session: @owner_session, organization: @org1, parser: RiskQueryParser.new("")).perform
-          end.tap do |result|
-            result.list_items.each do |r|
-              assert_nil(r.repo_alert_count_map[:dependabot])
+            # We should not attempt to build the URL. If the feature is instance-disabled, the route doesn't actually get loaded.
+            # https://github.com/github/security-center/issues/6633
+            UrlHelpers.expects(:repository_token_scanning_results_path).never
+
+            assert_queries(count: 6) do
+              ListQuery.for_organization(user: @owner, user_session: @owner_session, organization: @org1, parser: RiskQueryParser.new("")).perform
+            end.tap do |result|
+              result.items.each do |r|
+                assert_nil(r.repo_alert_count_map[:secret_scanning])
+              end
             end
           end
 
-          SecurityCenter::SecurityFeatures.stubs(
-            code_scanning_enabled_for_instance?: false,
-            secret_scanning_enabled_for_instance?: false,
-            dependabot_alerts_enabled_for_instance?: false,
-          )
+          test "does not return results for any feature" do
+            SecurityCenter::SecurityFeatures.stubs(
+              dependabot_alerts_enabled_for_instance?: false,
+              code_scanning_enabled_for_instance?: false,
+              secret_scanning_enabled_for_instance?: false,
+            )
 
-          assert_queries(count: 0) do
-            ListQuery.for_organization(user: @owner, user_session: @owner_session, organization: @org1, parser: RiskQueryParser.new("")).perform
-          end.tap do |result|
-            result.list_items.each do |r|
-              assert_empty [], r.repo_alert_count_map.values
+            UrlHelpers.expects(:repository_alerts_path).never
+            UrlHelpers.expects(:repository_code_scanning_results_path).never
+            UrlHelpers.expects(:repository_token_scanning_results_path).never
+
+            assert_queries(count: 0) do
+              ListQuery.for_organization(user: @owner, user_session: @owner_session, organization: @org1, parser: RiskQueryParser.new("")).perform
+            end.tap do |result|
+              result.items.each do |r|
+                assert_nil(r.repo_alert_count_map[:dependabot])
+                assert_nil(r.repo_alert_count_map[:code_scanning])
+                assert_nil(r.repo_alert_count_map[:secret_scanning])
+              end
             end
           end
         end

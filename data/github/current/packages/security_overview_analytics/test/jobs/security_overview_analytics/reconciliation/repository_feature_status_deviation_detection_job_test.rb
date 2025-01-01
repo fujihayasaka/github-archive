@@ -42,6 +42,9 @@ module SecurityOverviewAnalytics
           ::SecurityProduct::VulnerabilityAlerts.any_instance.stubs(:enabled?).returns(true)
           feature_status = create(:security_overview_analytics_feature_status_revision, dependabot_alerts_enabled: false)
 
+          # We do not enqueue the summary job; it will be done as part of remediation
+          UpdateFeatureStatusSummaryJob.expects(:enqueue).never
+
           GitHub.logger.expects(:info).with(
             "Deviation found.",
             has_entries({
@@ -62,6 +65,9 @@ module SecurityOverviewAnalytics
           org = create(:business_plus_organization)
           repo = create(:repository, owner: org)
 
+          # We do not enqueue the summary job; it will be done as part of remediation
+          UpdateFeatureStatusSummaryJob.expects(:enqueue).never
+
           GitHub.logger.expects(:info).with(
             "Deviation found.",
             has_entries({
@@ -81,6 +87,9 @@ module SecurityOverviewAnalytics
         test "does not report deviation if metadata record up to date" do
           feature_status = create(:security_overview_analytics_feature_status_revision)
 
+          # No deviation reported, but we still recalculate the summary
+          UpdateFeatureStatusSummaryJob.expects(:enqueue).once
+
           GitHub.logger.expects(:info).with("Deviation found.", anything).never
           RepositoryFeatureStatusDeviationRemediationJob.expects(:perform_later).with(has_entries(repository_id: feature_status.repository_id)).never
 
@@ -97,6 +106,9 @@ module SecurityOverviewAnalytics
         test "reports and queues remediation if deviation found" do
           ::SecurityProduct::VulnerabilityAlerts.any_instance.stubs(:enabled?).returns(true)
           feature_status = create(:security_overview_analytics_feature_status_revision, dependabot_alerts_enabled: false)
+
+          # We do not enqueue the summary job; it will be done as part of remediation
+          UpdateFeatureStatusSummaryJob.expects(:enqueue).never
 
           GitHub.logger.expects(:info).with(
             "Deviation found.",
@@ -118,6 +130,9 @@ module SecurityOverviewAnalytics
           org = create(:business_plus_organization)
           repo = create(:repository, owner: org)
 
+          # We do not enqueue the summary job; it will be done as part of remediation
+          UpdateFeatureStatusSummaryJob.expects(:enqueue).never
+
           GitHub.logger.expects(:info).with(
             "Deviation found.",
             has_entries({
@@ -136,6 +151,10 @@ module SecurityOverviewAnalytics
 
         test "does not report deviation if metadata record up to date" do
           feature_status = create(:security_overview_analytics_feature_status_revision)
+
+          # No deviation reported, but we still recalculate the summary
+          # Asserting via mock here because the debounce key is already set when creating the FeatureStatusRevision above
+          UpdateFeatureStatusSummaryJob.expects(:enqueue).once
 
           GitHub.logger.expects(:info).with("Deviation found.", anything).never
           RepositoryFeatureStatusDeviationRemediationJob.expects(:perform_later).with(has_entries(repository_id: feature_status.repository_id)).never
@@ -157,6 +176,9 @@ module SecurityOverviewAnalytics
           ::SecurityProduct::VulnerabilityAlerts.any_instance.stubs(:enabled?).returns(true)
           feature_status = create(:security_overview_analytics_feature_status_revision, repository_metadata: user_repo_metadata, dependabot_alerts_enabled: false)
 
+          # We do not enqueue the summary job; it will be done as part of remediation
+          UpdateFeatureStatusSummaryJob.expects(:enqueue).never
+
           GitHub.logger.expects(:info).with(
             "Deviation found.",
             has_entries({
@@ -175,6 +197,9 @@ module SecurityOverviewAnalytics
 
         test "reports and queues remediation if metadata record is missing" do
           repo = create(:repository, owner: @user)
+
+          # We do not enqueue the summary job; it will be done as part of remediation
+          UpdateFeatureStatusSummaryJob.expects(:enqueue).never
 
           GitHub.logger.expects(:info).with(
             "Deviation found.",
@@ -197,6 +222,10 @@ module SecurityOverviewAnalytics
           user_repo_metadata = create(:security_overview_analytics_repository, repository: user_repo)
 
           feature_status = create(:security_overview_analytics_feature_status_revision, repository_metadata: user_repo_metadata)
+
+          # No deviation reported, but we still recalculate the summary
+          # Asserting via mock here because the debounce key is already set when creating the FeatureStatusRevision above
+          UpdateFeatureStatusSummaryJob.expects(:enqueue).once
 
           GitHub.logger.expects(:info).with("Deviation found.", anything).never
           RepositoryFeatureStatusDeviationRemediationJob.expects(:perform_later).with(has_entries(repository_id: feature_status.repository_id)).never

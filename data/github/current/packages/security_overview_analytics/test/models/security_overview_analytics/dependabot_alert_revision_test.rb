@@ -425,6 +425,8 @@ module SecurityOverviewAnalytics
         create(:soa_dependabot_alert_revision, repository_id:, alert_number:, date_id: 20240103, next_revision_date_id: 20240105, alert_severity: :MODERATE)
         create(:soa_dependabot_alert_revision, repository_id:, alert_number:, date_id: 20240105, next_revision_date_id: 99991231, alert_severity: :MODERATE)
 
+        UpdateFeatureStatusSummaryJob.expects(:enqueue).once
+
         assert_equal 3, DependabotAlertRevision.count
         DependabotAlertRevision.update_severities(:CRITICAL, repository_id:, alert_number:)
         assert_equal 3, DependabotAlertRevision.count

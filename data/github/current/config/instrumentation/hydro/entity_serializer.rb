@@ -2584,6 +2584,17 @@ module Hydro
         }
       end
 
+      def ghes_usage_metrics_advisory_db_stats(data)
+        return unless data
+        data.symbolize_keys!
+
+        {
+          vulnerability_sync_enabled: data[:vulnerability_sync_enabled],
+          synced_vulnerability_count: data[:synced_vulnerability_count],
+          latest_updated_at: data[:latest_updated_at]&.to_time&.utc
+        }
+      end
+
       def request_context_for_insights_publishing(github_context)
         context_hash = request_context(github_context) || {}
         context_hash[:request_id] ? context_hash : context_hash.merge({ request_id: SecureRandom.uuid })

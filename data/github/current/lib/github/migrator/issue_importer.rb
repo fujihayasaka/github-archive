@@ -42,7 +42,7 @@ module GitHub
 
       def assignees(attributes)
         assignee_urls(attributes).map do |assignee_url|
-          model_from_source_url!(assignee_url)
+          model_from_source_url(assignee_url)
         end.compact
       end
 

@@ -68,6 +68,23 @@ module SecurityOverviewAnalytics
           end
         end
 
+        test "queues UpdateFeatureStatusSummaryJob after processing" do
+          ::Turboscan::Proto::InsightsClient.any_instance.expects(:get_alerts_for_insights_backfill)
+            .returns(Twirp::ClientResp.new(
+              data: ::Turboscan::Proto::GetAlertsForInsightsBackfillRequestResponse.new(
+                alerts: []
+              )
+            ))
+
+          perform_enqueued_jobs only: CodeScanningAlertsDeviationDetectionJob do
+            BatchedJob.stub_const(:BATCH_SIZE, 1) do
+              CodeScanningAlertsDeviationDetectionJob.perform_later(repository_id: @repo.id)
+            end
+          end
+
+          assert_enqueued_jobs 1, only: UpdateFeatureStatusSummaryJob
+        end
+
         context "when analytics doesn't have a latest revision for the alert" do
           test "it enqueues the alert upsert job" do
             # no revisions

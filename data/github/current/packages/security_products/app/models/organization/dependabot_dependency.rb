@@ -27,6 +27,6 @@ module Organization::DependabotDependency
   end
 
   def grouped_security_updates_available?
-    self.feature_enabled?(:dependabot_grouped_security_updates, memoize: false)
+    true
   end
 end

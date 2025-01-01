@@ -88,9 +88,9 @@ module SecurityOverviewAnalytics
 
           visibility_href = \
             if @scope.is_a?(::Business)
-              UrlHelpers.security_center_coverage_enterprise_path(@scope, { query: @parser.add_or_replace(RiskQueryParser::VISIBILITY, row.visibility) })
+              UrlHelpers.security_center_risk_enterprise_path(@scope, { query: @parser.add_or_replace(RiskQueryParser::VISIBILITY, row.visibility) })
             else
-              UrlHelpers.security_center_coverage_path(@scope, { query: @parser.add_or_replace(RiskQueryParser::VISIBILITY, row.visibility) })
+              UrlHelpers.security_center_risk_path(@scope, { query: @parser.add_or_replace(RiskQueryParser::VISIBILITY, row.visibility) })
             end
 
           repo_locked = locked_repos&.include?(row.repository_id) || false
@@ -108,39 +108,47 @@ module SecurityOverviewAnalytics
             is_advisory_workspace: !!row.repository&.advisory_workspace?,
           )
 
-          feature_summaries = {
-            dependabot_alerts: {
-              status: row.feature_status_summary&.dependabot_alerts_status,
-              alert_count: row.feature_status_summary&.dependabot_alerts_total_count,
-              href: UrlHelpers.repository_alerts_path(row.repository&.owner_display_login, row.repository),
-            },
-            code_scanning: {
-              status: row.feature_status_summary&.code_scanning_alerts_status,
-              alert_count: row.feature_status_summary&.code_scanning_alerts_total_count,
-              href: UrlHelpers.repository_code_scanning_results_path(row.repository&.owner_display_login, row.repository),
-            },
-            secret_scanning: {
-              status: row.feature_status_summary&.secret_scanning_alerts_status,
-              alert_count: row.feature_status_summary&.secret_scanning_alerts_total_count,
-              href: UrlHelpers.repository_token_scanning_results_path(row.repository&.owner_display_login, row.repository),
-            }
-          }
-
           repo_alert_count_map = visible_features.each_with_object({}) do |feature, h|
             # Is the user allowed to see these alerts for this repository?
             next unless can_see_alerts?(row, feature)
             # Does Security Overview support this feature for this repository?
             next unless eligible_for_alerts?(row, feature)
-            # We only show alerts when the feature is enabled
-            next if feature_summaries.dig(feature, :status) == "NOT_ENABLED"
 
-            h[feature] = AlertCountData.new(
-              feature: feature_display_name_for(feature),
-              alert_count: feature_summaries.dig(feature, :alert_count),
-              href: feature_summaries.dig(feature, :href),
-              repo_id: T.must(row.repository_id),
-              repo_locked:,
-            )
+            case feature
+            when :dependabot_alerts
+              # # We only show alerts when the feature is enabled
+              next if row.feature_status_summary&.dependabot_alerts_status == "NOT_ENABLED"
+
+              h[feature] = AlertCountData.new(
+                feature: feature_display_name_for(feature),
+                alert_count: row.feature_status_summary&.dependabot_alerts_total_count || 0,
+                href: UrlHelpers.repository_alerts_path(row.repository&.owner_display_login, row.repository),
+                repo_id: T.must(row.repository_id),
+                repo_locked:,
+              )
+            when :code_scanning
+              # # We only show alerts when the feature is enabled
+              next if row.feature_status_summary&.code_scanning_alerts_status == "NOT_ENABLED"
+
+              h[feature] = AlertCountData.new(
+                feature: feature_display_name_for(feature),
+                alert_count: row.feature_status_summary&.code_scanning_alerts_total_count || 0,
+                href: UrlHelpers.repository_code_scanning_results_path(row.repository&.owner_display_login, row.repository),
+                repo_id: T.must(row.repository_id),
+                repo_locked:,
+              )
+            when :secret_scanning
+              # # We only show alerts when the feature is enabled
+              next if row.feature_status_summary&.secret_scanning_alerts_status == "NOT_ENABLED"
+
+              h[feature] = AlertCountData.new(
+                feature: feature_display_name_for(feature),
+                alert_count: row.feature_status_summary&.secret_scanning_alerts_total_count || 0,
+                href: UrlHelpers.repository_token_scanning_results_path(row.repository&.owner_display_login, row.repository),
+                repo_id: T.must(row.repository_id),
+                repo_locked:,
+              )
+            end
           end
 
           Item.new(

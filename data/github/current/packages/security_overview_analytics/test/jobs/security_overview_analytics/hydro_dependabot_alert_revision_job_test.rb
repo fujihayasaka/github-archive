@@ -138,6 +138,7 @@ module SecurityOverviewAnalytics
         create(:soa_dependabot_alert_revision, date:, repository_metadata: repo_metadata, alert_number: 102, alert_severity: @vulnerability.severity)
 
         assert_equal 3, DependabotAlertRevision.where(alert_severity: @vulnerability.severity).count
+        UpdateFeatureStatusSummaryJob.expects(:enqueue).once
 
         assert_query_count_per_table({
           soa_dependabot_alert_revisions: 2, # 1 SELECT check for exists, 1 SELECT for update
@@ -244,7 +245,9 @@ module SecurityOverviewAnalytics
     context "when alerts being withdrawn" do
       test "delete alert revisions on withdraw event" do
         create(:soa_dependabot_alert_revision, repository: @repo, alert_number: @alert.number)
+
         assert_equal 1, DependabotAlertRevision.count
+        UpdateFeatureStatusSummaryJob.expects(:enqueue).once
 
         assert_query_count_per_table({
           soa_dependabot_alert_revisions: 2, # 1 SELECT check for exists, 1 DELETE

@@ -368,6 +368,18 @@ module SecurityOverviewAnalytics
           end
         end
 
+        test "queues UpdateFeatureStatusSummaryJob after processing" do
+          create_list(:repository_vulnerability_alert, 3, repository: @repo)
+
+          perform_enqueued_jobs only: DependabotAlertsDeviationDetectionJob do
+            BatchedJob.stub_const(:BATCH_SIZE, 1) do
+              DependabotAlertsDeviationDetectionJob.perform_later(repository_id: @repo.id)
+            end
+          end
+
+          assert_enqueued_jobs 1, only: UpdateFeatureStatusSummaryJob
+        end
+
         context "when alert is withdrawn" do
           test "it does nothing if no revisions exist" do
             alert = create(:repository_vulnerability_alert,

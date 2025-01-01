@@ -99,6 +99,16 @@ module SecurityOverviewAnalytics
           end
 
           if types_to_delete.include?(Initialization::Type::RepositoryMetadata)
+            # If we're deleting the repository metadata, also delete the 1:1 feature status rollup record
+            ::SecurityOverviewAnalytics::FeatureStatus
+              .where(repository_id: soa_repo_batch)
+              .in_batches do |rev_batch|
+                ::SecurityOverviewAnalytics::FeatureStatus.throttle_writes_with_retry do
+                  rev_batch.delete_all
+                  GitHub.dogstats.count("security_overview_analytics.reset.feature_status_summary.deleted", rev_batch.size)
+                end
+              end
+
             ::SecurityOverviewAnalytics::Repository.throttle_writes_with_retry do
               soa_repo_batch.delete_all
 

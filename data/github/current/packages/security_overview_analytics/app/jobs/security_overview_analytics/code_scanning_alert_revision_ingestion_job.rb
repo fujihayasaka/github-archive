@@ -57,6 +57,9 @@ module SecurityOverviewAnalytics
           alert_number:,
           alert_id:,
         )
+
+        # Recalculate rollup stats after purging a bunch of alert/revision data
+        UpdateFeatureStatusSummaryJob.enqueue(repository_id:)
       else
         CodeScanningAlertRevision.throttle_writes_with_retry do
           CodeScanningAlertRevision.upsert_revision(

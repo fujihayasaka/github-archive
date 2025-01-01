@@ -296,6 +296,21 @@ module SecurityOverviewAnalytics
 
           assert_dogstats_increment 1, "security_overview_analytics.code_scanning.alert_without_number"
         end
+
+        test "it enqueues UpdateFeatureStatusSummaryJob" do
+          CodeScanningAlertRevisionIngestionJob.perform_now(
+            alert: TurboscanInsightsAlert.new(
+              repository_id: @repo.id,
+              id: 111,
+              number: 30,
+            ),
+            event_time: @now,
+            deleted: true,
+            source_event: "security_overview_analytics.test",
+          )
+
+          assert_enqueued_jobs 1, only: UpdateFeatureStatusSummaryJob
+        end
       end
 
       context "when payload does not contain repository_id" do

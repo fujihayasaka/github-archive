@@ -1,10 +1,15 @@
 # rubocop:disable Style/FrozenStringLiteralComment
 # typed: true
 
+require "fileutils"
 require "gitrpc/experiment"
 
 module GitRPC
   class Backend
+    HAS_CONFLICTS_EXIT_STATUS = 1
+    TOO_MANY_COMMITS_EXIT_STATUS = 157
+    DIE_EXIT_STATUS = 128
+
     class RebaseTimeout < Timeout
     end
 
@@ -19,6 +24,8 @@ module GitRPC
 
     rpc_writer :rebase
     def rebase(commit_oid, upstream_commit_oid, committer, options = {})
+      tmpdir = create_custom_tmpdir(self.path, "objects/tmp_objdir-rebase-")
+
       env = {}
       env["GIT_COMMITTER_NAME"] = committer["name"]
       env["GIT_COMMITTER_EMAIL"] = committer["email"]
@@ -29,8 +36,11 @@ module GitRPC
       extra_git_options.push("-c", "pack.tmpObjDir.keepUnpackedThreshold=#{options[:keep_unpacked_threshold]}") if options[:keep_unpacked_threshold]
       extra_git_options.push("-c", "replay.maxLooseObjectsWritten=#{options[:max_loose_objects_written]}") if options[:max_loose_objects_written]
 
+      too_many_commits = 100
       extra_options = []
       extra_options.push("--use-tmp-objdir=#{options[:use_tmp_objdir_mode]}") if options[:use_tmp_objdir_mode]
+      extra_options.push("--tmp-objdir-location=#{tmpdir}")
+      extra_options.push("--short-circuit-bloated-rebases=#{too_many_commits}") if options[:short_circuit_bloated_rebases]
 
       diff_algorithm = options[:use_histogram_diff] ? [] : ["--diff-algorithm=default"]
       result = spawn_git(
@@ -97,10 +107,13 @@ module GitRPC
         output
       else
         raise RebaseTimeout if result["err"] =~ /(^|\n)fatal: Too many objects/
+        raise GitRPC::CommandFailed.new(result) if result["status"] != HAS_CONFLICTS_EXIT_STATUS && result["status"] != TOO_MANY_COMMITS_EXIT_STATUS && result["status"] != DIE_EXIT_STATUS
         nil
       end
     rescue GitRPC::Timeout
       fail RebaseTimeout
+    ensure
+      FileUtils.rm_rf(tmpdir) if tmpdir && File.exist?(tmpdir)
     end
   end
 end

@@ -20,6 +20,7 @@ module SecurityOverviewAnalytics
       @biz_1_org_2 = create(:organization, business: @biz_1)
       @biz_1_org_1_repo_1 = create(:private_repository, owner: @biz_1_org_1)
       @biz_1_org_1_soa_repo_1 = create(:security_overview_analytics_repository, repository: @biz_1_org_1_repo_1)
+      create(:soa_feature_status, repository_metadata: @biz_1_org_1_soa_repo_1)
 
       # Create a revision of each type for each date
       @dates.reduce(Date::FUTURE_DATE_ID) do |next_date_id, date|
@@ -59,6 +60,7 @@ module SecurityOverviewAnalytics
         @biz_2_org_2 = create(:organization, business: @biz_2)
         @biz_2_org_1_repo_1 = create(:private_repository, owner: @biz_2_org_1)
         @biz_2_org_1_soa_repo_1 = create(:security_overview_analytics_repository, repository: @biz_2_org_1_repo_1)
+        create(:soa_feature_status, repository_metadata: @biz_2_org_1_soa_repo_1)
 
         # Create a revision of each type for each date
         @dates.reduce(Date::FUTURE_DATE_ID) do |next_date_id, date|
@@ -238,6 +240,24 @@ module SecurityOverviewAnalytics
 
         # Assert data for other orgs are unaffected.
         assert(::SecurityOverviewAnalytics::FeatureStatusRevision.count > 0)
+      end
+
+      test "it deletes feature status summary for the provided organizations" do
+        assert_changes(
+          -> do
+            ::SecurityOverviewAnalytics::FeatureStatus
+              .includes(:repository_metadata)
+              .where(repository_metadata: { organization_id: [@biz_1_org_1.id] })
+              .size
+          end,
+          from: 1,
+          to: 0
+        ) do
+          DeletionHelper.delete_all_for_organizations(organization_ids: [@biz_1_org_1.id])
+        end
+
+        # Assert data for other orgs are unaffected.
+        assert(::SecurityOverviewAnalytics::FeatureStatus.count > 0)
       end
 
       test "it deletes repo metadata for the provided organizations" do

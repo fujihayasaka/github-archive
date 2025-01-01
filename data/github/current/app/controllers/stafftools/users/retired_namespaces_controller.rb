@@ -6,6 +6,8 @@ class Stafftools::Users::RetiredNamespacesController < Stafftools::UsersControll
   skip_before_action :enterprise_required
   skip_before_action :ensure_user_exists
 
+  layout :retired_namespaces_layout
+
   depends_on_clusters ApplicationRecord::Mysql1,
     ApplicationRecord::IamAbilities,
     ApplicationRecord::Ballast,
@@ -68,6 +70,12 @@ class Stafftools::Users::RetiredNamespacesController < Stafftools::UsersControll
   end
 
   private
+
+  def retired_namespaces_layout
+    if this_user.present?
+      overview_layout
+    end
+  end
 
   def ensure_this_namespace
     return render_404 unless this_namespace.present?

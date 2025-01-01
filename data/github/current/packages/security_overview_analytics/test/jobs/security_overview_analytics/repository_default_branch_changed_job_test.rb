@@ -46,6 +46,14 @@ module SecurityOverviewAnalytics
         GitHub.dogstats.count("security_overview_analytics.reset.code_scanning_alert_revisions.deleted", target_alert_count)
       end
 
+      test "enqueues summary rollup job for the repo repo" do
+        TenantValidationHelper.stubs(:is_owner_in_scope?).returns(true)
+
+        RepositoryDefaultBranchChangedJob.perform_now(repository_id: @repo.id)
+
+        assert_enqueued_jobs 1, only: UpdateFeatureStatusSummaryJob
+      end
+
       test "enqueues backfill job for the repo" do
         TenantValidationHelper.stubs(:is_owner_in_scope?).returns(true)
 

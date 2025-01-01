@@ -1,5 +1,6 @@
 # rubocop:disable Style/FrozenStringLiteralComment
 require "fileutils"
+require "securerandom"
 
 # RPC calls for creating and initializing repositories and poking around
 # inside the repository directory's files.
@@ -74,6 +75,31 @@ module GitRPC
     rpc_reader :exist?, no_git_repo: true
     def exist?
       !!File.exist?("#{path}/config")
+    end
+
+    # Public: create a custom tmpdir within the repository
+    #
+    # Creates a temporary directory under parent_dir/prefix-XXXXXX, and
+    # returns the path to that directory.
+    #
+    # While similar ruby's Dir.mktempdir, that function does not allow
+    # controlling the template and the number of alphanumeric characters
+    # in the temporary directory name.  Since git janitor and other places
+    # expect 6 alphanumeric characters, we have this function in order to
+    # mimic what C's mkdtemp would have done with a "...-XXXXXX" template.
+    #
+    def create_custom_tmpdir(parent_dir, prefix)
+      loop do
+        suffix = SecureRandom.alphanumeric(6)  # six alphanumeric characters
+        tmpdir = File.join(parent_dir, "#{prefix}#{suffix}")
+
+        begin
+          Dir.mkdir(tmpdir)  # Try to create the directory
+          return tmpdir  # Success: return the directory path
+        rescue Errno::EEXIST
+          # If the directory exists, retry with a new suffix
+        end
+      end
     end
 
     # Public: Ensure that a directory exists, creating it if necessary.

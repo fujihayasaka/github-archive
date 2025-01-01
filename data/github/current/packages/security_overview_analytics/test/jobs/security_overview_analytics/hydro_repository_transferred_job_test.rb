@@ -29,7 +29,9 @@ module SecurityOverviewAnalytics
       @user_repo = create(:private_repository, owner: @user_1_in_scope, force_user_owned: true)
 
       @soa_repo = create(:security_overview_analytics_repository, repository: @repo)
+      create(:soa_feature_status, repository_metadata: @soa_repo)
       @user_soa_repo = create(:security_overview_analytics_repository, repository: @user_repo)
+      create(:soa_feature_status, repository_metadata: @user_soa_repo)
     end
 
     setup do
@@ -55,6 +57,17 @@ module SecurityOverviewAnalytics
             perform_hydro_message_job(message, schema: @schema, queue: @queue)
           end
         end
+
+        test "it deletes the row in soa_feature_statuses" do
+          assert_changes(
+            -> { ::SecurityOverviewAnalytics::FeatureStatus.count },
+            from: ::SecurityOverviewAnalytics::FeatureStatus.count,
+            to: ::SecurityOverviewAnalytics::FeatureStatus.count - 1
+          ) do
+            message = make_message(repo: @repo, previous_owner: @org_1_in_scope, new_owner: @org_1_not_in_scope)
+            perform_hydro_message_job(message, schema: @schema, queue: @queue)
+          end
+        end
       end
 
       context "when a row matching the user repo exists in soa_repositories" do
@@ -63,6 +76,20 @@ module SecurityOverviewAnalytics
             -> { ::SecurityOverviewAnalytics::Repository.count },
             from: ::SecurityOverviewAnalytics::Repository.count,
             to: ::SecurityOverviewAnalytics::Repository.count - 1
+          ) do
+            # This is a theoretical scenario, as in practice users that are in scope
+            # can't transfer repos out of scope, as the only two supported scenarios
+            # are GHES and EMU users - both are always staying in scope, and can't transfer repos out of scope.
+            message = make_message(repo: @user_repo, previous_owner: @user_1_in_scope, new_owner: @org_1_not_in_scope)
+            perform_hydro_message_job(message, schema: @schema, queue: @queue)
+          end
+        end
+
+        test "it deletes the row in soa_feature_statuses" do
+          assert_changes(
+            -> { ::SecurityOverviewAnalytics::FeatureStatus.count },
+            from: ::SecurityOverviewAnalytics::FeatureStatus.count,
+            to: ::SecurityOverviewAnalytics::FeatureStatus.count - 1
           ) do
             # This is a theoretical scenario, as in practice users that are in scope
             # can't transfer repos out of scope, as the only two supported scenarios

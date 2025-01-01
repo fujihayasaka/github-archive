@@ -940,6 +940,22 @@ module SecurityOverviewAnalytics
                 end
               end
             end
+
+            test "queues UpdateFeatureStatusSummaryJob after processing" do
+              GitHub::TokenScanning::Service::Client.any_instance.expects(:get_alerts_for_insights_backfill)
+                .returns(Twirp::ClientResp.new(
+                  error: nil,
+                  data: SecretScanningBackfillResponse.new({ Alerts: [] })
+                ))
+
+              perform_enqueued_jobs only: SecretScanningAlertsDeviationDetectionJob do
+                BatchedJob.stub_const(:BATCH_SIZE, 1) do
+                  SecretScanningAlertsDeviationDetectionJob.perform_later(repository_id: @repo.id)
+                end
+              end
+
+              assert_enqueued_jobs 1, only: UpdateFeatureStatusSummaryJob
+            end
           end
         end
 

@@ -111,6 +111,9 @@ module SecurityOverviewAnalytics
         ).delete_all
       end
 
+      # Recalculate rollup stats after purging a bunch of alert/revision data
+      UpdateFeatureStatusSummaryJob.enqueue(repository_id: event.repository_id)
+
       instrument_withdraw_event_processed(deleted_rows:)
     end
 
@@ -124,6 +127,9 @@ module SecurityOverviewAnalytics
           .where(repository_id: event.repository_id, alert_number: event.repository_vulnerability_alert_number)
           .update_all(**update_payload)
       end
+
+      # Recalculate rollup stats after purging a bunch of alert/revision data
+      UpdateFeatureStatusSummaryJob.enqueue(repository_id: event.repository_id)
 
       instrument_vulnerability_update_event_processed(updated_rows:)
     end

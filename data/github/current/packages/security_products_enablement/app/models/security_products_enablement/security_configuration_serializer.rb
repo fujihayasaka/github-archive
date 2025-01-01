@@ -66,10 +66,16 @@ module SecurityProductsEnablement
                 _dirty: false,
               }
               if reviewer.reviewer_type == :TEAM
-                ret[:name] = Team.find(reviewer.reviewer_id).name
+                team = Team.find_by(id: reviewer.reviewer_id)
+                if team
+                  ret[:name] = team.name || ""
+                end
                 ret[:actorType] = "Team"
               else
-                ret[:name] = Role.find(reviewer.reviewer_id).name
+                role = Role.find_by(id: reviewer.reviewer_id)
+                if role
+                  ret[:name] = role.name || ""
+                end
                 ret[:actorType] = "RepositoryRole"
               end
               ret

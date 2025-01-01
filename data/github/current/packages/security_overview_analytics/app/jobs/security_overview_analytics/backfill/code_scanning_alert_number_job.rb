@@ -274,6 +274,14 @@ module SecurityOverviewAnalytics
       clear_lock
     end
 
+    sig { override.params(finished_successfully: T::Boolean, repository_id: Integer, kwargs: T.untyped).returns(T.untyped) }
+    def ensure_perform(finished_successfully:, repository_id:, **kwargs)
+      return unless finished_successfully
+
+      # Recalculate rollup stats after purging a bunch of alert/revision data
+      UpdateFeatureStatusSummaryJob.enqueue(repository_id:)
+    end
+
     sig { override.returns(T::Hash[Symbol, T.untyped]) }
     def failbot_context
       super.merge({ app: "github-security-center" })

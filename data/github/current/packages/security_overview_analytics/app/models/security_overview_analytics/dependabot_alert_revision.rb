@@ -244,6 +244,9 @@ module SecurityOverviewAnalytics
         DependabotAlertRevision.where(repository_id:, alert_number:).update_all(**updates)
       end
 
+      # Recalculate rollup stats after touching a bunch of alert/revision data
+      UpdateFeatureStatusSummaryJob.enqueue(repository_id:)
+
       GitHub.dogstats.count("security_overview_analytics.dependabot_alert_revisions.severities_updated", rows_updated)
     end
 

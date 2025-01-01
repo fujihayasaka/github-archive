@@ -47,7 +47,23 @@ module GitHub::Unsullied
         next unless asset
 
         new_url = rewrite_url_asset(asset)
-        @cached.html.gsub!(url, new_url)
+        if GitHub.flipper[:wiki_asset_url_rewriter_fix].enabled?
+          # Use a regex pattern that can match the URL with potential query parameters
+          # like extract_urls_from_text, this captures both canonical and signed versions of the URL
+          escaped_url = Regexp.escape(url)
+          url_pattern = Regexp.new("#{escaped_url}(\\?[^\"'\\s]*)?")
+          @cached.html.gsub!(url_pattern) do |match|
+            # A url with query parameters and the same without query parameters is scanned as two different URLs,
+            # so we need to check if the match is the same as the original URL to avoid replacing it twice
+            if match.size == url.size
+              new_url
+            else
+              match
+            end
+          end
+        else
+          @cached.html.gsub!(url, new_url)
+        end
       end
 
       @cached.html = GitHub::HTML::Result.to_html({ output: @cached.html, html_safe: true })

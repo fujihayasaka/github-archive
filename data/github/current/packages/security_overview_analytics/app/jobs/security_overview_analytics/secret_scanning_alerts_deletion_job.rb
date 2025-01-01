@@ -34,6 +34,9 @@ module SecurityOverviewAnalytics
 
       SecretScanningAlertRevision.delete_alerts(repository_id:, alert_numbers:)
 
+      # Recalculate rollup stats after purging a bunch of alert/revision data
+      UpdateFeatureStatusSummaryJob.enqueue(repository_id:)
+
       GitHub.logger.info(
         "Repository alerts deleted",
         "code.namespace": self.class.name,
@@ -92,22 +95,7 @@ module SecurityOverviewAnalytics
         return false
       end
 
-      unless repository.owner&.organization? || repository.owner&.is_enterprise_managed?
-        GitHub.logger.info(
-          "Alerts deletion skipped.",
-          "code.namespace": self.class.name,
-          "code.function": __method__,
-          "gh.security_overview_analytics.job.reason": "Not org or EMU owned repository.",
-        )
-        GitHub.dogstats.increment(
-          "security_overview_analytics.secret_scanning_alerts_deletion.skipped",
-          tags: all_stats_tags + ["reason:not_org_or_emu_owned_repo"]
-        )
-        return false
-      end
-
-      owner = T.must(repository.owner)
-      unless TenantValidationHelper.is_owner_in_scope?(owner)
+      unless TenantValidationHelper.should_handle_secret_scanning_alert_events?(repository.owner)
         GitHub.logger.info(
           "Alerts deletion skipped.",
           "code.namespace": self.class.name,

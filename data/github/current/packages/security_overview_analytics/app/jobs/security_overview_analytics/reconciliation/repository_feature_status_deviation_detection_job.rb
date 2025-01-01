@@ -268,7 +268,12 @@ module SecurityOverviewAnalytics
             synced_repository_ids << repository_id
 
             deviations = synced_data.find_deviations
-            next unless deviations.any?
+            unless deviations.any?
+              # If we didn't find any deviations, recalculate our rollup anyway
+              # If we _did_ find deviations, this will get queued after the remediation job
+              UpdateFeatureStatusSummaryJob.enqueue(repository_id:)
+              next
+            end
 
             report_deviation(repository_id:, deviations:)
             queue_deviation_remediation(repository_id:)

@@ -270,9 +270,14 @@ module SecurityOverviewAnalytics
 
       sig { override.params(finished_successfully: T::Boolean, options: T.untyped).returns(T.untyped) }
       def ensure_perform(finished_successfully:, **options)
-        if finished_successfully && !GitHub.enterprise?
+        return unless finished_successfully
+
+        unless GitHub.enterprise?
           PostReconciliationRepoDeviationCountsJob.perform_with_delay(repository_id:, owner_id:, feature: "secret-scanning")
         end
+
+        # Even if we didn't correct any data, recalculate our rollup anyway
+        UpdateFeatureStatusSummaryJob.enqueue(repository_id:)
       end
 
       protected

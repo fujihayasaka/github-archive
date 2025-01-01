@@ -112,7 +112,6 @@ function bootstrap_snek_env {
   done
 
   bt_init
-  trap finish EXIT HUP INT QUIT PIPE TERM
 
   cd "$(dirname "$0")/.."
   # Exit on `enterprise-X.Y-release` and `enterprise-X.Y-backport-*` branches.
@@ -120,6 +119,8 @@ function bootstrap_snek_env {
     echo "No-op on an enterprise release/backport branch"
     exit 0
   fi
+
+  trap finish EXIT HUP INT QUIT PIPE TERM
 
   # setup environment
   setup_common_env

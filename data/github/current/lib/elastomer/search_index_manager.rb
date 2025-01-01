@@ -621,24 +621,29 @@ module Elastomer
     def _create_index(name:, cluster:, metadata:, version:, mappings: {}, settings: {}, aliases: {})
       client = Elastomer.router.client(cluster)
       index  = client.index(name)
-      return if index.exists?
-
-      # create the index in Elasticsearch and wait for the cluster health to report green
-      response = index.create(mappings: mappings, settings: settings, aliases: aliases)
-      client.cluster.health \
+      exists = index.exists?
+      if !exists
+        # create the index in Elasticsearch and wait for the cluster health to report green
+        response = index.create(mappings: mappings, settings: settings, aliases: aliases)
+        client.cluster.health \
           index: name,
           wait_for_status: "green",
           timeout: "7s",
           read_timeout: 9
+      end
 
       # now update our IndexConfig in the MySQL table so we know about this new index
-      config = Elastomer::Router::IndexConfig.new \
-          name:    name,
-          cluster: cluster,
-          version: version
+      if Elastomer.router.get_index_config(name).nil?
+        config = Elastomer::Router::IndexConfig.new \
+            name:    name,
+            cluster: cluster,
+            version: version
 
-      config.update!(metadata)
-      Elastomer.router.update_index_config(config)
+        config.update!(metadata)
+        Elastomer.router.update_index_config(config)
+      else
+        return if exists
+      end
 
       GitHub.dogstats.event \
         "Search index created: #{name.inspect}",

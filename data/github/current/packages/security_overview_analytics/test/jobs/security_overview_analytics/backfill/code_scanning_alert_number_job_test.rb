@@ -208,6 +208,13 @@ module SecurityOverviewAnalytics
       Backfill::CodeScanningAlertNumberJob.perform_now(repository_id: @repo_not_backfilled.id)
     end
 
+    test "it enqueues UpdateFeatureStatusSummaryJob" do
+      setup_ts_request(@repo_backfilled)
+      Backfill::CodeScanningAlertNumberJob.perform_now(repository_id: @repo_backfilled.id)
+
+      assert_enqueued_jobs 1, only: UpdateFeatureStatusSummaryJob
+    end
+
     context "when repo contains duplicated revisions" do
       test "it replays duplicated revisions and cleans up duplicated entries" do
         numbers_before = CodeScanningAlertRevision

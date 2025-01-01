@@ -10,7 +10,7 @@ class WebSocketsController < ApplicationController
   before_action :login_required
 
   # limit requests for both endpoints to 100 per minute
-  rate_limit_requests(max: 100, ttl: 1.minute, at_limit: :at_limit, key: :rate_limit_key_by_ip)
+  rate_limit_requests(max: 100, ttl: 1.minute, at_limit: :at_limit, key: :rate_limit_key_by_ip, if: :request_is_rate_limited?)
 
   depends_on_clusters ApplicationRecord::Mysql1,
     ApplicationRecord::Collab,
@@ -31,5 +31,9 @@ class WebSocketsController < ApplicationController
 
   def at_limit
     GitHub.dogstats.increment("web_sockets_controller.rate_limit.reached", tags: ["action:#{action_name}"])
+  end
+
+  def request_is_rate_limited?
+    !GitHub.single_tenant_enterprise?
   end
 end

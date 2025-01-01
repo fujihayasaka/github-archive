@@ -144,22 +144,7 @@ module SecurityOverviewAnalytics
         return false
       end
 
-      unless repository.owner&.organization? || repository.owner&.is_enterprise_managed?
-        GitHub.logger.info(
-          "Data ingestion skipped.",
-          "code.namespace": self.class.name,
-          "code.function": __method__,
-          "gh.security_overview_analytics.job.reason": "Not org or EMU owned repository.",
-        )
-        GitHub.dogstats.increment(
-          "security_overview_analytics.secret_scanning_alert_revision_ingestion.skipped",
-          tags: all_stats_tags + ["reason:not_org_or_emu_owned_repo"]
-        )
-        return false
-      end
-
-      owner = T.must(repository.owner)
-      unless TenantValidationHelper.is_owner_in_scope?(owner)
+      unless TenantValidationHelper.should_handle_secret_scanning_alert_events?(repository.owner)
         GitHub.logger.info(
           "Data ingestion skipped.",
           "code.namespace": self.class.name,

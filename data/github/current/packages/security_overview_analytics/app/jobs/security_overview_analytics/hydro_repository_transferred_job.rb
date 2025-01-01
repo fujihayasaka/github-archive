@@ -70,6 +70,9 @@ module SecurityOverviewAnalytics
       SecurityOverviewAnalytics::Repository.throttle_writes do
         SecurityOverviewAnalytics::Repository.where(repository_id:).delete_all
       end
+      SecurityOverviewAnalytics::FeatureStatus.throttle_writes do
+        SecurityOverviewAnalytics::FeatureStatus.where(repository_id:).delete_all
+      end
     end
 
     sig { void }

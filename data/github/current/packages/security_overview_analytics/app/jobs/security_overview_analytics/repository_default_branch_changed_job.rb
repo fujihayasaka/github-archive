@@ -36,6 +36,9 @@ module SecurityOverviewAnalytics
         end
       end
 
+      # Recalculate rollup stats after purging a bunch of alert/revision data
+      UpdateFeatureStatusSummaryJob.enqueue(repository_id:)
+
       # queue for re-backfill
       # wait an arbitrary amount of time for code scanning to be notified of the default branch change
       Initialization::Repositories::CodeScanningAlertsJob.

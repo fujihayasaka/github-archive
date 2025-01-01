@@ -177,15 +177,8 @@ module Dependabot
     end
   end
 
-  def self.grouped_security_updates_available_for?(actor)
-    return true if GitHub.flipper[:dependabot_grouped_security_updates].enabled?
-    return true if GitHub.flipper[:dependabot_grouped_security_updates].enabled?(actor)
-
-    if actor.respond_to?(:owner)
-      return true if GitHub.flipper[:dependabot_grouped_security_updates].enabled?(actor.owner)
-    end
-
-    false
+  def self.grouped_security_updates_available_for?(_actor)
+    true
   end
 
   def self.dependabot_on_actions_available_for?(actor)
