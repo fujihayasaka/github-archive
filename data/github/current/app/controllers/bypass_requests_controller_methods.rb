@@ -218,8 +218,14 @@ module BypassRequestsControllerMethods
       return render_404
     end
 
+    payload = exemption_request_payload(exemption_request, current_user, responses: exemption_request.responses)
+    # The payload is nil when the request's resource owner (e.g. its rule suite) no longer exists,
+    # leaving nothing to render. Return 404 instead of rendering an empty React app that crashes
+    # on the client.
+    return render_404 if payload.nil?
+
     render_react_app(
-      payload: exemption_request_payload(exemption_request, current_user, responses: exemption_request.responses),
+      payload:,
       app_payload_generator: -> { Exemptions::ReactPayload.app_payload(current_source, exemption_request.request_type, is_stafftools: stafftools?) },
       title: REQUEST_TYPES[exemption_request.request_type],
     )

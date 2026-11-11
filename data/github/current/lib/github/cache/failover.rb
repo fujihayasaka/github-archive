@@ -276,12 +276,22 @@ module GitHub
       # multigets need special logic. if we get back a nil, fall back to
       # individual `get_multi` calls.
       def get_multi(keys, raw = false)
+        unmarshal_failure = false
         begin
           result = failover { super(keys, raw) }
           return result if result
         rescue => boom # rubocop:todo Lint/RescueException
           raise if raw || !GitHub::Cache.unmarshal_error?(boom)
+          unmarshal_failure = true
         end
+
+        # When only a single server is configured (e.g. a standalone appliance),
+        # a batch failure caused by the server being unavailable cannot be
+        # recovered by re-fetching each key: there is no other host to route to,
+        # so the per-key fallback only re-raises the same error N times and
+        # amplifies logging. Bail out with an empty result. Unmarshal errors still
+        # fall through so their broken keys get cleaned up below.
+        return {} if single_server? && !unmarshal_failure
 
         # If we did get here, we failed loading all keys in one batch,
         # either due to some memcache error or due to an unmarshal error.
@@ -299,14 +309,20 @@ module GitHub
       end
 
       def async_get_multi(keys, raw = false)
+        unmarshal_failure = false
         p = perform_failover_async { super(keys, raw) }
         p = p.rescue do |err|
           raise err if raw || !GitHub::Cache.unmarshal_error?(err)
+          unmarshal_failure = true
           nil
         end
 
         p.then do |result|
           next result if result
+
+          # See get_multi: on a single-server deployment a server-down batch
+          # failure cannot be recovered per-key and only amplifies logging.
+          next({}) if single_server? && !unmarshal_failure
 
           # If we did get here, we failed loading all keys in one batch,
           # either due to some memcache error or due to an unmarshal error.
@@ -508,6 +524,19 @@ module GitHub
         end
 
         [evicted_server, evicted_server_count]
+      end
+
+      # Whether only a single memcached server is configured. On such a
+      # deployment there is no failover peer, so a batch failure caused by the
+      # server being unavailable cannot be recovered by the per-key get_multi
+      # fallback and would only re-raise the same error once per key.
+      memoize def single_server?
+        return false unless respond_to?(:servers)
+
+        srv = servers
+        srv.respond_to?(:size) && srv.size == 1
+      rescue Memcached::Error
+        false
       end
 
       memoize def sample_error?

@@ -27,7 +27,9 @@ module GitHub
 
       sig { params(partition: Symbol, sites: T.nilable(T::Array[String])).returns(T::Hash[Symbol, T.untyped]) }
       def for_partition(partition, sites: nil)
-        config = partition_config(partition).merge({ servers: servers(partition:, sites:) })
+        server_list = servers(partition:, sites:)
+        config = partition_config(partition).merge({ servers: server_list })
+        config = config.merge(single_server_overrides(server_list))
 
         return config.merge(@overrides) if @overrides
 
@@ -39,6 +41,24 @@ module GitHub
       end
 
       private
+
+      # When only a single memcached server is configured on a standalone GHES
+      # appliance, disable dead-host marking. libmemcached only marks a host dead
+      # when server_failure_limit is non-zero AND retry_timeout is set; setting
+      # server_failure_limit to 0 prevents Memcached::ServerIsMarkedDead from ever
+      # being raised. With no failover peer, ejecting the sole host only produces a
+      # ~retry_timeout window where every op raises and the get_multi fallback
+      # amplifies logging. Slow ops instead surface as retryable timeouts that are
+      # swallowed (cache miss). Gated ON by default so it needs no ghe-config key on
+      # the appliance; set GITHUB_MEMCACHED_SINGLE_SERVER_NO_EJECT=0 to opt out.
+      sig { params(server_list: T::Array[String]).returns(T::Hash[Symbol, T.untyped]) }
+      def single_server_overrides(server_list)
+        return {} unless environment == Environment::Enterprise
+        return {} unless server_list.is_a?(Array) && server_list.size == 1
+        return {} unless ENV.fetch("GITHUB_MEMCACHED_SINGLE_SERVER_NO_EJECT", "1") == "1"
+
+        { server_failure_limit: 0, auto_eject_hosts: false }
+      end
 
       sig { returns(T::Hash[String, T.untyped]) }
       def env_config
