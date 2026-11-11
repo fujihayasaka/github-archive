@@ -21,13 +21,13 @@ module IssueEvents
     # Export all issue events for a given repository.
     sig { params(pagination: GH::Pagination::Base, repository_id: Integer).returns(GH::Domain::Collection[IssueEvent]) }
     def for_export(pagination:, repository_id:)
-      scope = ::IssueEvent.where(repository_id:)
+      scope = ::IssueEvent.where(repository_id:).joins(:issue_event_detail)
 
       sorts = [
         # ascending, to avoid duplicates
-        GH::Pagination::Sort.new(field: "created_at", direction: GH::Pagination::Sort::Direction::ASC),
+        GH::Pagination::Sort.new(field: "issue_events.created_at", direction: GH::Pagination::Sort::Direction::ASC),
         # by ID in the end, so that we can trust our order even in highly concurrent environments
-        GH::Pagination::Sort.new(field: "id", direction: GH::Pagination::Sort::Direction::ASC),
+        GH::Pagination::Sort.new(field: "issue_events.id", direction: GH::Pagination::Sort::Direction::ASC),
       ]
 
       T.let(

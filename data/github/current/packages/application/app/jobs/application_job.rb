@@ -250,9 +250,18 @@ class ApplicationJob < ActiveJob::Base
   end
 
   # Helper to retry on "expected" exceptions where the db or other dependency is down, from lib/resiliency/response.rb
-  def self.retry_on_recoverable_exceptions(wait: :polynomially_longer, attempts: 5)
+  #
+  # Pass +jitter:+ (0.0..1.0) to spread retries across the wait window, which is important for
+  # large fan-outs where many sibling jobs would otherwise retry on the same deterministic
+  # schedule. When +jitter+ is +nil+ (the default), no jitter is passed through and Active Job
+  # falls back to its global +retry_jitter+ setting -- preserving existing behavior for callers
+  # that don't opt in.
+  def self.retry_on_recoverable_exceptions(wait: :polynomially_longer, attempts: 5, jitter: nil)
+    retry_kwargs = { wait: wait, attempts: attempts }
+    retry_kwargs[:jitter] = jitter unless jitter.nil?
+
     Resiliency::Response::UnavailableExceptions.each do |error_class|
-      retry_on error_class, wait: wait, attempts: attempts do |job, error|
+      retry_on error_class, **retry_kwargs do |job, error|
         if block_given?
           yield(job, error)
         else

@@ -21,7 +21,12 @@ class Hook::Payload::IssueEventPayload < Hook::Payload
       referencing_issue_url: hook_event.referencing_issue.present? ? api_serialize(:issue_hash, hook_event.referencing_issue).dig(:url) : nil,
       referencing_issue_html_url: hook_event.referencing_issue.present? ? api_serialize(:issue_hash, hook_event.referencing_issue).dig(:html_url) : nil,
       performed_by_integration_id: hook_event.performed_by_integration_id,
-    }.merge(event_html_url(hook_event))
+    }.tap do |h|
+      h.merge!(event_html_url(hook_event))
+      if hook_event.action.to_s != "deleted"
+        h[:detail] = api_serialize(:issue_event_detail, hook_event.target)
+      end
+    end
   end
 
   def event_html_url(hook_event)

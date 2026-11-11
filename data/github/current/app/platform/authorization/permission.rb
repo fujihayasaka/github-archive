@@ -61,6 +61,15 @@ module Platform
         # { org => { repo => { oauth_app =>  Boolean } }
         @oauth_app_authorization_cache = Hash.new { |h, org| h[org] = Hash.new { |hh, repo| hh[repo] = {} } }
 
+        # Cache for org member listing authorization results by organization id.
+        # Every member node in an org members connection (e.g. `membersWithRole`) evaluates
+        # the same org-scoped `:v4_list_private_org_members` check, and the decision is
+        # identical for every member of the same org. Memoizing by org id lets a page of
+        # members share a single permission evaluation instead of re-resolving the
+        # org/business configuration chain once per member.
+        # Key: organization_id, Value: authorization result (boolean or Promise).
+        @list_private_org_members_cache = {}
+
         # Public requests go through the Platform::Authorization::PermissionCheck
         # and use the ConditionalAccess::Api::Public::Enforcer.
         # The Internal requests use the internal enforcer.
@@ -563,7 +572,14 @@ module Platform
       end
 
       def can_list_private_org_members?(org)
-        access_allowed?(:v4_list_private_org_members, resource: org, organization: org, current_repo: nil, allow_integrations: true, allow_user_via_granular_actor: true)
+        # Memoize by org id so a page of members from the same org (e.g. `membersWithRole`)
+        # shares a single evaluation. Without this, each member node re-runs `access_allowed?`,
+        # re-resolving the org/business configuration chain and loading hundreds of
+        # `Configuration::Entry` records per request. `fetch` is used so a `false` result is
+        # cached as reliably as a `true` one.
+        @list_private_org_members_cache.fetch(org.id) do
+          @list_private_org_members_cache[org.id] = uncached_can_list_private_org_members?(org)
+        end
       end
 
       def can_list_private_business_members?(business)
@@ -1503,6 +1519,10 @@ module Platform
       end
 
       private
+
+      def uncached_can_list_private_org_members?(org)
+        access_allowed?(:v4_list_private_org_members, resource: org, organization: org, current_repo: nil, allow_integrations: true, allow_user_via_granular_actor: true)
+      end
 
       def fetch_integration_permissions(resource)
         @integration.default_permissions[resource]

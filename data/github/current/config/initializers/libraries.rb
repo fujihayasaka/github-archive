@@ -118,6 +118,7 @@ require "s4/v1/client"
 require "azure/storage/blob"
 require "kusto/data"
 require "mvnd"
+require "mvnd/elm_exporter"
 
 # github libs
 require "acme_client"

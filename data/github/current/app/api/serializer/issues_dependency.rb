@@ -310,6 +310,77 @@ module Api::Serializer::IssuesDependency
     end
   end
 
+  trace_method :issue_event_detail
+  def issue_event_detail(event, options = {})
+    return nil unless event&.issue_event_detail
+    repo = repo_path(options, event)
+    detail = event.issue_event_detail
+    options = Api::SerializerOptions.from(options)
+
+    # rubocop:disable GitHub/AvoidMethodChainingWithDoEnd
+    detail = {}.tap do |h|
+      if detail.label_name
+        h[:label_url] = url("/repos/#{repo}/labels/#{Api::LegacyEncode.encode(detail.label_name)}", options)
+        h[:label_name] = detail.label_name
+        h[:label_color] = detail.label_color
+        h[:label_text_color] = detail.label_text_color
+      end
+
+      h[:milestone_url] = url("/repos/#{repo}/milestones/#{detail.milestone_id}", options) if detail.milestone_id
+
+      # return just the subject ID, not the fully hydrated object; this will not always
+      # be loaded (bulk export queries, for example, cannot load this polymorphic association)
+      h[:subject] = {
+        id: detail.subject_id,
+        type: detail.subject_type,
+      } if detail.subject_id
+
+      h[:title_was] = detail.title_was
+      h[:title_is] = detail.title_is
+
+      h[:deployment_id] = detail.deployment_id
+      h[:deployment_status_id] = detail.deployment_status_id
+
+      h[:ref] = detail.ref
+
+      h[:before_commit_oid] = detail.before_commit_oid
+      h[:after_commit_oid] = detail.after_commit_oid
+
+      h[:message] = detail.message
+
+      if detail.pull_request_review_id
+        h[:pull_request_review_url] = url("/repos/#{repo}/pulls/#{event.issue.number}/reviews/#{detail.pull_request_review_id}", options)
+        h[:pull_request_review_state_was] = ::PullRequestReview.state_name(detail.pull_request_review_state_was).to_s
+      end
+      h[:review_request] = detail.review_request_id
+
+      h[:column_name] = detail.column_name
+      h[:previous_column_name] = detail.previous_column_name
+      h[:card_id] = detail.card_id
+      h[:performed_by_project_workflow_action_id] = detail.performed_by_project_workflow_action_id
+
+      h[:lock_reason] = detail.lock_reason
+      h[:block_duration_days] = detail.block_duration_days
+      h[:state_reason] = detail.state_reason
+
+      # project_url is omitted since ELM doesn't handle these yet
+      h[:project_status] = detail.project_status
+      h[:project_previous_status] = detail.project_previous_status
+
+      h[:issue_type] = {
+        id: detail.issue_type_id,
+        name: detail.issue_type_name,
+        color: detail.issue_type_color,
+      } if detail.issue_type_id
+      h[:prev_issue_type] = {
+        id: detail.prev_issue_type_id,
+        name: detail.prev_issue_type_name,
+        color: detail.prev_issue_type_color,
+      } if detail.prev_issue_type_id
+    end.compact
+    # rubocop:enable GitHub/AvoidMethodChainingWithDoEnd
+  end
+
   # Creates a Hash to be serialized to JSON.
   #
   # milestone - Milestone instance.
