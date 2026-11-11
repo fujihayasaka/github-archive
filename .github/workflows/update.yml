@@ -63,15 +63,15 @@ jobs:
           git config commit.gpgsign false
 
           # Checkout existing version branch and rebase onto origin/master, or create new branch from origin/master
-          rebased=false
+          needs_push=false
           if git show-ref --verify --quiet "refs/remotes/origin/${SERIES}"; then
             git checkout -B "${SERIES}" "origin/${SERIES}"
             latest_commit_msg=$(git log -1 --format=%s)
 
             if ! git merge-base --is-ancestor origin/master HEAD; then
               echo "Rebasing ${SERIES} onto origin/master..."
-              git rebase --committer-date-is-author-date --no-gpg-sign origin/master
-              rebased=true
+              git rebase --keep-empty --committer-date-is-author-date --no-gpg-sign origin/master
+              needs_push=true
             fi
           else
             git checkout -B "${SERIES}" origin/master
@@ -94,7 +94,7 @@ jobs:
 
           if [ -z "$rss_versions" ]; then
             echo "No releases found in RSS feed for ${SERIES}."
-            if [ "$rebased" = true ]; then
+            if [ "$needs_push" = true ]; then
               git push --force-with-lease -u origin @
             fi
             exit 0
@@ -107,7 +107,7 @@ jobs:
 
           if (( last_patch >= latest_rss_patch )); then
             echo "Branch ${SERIES} is already up to date."
-            if [ "$rebased" = true ]; then
+            if [ "$needs_push" = true ]; then
               git push --force-with-lease -u origin @
             fi
             exit 0
@@ -123,19 +123,21 @@ jobs:
               continue
             fi
 
-            # Verify the release exists in the RSS feed or on S3 (handles skipped patch numbers)
+            # Verify the .pkg actually exists and is downloadable on S3 (S3 returns 403 for missing/retracted keys)
             pkg_url="https://github-enterprise.s3.amazonaws.com/ami/updates/github-enterprise-ami-${candidate}.pkg"
-            if printf '%s\n' "$rss_versions" | grep -Fxq "$candidate" || curl -fsSI "$pkg_url" >/dev/null 2>&1; then
+            if curl -fsSL -r 0-0 -o /dev/null "$pkg_url" 2>/dev/null; then
               next_version="$candidate"
               break
             else
-              echo "Release ${candidate} does not exist (skipped upstream), checking next patch..."
+              echo "Release ${candidate} is not available on S3 (skipped or removed upstream); creating empty tombstone commit and checking next patch..."
+              git commit --allow-empty --no-gpg-sign -m "$candidate"
+              needs_push=true
             fi
           done
 
           if [ -z "$next_version" ]; then
             echo "No new release to download for ${SERIES}."
-            if [ "$rebased" = true ]; then
+            if [ "$needs_push" = true ]; then
               git push --force-with-lease -u origin @
             fi
             exit 0

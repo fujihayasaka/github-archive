@@ -10,17 +10,23 @@ TARBALL_URL="https://github-enterprise.s3.amazonaws.com/ami/updates/github-enter
 wget "$TARBALL_URL" -O "$DOWNLOAD_PATH"
 
 cat_script() {
-    LC_ALL=C sed '/^exit$/q' "$DOWNLOAD_PATH"
+    LC_ALL=C sed '/^exit$/q' "$DOWNLOAD_PATH" 2>/dev/null
 }
 
 cat_data() {
-    LC_ALL=C sed '1,/^exit$/d' "$DOWNLOAD_PATH"
+    LC_ALL=C sed '1,/^exit$/d' "$DOWNLOAD_PATH" 2>/dev/null
 }
 
 tar_args(){
   if [ -z "${TAR_ARGS:-}" ] ; then
-    if cat_data | head -c 1024 | file - | grep -q "XZ compressed data"; then
+    local file_type
+    file_type=$(cat_data | head -c 1024 | file -)
+    if echo "$file_type" | grep -q "XZ compressed data"; then
       TAR_ARGS="-xJf"
+    elif echo "$file_type" | grep -q "Zstandard compressed data"; then
+      TAR_ARGS="--zstd -xf"
+    elif echo "$file_type" | grep -q "gzip compressed data"; then
+      TAR_ARGS="-xzf"
     else
       TAR_ARGS="-xf"
     fi
