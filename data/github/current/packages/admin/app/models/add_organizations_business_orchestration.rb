@@ -1,0 +1,181 @@
+# typed: true
+# frozen_string_literal: true
+
+class AddOrganizationsBusinessOrchestration < BusinessOrchestration
+  BATCH_SIZE = 100
+
+  step :upsert_organization_memberships do
+    previous_plans = {}
+    organizations.each do |organization|
+      previous_plans[organization.id] = organization.plan.name
+
+      T.must(business).enforce_organizations_limit!
+      T.must(business).enforce_members_limit!(new_member_ids: organization.member_ids)
+
+      if data[:ensure_sufficient_licenses]
+        T.must(business).ensure_sufficient_licenses_for_organization!(organization)
+      end
+
+      membership = with_write { T.must(business).upsert_organization_membership(organization, data[:organization_upgrade]) }
+
+      if !membership.valid?
+        raise Business::CannotAddOrganizationError.new(membership.errors.full_messages.to_sentence)
+      end
+
+      # Configure tenant for organization
+      if T.must(business).team_sync_enabled? && membership.valid?
+        UpdateTeamSyncForBusinessOrganizationJob.perform_later(org_id: organization.id)
+      end
+    end
+    data[:previous_plans] = previous_plans
+  end
+
+  job_start
+
+  step :instrument do
+    organizations.each do |organization|
+      GlobalInstrumenter.instrument("enterprise_account.organization_add", {
+        enterprise_id: T.must(business).id,
+        organization_id: organization.id,
+        actor_id: actor&.id,
+        new_organization: data[:new_organization],
+        previous_plan: data[:previous_plans][organization.id]
+      })
+
+      T.must(business).business_teams.where(organization_selection_type: :all).find_each(
+        batch_size: BATCH_SIZE
+      ) do |business_team|
+        business_team.instrument :add_to_organization, org: organization, business: business
+      end
+    end
+
+    GlobalInstrumenter.instrument("enterprise_account.add_organizations", {
+      enterprise: business,
+      actor: actor,
+      organization_ids: organization_ids
+    })
+  end
+
+  step :restore_soft_deleted_pages do
+    unless GitHub.single_or_multi_tenant_enterprise?
+      organizations.each do |organization|
+        RestoreSoftDeletedPagesJob.perform_later(organization)
+      end
+    end
+  end
+
+  step :synchronize_business_user_accounts do
+    BusinessUserAccountsSynchronizeJob.perform_later(business_id: T.must(business).id)
+  end
+
+  step :update_organization_collaborators do
+    organizations.each do |organization|
+      if T.must(business).feature_flag_enabled?(:collaborator_cache_write, default: false) ||
+        organization.feature_flag_enabled?(:collaborator_cache_write, default: false)
+
+        with_write { OrganizationCollaborator.where(organization_id: organization.id).update_all(business_id: T.must(business).id) }
+        OrganizationCollaboratorBackfillJob.perform_later(org: organization)
+      end
+    end
+  end
+
+  step :update_organization_invitations do
+    return if GitHub.bypass_org_invites_enabled? || T.must(business).enterprise_managed?
+    with_write do
+      OrganizationInvitation.where(
+          organization_id: organization_ids
+        ).update_all(business_id: T.must(business).id)
+    end
+  end
+
+  step :update_custom_properties do
+    organizations.each do |organization|
+      with_write do
+        Repositories.domain.custom_properties.handle_org_added_to_business(
+          business: T.must(business),
+          org: organization
+        )
+      end
+    end
+  end
+
+  step :update_blackbird do
+    BlackbirdOnboardJob.perform_later(organizations.to_a)
+  end
+
+  step :update_license_usage do
+    with_write { T.must(business).update_license_usage }
+  end
+
+  step :update_trade_screening_records do
+    organizations.each do |organization|
+      with_write do
+        if organization.org_is_on_standard_tos?
+          organization.force_unlink_billing_contact
+        else
+          screening_record = organization.trade_screening_record(ignore_linked_record: true)
+          if screening_record.persisted?
+            screening_record.destroy(
+              actor: actor,
+              reason: "Organization added to business #{T.must(business).slug}"
+            )
+          end
+        end
+
+        T.must(business).trade_screening_record.enqueue_billing_changes
+      end
+    end
+  end
+
+  step :cancel_organization_sponsorships do
+    return unless GitHub.sponsors_enabled?
+    return if actor.nil?
+
+    organizations.each do |organization|
+      OrganizationSponsorshipAccessRevokedJob.perform_later(
+        organization: organization,
+        actor: T.must(actor)
+      )
+    end
+  end
+
+  step :update_enterprise_teams do
+    all_org_business_teams = BusinessTeam.where(business_id: T.must(business).id, organization_selection_type: "all")
+    all_org_business_teams.each do |business_team|
+      with_write { business_team.members_or_organizations_updated(action: :add, operation: :org) }
+    end
+
+    if T.must(business).organizations.count == T.must(business).business_team_organization_assignment_limit + 1
+      # snapshot org_ids here in case additional orgs are created before the scheduler decides to run the job
+      org_ids = T.must(business).organization_ids.first(T.must(business).business_team_organization_assignment_limit)
+      all_org_business_teams.each do |business_team|
+        CreateBusinessTeamOrgAssignmentsJob.enqueue(business_team, org_ids: org_ids)
+      end
+    end
+  end
+
+  step :stamp_sandbox_setting do
+    # When the enterprise has "Enabled for all orgs" mode active, newly added orgs
+    # must be stamped synchronously so there is no window where their sandbox row is
+    # absent.
+    next unless T.must(business).github_sandbox_all_orgs_mode?
+    next unless actor
+
+    organizations.each do |org|
+      with_write do
+        org.update_github_sandbox_enabled(
+          Configurable::GithubSandboxEnabled::ALL_MEMBERS,
+          actor: actor,
+          force: true,
+        )
+      end
+    end
+  end
+
+  step :synchronize_enterprise_team_member_search_indexes do
+    team_ids = BusinessTeam.where(business_id: T.must(business).id, organization_selection_type: "all").pluck(:id)
+    return if team_ids.empty?
+
+    SynchronizeBusinessTeamMembersSearchIndexJob.perform_later(team_ids: team_ids)
+  end
+end

@@ -1,0 +1,125 @@
+#!/bin/bash
+# Kibana installation script for GitHub development environment
+
+kibana_is_running() {
+    if ! command -v supervisorctl >/dev/null 2>&1; then
+        return 1
+    fi
+
+    local status_output
+    if ! status_output=$(sudo supervisorctl status kibana 2>/dev/null); then
+        return 1
+    fi
+
+    echo "$status_output" | grep -q "RUNNING"
+}
+
+kibana_installed_and_running() {
+    local es_version="$1"
+    local kibana_dir="/usr/share/kibana-$es_version"
+
+    [ -d "$kibana_dir" ] && kibana_is_running
+}
+
+write_kibana_supervisor_config() {
+    local es_version="$1"
+    local supervisor_conf_file="/etc/supervisord.conf"
+    local program_header="[program:kibana]"
+
+    if sudo grep -F -q "$program_header" "$supervisor_conf_file"; then
+        echo "Kibana supervisor config already present; skipping append."
+        return 0
+    fi
+
+    echo "Appending Kibana supervisor config to $supervisor_conf_file"
+    sudo tee -a "$supervisor_conf_file" > /dev/null <<EOF_CONF
+
+$program_header
+redirect_stderr=true
+environment=NODE_OPTIONS="--max-old-space-size=2048"
+command=/usr/share/kibana-$es_version/bin/kibana
+user=kibana
+group=kibana
+directory=/usr/share/kibana-$es_version
+stdout_logfile=/var/log/kibana.log
+autostart=true
+autorestart=true
+
+EOF_CONF
+}
+
+install_kibana() {
+    local es_version
+    es_version=$(get_elasticsearch_version)
+
+    echo "Installing Kibana for Elasticsearch version: $es_version"
+
+    if kibana_installed_and_running "$es_version"; then
+        echo "Kibana $es_version already installed and running under supervisord; skipping reinstallation."
+        return 0
+    fi
+
+    local kibana_url="https://artifacts.elastic.co/downloads/kibana/kibana-$es_version-linux-x86_64.tar.gz"
+    echo "Downloading Kibana $es_version from Elastic..."
+
+    if ! curl --head --fail --silent "$kibana_url" > /dev/null; then
+        echo "ERROR: Kibana version $es_version not found at $kibana_url"
+        echo "This might be a newer ES version without matching Kibana release"
+        exit 1
+    fi
+
+    local tarball="/tmp/kibana-$es_version.tar.gz"
+    sudo curl --fail --location --output "$tarball" "$kibana_url"
+
+    echo "Extracting Kibana..."
+    sudo tar -zxf "$tarball" -C /usr/share/
+    sudo rm "$tarball"
+
+    if ! id "kibana" &>/dev/null; then
+        sudo useradd --system --home-dir /usr/share/kibana-$es_version --shell /bin/false kibana
+    fi
+
+    sudo chown -R kibana:kibana /usr/share/kibana-$es_version/
+
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}" )" && pwd)"
+    local kibana_config_source="$script_dir/config/kibana.yml"
+    local kibana_config_target="/usr/share/kibana-$es_version/config/kibana.yml"
+
+    if [ ! -f "$kibana_config_source" ]; then
+        echo "ERROR: Kibana config template not found at $kibana_config_source" >&2
+        exit 1
+    fi
+
+    sudo cp "$kibana_config_source" "$kibana_config_target"
+    sudo chown kibana:kibana "$kibana_config_target"
+
+    echo "Adding Kibana to supervisord..."
+    write_kibana_supervisor_config "$es_version"
+
+    echo "Updating supervisord configuration..."
+    sudo supervisorctl reread
+    sudo supervisorctl update
+
+    echo "Kibana installation completed"
+}
+
+wait_for_kibana() {
+    echo "Waiting for Kibana to be ready..."
+    local max_attempts=10
+    local attempt=0
+
+    while [ $attempt -lt $max_attempts ]; do
+        if curl -s http://localhost:5601/api/status > /dev/null 2>&1; then
+            echo "Kibana is ready"
+            return 0
+        fi
+
+        echo "Kibana not ready yet, waiting... (attempt $((attempt + 1))/$max_attempts)"
+        sleep 10
+        attempt=$((attempt + 1))
+    done
+
+    echo "ERROR: Kibana failed to start within expected time" >&2
+    return 1
+}

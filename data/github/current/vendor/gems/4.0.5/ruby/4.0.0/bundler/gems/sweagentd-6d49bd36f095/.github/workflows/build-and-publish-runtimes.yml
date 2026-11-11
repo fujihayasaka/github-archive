@@ -1,0 +1,210 @@
+name: Build and Publish Runtime Releases
+
+env:
+  HUSKY: 0
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version override (defaults to workflow commit SHA)"
+        required: false
+        type: string
+  merge_group:
+    types: [checks_requested]
+
+concurrency:
+  group: runtime-build-${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  # Builds the runtime addon for Windows so the action bundles published below
+  # contain `runtime.win32-x64-msvc.node` alongside the Linux variant produced
+  # on the build-and-release runner.
+  build-runtime-windows:
+    runs-on: windows-latest-8core
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: sweagentd
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ./sweagentd/runtime/.nvmrc
+
+      - run: npm ci
+        working-directory: ./sweagentd/runtime
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Rust runtime for Windows
+        run: npm run build:runtime -- --release
+        working-directory: ./sweagentd/runtime
+
+      - name: Verify runtime artifact
+        id: runtime-artifact
+        run: |
+          set -eu
+          for path in \
+            sweagentd/runtime/src/runtime/runtime.win32-x64-msvc.node \
+            sweagentd/runtime/src/runtime/runtime/runtime.win32-x64-msvc.node
+          do
+            if [ -f "$path" ]; then
+              echo "path=$path" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "runtime.win32-x64-msvc.node was not produced in the flattened or legacy runtime layout" >&2
+          exit 1
+        shell: bash
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: runtime-win32-x64-msvc
+          path: ${{ steps.runtime-artifact.outputs.path }}
+          if-no-files-found: error
+          retention-days: 1
+
+  build-and-release:
+    runs-on: ubuntu-latest-8core
+    needs: build-runtime-windows
+    env:
+      RELEASE_VERSION: ${{ inputs.version || github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: sweagentd
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ./sweagentd/runtime/.nvmrc
+
+      - run: npm ci
+        working-directory: ./sweagentd/runtime
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download Windows runtime addon
+        uses: actions/download-artifact@v8
+        with:
+          name: runtime-win32-x64-msvc
+          path: ./sweagentd/runtime-windows-addon/
+
+      - name: Stage Windows runtime addon
+        shell: bash
+        run: |
+          set -eu
+          if [ -f ./sweagentd/runtime/src/runtime/package.json ]; then
+            runtime_addon_dir=./sweagentd/runtime/src/runtime
+          else
+            runtime_addon_dir=./sweagentd/runtime/src/runtime/runtime
+          fi
+          mkdir -p "$runtime_addon_dir"
+          cp ./sweagentd/runtime-windows-addon/runtime.win32-x64-msvc.node "$runtime_addon_dir/"
+
+      - name: Install Linux sysroot for glibc compatibility
+        if: runner.os == 'Linux'
+        working-directory: ./sweagentd
+        run: script/runtime-linux-sysroot-env >> "$GITHUB_ENV"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.COPILOT_DEVELOPER_ACTION_PAT }}
+          repository: github/copilot-developer-action
+          path: copilot-developer-action
+          ref: main
+
+      - name: Build action
+        run: ./sweagentd/runtime/script/action-build ./copilot-developer-action
+        env:
+          EBPF_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.EBPF_DOWNLOAD_GITHUB_TOKEN }}"
+          BLACKBIRD_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.BLACKBIRD_DOWNLOAD_GITHUB_TOKEN }}"
+          AUTOFIND_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.AUTOFIND_DOWNLOAD_GITHUB_TOKEN }}"
+          GPGSIGN_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.GPGSIGN_DOWNLOAD_GITHUB_TOKEN }}"
+
+      - name: Verify glibc requirements for native addons
+        if: runner.os == 'Linux'
+        working-directory: ./sweagentd/runtime
+        run: ./script/linux/verify-glibc-requirements.sh
+        env:
+          EXPECTED_GLIBC_VERSION: "2.28"
+          SEARCH_PATH: src/runtime
+
+      - name: Package and release all runtimes
+        working-directory: ./copilot-developer-action
+        env:
+          GH_TOKEN: ${{ secrets.COPILOT_DEVELOPER_ACTION_PAT }}
+        run: |
+          declare -A runtimes=(
+            ["cca"]="dist-cca|CCA|CCA v2 runtime"
+            ["cca-v3"]="dist-cca-v3|CCA V3|CCA v3 runtime"
+            ["codex"]="dist-codex|Codex|Codex runtime"
+            ["claude"]="dist-claude|Claude|Claude runtime"
+            ["copilot"]="dist|Copilot|Copilot runtime"
+            ["copilot-pull-request-reviewer"]="dist-autofind-ts|CCR|Copilot Code Review"
+          )
+
+          for name in "${!runtimes[@]}"; do
+            IFS='|' read -r dist title notes <<< "${runtimes[$name]}"
+            echo "Packaging ${title} runtime..."
+
+            rm -rf ../release
+            mkdir -p ../release/copilot-developer-action-main
+
+            cp -r ./${dist} ../release/copilot-developer-action-main/${dist}
+            rm -rf ../release/copilot-developer-action-main/${dist}/autofind
+            
+            cp -r ./script ../release/copilot-developer-action-main/script
+            cp -r ./ebpf ../release/copilot-developer-action-main/ebpf
+            cp -r ./mcp ../release/copilot-developer-action-main/mcp
+            cp -r ./blackbird-mcp-server ../release/copilot-developer-action-main/blackbird-mcp-server
+            cp -r ./github-mcp-server ../release/copilot-developer-action-main/github-mcp-server
+            cp ./package.json ../release/copilot-developer-action-main/
+            cp ./package-lock.json ../release/copilot-developer-action-main/
+            cp ./LICENSE.md ../release/copilot-developer-action-main/
+            cp ./action.yml ../release/copilot-developer-action-main/
+            cp ./node-req.env ../release/copilot-developer-action-main/
+            cp ./version ../release/copilot-developer-action-main/
+
+            tar -czf ../copilot-developer-action.tar.gz -C ../release .
+
+            RELEASE_TAG="runtime-${name}-${RELEASE_VERSION}"
+            echo "Creating release ${RELEASE_TAG}..."
+            gh release create "${RELEASE_TAG}" \
+              --title "${title} Runtime ${RELEASE_VERSION}" \
+              --notes "${notes} build from sweagentd commit ${{ github.sha }}" \
+              ../copilot-developer-action.tar.gz
+          done
+
+      - name: Package and release autofind
+        working-directory: ./copilot-developer-action
+        env:
+          GH_TOKEN: ${{ secrets.COPILOT_DEVELOPER_ACTION_PAT }}
+        run: |
+          echo "Packaging Autofind..."
+
+          rm -rf ../autofind-release
+          mkdir -p ../autofind-release
+
+          cp -r ./autofind ../autofind-release/
+
+          tar -czf ../autofind.tar.gz -C ../autofind-release .
+
+          RELEASE_TAG="autofind-${RELEASE_VERSION}"
+          echo "Creating release ${RELEASE_TAG}..."
+          gh release create "${RELEASE_TAG}" \
+            --title "Autofind ${RELEASE_VERSION}" \
+            --notes "Autofind binary build from sweagentd commit ${{ github.sha }}" \
+            ../autofind.tar.gz

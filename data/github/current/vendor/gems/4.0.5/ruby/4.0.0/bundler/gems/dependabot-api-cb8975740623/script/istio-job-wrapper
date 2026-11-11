@@ -1,0 +1,96 @@
+#!/bin/sh
+
+# This script is used to wrap a job that is run under istio. It will shutdown the istio proxy
+# before exiting. This allows the job to exit with the exit code from the command and not care
+# about whether or not the job is running under istio.
+#
+# The script is sourced from https://github.com/github/istio-job-wrapper/blob/main/istio-job-wrapper
+
+ISTIO_JOB_WRAPPER_DEBUG=${ISTIO_JOB_WRAPPER_DEBUG:-}
+if [ -n "$ISTIO_JOB_WRAPPER_DEBUG" ]; then
+  set -x
+fi
+
+usage() {
+  echo "Usage: istio-job-wrapper <command>"
+  echo "  command: The command to run"
+  echo
+  echo "Example:"
+  echo "  ./istio-job-wrapper run-it --with --args"
+  echo
+  echo "To debug, set the ISTIO_JOB_WRAPPER_DEBUG environment variable:"
+  echo "  ISTIO_JOB_WRAPPER_DEBUG=1 ./istio-job-wrapper run-it --with --args"
+
+  exit 1
+}
+
+wget_shutdown_istio_proxy() {
+  wget --quiet \
+       --method POST \
+       --output-document - \
+       http://localhost:15020/quitquitquit
+}
+
+curl_shutdown_istio_proxy() {
+  curl --fail \
+       --silent \
+       --head \
+       --request POST \
+       http://localhost:15020/quitquitquit
+}
+
+shutdown_istio_proxy() {
+  cli="$1"
+
+  if [ "$cli" = "curl" ]; then
+    curl_shutdown_istio_proxy
+    return $!
+  fi
+
+  if [ "$cli" = "wget" ]; then
+    wget_shutdown_istio_proxy
+    return $!
+  fi
+
+  echo "Unknown http client: $cli"
+  return 1
+}
+
+# Determine which http client to use.
+http_cli() {
+  if command -v curl >/dev/null 2>&1; then
+    echo "curl"
+    return
+  fi
+
+  if command -v wget >/dev/null 2>&1; then
+    echo "wget"
+    return
+  fi
+
+  return 1
+}
+
+[ $# -lt 1 ] && usage
+
+cli=$(http_cli)
+if [ -z "$cli" ]; then
+  echo "curl or wget are required to run this script"
+  echo
+  usage
+fi
+
+# call the command & capture the exit code
+"$@"
+rc=$?
+
+# Ignore the exit code from shutting down the proxy.
+# This allows the job to exit with the exit code from the command and
+# not care about whether or not this script is running under istio.
+if [ -n "$ISTIO_JOB_WRAPPER_DEBUG" ]; then
+  shutdown_istio_proxy "$cli" || true
+else
+  shutdown_istio_proxy "$cli" >/dev/null 2>&1 || true
+fi
+
+exit "$rc"

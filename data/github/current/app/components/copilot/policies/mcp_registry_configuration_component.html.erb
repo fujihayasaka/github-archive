@@ -1,0 +1,106 @@
+<%= render(Primer::Box.new(display: :flex, align_items: :center, flex: :auto, direction: :row, classes: "gap-2", test_selector: "copilot-mcp-registry-configuration-section")) do %>
+  <%= render(Primer::Beta::Text.new(tag: :span, classes: "f6", color: :muted)) do %>
+    <% if !configured? %>
+      No registry selected
+    <% elsif registry_type == "github" %>
+      Using GitHub registry
+    <% else %>
+      Using custom registry
+    <% end %>
+  <% end %>
+
+  <%= render(Primer::Alpha::Dialog.new(
+    title: "Configure MCP Registry",
+    id: dialog_id,
+    position: :center,
+    size: :medium_portrait
+  )) do |dialog| %>
+    <% dialog.with_show_button(scheme: :link, size: :small, classes: "f6", disabled: !can_write) { "Edit" } %>
+    <% dialog.with_header(show_divider: true) do %>
+      <strong>Configure MCP Registry</strong>
+    <% end %>
+
+    <% dialog.with_body do %>
+      <%= form_with model: mcp_registry_model, url: submit_path, method: form_method, local: true, id: "mcp-registry-configure-form" do |form| %>
+
+        <%= render(Primer::Beta::Text.new(tag: :p, color: :muted, classes: "tmp-mb-3")) do %>
+          Configure which MCP servers Copilot can use for this enterprise.
+        <% end %>
+
+        <div class="js-mcp-toggle-test" data-submit-path="<%= submit_path %>" data-registry-id="<%= registry&.id %>">
+          <input type="hidden" name="copilot_mcp_registry[registry_type]" value="<%= registry_type %>" class="js-mcp-type-value">
+          <input type="hidden" name="copilot_mcp_registry[registry_access]" value="<%= registry_access %>">
+          <%= render(Primer::Alpha::SegmentedControl.new(
+            aria: { label: "Registry type" },
+            classes: "tmp-mb-3",
+            full_width: true
+          )) do |component| %>
+            <% component.with_item(
+              tag: :a,
+              href: "#panel-test-external",
+              label: "External Registry",
+              selected: registry_type == "external"
+            ) %>
+            <% component.with_item(
+              tag: :a,
+              href: "#panel-test-github",
+              label: "GitHub Registry",
+              selected: registry_type == "github"
+            ) %>
+          <% end %>
+        </div>
+
+        <div id="panel-test-external" <%= "hidden" if registry_type == "github" %>>
+          <div class="tmp-pt-3">
+            <%= render(Primer::Beta::Text.new(tag: :p, color: :muted, classes: "tmp-mb-3")) do %>
+              Ideal if you already have a centralized registry.
+            <% end %>
+
+            <div class="form-group tmp-mb-3">
+              <label class="form-label" for="registry-url-input">Registry URL</label>
+              <%= form.url_field :registry_url,
+                id: "registry-url-input",
+                class: "form-control input-block js-mcp-external-url",
+                placeholder: "https://exampleregistry.com/allowed-servers",
+                aria: { label: "Registry URL" },
+                disabled: !can_write || registry_type == "github",
+                value: registry_type == "external" ? registry_url : nil
+              %>
+            </div>
+          </div>
+        </div>
+
+        <div id="panel-test-github" <%= "hidden" unless registry_type == "github" %>>
+          <div class="tmp-pt-3">
+            <%= render(Primer::Beta::Text.new(tag: :p, color: :muted, classes: "tmp-mb-3")) do %>
+              Manage your MCP allowlist directly in GitHub.
+            <% end %>
+
+            <input type="hidden" name="copilot_mcp_registry[registry_url]" value="<%= Copilot::McpRegistry::GITHUB_ENTERPRISE_URL %>" class="js-mcp-github-url" <%= "disabled" unless registry_type == "github" %>>
+            <div class="form-group tmp-mb-3">
+              <label class="form-label">Registry URL</label>
+              <div>
+                <%= render(Primer::Beta::Text.new(color: :muted)) { Copilot::McpRegistry::GITHUB_ENTERPRISE_URL } %>
+              </div>
+            </div>
+          </div>
+        </div>
+      <% end %>
+    <% end %>
+    <% dialog.with_footer(show_divider: true) do %>
+      <div class="d-flex flex-justify-end gap-2">
+        <%= render(Primer::Beta::Button.new(
+          data: { "close-dialog-id": dialog_id }
+        )) { "Cancel" } %>
+        <%= render(Primer::Beta::Button.new(
+          scheme: :primary,
+          disabled: !can_write,
+          type: :submit,
+          form: "mcp-registry-configure-form",
+          data: { disable_with: "Saving..." }
+        )) { "Save" } %>
+      </div>
+    <% end %>
+  <% end %>
+  <%= render(Primer::Beta::Label.new(scheme: :success)) { "Preview" } %>
+<% end %>

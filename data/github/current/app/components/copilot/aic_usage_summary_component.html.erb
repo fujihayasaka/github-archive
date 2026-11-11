@@ -1,0 +1,97 @@
+<% if helpers.params[:budget_updated].present? %>
+  <%= render(Primer::Alpha::Banner.new(scheme: :success, dismiss_scheme: :hide, classes: "tmp-mb-3")) do %>
+    Your additional usage budget has been updated.
+  <% end %>
+<% end %>
+<%= render(Primer::Box.new(display: :flex, justify_content: :space_between, direction: :row, align_items: :center, classes: "tmp-mb-3 tmp-mt-4")) do %>
+  <%= render(Primer::Beta::Text.new(tag: :h3, font_size: 4, font_weight: :bold)) { "Usage" } %>
+  <%= render(Primer::Beta::Link.new(href: settings_billing_ai_usage_index_path, scheme: :default, muted: false)) do %>
+    View details <%= render(Primer::Beta::Octicon.new(:"chevron-right", size: :small)) %>
+  <% end %>
+<% end %>
+<%= render(Primer::Beta::BorderBox.new(padding: :default, classes: merge_with_banner_below? ? "rounded-bottom-0 border-bottom-0" : "tmp-mb-3")) do |component| %>
+  <%# Included credits row %>
+  <%= component.with_row do %>
+    <%= render(Primer::Box.new(display: :flex, justify_content: :space_between, flex: 1, direction: :row, align_items: :center)) do %>
+      <%= render(Primer::Box.new(display: :flex, direction: :column, flex: 1)) do %>
+        <%= render(Primer::Box.new(display: :inline_flex, align_items: :center)) do %>
+          <%= render(Primer::Beta::Text.new(tag: :span, font_weight: :bold, mr: 2)) { "Included credits" } %>
+          <%= render(
+            partial: "copilot/aic/popover",
+            locals: {
+              heading: "Included credits",
+              body: "AI credits included with your plan, reset monthly. Enable additional usage to continue with pay-as-you-go credits once you run out of your included usage.",
+              aria_label: "About included credits"
+            }
+          ) %>
+        <% end %>
+        <%= render(Primer::Beta::Text.new(tag: :span, color: :muted, font_size: "00")) { reset_label_for(@entitlement_percent_used, @entitlement_reset_label) } %>
+      <% end %>
+      <%= render(Copilot::AicProgressBarComponent.new(percent: @entitlement_percent_used, label: "#{number_with_delimiter(@entitlement_used)} / #{number_with_delimiter(@entitlement)} AI credits")) %>
+    <% end %>
+  <% end %>
+  <%# Overage spend row %>
+  <%= component.with_row do %>
+    <%= render(Primer::Box.new(display: :flex, justify_content: :space_between, flex: 1, direction: :row, align_items: :center)) do %>
+      <%= render(Primer::Box.new(display: :flex, direction: :column, flex: 1)) do %>
+        <%= render(Primer::Box.new(display: :inline_flex, align_items: :center)) do %>
+          <%= render(Primer::Beta::Text.new(tag: :span, font_weight: :bold, mr: 2)) { "Additional usage" } %>
+          <%= render(
+            partial: "copilot/aic/popover",
+            locals: {
+              heading: "Additional usage",
+              body: "Pay-as-you-go usage of additional AI credits once you run out of your included usage. Set a budget to cap your maximum monthly spend.",
+              aria_label: "About Additional Usage"
+            }
+          ) %>
+        <% end %>
+        <%= render(Primer::Beta::Text.new(tag: :span, color: :muted, font_size: "00")) { @budget_overage_status_label } %>
+      <% end %>
+
+      <%= render(Primer::Box.new(display: :flex, direction: :column, flex: 1, align_items: :flex_end)) do %>
+        <%= render(Primer::Box.new(display: :flex, align_items: :center, classes: "width-full")) do %>
+          <%= render(Copilot::AicProgressBarComponent.new(percent: @overage_percent_used, label: "#{@overage_spent} / #{@overage_budget} budget")) %>
+        <% end %>
+        <% if @customer_id.present? %>
+          <%= render(Copilot::OverageBudgetDialogComponent.new(
+            budget_uuid: @budget_uuid,
+            budget_amount: @budget_amount,
+            budgets_url: "/settings/billing/budgets",
+            customer_id: @customer_id,
+            pricing_target_id: "premium_requests",
+          )) %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>
+<% if trust_limit_banner_payload %>
+  <%= render_react_partial(name: "copilot-trust-tier-limit-hit-banner-partial", props: trust_limit_banner_payload) %>
+<% elsif @usage_banner_message.present? %>
+  <%= render(Primer::Alpha::Banner.new(
+    scheme: @usage_banner_scheme == :danger ? :danger : :default,
+    icon: @usage_banner_scheme == :danger ? :stop : :info,
+    test_selector: "usage-banner",
+    classes: "rounded-top-0",
+  )) do |banner| %>
+    <% if show_banner_actions? %>
+      <% banner.with_action_content(display: :flex, align_items: :center, flex_wrap: :nowrap, style: "gap: 12px;") do %>
+        <% if @show_upgrade_cta %>
+          <%= render(Primer::Beta::Button.new(
+            href: upgrade_url,
+            tag: :a,
+            data: analytics_click_attributes(
+              category: "user_copilot_settings",
+              action: "upgrade_clicked",
+              label: "ref_cta:tbb_quota_exhausted_upgrade_link"
+            )
+          )) { "Upgrade plan" } %>
+        <% end %>
+        <% if show_budget_cta? %>
+          <%= render(Primer::Beta::Button.new(data: { show_dialog_id: "overage-budget-dialog" })) { overage_budget_hit? ? "Increase budget" : "Enable additional usage" } %>
+        <% end %>
+      <% end %>
+    <% end %>
+    <%= @usage_banner_message %>
+  <% end %>
+<% end %>

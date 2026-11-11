@@ -1,0 +1,59 @@
+#!/bin/bash
+# Startup script for the Test Helper Service
+# This service allows Go integration tests to create test fixtures via REST API
+
+set -e
+
+# Ensure we're in test environment
+if [ "$RAILS_ENV" != "test" ] && [ "$RACK_ENV" != "test" ]; then
+  echo "ERROR: Test Helper Service can only run in test environment"
+  echo "Set RAILS_ENV=test or RACK_ENV=test"
+  exit 1
+fi
+
+# Set environment variables
+export RAILS_ENV=test
+export RACK_ENV=test
+
+# Default port for the test helper service
+PORT="${TEST_HELPER_SERVICE_PORT:-9292}"
+
+# Get the repository root using git
+if command -v git >/dev/null 2>&1; then
+  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+fi
+
+# Fallback to script directory method if git command fails
+if [ -z "$REPO_ROOT" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
+
+CONFIG_RU="$REPO_ROOT/lib/test_helper_service/config.ru"
+
+# Validate that the config file exists
+if [ ! -f "$CONFIG_RU" ]; then
+  echo "ERROR: Config file not found at $CONFIG_RU"
+  echo "Please ensure you're running this script from the GitHub repository"
+  exit 1
+fi
+
+echo "Starting Test Helper Service..."
+echo "Environment: $RAILS_ENV"
+echo "Port: $PORT"
+echo "Config: $CONFIG_RU"
+echo ""
+echo "Endpoints:"
+echo "  - Health check: http://localhost:$PORT/health"
+echo "  - Service info: http://localhost:$PORT/"
+echo "  - Create fixture: POST http://localhost:$PORT/fixtures"
+echo ""
+echo "Example:"
+echo '  curl -X POST http://localhost:'"$PORT"'/fixtures \\'
+echo '    -H "Content-Type: application/json" \\'
+echo '    -d '"'"'{"fixture_type": "user", "attributes": {"login": "testuser"}}'"'"''
+echo ""
+
+# Start the service using rackup
+cd "$REPO_ROOT"
+bin/rackup "$CONFIG_RU" -p "$PORT"

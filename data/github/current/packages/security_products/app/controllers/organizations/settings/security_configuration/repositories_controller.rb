@@ -1,0 +1,75 @@
+# typed: true
+# frozen_string_literal: true
+
+class Organizations::Settings::SecurityConfiguration::RepositoriesController < Orgs::Controller
+  include ApplicationController::JsonDependency
+  include ApplicationController::VerifiedFetchDependency
+  include EnablementSettingsDependency
+  include SecurityConfigurations::RepositoriesDependency
+
+  allow_verified_fetch only: [:update, :destroy]
+
+  # Access
+  before_action :manage_security_products_permission_required
+  before_action :prevent_duplicate_enablement_events, only: [:update, :destroy]
+  before_action :parse_json_params, only: [:update, :destroy]
+  before_action :security_configuration, only: [:update]
+
+  sig { void }
+  def update
+    # we only want to update the defaults if they are present in the params
+    # so that we can treat nil values as "do not change"
+    if params.key?("default_for_new_public_repos") && params.key?("default_for_new_private_repos")
+      SecurityConfigurationDefault.create_or_update_defaults(
+        target: current_organization,
+        security_configuration: security_configuration,
+        default_for_new_public_repos: params["default_for_new_public_repos"],
+        default_for_new_private_repos: params["default_for_new_private_repos"],
+      )
+    end
+
+    repositories = if params[:repository_ids].present?
+      SecurityProductsEnablement::RepositorySelection.selected(params[:repository_ids])
+    end
+    SecurityProductsEnablement.domain.configurations.enqueue_bulk_attachment(
+      security_configuration_id: security_configuration.id,
+      organization: current_organization,
+      actor_id: current_user.id,
+      action: :apply,
+      repositories: repositories,
+      repository_query: params[:repository_query],
+      override_existing_config: params[:override_existing_config] == true,
+      user_session_id: user_session.id,
+      options: {},
+    )
+
+    if %w(config_table repos_table).include?(params[:source])
+      is_gh_config = security_configuration.is_github_recommended_configuration?
+      analytics_event(
+        category: is_gh_config ? "apply_gh_config" : "apply_custom_config",
+        action: params[:source],
+        label: "org_id:#{current_organization.id}",
+      )
+    end
+
+    head :created
+  end
+
+  sig { void }
+  def destroy
+    repositories = if params[:repository_ids].present?
+      SecurityProductsEnablement::RepositorySelection.selected(params[:repository_ids])
+    end
+    SecurityProductsEnablement.domain.configurations.enqueue_bulk_attachment(
+      security_configuration_id: nil,
+      organization: current_organization,
+      actor_id: current_user.id,
+      action: :detach,
+      repositories: repositories,
+      repository_query: params[:repository_query],
+      user_session_id: user_session.id,
+    )
+
+    head :ok
+  end
+end

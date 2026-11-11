@@ -1,0 +1,8 @@
+#!/bin/bash
+# This runs when the user starts up their codespace.
+set -e
+
+# reinitialize goproxy configuration
+/usr/local/share/goproxy-init.sh --override
+
+echo "Devcontainer successfully started: Put any boostrap steps we need in on-create-command.sh"

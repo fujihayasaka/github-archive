@@ -1,0 +1,129 @@
+<%
+  analytics_dimensions = {
+    currently_following_users_count: current_user.following_count(viewer: current_user),
+    page_type: "activity"
+  }
+  instrument_dashboard_page_view(current_user, payload: analytics_dimensions)
+%>
+
+<% feed = private_feed_path(:atom) %>
+<% content_for :head do %>
+  <%= auto_discovery_link_tag :atom, feed %>
+<% end %>
+
+<%
+  page_info title: current_page?(home_path) ? "GitHub" : "GitHub Dashboard",
+            class: "full-width",
+            footer: false
+%>
+
+<%
+  hide_feed_on_dashboard =
+    dashboard_universe_enabled? &&
+      !FeatureFlag.vexi.enabled?(:disable_dashboard_feed_page, current_user, default: false)
+
+  show_dashboard_lists =
+    dashboard_universe_enabled? &&
+      !FeatureFlag.vexi.enabled?(:disable_dashboard_lists, current_user, default: false)
+%>
+
+<%
+  show_copilot_dashboard_headers =
+    dashboard_universe_enabled? &&
+    !FeatureFlag.vexi.enabled?(:disable_copilot_dashboard_headers, current_user, default: false)
+%>
+
+<%
+  show_feature_preview_enrollment_link =
+    !dashboard_universe_enabled? &&
+    FeatureFlag.vexi.enabled?(:dashboard_universe_2025, current_user, default: false) &&
+    !GitHub.enterprise? &&
+    !GitHub.multi_tenant_enterprise? &&
+    FeatureFlag.vexi.enabled?(:dashboard_opt_in_opt_out_links, current_user, default: false)
+%>
+
+<%= render InProductTargeting::Components::ProductAnnouncements::CopilotWelcomeModalComponent.new(user: current_user) %>
+
+<%= render partial: "dashboard/banners_above_the_header" %>
+
+<div data-issue-and-pr-hovercards-enabled data-sponsors-listing-hovercards-enabled>
+  <div id="dashboard" class="dashboard">
+    <% content_for :left_column do %>
+      <% if show_profile_navigation? %>
+          <%= render partial: "dashboard/profile_navigation" %>
+      <% else %>
+      <div class="dashboard-sidebar">
+        <%= render partial: "dashboard/left_column", locals: { user_repo_query: query } %>
+      </div>
+      <% end %>
+    <% end %>
+
+    <% content_for :right_column do %>
+      <% track_render_partial("dashboard/right_column") do %>
+        <%= render partial: "dashboard/right_column" %>
+      <% end %>
+    <% end %>
+
+    <h1 class="sr-only">Dashboard</h1>
+
+    <% unless show_copilot_dashboard_headers %>
+      <%= render Primer::Alpha::Stack.new(direction: :horizontal, justify: :space_between, align: :center, classes: "tmp-mb-3") do %>
+        <h2>Home</h2>
+        <% if show_feature_preview_enrollment_link %>
+          <%= form_with url: feature_previews_toggle_path(:dashboard_universe_2025), method: :post, local: true do |form| %>
+            <%= render Primer::Beta::Button.new(scheme: :link, tag: :button, type: :submit, classes: "text-normal") do %>
+              Try the new dashboard experience
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <div class="news" data-hpc>
+
+      <% if current_user.feature_flag_enabled?(:ipm_dashboard_banners_beneath_copilot_chat, default: false) %>
+        <%= render Dashboard::CopilotEntrypointComponent.new(
+          show_header: show_copilot_dashboard_headers,
+          unauthorized_sso_orgs: unauthorized_sso_orgs,
+        ) %>
+
+        <%= render partial: "dashboard/banners_below_the_header", locals: { show_nudges_section: show_nudges_section } %>
+      <% else %>
+        <%= render partial: "dashboard/banners_below_the_header", locals: { show_nudges_section: show_nudges_section } %>
+
+        <%= render Dashboard::CopilotEntrypointComponent.new(
+          show_header: show_copilot_dashboard_headers,
+          unauthorized_sso_orgs: unauthorized_sso_orgs,
+        ) %>
+      <% end %>
+
+      <%= render partial: "dashboard/left_column_content_to_center_for_narrow_screens", locals: { query: query } %>
+
+      <% if show_zero_user_dashboard %>
+        <%= render_react_partial(props: dashboard_refresh_props, name: "nux-dashboard-refresh") %>
+      <% end %>
+
+      <% if show_dashboard_lists %>
+        <%= render_react_partial(
+          name: "dashboard-lists",
+          props: {
+            userDisplayLogin: current_user.display_login,
+            currentUserId: current_user.id,
+            showProductivityDashboardModules: show_dashboard_lists,
+            showAgentsModule: show_agents_module,
+            showCopilotChatActions: show_copilot_chat_actions,
+          }
+        ) %>
+      <% end %>
+
+      <% show_feed = GitHub.enterprise? || (!onboarding_hide_feed && !hide_feed_on_dashboard) %>
+      <% if show_feed %>
+        <%= render partial: "dashboard/feed_container", locals: { feed_title: feed_title } %>
+      <% end %>
+    </div>
+  </div>
+</div>
+
+<% content_for :scripts do %><%# erblint:disable NoContentForScripts %>
+  <%= javascript_bundle :dashboard %>
+<% end %>

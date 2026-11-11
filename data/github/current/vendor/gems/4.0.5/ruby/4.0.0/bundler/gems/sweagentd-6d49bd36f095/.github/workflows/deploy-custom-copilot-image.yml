@@ -1,0 +1,48 @@
+name: Deploy Custom Copilot Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_version:
+        description: "Image version to deploy (find via stafftools for ImageId 4488)"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      image_version:
+        required: true
+        type: string
+    secrets:
+      CUSTOM_IMAGE_DEPLOYMENT_APP_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Trigger Image Deployment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: 3228698
+          private-key: ${{ secrets.CUSTOM_IMAGE_DEPLOYMENT_APP_KEY }}
+          owner: github
+          repositories: hosted-runners-images
+
+      - name: Dispatch deploy workflow
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh workflow run curated-deploy-GitHub-UbuntuCopilotCodingAgent-X64.yml \
+            --repo github/hosted-runners-images \
+            --ref main \
+            --field "image-version=${{ inputs.image_version }}" \
+            --field "deployment-slack-channel=C08PS7VEL3B"
+          echo "### ✅ Deploy workflow dispatched" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Image version:** \`${{ inputs.image_version }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Target:** [hosted-runners-images Actions](https://github.com/github/hosted-runners-images/actions/workflows/curated-deploy-GitHub-UbuntuCopilotCodingAgent-X64.yml)" >> "$GITHUB_STEP_SUMMARY"

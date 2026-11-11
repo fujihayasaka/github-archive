@@ -1,0 +1,159 @@
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+  <% component.with_header do |h| %>
+    <% h.with_title(tag: :h2) do %>
+      Copilot AI Credits
+    <% end %>
+  <% end %>
+
+  <% component.with_row do %>
+    <% tbb_status, tbb_err = display_pooled_entitlements_status %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Token Based Billing + Pooled Entitlements (CE/CB)",
+      tbb_status || tbb_err.presence,
+      "TBB and Pooled Entitlements opt-in for Copilot Enterprise/Business users.",
+      label_scheme: tbb_status ? :success : :danger
+    ) %>
+  <% end %>
+
+  <% if copilot_user.consumptive_user? %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "Overages Enabled?",
+        public_user.overages_enabled?,
+        "Can this user incur overages for premium usage?"
+      ) %>
+    <% end %>
+  <% end %>
+
+  <% if copilot_user.has_multi_access? %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "Billable Customer",
+        Customer.find_by(id: public_user.billable_customer_ids.first)&.name || false,
+        "Has this user selected a billable customer for premium usage?"
+      ) %>
+    <% end %>
+  <% end %>
+
+  <% if has_budget? %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "Entitlement",
+        render(Primer::Beta::Label.new(scheme: :default)) { "#{budget_info[:entitlement] || 0} AIC" },
+        "The user's entitlement for Copilot usage in AIC"
+      ) %>
+    <% end %>
+
+    <% if is_budget_unlimited? %>
+      <% component.with_row do %>
+        <%= render Stafftools::Copilot::DetailComponent.new(
+          safe_join(["Monthly Limit ", render(Primer::Beta::Octicon.new(icon: :info, ml: 1))]),
+          render(Primer::Beta::Label.new(scheme: :default)) { "No usage limit" },
+          "No monthly limit on AI credits usage set."
+        ) %>
+      <% end %>
+
+    <% else %>
+      <% component.with_row do %>
+        <div class="d-flex flex-column" style="width: 100%;">
+          <span class="text-bold mb-1">Monthly Limit <%= render(Primer::Beta::Octicon.new(icon: :info, ml: 1)) %></span>
+          <% pct_used = 100 - budget_info[:percent_remaining].to_f %>
+          <% overage_permitted = budget_info[:overage_permitted] %>
+          <% bar_color = (pct_used == 100 && !overage_permitted) ? "color-bg-danger-emphasis" : "color-bg-success-emphasis"  %>
+          <div class="d-flex flex-items-center mb-1" style="width: 100%;">
+            <div class="rounded-2 overflow-hidden mr-2" style="flex: 1; height: 8px; background: var(--bgColor-neutral-muted, var(--color-neutral-muted));">
+              <div class="<%= bar_color %> rounded-2" style="width: <%= [pct_used, 100].min %>%; height: 100%;" <%= tag.attributes(data: { test_selector: "monthly_limit_usage_bar" }) %>></div>
+            </div>
+            <span class="f6 text-bold" style="min-width: 45px; text-align: right;" <%= tag.attributes(data: { test_selector: "monthly_limit_usage" }) %>><%= format("%.1f%%", pct_used) %></span>
+          </div>
+          <span class="color-fg-muted f6" <%= tag.attributes(data: { test_selector: "monthly_limit_reset_at" }) %>>
+            <% reset_date = copilot_user.quota_reset_date %>
+            <% days_until_reset = (reset_date - Date.current).to_i %>
+            Resets in <%= pluralize(days_until_reset, 'day') %> on <%= reset_date.strftime("%B %-d, %Y") %>
+          </span>
+        </div>
+        <% if pct_used == 100 && !overage_permitted %>
+          <%= render Primer::Alpha::Banner.new(scheme: :danger, icon: :alert) do %>
+            Usage blocked until monthly limit resets.
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <% component.with_row do %>
+      <div class="d-flex flex-justify-between">
+        <div class="pr-2">
+          <div class="d-flex flex-items-start flex-items-center">
+            <%= render(Primer::Beta::Button.new(
+              scheme: :secondary,
+              size: :small,
+              id: "pooled_entitlements_stafftools_link",
+              tag: :a,
+              href: stafftools_path,
+              leading_visual: { icon: :link }
+            )) { "View AIC Pool" }
+            %>
+          </div>
+        </div>
+      </div>
+    <% end %>
+
+  <% else %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        safe_join(["Monthly Limit ", render(Primer::Beta::Octicon.new(icon: :info, ml: 1))]),
+        render(Primer::Beta::Label.new(scheme: :default)) { "Data not available" },
+        "Budget not found for this user"
+      ) %>
+    <% end %>
+  <% end %>
+<% end %>
+<br>
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+  <% component.with_header do |h| %>
+    <% h.with_title(tag: :h2) do %>
+      Copilot Quota Actions
+    <% end %>
+  <% end %>
+  <% component.with_row do %>
+    <div class="mb-2">
+      Premium user quota events
+      <%= render Primer::Beta::Label.new(tag: :div, scheme: :success) do %>
+        Active
+      <% end %>
+    </div>
+    <%= render(Primer::Beta::Button.new(
+      scheme: :secondary,
+      size: :medium,
+      id: "quota_events",
+      tag: :a,
+      target: "_blank",
+      href: data_dot_chat_quota_events_link
+    )) { "View Chat Events" } %>
+    <%= render(Primer::Beta::Button.new(
+      scheme: :secondary,
+      size: :medium,
+      id: "quota_processed_events_premium",
+      tag: :a,
+      target: "_blank",
+      href: data_dot_quota_processed_events_link
+    )) { "View Quota Processed Events" } %>
+    <%= render(Primer::Beta::Button.new(
+      scheme: :secondary,
+      size: :medium,
+      id: "premium_quota_events",
+      tag: :a,
+      target: "_blank",
+      href: data_dot_premium_events_link
+    )) { "View Premium Events" } %>
+    <%= render(Primer::Beta::Button.new(
+      scheme: :secondary,
+      size: :medium,
+      id: "premium_billing_usage",
+      tag: :a,
+      target: "_blank",
+      href: data_dot_billing_usage_link
+    )) { "View Premium Billing Usage" } %>
+  <% end %>
+<% end %>
+<br>

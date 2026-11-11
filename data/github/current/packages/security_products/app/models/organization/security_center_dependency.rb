@@ -1,0 +1,184 @@
+# typed: strict
+# frozen_string_literal: true
+
+module Organization::SecurityCenterDependency
+  extend ActiveSupport::Concern
+
+  # How long the cached backfill banner state remains valid before expiring.
+  SECURITY_CENTER_BACKFILL_STATE_TTL = T.let(1.day, ActiveSupport::Duration)
+
+  # Schedule the drift detection off-request and return the last cached banner
+  # state. The returned boolean may be stale on the very first visit, before the
+  # check job has run once.
+  sig { returns(T::Boolean) }
+  def trigger_security_center_reconciliation
+    T.bind(self, ::Organization)
+    ::SecurityCenter::OrganizationBackfillCheckJob.perform_later(owner_id: self.id)
+    security_center_backfill_in_progress?
+  rescue => exception
+    # Report but don't block the page from rendering.
+    Failbot.report(exception, {
+      "gh.org.id": self.id,
+    })
+    false
+  end
+
+  # Detect whether the Security Center derived tables have drifted from canonical
+  # repository data and, if so, force reconciliation to run. Returns whether a
+  # deviation was detected. Runs off-request via OrganizationBackfillCheckJob.
+  sig { returns(T::Boolean) }
+  def perform_security_center_reconciliation_check
+    T.bind(self, ::Organization)
+    needs_backfill = T.let(false, T::Boolean)
+
+    if self.repositories.any?
+      needs_backfill = repository_security_center_configs.empty?
+      unless needs_backfill
+        # only check status counts if configs matched
+        expected_features = SecurityCenter::SecurityFeatures.visible_features(self)
+          .flat_map { |f| [f] + RepositorySecurityCenterStatus.subfeatures_for(f) }
+          .map(&:to_s)
+
+        # in case of GHES, it's possible for there to be no visible features
+        if expected_features.any?
+          # for performance reasons, querying each feature_type individually is much faster
+          # for organizations with many repositories, otherwise mysql needs to scan the entire
+          # index even though it should be able to short-circuit once it finds a hit for feature_type
+          feature_type_subquery = expected_features.map do |feature_type|
+            "(%{subquery})" % {
+              subquery: repository_security_center_statuses
+                .where(feature_type: feature_type)
+                .select(:feature_type)
+                .limit(1)
+                .to_sql
+            }
+          end.join(" UNION ")
+
+          actual_features = RepositorySecurityCenterStatus.connection.select_values(Arel.sql("SELECT feature_type FROM (#{feature_type_subquery}) AS feature_types"))
+
+          needs_backfill ||= (expected_features - actual_features).any?
+        end
+      end
+    else
+      needs_backfill = repository_security_center_configs.any? ||
+        repository_security_center_statuses.any?
+    end
+
+    # If we detected a deviation in the expected amount of data, clear the
+    # reconciliation lock to effectively "force" reconciliation to run.
+    if needs_backfill
+      GitHub.logger.info("Clearing reconciliation lock",
+        "code.namespace": self.class.name,
+        "code.function": __method__,
+        "gh.org.id": self.id,
+        "gh.org.login": self.display_login,
+      )
+      ::SecurityCenter::OwnerReconciliationJob::KvHelper.new(self.id).session_lock = nil
+      GitHub.dogstats.increment("security_center.deviation.count", tags: ["scope:org"])
+    end
+
+    # enqueue will noop unless
+    #  - it has been 7+ days since the last reconciliation (via org event or this backfill)
+    #  - we just cleared the lock above
+    source_event = ::SecurityCenter::OwnerReconciliationJob::RECONCILIATION_EVENT
+    source_event = ::SecurityCenter::OwnerReconciliationJob::BACKFILL_EVENT if needs_backfill
+
+    ::SecurityCenter::OwnerReconciliationJob.perform_later(owner_id: self.id, source_event: source_event)
+
+    # only show the banner if we detected deviation (rare)
+    needs_backfill
+  rescue => exception
+    # Report but don't block; fall back to the detected value.
+    Failbot.report(exception, {
+      "gh.org.id": self.id,
+    })
+    needs_backfill
+  end
+
+
+  sig { params(in_progress: T::Boolean).void }
+  def cache_security_center_backfill_state(in_progress)
+    T.bind(self, ::Organization)
+    ActiveRecord::Base.connected_to(role: :writing) do
+      ::SecurityCenter::KV.store.set(
+        security_center_backfill_state_key,
+        in_progress.to_s,
+        expires: SECURITY_CENTER_BACKFILL_STATE_TTL.from_now,
+      )
+    end
+  end
+
+  # Read the cached banner state, defaulting to false when no check has run yet
+  # or the value has expired.
+  sig { returns(T::Boolean) }
+  def security_center_backfill_in_progress?
+    T.bind(self, ::Organization)
+    ::SecurityCenter::KV.store.get(security_center_backfill_state_key).value { nil } == "true"
+  end
+
+  sig { returns(String) }
+  private def security_center_backfill_state_key
+    T.bind(self, ::Organization)
+    "security_center.backfill_state:#{self.id}"
+  end
+
+  sig { returns(ActiveRecord::Relation) }
+  def security_center_repo_config_status_scope
+    T.bind(self, ::Organization)
+
+    RepositorySecurityCenterConfig
+      .where(owner_id: self.id)
+      .joins(%{
+        LEFT JOIN repository_security_center_statuses
+          ON repository_security_center_statuses.repository_id = repository_security_center_configs.repository_id
+          AND repository_security_center_statuses.owner_id = repository_security_center_configs.owner_id
+        })
+  end
+
+  sig { returns(T::Boolean) }
+  def secret_scanning_enabled_in_any_repo?
+    T.bind(self, ::Organization)
+
+    RepositorySecurityCenterConfig
+      .where(owner_id: self.id)
+      .joins(:repository_security_center_statuses)
+      .where(repository_security_center_statuses: {
+        feature_type: :secret_scanning,
+        scanning_status: :enrolled
+      })
+      .exists?
+  end
+
+  sig { returns(T::Boolean) }
+  def code_scanning_enabled_in_any_repo?
+    T.bind(self, ::Organization)
+
+    RepositorySecurityCenterConfig
+      .where(owner_id: self.id, archived: false)
+      .joins(:repository_security_center_statuses)
+      .where(repository_security_center_statuses: {
+        feature_type: :code_scanning,
+        scanning_status: :enrolled
+      })
+      .exists?
+  end
+
+  sig { returns(T::Boolean) }
+  def code_scanning_enabled_in_all_repos?
+    T.bind(self, ::Organization)
+
+    # Check if any non-archived repo exists without code scanning enrolled
+    repo_without_cs_exists = RepositorySecurityCenterConfig
+      .where(owner_id: self.id, archived: false)
+      .where.not(
+        repository_id: RepositorySecurityCenterStatus
+          .where(owner_id: self.id, feature_type: :code_scanning, scanning_status: :enrolled)
+          .select(:repository_id)
+      )
+      .exists?
+
+    return false if repo_without_cs_exists
+
+    code_scanning_enabled_in_any_repo?
+  end
+end

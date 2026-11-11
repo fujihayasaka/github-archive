@@ -1,0 +1,27 @@
+# typed: strict
+# frozen_string_literal: true
+
+module MemexProjectColumn::Interface::Indexable
+  module Processor
+    class NumberValueDestroy < Base
+      include GenericFieldValueDestroyStrategy
+
+      sig { override.returns(T::Array[Regexp]) }
+      def self.topics
+        [
+          /github\.memex\.v0\.MemexProjectColumnValueDestroy\Z/
+        ]
+      end
+
+      sig { override.returns(StreamProcessorKey) }
+      def self.stream_processor_key
+        StreamProcessorKey::ColumnChanges
+      end
+
+      sig { override.returns(T.class_of(MemexProjectColumn::Field::Number)) }
+      def field_class
+        MemexProjectColumn::Field::Number
+      end
+    end
+  end
+end

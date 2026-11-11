@@ -1,0 +1,70 @@
+name: "Build and test"
+
+on:
+  push:
+  workflow_dispatch:
+  merge_group:
+
+permissions:
+  id-token: write # for setup-goproxy
+  contents: read
+
+env:
+  HUSKY: 0
+
+jobs:
+  sweagentd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+      - uses: github/setup-goproxy@v1.1.0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: No changes to go.sum
+        run: |
+          go mod tidy
+          git diff --exit-code go.sum || exit_code=$?
+          if [ "${exit_code:-0}" -ne 0 ]; then
+            echo "Error: go.sum has changed, please run `go mod tidy` and commit the result"
+            exit 1
+          fi
+
+      - name: Build sweagentd
+        run: make build
+
+      - name: Execute sweagentd tests
+        run: |
+          go install github.com/mfridman/tparse@latest
+          make test
+        env:
+          GITHUB_ORG: "ghcpd"
+          GITHUB_TOKEN: ${{ secrets.COPILOT_DEVLOPER_AGENT_USER_PAT }}
+          GITHUB_BOT_LOGIN: "CloudColonel" # the assignee to the PR
+  sweagentd_with_integration_tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+      - uses: github/setup-goproxy@v1.1.0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Build sweagentd
+        run: make build
+
+      - name: Execute sweagentd tests
+        run: |
+          go install github.com/mfridman/tparse@latest
+          RUN_INTEGRATION_TESTS=1 make test
+        env:
+          GITHUB_ORG: "ghcpd"
+          GITHUB_TOKEN: ${{ secrets.COPILOT_DEVLOPER_AGENT_USER_PAT }}
+          GITHUB_BOT_LOGIN: "CloudColonel" # the assignee to the PR

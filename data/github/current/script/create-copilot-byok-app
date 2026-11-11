@@ -1,0 +1,44 @@
+#!/usr/bin/env safe-ruby
+# typed: true
+# frozen_string_literal: true
+
+puts "=> Loading the environment..."
+
+require_relative "../config/environment"
+
+unless Rails.env.development?
+  puts "=> This script is only intended for development."
+  exit 1
+end
+
+class CreateCopilotByokApp
+  def call
+    if Apps::Privileged.integration(:copilot_byok).present?
+      puts "=> The Copilot BYOK GitHub app already exists."
+    else
+      puts "=> Creating the Copilot BYOK GitHub app..."
+      integration = Apps::Privileged::CopilotByok.seed_database!
+      create_dot_env_file(integration)
+    end
+  end
+
+  private
+
+  def create_dot_env_file(integration)
+    File.open(dotenv_path, "w") do |file|
+      file.puts "COPILOT_BYOK_APP_NEXT_GLOBAL_ID=\"#{integration.next_global_id}\""
+    end
+  end
+
+  def dotenv_path
+    dotenv_path = "tmp/copilot-byok.env.local"
+
+    puts "Saving Copilot BYOK environment variables to `#{dotenv_path}`"
+    dotenv_path
+  end
+end
+
+if __FILE__ == $0
+  CreateCopilotByokApp.new.call
+  puts "=> Done!"
+end

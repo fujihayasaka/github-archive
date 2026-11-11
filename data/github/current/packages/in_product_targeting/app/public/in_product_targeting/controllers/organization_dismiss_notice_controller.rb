@@ -1,0 +1,68 @@
+# typed: strict
+# frozen_string_literal: true
+
+module InProductTargeting
+  module Controllers
+    class OrganizationDismissNoticeController < ApplicationController
+      include ApplicationController::VerifiedFetchDependency
+
+      depends_on_clusters ApplicationRecord::Domain::Users,
+        ApplicationRecord::Mysql1,
+        ApplicationRecord::Collab,
+        ApplicationRecord::IamAbilities
+
+      before_action :login_required
+      allow_verified_fetch only: [:create]
+
+      CLUSTER_DEPENDENCIES_ALLOWED_NON_GET_REQUESTS = T.let(%w[
+        InProductTargeting::Controllers::OrganizationDismissNoticeController#create
+      ].freeze, T::Array[String])
+
+      # POST /in-product-messaging/organization-dismiss-notice
+      # Dismisses a notice for an organization and redirects to destination URL based on key lookup
+      sig { void }
+      def create
+        notice = params[:notice]
+        group = params[:group].present? ? params[:group].to_sym : nil
+        org_id = params[:organization_id].present? ? params[:organization_id].to_i : nil
+
+        if notice.present?
+          # Use connected write role to avoid replication lag
+          ActiveRecord::Base.connected_to(role: :writing) do
+            if org_id
+              if (org = Organization.find_by(id: org_id))
+                current_user.dismiss_organization_notice(
+                  notice,
+                  org,
+                )
+              end
+            end
+
+            InProductTargeting::NudgeMemory.new(current_user).save_a_copy_of_dismissal_analytics_to_dotcom(id: notice, group: group, org_id: org_id)
+          end
+        end
+
+        if request.xhr? || use_verified_fetch?
+          head :ok
+        else
+          redirect_back(fallback_location: "/")
+        end
+      end
+
+      private
+
+      # Since we're only dismissing notices for the current user, return current_user as the target
+      sig { returns(T.any(Symbol, User)) }
+      def resource_for_conditional_access
+        return :no_target_for_conditional_access unless logged_in?
+        return :no_target_for_conditional_access if GitHub::DeniedLogins.include? current_user.display_login.downcase
+        current_user
+      end
+
+      sig { returns(Symbol) }
+      def target_for_conditional_access
+        :no_target_for_conditional_access # rubocop:disable GitHub/SpecifyTargetForConditionalAccess
+      end
+    end
+  end
+end

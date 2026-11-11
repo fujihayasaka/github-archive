@@ -1,0 +1,46 @@
+# This checks who the next CCA FR will be and updates the appropriate Slack channel topics to announce that upcoming FR.
+
+name: Update Slack with Copilot Coding Agent FR
+
+# Controls when the workflow will run:
+on:
+  # Run this workflow on a regular schedule automatically:
+  schedule:
+    - cron: '0 19 * * WED' # 15 minutes before PD schedule change
+
+  # Allows you to run this workflow manually from the Actions tab:
+  workflow_dispatch:
+
+env:
+  CCA_TEAM_CHANNEL: 'C0891ESUXGW'
+  CCA_FEEDBACK_CHANNEL: 'C08DGM5ULJ3'
+
+permissions:
+  contents: read
+
+jobs:
+  set-first-responder-slack-topic:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Schedule from PagerDuty
+        id: fetch-fr-schedule
+        uses: github/copilot-mission-control/.github/actions/fr-schedule@main
+        with:
+          pagerduty-token: ${{ secrets.PAGERDUTY_API_KEY }}
+          pagerduty-schedule: P8DYGLG # https://github.pagerduty.com/schedules#P8DYGLG
+
+      - name: Set Slack Channel Topic (#coding-agent-team)
+        uses: github/copilot-mission-control/.github/actions/set-slack-topic@main
+        with:
+          slack-token: ${{ secrets.SLACK_FIRST_RESPONDER_BOT_API_TOKEN }}
+          first-responder: ${{ steps.fetch-fr-schedule.outputs.next-first-responder }}
+          first-responder-label: "First responders: "
+          slack-channel: ${{ env.CCA_TEAM_CHANNEL }}
+
+      - name: Set Slack Channel Topic (#copilot-coding-agent-feedback)
+        uses: github/copilot-mission-control/.github/actions/set-slack-topic@main
+        with:
+          slack-token: ${{ secrets.SLACK_FIRST_RESPONDER_BOT_API_TOKEN }}
+          first-responder: ${{ steps.fetch-fr-schedule.outputs.next-first-responder }}
+          first-responder-label: "First responders: "
+          slack-channel: ${{ env.CCA_FEEDBACK_CHANNEL }}

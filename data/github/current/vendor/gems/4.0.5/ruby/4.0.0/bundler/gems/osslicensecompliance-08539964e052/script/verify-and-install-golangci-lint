@@ -1,0 +1,221 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+workflow="${repo_root}/.github/workflows/build.yaml"
+linter_bin="${repo_root}/bin/golangci-lint"
+
+# --------------------------------------------------------------
+# Get golangci-lint version from the workflow file
+# --------------------------------------------------------------
+golangci_lint_workflow_version() {
+  # Extract lint-version from the github/go-linter step.
+  local expected_version
+  expected_version="$(
+    awk '
+      $0 ~ /uses:[[:space:]]*github\/go-linter@/ { in_step=1 }
+      in_step && $0 ~ /^[[:space:]]*lint-version:[[:space:]]*/ {
+        sub(/^[[:space:]]*lint-version:[[:space:]]*/, "", $0)
+        gsub(/\"/, "", $0)
+        print $0
+        exit
+      }
+      in_step && $0 ~ /^[[:space:]]*-[[:space:]]name:/ { in_step=0 }
+    ' "${workflow}"
+  )"
+
+  # Trim leading/trailing whitespace.
+  expected_version="${expected_version#"${expected_version%%[![:space:]]*}"}"
+  expected_version="${expected_version%"${expected_version##*[![:space:]]}"}"
+
+  if [[ -z "${expected_version}" ]]; then
+    echo "WARNING: No lint-version found in ${workflow}" >&2
+    echo "  Add it under the 'github/go-linter' step, e.g.: lint-version: v2.8.0" >&2
+    return 2
+  fi
+
+  # Security/robustness: ensure we parsed a plain version string (not arbitrary YAML content).
+  # We intentionally keep this strict: golangci-lint versions are expected to look like `v2.8.0`.
+  if [[ ! "${expected_version}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "WARNING: Parsed lint-version from workflow is not a plain semver: ${expected_version}" >&2
+    echo "  Expected something like: v2.8.0" >&2
+    return 2
+  fi
+
+  echo "${expected_version}"
+}
+
+# --------------------------------------------------------------
+# Get golangci-lint version from the local ./bin
+# --------------------------------------------------------------
+golangci_lint_bin_version() {
+  # golangci-lint output examples:
+  #   golangci-lint has version 2.8.0 built ...
+  #   golangci-lint version v2.8.0 built ...
+  local actual_version_raw
+  local actual_version
+  actual_version_raw="$(${linter_bin} --version | head -n 1)"
+  actual_version="$(
+    printf '%s\n' "${actual_version_raw}" |
+      grep -Eo 'v?[0-9]+\.[0-9]+\.[0-9]+' |
+      head -n 1
+  )"
+
+  # Trim leading/trailing whitespace.
+  actual_version="${actual_version#"${actual_version%%[![:space:]]*}"}"
+  actual_version="${actual_version%"${actual_version##*[![:space:]]}"}"
+
+  if [[ -z "${actual_version}" ]]; then
+    echo "ERROR: Could not parse golangci-lint version from: ${actual_version_raw}" >&2
+    return 2
+  fi
+
+  # Security/robustness: ensure we parsed a plain version string (not arbitrary YAML content).
+  # We intentionally keep this strict: golangci-lint versions are expected to look like `v2.8.0`.
+  if [[ ! "${actual_version}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "WARNING: Parsed lint-version from ./bin/golangci-lint is not a plain semver: ${actual_version}" >&2
+    echo "  Expected something like: v2.8.0" >&2
+    return 2
+  fi
+
+  echo "${actual_version}"
+}
+
+# --------------------------------------------------------------
+# Check if bin/golangci-lint version matches the expected version from the workflow
+# --------------------------------------------------------------
+golangci_lint_versions_match() {
+  local expected_version="$1"
+  local actual_version
+  actual_version="$(golangci_lint_bin_version)" || return $?
+
+  # Normalize to leading 'v' for comparison.
+  case "${expected_version}" in
+    v*) ;; 
+    *) expected_version="v${expected_version}" ;;
+  esac
+  case "${actual_version}" in
+    v*) ;; 
+    *) actual_version="v${actual_version}" ;;
+  esac
+
+  if [[ "${actual_version}" != "${expected_version}" ]]; then
+    echo >&2
+    echo "WARNING: golangci-lint version mismatch" >&2
+    echo "  Expected (CI): ${expected_version} (from ${workflow})" >&2
+    echo "  Actual:        ${actual_version} (from ${linter_bin} --version)" >&2
+    return 1
+  fi
+
+  echo >&2
+  echo "OK: golangci-lint ${actual_version} matches CI (${expected_version})." >&2
+}
+
+# --------------------------------------------------------------
+# check if golangci-lint is installed locally
+# --------------------------------------------------------------
+golangci_lint_installed_locally() {
+  if [[ -x "${linter_bin}" ]]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+# --------------------------------------------------------------
+# Prompt to run bootstrap to install golangci-lint
+# --------------------------------------------------------------
+golangci_lint_install_now() {
+  local ans
+
+  # When invoked from Make, stdout/stderr may be redirected/captured (e.g. via $$(...) or pipes),
+  # which makes `-t 1`/`-t 2` false even though the user is at a terminal.
+  # Use /dev/tty for an interactive prompt when available.
+  if [[ -r /dev/tty && -w /dev/tty ]]; then
+    printf "Run ./script/bootstrap now to install golangci-lint locally in ./bin? [y/N] " > /dev/tty
+    read -r ans < /dev/tty
+  elif [[ -t 0 ]]; then
+    printf "Run ./script/bootstrap now to install golangci-lint locally in ./bin? [y/N] " >&2
+    read -r ans
+  else
+    echo "FATAL: Non-interactive shell detected." >&2
+    return 2
+  fi
+
+  case "${ans}" in
+    y|Y|yes|YES)
+      ${repo_root}/script/bootstrap
+      ;;
+    *)
+      echo "INFO: User selected to NOT run bootstrap." >&2
+      return 1
+      ;;
+  esac
+
+  if ! golangci_lint_installed_locally; then
+    echo "FATAL: ${linter_bin} still not found after bootstrap." >&2
+    return 2
+  fi
+}
+
+# --------------------------------------------------------------
+# Check versions of local and CI golangci-lint.
+# If mismatch on first check, will try reinstalling locally.
+# --------------------------------------------------------------
+check_versions() {
+  local expected_version="$1"
+  local rc
+  golangci_lint_versions_match "${expected_version}"
+  rc=$?
+  if [[ ${rc} -eq 0 ]]; then
+    # versions match -- all good
+    return 0
+  elif [[ ${rc} -ne 1 ]]; then
+    # rc=2 means we couldn't determine version for locally installed golangci-lint -- ABORT.
+    return ${rc}
+  fi
+
+  # Found versions, but they don't match -- try to fix by reinstalling
+  echo >&2
+  echo "INFO: golangci-lint version mismatch may be fixed by running ./script/bootstrap" >&2
+  golangci_lint_install_now || exit $?
+
+  golangci_lint_versions_match "${expected_version}"
+  rc=$?
+  if [[ ${rc} -eq 0 ]]; then
+    # versions match after reinstall -- all good
+    return 0
+  elif [[ ${rc} -ne 1 ]]; then
+    # rc=2 means we couldn't determine version for locally installed golangci-lint -- ABORT.
+    return ${rc}
+  fi
+
+  echo >&2
+  echo "WARNING: Unable to make golangci-lint versions match." >&2  
+  return 1
+}
+
+# --------------------------------------------------------------
+# Main script logic
+# --------------------------------------------------------------
+main() {
+  # check that linter is installed
+  if ! golangci_lint_installed_locally; then
+    echo >&2
+    echo "WARNING: golangci-lint not installed in ${linter_bin}." >&2
+    golangci_lint_install_now || exit $?
+  fi
+
+  # check that workflow file exists
+  if [[ ! -f "${workflow}" ]]; then
+    echo "WARNING: Cannot find workflow at ${workflow}" >&2
+    echo "  Local golangci-lint installation version: $(golangci_lint_bin_version)" >&2
+    echo "  Unable to verify golangci-lint version from workflow." >&2
+    exit 2
+  fi
+  expected_version="$(golangci_lint_workflow_version)" || exit $?
+
+  check_versions "${expected_version}" || exit $?
+}
+
+main "$@"

@@ -1,0 +1,1 @@
+function e(){return`production`}var t=t=>e()===`production`?{}:{"data-testid":t};export{t};

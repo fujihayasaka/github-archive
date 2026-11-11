@@ -1,0 +1,125 @@
+#!/bin/bash
+# Elasticsearch inference helper functions for GitHub development environment
+
+inference_endpoint_exists() {
+    local endpoint_name="$1"
+    local status
+
+    status="$(curl -s -o /dev/null -w "%{http_code}" "$es_url/_inference/text_embedding/$endpoint_name")"
+    [ "$status" = "200" ]
+}
+
+# Built-in Elasticsearch models (IDs starting with '.') are downloaded from
+# Elastic's own CDN when the inference endpoint is created — no HuggingFace
+# access or eland tooling required.
+is_builtin_model() {
+    [[ "$1" == .* ]]
+}
+
+# After creating an inference endpoint backed by a built-in model, ES needs
+# time to download and deploy it.  Poll until a test inference succeeds.
+wait_for_inference_endpoint() {
+    local endpoint_name="$1"
+    local max_attempts=36  # 3 minutes (36 × 5 s)
+    local attempt=0
+
+    echo "Waiting for inference endpoint '$endpoint_name' to become ready..."
+    while [ $attempt -lt $max_attempts ]; do
+        local test_response
+        test_response="$(curl -s -X POST "$es_url/_inference/$endpoint_name" \
+            -H "Content-Type: application/json" \
+            -d '{"input": "test"}')"
+
+        if echo "$test_response" | jq -e '.text_embedding // .text_embedding_results' > /dev/null 2>&1; then
+            echo "Inference endpoint '$endpoint_name' is ready."
+            return 0
+        fi
+
+        sleep 5
+        attempt=$((attempt + 1))
+    done
+
+    echo "WARNING: Inference endpoint '$endpoint_name' did not become ready within expected time" >&2
+    return 1
+}
+
+create_inference_endpoint() {
+    local endpoint_name="${1:-test-endpoint}"
+    local model_id="${2:-.multilingual-e5-small}"
+    local hub_model_id="${HUB_MODEL_ID:-sentence-transformers/all-MiniLM-L6-v2}"
+    local service_threads="${INFERENCE_NUM_THREADS:-1}"
+    local service_allocations="${INFERENCE_NUM_ALLOCATIONS:-1}"
+
+    echo "Ensuring inference endpoint '$endpoint_name' exists"
+
+    if inference_endpoint_exists "$endpoint_name"; then
+        echo "Inference endpoint '$endpoint_name' already exists; skipping creation."
+        test_inference_endpoint "$endpoint_name"
+        return 0
+    fi
+
+    local license_response="$(curl -s "$es_url/_license")"
+    local license_type="$(echo "$license_response" | jq -r '.license.type // "basic"')"
+
+    if [ "$license_type" = "basic" ] || [ "$license_type" = "null" ]; then
+        echo "WARNING: Inference endpoints require a valid Elasticsearch license"
+        echo "Current license type: $license_type"
+        echo "You can create an inference endpoint later with:"
+        cat <<EOF
+  curl -X PUT "$es_url/_inference/text_embedding/$endpoint_name" \\
+    -H 'Content-Type: application/json' \\
+    -d '{"service": "elasticsearch", "service_settings": {"model_id": "$model_id"}}'
+EOF
+        return 0
+    fi
+
+    # Built-in models are provisioned automatically by Elasticsearch when the
+    # inference endpoint is created — skip the manual eland/HuggingFace import.
+    if ! is_builtin_model "$model_id"; then
+        echo "Ensuring model '$model_id' is imported and deployed..."
+        if ! ensure_model_ready "$model_id" "$hub_model_id"; then
+            echo "ERROR: Failed to prepare model '$model_id'" >&2
+            return 1
+        fi
+    fi
+
+    echo "Creating inference endpoint '$endpoint_name' (model: $model_id)..."
+    local payload="$(jq -n --arg model_id "$model_id" \
+        --argjson num_threads "$service_threads" \
+        --argjson num_allocations "$service_allocations" \
+        '{service: "elasticsearch", service_settings: {model_id: $model_id, num_threads: $num_threads, num_allocations: $num_allocations}}')"
+    local endpoint_response="$(curl -s -w "%{http_code}" -X PUT "$es_url/_inference/text_embedding/$endpoint_name" \
+        -H "Content-Type: application/json" \
+        -d "$payload")"
+
+    local http_code="${endpoint_response: -3}"
+    local response_body="${endpoint_response%???}"
+
+    if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+        echo "Inference endpoint '$endpoint_name' created successfully"
+        if is_builtin_model "$model_id"; then
+            wait_for_inference_endpoint "$endpoint_name"
+        fi
+        test_inference_endpoint "$endpoint_name"
+    elif [ "$http_code" = "409" ]; then
+        echo "Inference endpoint '$endpoint_name' already exists according to Elasticsearch (409)."
+        test_inference_endpoint "$endpoint_name"
+    else
+        echo "Failed to create inference endpoint (HTTP $http_code)" >&2
+        echo "Response: $response_body" >&2
+        return 1
+    fi
+}
+
+test_inference_endpoint() {
+    local endpoint_name="${1:-test-endpoint}"
+    local text="${2:-Hello, this is a test message}"
+    local payload="$(jq -n --arg input "$text" '{input: $input}')"
+
+    echo "Testing inference endpoint: $endpoint_name"
+    local response="$(curl -s -X POST "$es_url/_inference/$endpoint_name" \
+        -H "Content-Type: application/json" \
+        -d "$payload")"
+
+    echo "$response" | jq '.' || echo "$response"
+}

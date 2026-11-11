@@ -1,0 +1,105 @@
+<%= render(Primer::BaseComponent.new(**@system_arguments)) do %>
+  <%= summary || render(default_summary) %>
+  <%
+    details_menu_attrs = { class: details_menu_class_names }
+    if @src
+      details_menu_attrs[:src] = @src
+      details_menu_attrs[:preload] = "" if @preload
+    end
+    unless @filterable
+      details_menu_attrs[:role] = "menu"
+      details_menu_attrs[:"aria-label"] = @title if @title
+    end
+    details_menu_attrs[:"data-menu-input"] = @input_id if @input_id
+    if @onselect || @onselected
+      action_parts = []
+      action_parts << "details-menu-select:#{@onselect}" if @onselect
+      action_parts << "details-menu-selected:#{@onselected}" if @onselected
+      details_menu_attrs[:"data-action"] = action_parts.join(" ")
+    end
+  %>
+  <%= content_tag("details-menu", details_menu_attrs) do %>
+    <div class="<%= modal_class_names %>">
+      <% if @title || header %>
+        <header class="SelectMenu-header">
+          <% if header %>
+            <%= header %>
+          <% else %>
+            <div class="SelectMenu-title"><%= @title %></div>
+          <% end %>
+          <button class="SelectMenu-closeButton" type="button" aria-label="Close menu" data-toggle-for="<%= @details_id %>">
+            <%= render Primer::Beta::Octicon.new(icon: "x") %>
+          </button>
+        </header>
+      <% else %>
+        <button class="SelectMenu-closeButton position-absolute right-0 m-2" type="button" aria-label="Close menu" data-toggle-for="<%= @details_id %>">
+          <%= render Primer::Beta::Octicon.new(icon: "x") %>
+        </button>
+      <% end %>
+      <% if @filterable %>
+        <filter-input aria-owns="filter-menu-<%= id %>" class="SelectMenu-filter">
+          <%
+            input_attrs = {
+              autofocus: "autofocus",
+              "aria-owns": "filter-menu-#{id}",
+              class: input_filterable_class_names,
+              type: "text",
+              "aria-label": @title || @text,
+              placeholder: @filter_placeholder || @title || @text,
+            }
+            input_attrs[:id] = @js_filterable_id if @js_filterable
+          %>
+          <%= tag(:input, input_attrs) %>
+        </filter-input>
+      <% end %>
+      <%
+        filter_menu_attrs = {
+          id: "filter-menu-#{id}",
+          class: "d-flex flex-column flex-1 overflow-hidden",
+        }
+        if @filterable
+          filter_menu_attrs[:role] = "menu"
+          filter_menu_attrs[:"aria-label"] = @title if @title
+        end
+      %>
+      <%= content_tag(:div, filter_menu_attrs) do %>
+        <%
+          list_attrs = { class: "SelectMenu-list" }
+          list_attrs[:"data-filter-list"] = "" if @filterable
+        %>
+        <%= content_tag(:div, list_attrs) do %>
+
+          <% if @src.present? %>
+            <%= render Primer::Alpha::IncludeFragment.new(classes: "SelectMenu-loading", "aria-label": "Loading") do %>
+              <% spinner_content = capture do %>
+                <%= render(Primer::Beta::Spinner.new(role: 'menuitem')) %>
+              <% end %>
+              <% if @src_error_msg %>
+                <p data-show-on-error hidden>
+                  <%= @src_error_msg %>
+                </p>
+                <span data-hide-on-error>
+                  <%= spinner_content %>
+                </span>
+              <% else %>
+                <%= spinner_content %>
+              <% end %>
+            <% end %>
+          <% elsif body %>
+            <%= body %>
+          <% else %>
+            <% @items.each do |item| %>
+              <%= render(item) %>
+            <% end %>
+          <% end %>
+          <% if @filterable %>
+            <div class="SelectMenu-blankslate" data-filter-empty-state hidden>
+              No results found.
+            </div>
+          <% end %>
+        <% end %>
+        <%= extra %>
+      <% end %>
+    </div>
+  <% end %>
+<% end %>

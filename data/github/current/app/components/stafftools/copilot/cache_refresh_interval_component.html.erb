@@ -1,0 +1,91 @@
+<%= render(Primer::Beta::BorderBox.new(classes: "tmp-mt-4")) do |component| %>
+  <% component.with_header do %>
+    <h3 class="f4">Cache Refresh Interval</h3>
+  <% end %>
+  <% component.with_row do %>
+    <div class="d-flex flex-justify-between flex-items-center">
+      <div>
+        <strong>Active Interval</strong>
+        <p class="color-fg-muted mb-0 text-small">
+          The TTL currently used to refresh cached Copilot user policy data
+          <% unless Copilot::CacheRefreshIntervalSetting.enabled? %>
+            <br>
+            <span class="color-fg-attention">
+              Using the default because the
+              <%= link_to "https://devportal.githubapp.com/feature-flags/#{feature_flag}/overview", target: "_blank", rel: "noopener noreferrer" do %><code><%= feature_flag %></code><% end %>
+              feature flag is disabled. Any stored override is ignored.
+            </span>
+          <% end %>
+        </p>
+      </div>
+      <code class="f4"><%= formatted_current_interval %></code>
+    </div>
+  <% end %>
+  <% component.with_body do %>
+    <%= render Primer::Alpha::Banner.new(
+      icon: :info,
+      scheme: :default,
+      test_selector: "copilot-policies-cache-ttl-info",
+      classes: "tmp-mb-3") do %>
+      Lowering the cache TTL will increase load on the Copilot policy backend by causing more users to refresh their cached data sooner.
+      Tune carefully and monitor the impact on the <%= link_to "Copilot user cache dashboard", "https://app.datadoghq.com/dashboard/eds-pth-rkg/copilot-user-cache?fromUser=false&refresh_mode=sliding&live=true", target: "_blank", rel: "noopener noreferrer", class: "Link--inTextBlock" %>.
+    <% end %>
+    <%= form_with url: stafftools_copilot_policies_path, method: :put, local: true do |f| %>
+      <fieldset class="form-group">
+        <legend class="form-group-header">Interval</legend>
+        <div class="form-group-body">
+          <div class="d-flex flex-items-center">
+            <label for="cache_refresh_interval_value" class="sr-only">Interval amount</label>
+            <%= f.number_field :value,
+                id: "cache_refresh_interval_value",
+                value: current_value,
+                min: 1,
+                step: 1,
+                required: true,
+                class: "form-control",
+                style: "width: 8rem;" %>
+            <label for="cache_refresh_interval_unit" class="sr-only">Interval unit</label>
+            <%= f.select :unit,
+                [["minutes", "minutes"], ["hours", "hours"]],
+                { selected: current_unit },
+                id: "cache_refresh_interval_unit",
+                class: "form-select tmp-ml-2" %>
+          </div>
+        </div>
+        <p class="note">
+          Allowed range: <%= min_minutes %> minutes to <%= max_hours %> hours. Values outside this range are clamped.
+        </p>
+      </fieldset>
+      <div class="form-group">
+        <div class="form-group-header">
+          <label for="cache_refresh_interval_reason">Reason for change <span class="color-fg-danger">*</span></label>
+        </div>
+        <div class="form-group-body">
+          <%= f.text_area :reason,
+              id: "cache_refresh_interval_reason",
+              class: "form-control width-full",
+              rows: 3,
+              required: true,
+              placeholder: "e.g., Investigating incident #1234, dropping TTL to 5 minutes to speed up policy propagation" %>
+        </div>
+        <p class="note">
+          This reason will be logged for audit purposes.
+        </p>
+      </div>
+      <%= render(Primer::Alpha::Dialog.new(
+        title: "Update cache refresh interval?",
+        id: "update-cache-refresh-interval-dialog",
+        size: :medium,
+      )) do |dialog| %>
+        <% dialog.with_show_button(scheme: :primary, classes: "tmp-mt-3") { "Update Cache Refresh Interval" } %>
+        <% dialog.with_body do %>
+          <p>This affects how often all users refresh their cached policy data.</p>
+        <% end %>
+        <% dialog.with_footer do %>
+          <%= render(Primer::Beta::Button.new(data: { "close-dialog-id": "update-cache-refresh-interval-dialog" })) { "Cancel" } %>
+          <%= render(Primer::Beta::Button.new(type: :submit, scheme: :primary)) { "Update" } %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

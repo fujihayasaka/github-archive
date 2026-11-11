@@ -1,0 +1,27 @@
+#!/bin/bash
+set -e
+
+echo "*** Setup GHCR"
+cd /workspaces/github
+script/setup-codespaces-packages
+
+echo "*** Setup npm-registry"
+echo "export ADDR=:8004" > /workspaces/packages/npm-registry/.env
+
+echo "*** Creating /workspaces/logs"
+mkdir -p /workspaces/logs
+
+echo "*** Modifying RMS as per https://github.com/github/package-registry-team/issues/7439"
+cd /workspaces/packages/registry-metadata
+# Hard to make git apply work when copy-pasting a diff file from markdown, due to whitespace I think.
+# So the following sed command replaces the function IsFeatureEnabledGlobally with a return true, nil
+# Dependent on the existing closing brace being within 40 lines of the start
+linenumber=$(grep -n -E "cachingClient\) IsFeatureEnabledGlobally.*{$" rms/features/client.go | sed -E 's/(.*):.*/\1/')
+if [ -n "$linenumber" ]; then # Allow for this script having run before
+  sed -i "${linenumber},${linenumber}s/$/ return true, nil } \/*/" rms/features/client.go
+  sed -i "${linenumber},$(( linenumber + 50 ))s/^}/ } *\//" rms/features/client.go
+fi
+
+cd /workspaces/github
+
+echo "***"

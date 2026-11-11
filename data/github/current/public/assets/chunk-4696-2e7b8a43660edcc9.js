@@ -1,0 +1,2 @@
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[4696],{37387(e,t,s){s.r(t);var i=s(331635),o=s(651135);class a extends HTMLElement{async connectedCallback(){this.closeDetailsPopover();let e=this.getAttribute("data-codespace-url");e&&(window.location.href=encodeURI(e))}closeDetailsPopover(){let e=document.querySelector(".js-codespaces-details-container");e&&(e.open=!1)}}(0,i.Cg)([(0,o.p_)("editor-forwarder")],a)}}]);
+//# sourceMappingURL=chunk-4696-2e7b8a43660edcc9-67a8bccb1b75da61.js.map

@@ -1,0 +1,102 @@
+<%# locals(payment_duration:, monthly_price: 10, yearly_price: 100, is_trial: false, monthly_pricing: nil, yearly_pricing: nil, monthly_only: false) -%>
+
+<%
+  is_trial ||= false
+  monthly_only ||= false
+  monthly_pricing ||= nil
+  yearly_pricing ||= nil
+
+  monthly_has_coupon = monthly_pricing&.has_coupon || false
+  yearly_has_coupon = yearly_pricing&.has_coupon || false
+
+  # Use discounted price from pricing data if available, otherwise use base price
+  monthly_display_price = monthly_has_coupon ? monthly_pricing.formatted_discounted_price : Billing::Money.new(monthly_price * 100).format(no_cents_if_whole: false)
+  yearly_display_price = yearly_has_coupon ? yearly_pricing.formatted_discounted_price : Billing::Money.new(yearly_price * 100).format(no_cents_if_whole: false)
+
+  # Savings badge always reflects the base yearly vs monthly price difference (not coupon savings)
+  yearly_saving = (monthly_price * 12) - yearly_price
+%>
+
+<billing-duration data-bg-color-class="bgColor-muted" data-border-color-class="copilot-signup__billing-frequency--active-border-color" <% if monthly_only %>style="width: fit-content"<% end %>>
+  <fieldset class="copilot-signup__billing-frequency" role="radiogroup">
+    <legend class="sr-only">Choose your billing frequency</legend>
+
+    <label
+      for="pay-monthly"
+      class="radio-label rounded-2 tmp-p-3 width-full <%= payment_duration == "monthly" ? " bgColor-muted copilot-signup__billing-frequency--active-border-color" : "" %>"
+      data-target="billing-duration.monthlyRadioInput"
+      data-action="click:billing-duration#select"
+    >
+      <div class="tmp-mb-3">
+        <input name="payment_duration" type="radio" value="monthly"
+          class="js-payment-method radio-input m-0 mr-1 float-none"
+          data-selected-tab="pay-monthly"
+          id="pay-monthly"
+          data-action="click:billing-checkout#monthlyPaymentSelected"
+          <%= payment_duration == "monthly" ? "checked" : "" %>
+        >
+
+        <%= render Primer::Beta::Text.new(tag: :span, font_weight: :bold, font_size: 5) do %>
+          Pay monthly
+        <% end %>
+      </div>
+
+      <span class="h2"><%= monthly_display_price %></span>
+      <% if monthly_has_coupon %>
+        <span class="text-light color-fg-muted text-small" style="text-decoration: line-through;"><%= monthly_pricing.formatted_original_price %></span>
+      <% end %>
+      <span class="text-light color-fg-muted text-small">USD</span> <span class="text-light color-fg-muted"> / month <% if is_trial %>after trial<% end %></span>
+      <% if monthly_has_coupon %>
+        <div class="mt-1">
+          <span class="text-small color-fg-success"><%= monthly_pricing.discount_label %></span>
+          <% if monthly_pricing.coupon&.will_expire? %>
+            <span class="text-small color-fg-muted"> for <%= monthly_pricing.coupon.human_duration %></span>
+          <% end %>
+        </div>
+      <% end %>
+    </label>
+
+    <% unless monthly_only %>
+    <label
+      for="pay-yearly"
+      class="radio-label rounded-2 tmp-p-3 width-full <%= payment_duration == "yearly" ? " bgColor-muted copilot-signup__billing-frequency--active-border-color" : "" %>"
+      data-target="billing-duration.yearlyRadioInput"
+      data-action="click:billing-duration#select"
+    >
+      <%= render Primer::Alpha::Stack.new(direction: :horizontal, justify: :space_between, classes: "tmp-mb-3") do %>
+        <div>
+          <input name="payment_duration" type="radio" value="yearly"
+            class="js-payment-method radio-input m-0 mr-1 float-none"
+            data-selected-tab="pay-yearly"
+            id="pay-yearly"
+            data-action="click:billing-checkout#yearlyPaymentSelected"
+            <%= payment_duration == "yearly" ? "checked" : "" %>
+          >
+
+          <%= render Primer::Beta::Text.new(tag: :span, font_weight: :bold, font_size: 5) do %>
+            Pay yearly
+          <% end %>
+        </div>
+
+        <%= render Primer::Beta::Label.new(tag: :span, scheme: :primary, size: :medium, inline: true) do %>
+          Save <%= Billing::Money.new(yearly_saving * 100).format(no_cents_if_whole: false) %>
+        <% end %>
+      <% end %>
+
+      <span class="h2"><%= yearly_display_price %></span>
+      <% if yearly_has_coupon %>
+        <span class="text-light color-fg-muted text-small" style="text-decoration: line-through;"><%= yearly_pricing.formatted_original_price %></span>
+      <% end %>
+      <span class="text-light color-fg-muted text-small">USD</span> <span class="text-light color-fg-muted"> / year <% if is_trial %>after trial<% end %></span>
+      <% if yearly_has_coupon %>
+        <div class="mt-1">
+          <span class="text-small color-fg-success"><%= yearly_pricing.discount_label %></span>
+          <% if yearly_pricing.coupon&.will_expire? %>
+            <span class="text-small color-fg-muted"> for <%= yearly_pricing.coupon.human_duration %></span>
+          <% end %>
+        </div>
+      <% end %>
+    </label>
+    <% end %>
+  </fieldset>
+</billing-duration>

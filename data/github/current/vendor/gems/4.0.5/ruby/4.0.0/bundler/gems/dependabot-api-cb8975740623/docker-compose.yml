@@ -1,0 +1,153 @@
+services:
+  db:
+    image: mysql:8.0
+    command:
+      - --default-authentication-plugin=mysql_native_password
+    environment:
+      - MYSQL_ALLOW_EMPTY_PASSWORD=1
+      - MYSQL_TCP_PORT=3307
+    ports:
+      - "3307:3307"
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+  redis:
+    image: redis:5.0.8
+
+  aqueduct-lite:
+    image: ghcr.io/github/aqueduct-lite/aqueduct-lite:latest
+    restart: always
+    ports:
+      - "18081:18081"
+    depends_on:
+      - redis
+    environment:
+      - AQUEDUCT_LITE_LISTEN_ADDRESS=0.0.0.0:18081
+      - AQUEDUCT_LITE_LOG_LEVEL=debug
+      - AQUEDUCT_LITE_REDIS_ADDRESS=127.0.0.1:6379
+    command: "bin/aqueduct-lite"
+
+  web:
+    build:
+      context: .
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+      cache_from:
+        - octofactory.githubapp.com/github-golden-docker/github-dependabot-api:dependabot-api
+        - octofactory.githubapp.com/github-golden-docker/github-dependabot-api:dependabot-api-builder
+        - octofactory.githubapp.com/github-golden-docker/github-dependabot-api:dependabot-api-builder-base
+      secrets:
+        - apt-auth-conf
+        - pkg-mirror-host
+    image: ghcr.io/github/dependabot-api:latest
+    command: bundle exec foreman start web
+    environment:
+      - AQUEDUCT_URL=http://aqueduct-lite:18081/twirp
+      - AWS_ENDPOINT
+      - BOOTSNAP_CACHE_DIR=/tmp/bootsnap
+      - BUNDLE_RUBYGEMS__PKG__GITHUB__COM
+      - DATABASE_URL=trilogy://db:3307
+      - ENTERPRISE
+      - INTERNAL_DEPLOYMENT=true
+      - OVERRIDE_UPDATE_JOB_QUEUE_NAME=update-jobs-dev
+      - PROXIMA_STAMP
+      - RAILS_ENV
+      - REDIS_URL=redis://redis:6379/0
+      - SCHEMA
+      # The `GITHUB_TELEMETRY_*` vars are documented here: https://github.com/github/github-telemetry-ruby/blob/017c506e1aa48cb90f28842e08f2e0bed52f7cda/lib/github/telemetry/logs.rb#L10-L12
+      # Here's how they're currently setup in the monolith: https://github.com/github/github/blob/bf5358c3f5d81c0165734d05e2d5e084e0246b5d/lib/github/config/environments/enterprise.rb#L290-L299
+      - GITHUB_TELEMETRY_LOGS_FILE=false
+      - GITHUB_TELEMETRY_LOGS_STDOUT=true
+      - GITHUB_TELEMETRY_LOGS_SYSLOG=false
+    ports:
+      - "3001:3000"
+    volumes:
+      - .:/app:rw,delegated
+      - bootsnap-cache:/tmp/bootsnap:cached
+    depends_on:
+      - db
+      - redis
+      - aqueduct-worker
+
+  timerd:
+    image: ghcr.io/github/dependabot-api:latest
+    command: bundle exec bin/timerd ./config/scheduled_jobs.rb
+    environment:
+      - AQUEDUCT_URL=http://aqueduct-lite:18081/twirp
+      - AWS_ENDPOINT
+      - BOOTSNAP_CACHE_DIR=/tmp/bootsnap
+      - CODESPACES
+      - DATABASE_URL=trilogy://db:3307
+      - ENTERPRISE
+      - HYDRO_KAFKA_BROKERS
+      - INTERNAL_DEPLOYMENT=true
+      - OVERRIDE_UPDATE_JOB_QUEUE_NAME=update-jobs-dev
+      - PORT=3001
+      - PROXIMA_STAMP
+      - RAILS_ENV
+      - REDIS_URL=redis://redis:6379/0
+      - SCHEMA
+    network_mode: host
+    volumes:
+      - .:/app:rw,delegated
+      - bootsnap-cache:/tmp/bootsnap:cached
+    depends_on:
+      - db
+      - aqueduct-lite
+      - aqueduct-worker
+
+  aqueduct-worker:
+    image: ghcr.io/github/dependabot-api:latest
+    command: bundle exec dotenv -f ".env.local,.env" bundle exec resqued config/resqued/aqueduct_enterprise.rb
+    environment:
+      - AQUEDUCT_URL=http://aqueduct-lite:18081/twirp
+      - AWS_ENDPOINT
+      - BOOTSNAP_CACHE_DIR=/tmp/bootsnap
+      - DATABASE_URL=trilogy://db:3307
+      - ENTERPRISE
+      - OVERRIDE_UPDATE_JOB_QUEUE_NAME=update-jobs-dev
+      - PROXIMA_STAMP
+      - RAILS_ENV
+      - REDIS_URL=redis://redis:6379/0
+      - SCHEMA
+    network_mode: host
+    volumes:
+      - .:/app:rw,delegated
+      - bootsnap-cache:/tmp/bootsnap:cached
+    depends_on:
+      - aqueduct-lite
+      - db
+      - redis
+
+  consumer:
+    image: ghcr.io/github/dependabot-api:latest
+    command: bundle exec foreman start --procfile=Procfile.hydro
+    environment:
+      - AQUEDUCT_URL=http://aqueduct-lite:18081/twirp
+      - AWS_ENDPOINT
+      - BOOTSNAP_CACHE_DIR=/tmp/bootsnap
+      - DATABASE_URL=trilogy://db:3307
+      - ENTERPRISE
+      - OVERRIDE_UPDATE_JOB_QUEUE_NAME=update-jobs-dev
+      - PROXIMA_STAMP
+      - RAILS_ENV
+      - REDIS_URL=redis://redis:6379/0
+      - SCHEMA
+    volumes:
+      - .:/app:rw,delegated
+      - bootsnap-cache:/tmp/bootsnap:cached
+    depends_on:
+      - db
+      - redis
+
+volumes:
+  mysql-data:
+    driver: local
+  bootsnap-cache:
+    driver: local
+
+secrets:
+  apt-auth-conf:
+    file: ./apt-auth-conf
+  pkg-mirror-host:
+    file: ./pkg-mirror-host

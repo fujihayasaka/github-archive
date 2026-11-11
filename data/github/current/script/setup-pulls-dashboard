@@ -1,0 +1,167 @@
+#!/usr/bin/env safe-ruby
+# frozen_string_literal: true
+
+require "optparse"
+
+class SetupPullsDashboard
+  attr_accessor :opts
+
+  def initialize(opts = {})
+    @opts = opts
+  end
+
+  def startup  = log colorize("\n\n✨ Preparing Pulls Dashboard + Inbox ✨\n", "yellow")
+  def shutdown = log colorize("\nPulls Dashboard + Inbox is setup!\n", "yellow")
+
+  def run
+    startup
+    @logger = StringIO.new if opts[:quiet_mode]
+
+    validate
+    load_dependencies
+    enable_feature_flags
+    seed_dashboard_data
+    repair_elastomer_indexes
+
+    @logger = STDOUT if opts[:quiet_mode]
+    shutdown
+  end
+
+  def validate
+    opts.each do |(name, v)|
+      log help_text "✔️ #{name} = #{v}" if v
+    end
+
+    log colorize("\nPlease make sure that the dev server is running (script/server) before running this setup script", "magenta")
+
+    unless Rails.env.development?
+      log_and_raise_error "This is a dev-only script", "Environment is not :development"
+    end
+  end
+
+  def load_dependencies
+    section "Loading Dependencies" do
+      load_and_log_time("Seeds::PullRequests", "../script/seeds/runners/pull_requests")
+      load_and_log_time("Seeds::PullRequestReviews", "../script/seeds/runners/pull_request_reviews")
+      load_and_log_time("Seeds::PullsDashboard", "../script/seeds/runners/pulls_dashboard")
+      load_and_log_time("Rails Environment", "../config/environment")
+    end
+  end
+
+  def enable_feature_flags
+    section("Toggling on Feature Flags") do
+      monalisa = Seeds::Objects::User.monalisa
+
+      # Enable pulls dashboard react app feature preview
+      steal_output do
+        Seeds::Objects::FeatureFlag.enable(feature_flag: "dashboard_surface_react_app")
+
+        if !Feature.find_by(slug: :dashboard_surface_react_app)
+          Feature.create(
+            public_name: "New Pull Requests Dashboard",
+            slug: "dashboard_surface_react_app",
+            feature_flag_name: "dashboard_surface_react_app",
+            feedback_link: "https://github.com"
+          )
+        end
+
+        monalisa.enable_feature_preview(:dashboard_surface_react_app)
+      end
+      log success_text ":dashboard_surface_react_app"
+      log help_text "Enables the new /pulls React dashboard experience for monalisa"
+    end
+  end
+
+  def seed_dashboard_data
+    section "Seeding Dashboard Data" do |_logger|
+      Seeds::Runner::PullsDashboard.execute
+    end
+  end
+
+  def repair_elastomer_indexes
+    log colorize("\nRepairing Elastomer indexes:", "white")
+    elastomer_output = `bin/elastomer repair`
+    log elastomer_output.split("\n").map { |msg| "\t#{msg}" }.join("\n")
+  end
+
+  # --- Helper methods (output formatting) ---
+
+  def steal_output
+    old_stdout = $stdout
+    old_stderr = $stderr
+    $stdout = StringIO.new
+    $stderr = StringIO.new
+    yield
+    [$stdout.string, $stderr.string].flat_map { |s| s.split("\n") }
+  ensure
+    $stdout = old_stdout
+    $stderr = old_stderr
+  end
+
+  def load_and_log_time(name, path)
+    now = Time.now
+    logger.print "\n#{help_text("⟳ Loading #{name}...", indent: 1)}"
+    require_relative path
+    time = "(#{(((Time.now - now) * 10_000).round(4) / 10).round(1)}ms)"
+    replace_line(success_text("#{name} loaded in #{time}\n"))
+  end
+
+  def replace_line(msg)
+    logger.print "\e[2K\r#{msg}"
+  end
+
+  def success_text(msg, indent: 1)
+    colorize("\n#{("\t" * indent)}✔️ #{msg}", "green")
+  end
+
+  def help_text(msg, indent: 2)
+    ("\t" * indent) + msg
+  end
+
+  def section(title, &block)
+    log colorize("\n#{title}:", "white")
+    block.call(-> (out) {
+      log out&.map { |msg| "\t#{msg}" }&.join("\n")
+    })
+  end
+
+  def colorize(string, color, options = {})
+    return string unless logger.tty?
+
+    background = options[:background] || options[:bg] || false
+    offsets = %w[gray red green yellow blue magenta cyan white]
+    start = background ? 40 : 30
+    color_code = start + (offsets.index(color.to_s) || 8)
+    "\e[0;#{color_code}m#{string}\e[0m"
+  end
+
+  def logger
+    @logger ||= STDOUT
+  end
+
+  def log(msg)
+    logger.puts(msg)
+  end
+
+  def log_error(msg)
+    STDERR.puts(colorize(msg, "red"))
+  end
+
+  def log_and_raise_error(msg, failure = "Failure")
+    log_error(msg)
+    fail failure
+  end
+end
+
+options = {
+  quiet_mode: false,
+}
+
+parser = OptionParser.new do |opt|
+  opt.on("-q", "--quiet", "Reduce output") do
+    options[:quiet_mode] = true
+  end
+end
+parser.parse!
+
+SetupPullsDashboard.new(options).run if $PROGRAM_NAME == __FILE__

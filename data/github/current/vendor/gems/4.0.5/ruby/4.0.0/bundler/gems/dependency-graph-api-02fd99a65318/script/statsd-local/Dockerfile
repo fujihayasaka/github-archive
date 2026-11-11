@@ -1,0 +1,2 @@
+FROM statsd/statsd:latest@sha256:6fe36c2023f3aae99450cefdef3a1b1fae86c3c92769d15136705870e263f8b6
+COPY config.js config.js

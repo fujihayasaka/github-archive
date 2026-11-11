@@ -1,0 +1,249 @@
+# typed: strict
+# frozen_string_literal: true
+
+class Copilot::ProPlusSignupController < Copilot::Signup::BaseController
+  include Copilot::VscodeRedirectConcern
+  include Billing::ManualPaymentRedirect
+
+  before_action :login_required, except: [:index]
+  before_action :restrict_emu_access, except: [:index]
+  before_action :set_vscode_return_to, only: [:index, :new]
+  before_action :add_vscode_form_action_csp, only: [:new]
+  before_action :check_for_active_copilot_pro_plus_subscription, only: [:new]
+
+  before_action only: [:new] do
+    T.bind(self, Copilot::ProPlusSignupController)
+    check_trade_compliance(target: current_user)
+  end
+
+  before_action only: [:create] do
+    T.bind(self, Copilot::ProPlusSignupController)
+    check_trade_compliance(target: current_user, feature_type: :copilot, sdn_redirect: true)
+  end
+
+  include Site::MicrosoftAnalyticsDependency
+  before_action :enable_microsoft_analytics, only: [:new]
+  before_action :add_microsoft_analytics_csp_exceptions, only: [:new]
+
+  javascript_bundle :billing, only: [:new]
+  global_navigation_title "Copilot Pro+ checkout", only: [:new]
+
+  depends_on_clusters ApplicationRecord::Mysql1,
+    ApplicationRecord::IamAbilities,
+    ApplicationRecord::Billing,
+    ApplicationRecord::Copilot,
+    ApplicationRecord::Collab,
+    ApplicationRecord::Mysql2,
+    ApplicationRecord::NotificationsEntries,
+    ApplicationRecord::Mysql5,
+    ApplicationRecord::Repositories,
+    ApplicationRecord::Configurations,
+    only: [:index, :new]
+
+  sig { void }
+  def index
+    redirect_to preserve_tracking_params_path(copilot_pro_plus_signup_new_path)
+  end
+
+  sig { void }
+  def new
+    Copilot::Instrumenter.instrument_page_view(
+      Copilot::Events::COPILOT_PRO_PLUS_SIGNUP_PAGE_VIEW,
+      copilot_user,
+      utm_query_params: utm_query_params
+    )
+
+    render "copilot/pro_plus/new", locals: {
+      payment_duration: "monthly",
+      premium_requests: signup_params[:premium_requests],
+      return_to_path: preserve_tracking_params_path(copilot_pro_plus_signup_new_path, signup_params),
+      subscribe_path: preserve_tracking_params_path(copilot_pro_plus_signup_create_path),
+      tracking_params: tracking_params,
+      copilot_user: copilot_user,
+    }, formats: :html
+  end
+
+  sig { void }
+  def update
+    redirect_to preserve_tracking_params_path(copilot_pro_plus_signup_new_path, signup_params.slice(:premium_requests))
+  end
+
+  sig { void }
+  def create
+    return_to_path = signup_params[:return_to_path] || copilot_signup_path
+
+    unless required_signup_params?
+      flash[:error] = "Missing required parameters"
+      return redirect_to preserve_tracking_params_path(return_to_path)
+    end
+
+    duration = :month
+
+    url_options = { host: GitHub.admin_host_name, protocol: "https" }
+    staff_url = stafftools_user_copilot_settings_url(current_user, **url_options)
+
+    blocked = copilot_user.block_if_sharing_payment_method_with_other_blocked_users!
+
+    if blocked
+      copilot_user.send_abuse_notification(
+        url: staff_url,
+        is_trial_signup: false, # Pro+ doesn't offer trials
+        duration: duration.to_s,
+        signed_up: false,
+      )
+      flash[:error] = "Unable to sign up for Copilot"
+      redirect_to preserve_tracking_params_path(copilot_signup_path)
+      return
+    end
+
+    if copilot_user.shares_payment_method_with_blocked_user?
+      copilot_user.send_abuse_notification(
+        url: staff_url,
+        is_trial_signup: false,
+        duration: duration.to_s,
+        signed_up: true,
+      )
+    end
+
+    if FeatureFlag.vexi.enabled_or_raise?(:copilot_pro_plus_premium_requests, current_user) # rubocop:disable GitHub/FeatureManagement/NoVexiEnabledOrRaiseUsage
+      if signup_params[:premium_requests] == "enabled"
+        copilot_user.overages_enabled!
+      elsif signup_params[:premium_requests] == "disabled"
+        copilot_user.overages_disabled!
+      end
+    end
+    result = copilot_user.subscribe_pro_plus(duration)
+
+    if !result.ok?
+      # If this is a re-POST from the manual payments page and we can confirm the payment was actually
+      # collected, send them back to the upgrade page to activate again (the upgrade just hasn't caught
+      # up yet) rather than looping them to the payment page. If we can't confirm payment went through,
+      # fall through so they're redirected back to complete it instead of being reassured prematurely.
+      if manual_payment_finalization? && result.error.is_a?(Billing::ManualPaymentRequiredError) &&
+          manual_payment_collected?(target: current_user, invoice_id: result.error.invoice_id)
+        flash[:error] = Billing::ManualPaymentRedirect::FINALIZATION_RETRY_MESSAGE
+        redirect_to preserve_tracking_params_path(return_to_path)
+        return
+      end
+
+      # An advance payment may have been declined because the customer must pay manually (India RBI).
+      # If so, send them to the manual payments page to complete payment, which finalizes the upgrade.
+      pending_upgrade = Copilot::Billing::PendingManualPaymentUpgrade.build(user: current_user, product_key: Copilot::INDIVIDUAL_PRO_PLUS_PRODUCT_KEY)
+      return if redirect_to_manual_payment_if_required(result.error, target: current_user, pending_upgrade: pending_upgrade)
+
+      flash[:error] = result.error.message
+      redirect_to preserve_tracking_params_path(return_to_path)
+      return
+    end
+
+    Copilot::Instrumenter.instrument_signup_subscription_created(
+      copilot_user,
+      duration.to_s,
+      0, # today there is no trial for Pro+
+      utm_query_params: utm_query_params
+    )
+
+    Copilot::Instrumenter.instrument_pro_plus_subscription_created(
+      copilot_user,
+      billing_frequency: duration.to_s
+    )
+
+    if signup_params[:success_path] == spark_dashboard_path
+      Copilot::Instrumenter.instrument_subscription_created(
+        Copilot::Events::COPILOT_SPARK_PRO_PLUS_SUBSCRIPTION_CREATED,
+        copilot_user: copilot_user,
+        billing_frequency: duration.to_s,
+      )
+    end
+
+    send_marketing_email_consent if has_marketing_email_consent?
+
+    # If the user has limited access (free tier), remove their free access record
+    if !current_user.feature_flag_enabled?(:copilot_delay_limited_user_destroy, default: false)
+      Copilot::LimitedUser.find_by(user_id: copilot_user.id)&.destroy
+    end
+    Copilot::FreeUser.find_for_copilot_user(copilot_user)&.cancel!
+
+    # Create or update the Copilot settings cache from new Copilot::User instance
+    # https://github.com/github/heart-services/issues/5978
+    Copilot::User.new(current_user).create_copilot_settings_cache(Copilot::PolicyCacheVersion.current_version, reason: "signup_pro_plus")
+
+    Copilot::Instrumenter.instrument_copilot_license_or_billable_customer_change(Copilot::Public::User.for(current_user))
+
+    return if redirect_to_vscode_if_needed
+
+    success_path = signup_params[:success_path] || copilot_immersive_path
+    redirect_to preserve_tracking_params_path(success_path)
+  end
+
+  sig { void }
+  def downgrade # rubocop:todo GitHub/UseRestfulActions
+    unless required_signup_params?
+      flash[:error] = "Missing required parameters"
+      redirect_to preserve_tracking_params_path(copilot_settings_path)
+      return
+    end
+
+    duration = :month
+    # Copilot::User#subscribe is used to downgrade from Pro+ to Pro
+    result = copilot_user.subscribe(duration)
+
+    if !result.ok?
+      flash[:error] = result.error.message
+      redirect_to preserve_tracking_params_path(copilot_settings_path)
+      return
+    end
+
+    Copilot::Instrumenter.instrument_pro_plus_subscription_downgraded(
+      copilot_user,
+      billing_frequency: duration.to_s
+    )
+
+    # Create or update the Copilot settings cache from new Copilot::User instance
+    # https://github.com/github/heart-services/issues/5978
+    Copilot::User.new(current_user).create_copilot_settings_cache(Copilot::PolicyCacheVersion.current_version, reason: "downgrade_pro_plus")
+
+    Copilot::Instrumenter.instrument_copilot_license_or_billable_customer_change(Copilot::Public::User.for(current_user))
+
+    flash[:notice] = "Your pending plan change has been successfully reverted."
+    redirect_to preserve_tracking_params_path(copilot_settings_path)
+  end
+
+  private
+
+  sig { void }
+  def check_for_active_copilot_pro_plus_subscription
+    redirect_to copilot_immersive_path if copilot_user.has_pro_plus_access?
+  end
+
+  sig { returns(T::Boolean) }
+  def required_signup_params?
+    if FeatureFlag.vexi.enabled_or_raise?(:copilot_pro_plus_premium_requests, current_user) # rubocop:disable GitHub/FeatureManagement/NoVexiEnabledOrRaiseUsage
+      %w(disabled enabled).include?(signup_params[:premium_requests])
+    else
+      true
+    end
+  end
+
+  sig { returns(T::Hash[Symbol, String]) }
+  def user_contact_info_params
+    signup_params.slice(:user_contact_info)
+  end
+
+  sig { returns(T::Boolean) }
+  def has_marketing_email_consent?
+    return false unless user_contact_info_params.present?
+    return false unless user_contact_info_params[:marketing_consent].present?
+
+    user_contact_info_params[:marketing_consent] == "1"
+  end
+
+  sig { void }
+  def send_marketing_email_consent
+    MarketingConsentSubmissionJob.perform_later(
+      email: T.must(user_contact_info_params[:email]),
+      country: T.must(user_contact_info_params[:country]),
+      source: "copilot-pro-plus-signup"
+    )
+  end
+end

@@ -1,0 +1,56 @@
+name: Daily Support Escalation Reminder
+
+on:
+  schedule:
+    - cron: "0 14 * * 1-5" # 14:00 UTC, weekdays (09:00 ET during standard time, 10:00 ET during daylight saving time)
+  workflow_dispatch:
+    inputs:
+      suppress_mentions:
+        description: "Skip @ mentions (for testing)"
+        type: boolean
+        default: true
+      repair_dry_run:
+        description: "Render incident-repair mentions without pinging users"
+        type: boolean
+        default: true
+      slack_channel:
+        description: "Slack channel ID to post to (defaults to production channel)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  send-reminder:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Get on-call engineer from PagerDuty
+        id: oncall
+        env:
+          PAGERDUTY_API_KEY: ${{ secrets.PAGERDUTY_API_KEY }}
+        run: |
+          ONCALL_HANDLE=$(./.github/scripts/support-issues/get-oncall.sh "$PAGERDUTY_API_KEY" "P29A2BN")
+          echo "oncall_handle=${ONCALL_HANDLE}" >> $GITHUB_OUTPUT
+
+      - name: Build Slack message
+        id: build-message
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ONCALL_HANDLE: ${{ steps.oncall.outputs.oncall_handle }}
+          SLACK_TOKEN: ${{ secrets.SLACK_FIRST_RESPONDER_BOT_API_TOKEN }}
+          SUPPRESS_MENTIONS: ${{ github.event.inputs.suppress_mentions || 'false' }}
+          REPAIR_DRY_RUN: ${{ github.event.inputs.repair_dry_run || 'true' }}
+        run: |
+          ./.github/scripts/support-issues/build-slack-reminder.sh
+
+      - name: Send Slack message
+        if: steps.build-message.outputs.has_issues == 'true'
+        uses: github/copilot-mission-control/.github/actions/send-slack-message@main
+        with:
+          slack-token: ${{ secrets.SLACK_FIRST_RESPONDER_BOT_API_TOKEN }}
+          slack-channel: ${{ github.event.inputs.slack_channel || 'C0891ESUXGW' }}
+          message: ${{ steps.build-message.outputs.message }}

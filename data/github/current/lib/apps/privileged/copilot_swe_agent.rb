@@ -1,0 +1,99 @@
+# typed: strict
+# frozen_string_literal: true
+
+module Apps
+  class Privileged
+    class CopilotSWEAgent
+      MAX_SESSION_TIME = T.let(1.hour, Integer)
+      MAX_REFRESH_TIME = T.let(1.day, Integer)
+      NAME = "Copilot SWE Agent"
+      SLUG = "copilot-swe-agent"
+
+      PRODUCTION = T.let({
+        alias: :copilot_swe_agent,
+        database_lookup_attributes: { owner_id: :first_party_apps_owner_id, name: NAME },
+        inherits: [:first_party],
+        capabilities: {
+          actions_dynamic_workflows: true,
+          actions_require_workflow_approval: true,
+          can_auto_approve_oauth_authorization: true,
+          enforce_internal_access_on_token_generation: false,
+          auto_upgrade_permissions: true,
+          installed_globally: true,
+          proxima_first_party_sync: true,
+          user_installable: false,
+          limited_access: false,
+          is_copilot: true,
+          pr_autocomplete_mentionable: true,
+          is_assignable: true,
+          ip_allowlist_exempt: true,
+          coding_agent_job_execution: true,
+          ai_agent_for_audit_events: true,
+          display_ai_identifier: true,
+        },
+        properties: {
+          agent_session_activity_display_name: "Copilot Cloud Agent", # Used for display and filtering purposes in the Enterprise AI Controls Agent Session Activity page.
+          display_login: "Copilot",
+          oauth_access_expiry: MAX_SESSION_TIME,
+          refresh_token_expiry: MAX_REFRESH_TIME,
+          searchable_slug: SLUG,
+          proxima_sync_delegate: :DefaultDelegate,
+          oauth_access_limit: 100, # Increase to allow Coding Agent to create more OauthAccess records than normal apps: https://github.com/github/sweagentd/issues/3259
+        },
+        can_auto_install: {},
+        custom_instrumentation_events: {},
+        owners: ["@github/copilot-extensibility"],
+      }, T.any(Proc, Symbol, T::Hash[Symbol, T::Boolean], T::Array[String]))
+
+      # Since the application is a global app, you will need a manager of the app
+      # on the GitHub organization to make live changes to the permissions.
+      # Make sure to make the live changes way ahead of needing the permissions in production (at least 24h ahead)
+      # Make sure to update the permissions below to reflect what's updated in the global app in production
+      #
+      # If no manager of the app is available, you can request it via a github/security-iam issue (#authorization)
+      PERMISSIONS = T.let({
+        contents: :write,
+        copilot_requests: :write,
+        members: :read,
+        metadata: :read,
+        pull_requests: :write,
+        issues: :write,
+        discussions: :write,
+        workflows: :write,
+        actions: :write,
+        environments: :write,
+        secrets: :read,
+        actions_variables: :read,
+        agent_secrets: :read,
+        agent_variables: :read,
+        administration: :read,
+        checks: :read,
+        security_events: :read,
+      }, T::Hash[Symbol, Symbol])
+
+      sig { returns(T.nilable(Integration)) }
+      def self.seed_database!
+        existing_app = Apps::Privileged.integration(:copilot_swe_agent)
+        return existing_app if existing_app.present?
+
+        owner = GitHub.first_party_apps_owner
+        # copilot_requests is a preview permission gated by this feature flag
+        FeatureFlag.vexi_management.add_feature_flag_actors(:copilot_requests_write_access_for_actions, [owner]) # rubocop:disable GitHub/FeatureManagement/NoVexiManagementUsage
+        # agent_secrets and agent_variables are preview permissions gated by this feature flag
+        FeatureFlag.vexi_management.add_feature_flag_actors(:actions_agent_secrets, [owner]) # rubocop:disable GitHub/FeatureManagement/NoVexiManagementUsage
+
+        integration_attributes = {
+          owner: owner,
+          name: NAME,
+          slug: SLUG,
+          url: "https://github.com/",
+          visibility: :public_visibility,
+          default_permissions: PERMISSIONS,
+          skip_restrict_names_with_github_validation: true,
+          skip_generate_slug: true,
+        }
+        Integration.create!(integration_attributes)
+      end
+    end
+  end
+end

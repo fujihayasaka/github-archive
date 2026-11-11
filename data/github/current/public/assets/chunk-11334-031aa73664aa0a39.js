@@ -1,0 +1,2 @@
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[11334],{174117(t,u,e){var h=e(331635),i=e(651135);class s extends HTMLElement{prompt(){this.dispatchEvent(new CustomEvent("webauthn-subtle-submit")),this.hidden=!0;let t=document.querySelector(".js-webauthn-hint");t&&(t.hidden=!0)}}(0,h.Cg)([(0,i.p_)("webauthn-subtle")],s)}}]);
+//# sourceMappingURL=chunk-11334-031aa73664aa0a39-cbc0e7fb5467a6ee.js.map

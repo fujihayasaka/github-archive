@@ -1,0 +1,1 @@
+import{Wp as e,ip as t,xp as n}from"./index-M6n1L9AM.js";var r=n(),i=e(),a=()=>{let e=(0,r.c)(1),n;return e[0]===Symbol.for(`react.memo_cache_sentinel`)?(n=(0,i.jsx)(`div`,{className:`d-flex flex-column flex-items-center tmp-py-3`,children:(0,i.jsx)(t,{"aria-label":`Loading`})}),e[0]=n):n=e[0],n};a.displayName=`LoadingFallback`;export{a as t};

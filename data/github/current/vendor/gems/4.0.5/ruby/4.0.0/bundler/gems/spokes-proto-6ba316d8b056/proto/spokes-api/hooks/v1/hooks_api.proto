@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package github.spokes.hooks.v1;
+
+option go_package = "github.com/github/spokes-proto/gen/go/v1/hooks";
+option ruby_package = "GitHub::Spokes::Proto::Hooks::V1";
+
+import "spokes-api/types/v1/reference_update.proto";
+import "spokes-api/types/v1/repository.proto";
+import "spokes-api/types/v1/request_context.proto";
+import "spokes-api/types/v1/sockstat.proto";
+
+service HooksAPI {
+  // RunPreReceiveHooks runs the pre-receive hooks on a file server host.
+  rpc RunPreReceiveHooks(RunPreReceiveHooksRequest) returns (RunPreReceiveHooksResponse) {}
+}
+
+message RunPreReceiveHooksRequest {
+  enum HookMode {
+        HOOK_MODE_INVALID = 0;
+
+        // These hooks are run during the initial temprefs receive-pack process.
+        // During execution, these hooks rely on a GIT_QUARANTINE_DIR value
+        // that is computed and used by that initial receive-pack process and needs
+        // to be passed through as `GIT_SOCKSTAT_VAR_git_quarantine_dir.
+        // So we refer to these as the 'quarantine' hooks.
+        // NOTE: this mode cannot be called via Spokes API today by a consumer, but may be opened up in the future.
+        HOOK_MODE_QUARANTINE = 1;
+
+        // These hooks are run after landing the packfile and temprefs,
+        // and immediately before the commit-refs flow. These are also referred to
+        // as the regular hooks.
+        // NOTE: this mode cannot be called via Spokes API today, but may be opened up in the future.
+        HOOK_MODE_BABELD = 2;
+
+        // Custom hooks that a customer can upload, these only run in GHES. 
+        // Typically run as part of the babeld mode during a git push, but can be run
+        // independently as well (for e.g. when content is pushed via the API)
+        HOOK_MODE_CUSTOM = 3;
+    }
+
+  github.spokes.types.v1.Repository repository = 1;
+
+  // set of sockstat variables to pass to gitrpcd to setup the git hooks environment correctly.
+  github.spokes.types.v1.Sockstat sockstat = 2;
+
+  // the set of incoming reference updates for a push that are being evaluated in the hook.
+  repeated github.spokes.types.v1.ReferenceUpdate reference_updates = 3;
+
+  // The mode in which the pre-receive hooks can run
+  HookMode hook_mode = 4;
+
+  github.spokes.types.v1.RequestContext request_context = 5;
+}
+
+message RunPreReceiveHooksResponse {
+  // the return code as being returned by the pre receive hook after its done running.
+  // a zero code represents success, while a non zero code represents failure.
+  int64 return_code = 1;
+
+  // the message returned by the hook (via its stdout) that can be
+  // passed on to the caller. The message can compose of multiple lines, each seperated by a newline.
+  bytes output_message = 2;
+
+  // the message returned by the hook (via its stderr) indicating the reason the hook failed, that can be
+  // passed on to the caller. The message can compose of multiple lines, each seperated by a newline.
+  bytes error_message = 3;
+}

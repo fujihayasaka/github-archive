@@ -1,0 +1,123 @@
+<% enterprise_team = this_business.enterprise_teams %>
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+  <% component.with_header do |h| %>
+    <% h.with_title(tag: :h2) do %>
+      Copilot Access
+    <% end %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Basic Seat Plan",
+      true
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Copilot licensing enabled",
+      this_business.copilot_licensing_enabled?
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Max Copilot Seats",
+      this_business.copilot_max_seats,
+      "What is the max number of Copilot seats this enterprise allows?",
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= form_tag copilot_refresh_limiter_cache_for_all_users_stafftools_enterprise_path(current_business), :method => :put do %>
+      <%= render(Primer::Beta::ButtonGroup.new) do |component| %>
+        <% component.with_button(type: :submit, scheme: :danger, id: "copilot-refresh-limiter-cache-button", test_selector: "copilot-refresh-limiter-cache-button") do |button| %>
+          <% button.with_leading_visual_icon(icon: :sync) %>
+          Refresh Limiter Cache for All Users
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Copilot Enablement Allowed",
+      !copilot_business.copilot_enablement_blocked?,
+      "Is this enterprise allowed to enable Copilot?",
+    ) %>
+    <% if copilot_business.copilot_enablement_blocked? %>
+      <%= form_tag business_unblock_copilot_stafftools_enterprise_path(current_business), :method => :put do %>
+        <%= render(Primer::Beta::Button.new(type: :submit, scheme: :primary, id: "copilot-unblock-button", test_selector: "copilot-unblock-button")) do |button| %>
+          <% button.with_leading_visual_icon(icon: :unlock) %>
+          Allow Copilot Enablement
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>
+
+<%= render(Stafftools::Copilot::PlanComponent.new(copilot_business)) %>
+
+<br>
+<%= render Stafftools::Copilot::SettingsComponent.new(copilot_business) do |component| %>
+  <% component.with_prepended_row do %>
+    <%= form_tag copilot_refresh_organizations_caches_stafftools_enterprise_path(current_business), :method => :put do %>
+      <%= render(Primer::Beta::ButtonGroup.new) do |component| %>
+        <% component.with_button(type: :submit, id: "copilot-refresh-button", test_selector: "copilot-refresh-button") do |button| %>
+          <% button.with_leading_visual_icon(icon: :sync) %>
+          Refresh all enterprise members settings cache
+        <% end %>
+      <% end %>
+    <% end %>
+    <% component.with_prepended_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_MCP_REGISTRY_ACCESS,
+        copilot_business.mcp_registry_access.titleize,
+        "What level of MCP registry access restriction that the enterprise has set",
+        label_scheme: copilot_business.mcp_registry_access_is?("registry_only") ? :success : :danger
+      ) %>
+    <% end %>
+  <% end %>
+
+  <% component.with_prepended_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_MCP_REGISTRY,
+      nil,
+      "Whether the enterprise has a #{Copilot::COPILOT_MCP_REGISTRY} set and what the url is",
+    ) do |component| %>
+      <% component.with_body do %>
+      <p class="note">
+        <%= copilot_business.mcp_registry_url.present? ? copilot_business.mcp_registry_url : "No MCP registry URL set" %>
+      </p>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% component.with_prepended_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_MCP_REGISTRY_ACCESS,
+      copilot_business.mcp_registry_access.titleize,
+      "What level of MCP registry access restriction that the enterprise has set",
+      label_scheme: copilot_business.mcp_registry_access_is?("registry_only") ? :success : :danger
+    ) %>
+  <% end %>
+
+  <% component.with_prepended_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Copilot code review blocked",
+      copilot_business.code_review_repository_access_enabled? ? "Not blocked" : "Blocked",
+      "Whether this enterprise has blocked Copilot code review in all enterprise repositories",
+      label_scheme: copilot_business.code_review_repository_access_enabled? ? :danger : :success
+    ) %>
+  <% end %>
+<% end %>
+<br>
+
+<%= render Stafftools::Copilot::EmailOptInOutComponent.new(
+  entity: this_business,
+  submit_path: business_toggle_copilot_email_notifications_stafftools_enterprise_path(this_business, notifications: params[:notifications]),
+  notifications: params[:notifications]
+) %>
+
+<%= render Stafftools::Copilot::SeatEmissionsComponent.new(copilot_seat_emissions) %>
+
+<br>
+<%= render "stafftools/copilot_settings/anthropic_user_profile",
+  anthropic_owner: this_business,
+  anthropic_input_id: "enterprise-anthropic-user-id" %>

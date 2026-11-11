@@ -1,0 +1,3678 @@
+#!/usr/bin/env safe-ruby
+# frozen_string_literal: true
+
+# This script sets up seed data for in-product messaging testing.
+# It creates various organizations, enterprises, and repositories with
+# different configurations for Copilot Business and Copilot Code Review,
+# as well as individual users with Copilot Pro, Copilot Pro+, and Copilot Max plans.
+#
+# See script/in-product-messaging/README.md for the full setup guide,
+# including how to run with --with-billing against a local billing-platform.
+#
+# Usage:
+#   script/in-product-messaging/setup                              # Destroy then recreate all seed data
+#   script/in-product-messaging/setup --destroy                    # Only destroy seed data (no recreate)
+#   script/in-product-messaging/setup --with-billing               # Also create budget alert test accounts
+#   script/in-product-messaging/setup --with-cq-banners            # Also create Code Quality upcoming-charges test accounts (temporary; campaign ends 2026-07-20)
+#   script/in-product-messaging/setup --individual dashboard-cli   # Only recreate entities for a specific test user
+#   script/in-product-messaging/setup --individual user-1,user-2   # Recreate entities for multiple test users
+#   script/in-product-messaging/setup --multiples 5                # Create 5 copies of each user (username-0..username-4)
+#   script/in-product-messaging/setup --individual dashboard-cli --multiples 3  # Create 3 copies of matching users
+#   script/in-product-messaging/setup --with-cq-banners --individual ipm-cq-ent-owner,ipm-cq-org-admin  # CQ banners for specific users
+#
+# Prerequisites:
+#   - script/server must be running (authzd, spokesd, etc. are required)
+#   - For --with-billing: billing-platform must be running. In another tab:
+#       script/setup-codespaces-billing-platform   # one-time per codespace
+#       cd ../billing-platform && script/server
+#
+# This is a development-only script and should never be used in production.
+#
+# ----------------------------------------------------------------------------
+# Member "Request a feature" surfaces (issue github/in-product-messaging#604)
+# ----------------------------------------------------------------------------
+# After a plain `script/in-product-messaging/setup`, these surfaces are seeded
+# and reproducible by signing in (password: passworD1):
+#
+#   * Member request entry points — sign in as ipm-org-raf-cb-no-cb-org-mem1:
+#       - Copilot from an org:       /settings/copilot
+#       - Custom repo roles upsell:  /ipm-org-raf-cb-no-cb-org/test-repo/settings/access
+#       - Branch protection warning: /ipm-org-raf-cb-no-cb-org/test-repo/settings/branches
+#       - Empty-repo Copilot prompt: /ipm-org-raf-cb-no-cb-org/empty-demo
+#   * Org admin manage surfaces — sign in as ipm-org-raf-cb-no-cb:
+#       - Member requests hub:       /organizations/ipm-org-raf-cb-no-cb-org/settings/member_feature_requests
+#       - Personal review nudge:     /settings/organizations
+#   * Org seat-management requests — sign in as ipm-org-raf-cb-with-cb:
+#       - /organizations/ipm-org-raf-cb-with-cb-org/settings/copilot/seat_management
+#   * Enterprise coding-agent requests card — sign in as ipm-ent-cloud-agent:
+#       - /enterprises/ipm-ent-cloud-agent-biz/ai-controls/agents/policies
+#   * Stafftools opt-out — sign in as a site admin (e.g. monalisa):
+#       - /stafftools/enterprises/ipm-ent-cloud-agent-biz
+#
+# Two member entry points CANNOT be auto-seeded and need manual steps:
+#   * Draft PRs upgrade dialog (A3): temporarily add `draft_prs.private: false`
+#     to the `free` plan's FREE_FEATURES block in config/plans.yml and restart
+#     web (the default seed entitles draft_prs to all plans, so the upsell never
+#     fires). Then, as mem1, open a compare view and pick "Create a draft pull
+#     request". Revert config/plans.yml afterward.
+#   * Code-editor Copilot popover (A5): gated entirely in the github-ui frontend
+#     and not reproducible from the monolith dev environment.
+
+
+require_relative "#{Rails.root}/config/environment"
+# Force ActiveRecord::Base to load before FactoryBot. In development mode,
+# the on_load(:active_record) hook in config/application.rb needs to resolve
+# ApplicationRecord::Mysql1 before any autoloading chain references it,
+# otherwise a circular dependency causes a NameError.
+ActiveRecord::Base
+require_relative "#{Rails.root}/script/seeds/objects"
+require "#{Rails.root}/test/test_helpers/user_test_helpers"
+require_relative "../seeds/factory_bot_loader"
+require "logger"
+require "securerandom"
+require "net/http"
+require "uri"
+
+# Pre-load rbnacl to prevent NameError deep in the autoload chain when
+# enabling Copilot Business (Copilot → PlaygroundDependency → RbNaCl::SimpleBox).
+begin
+  require "rbnacl"
+rescue LoadError
+  abort <<~MSG
+    ERROR: rbnacl gem not available. This gem is required for Copilot Business setup.
+    Try: gem install rbnacl
+  MSG
+end
+
+LOGGER = Logger.new(STDERR)
+
+# Verify that authzd and spokesd are reachable before doing any work.
+# These services are started by script/server and are required for
+# repository creation and authorization checks.
+require "socket"
+%w[8091 28081].each do |port|
+  service = port == "8091" ? "authzd" : "spokesd"
+  begin
+    TCPSocket.new("127.0.0.1", port.to_i).close
+  rescue Errno::ECONNREFUSED, Errno::EADDRNOTAVAIL
+    abort <<~MSG
+      ERROR: #{service} is not running on port #{port}.
+      Please start script/server before running this script.
+    MSG
+  end
+end
+
+DEFAULT_PASSWORD = "passworD1"
+
+module LoggingHelpers
+  def title(string)
+    LOGGER.info colorize(string, "yellow", style: :underline)
+  end
+
+  def yellow(string)
+    LOGGER.info colorize(string, "yellow")
+  end
+
+  def green(string)
+    LOGGER.info colorize(string, "green")
+  end
+
+  def log(string)
+    LOGGER.info string
+  end
+
+  def colorize(string, color, options = {})
+    background = options[:background] || options[:bg] || false
+    style = options[:style]
+    offsets = %w[gray red green yellow blue magenta cyan white]
+    styles = %w[normal bold dark italic underline xx xx underline xx strikethrough]
+    start = background ? 40 : 30
+    color_code = start + (offsets.index(color) || 8)
+    style_code = styles.index(style) || 0
+    "\e[#{style_code};#{color_code}m#{string}\e[0m"
+  end
+end
+
+unless Rails.env.development?
+  raise "This script can only be run in the development environment"
+end
+
+# Retry helper for transient infrastructure timeouts (spokesd, authzd, gitrpc).
+# Codespace services can lag under heavy seed data creation.
+def with_retries(max_attempts: 5, base_delay: 10, on: [GitRPC::Timeout, GitRPC::NetworkError, Faraday::TimeoutError, RuntimeError, GitHub::Spokes::ClientError])
+  attempts = 0
+  begin
+    attempts += 1
+    yield
+  rescue *on => e
+    retryable = e.message.match?(/timed out|Timeout|INDETERMINATE|unavailable|502|Bad Gateway|connection refused/i)
+    raise unless retryable
+    raise if attempts >= max_attempts
+    delay = base_delay * attempts # linear backoff: 10, 20, 30, 40s
+    LOGGER.info "  -> Transient error (attempt #{attempts}/#{max_attempts}), retrying in #{delay}s... [#{e.class}: #{e.message.truncate(80)}]"
+    sleep delay
+    retry
+  end
+end
+
+# Entity configuration - single source of truth
+# All arrays below are dynamically populated from this configuration
+ENTITY_CONFIG = {
+  free_orgs: [
+    { org: "ipm-free-org-cb", admin: "ipm-free-org-cb-admin", copilot_business: true, copilot_code_review: false },
+    { org: "ipm-free-org-cb-ccr", admin: "ipm-free-org-cb-ccr-admin", copilot_business: true, copilot_code_review: true },
+    { org: "ipm-free-org-no-cb", admin: "ipm-free-org-no-cb-admin", copilot_business: false, copilot_code_review: false },
+    # --- raf_cb (Request a Feature → Copilot Business) nudge test accounts ---
+    # Free org without Copilot Business: admin sees the
+    # `organization_new_tasks_raf_cb_nudge` with an "Enable Copilot Business"
+    # CTA and a global Dismiss button (one-shot until the org buys CB).
+    # See https://github.com/github/in-product-messaging/issues/262.
+    {
+      org: "ipm-org-raf-cb-no-cb-org",
+      admin: "ipm-org-raf-cb-no-cb",
+      copilot_business: false,
+      copilot_code_review: false,
+      cb_member_requests: { count: 2 },
+      # Seed the member-driven "Request a feature" entry points so a member
+      # (`<org>-mem1`) can exercise them after a plain setup + login:
+      #   - grants mem1 repo-admin on test-repo (custom repo roles + branch
+      #     protection "not enforced" upsell surfaces)
+      #   - adds a classic branch protection rule on the default branch
+      #   - creates an empty repo with mem1 as a write member (empty-repo
+      #     Copilot onboarding prompt)
+      request_feature_surfaces: true,
+      reset_raf_cb_dismissal: true
+    },
+    # Mirror account so QA can exercise the global Dismiss flow without
+    # poisoning the primary account above.
+    {
+      org: "ipm-org-raf-cb-no-cb-dismiss-org",
+      admin: "ipm-org-raf-cb-no-cb-dismiss",
+      copilot_business: false,
+      copilot_code_review: false,
+      cb_member_requests: { count: 2 },
+      reset_raf_cb_dismissal: true
+    },
+  ],
+  team_orgs: [
+    { org: "ipm-team-org-cb", admin: "ipm-team-org-cb-admin", copilot_business: true, copilot_code_review: false },
+    { org: "ipm-team-org-cb-ccr", admin: "ipm-team-org-cb-ccr-admin", copilot_business: true, copilot_code_review: true },
+    { org: "ipm-team-org-no-cb", admin: "ipm-team-org-no-cb-admin", copilot_business: false, copilot_code_review: false },
+    {
+      org: "ipm-team-org-cb-with-copilot-cli",
+      admin: "ipm-admin-with-team-org-copilot-cli",
+      member: "ipm-member-with-team-org-copilot-cli",
+      copilot_business: true,
+      copilot_code_review: false,
+      copilot_cli: true
+    },
+    # --- Dedicated 1-to-1 nudge test accounts below ---
+    {
+      org: "ipm-org-cli-org",
+      admin: "ipm-org-cli",
+      copilot_business: true,
+      copilot_code_review: false
+    },
+    {
+      org: "ipm-nav-org-new-tasks-org",
+      admin: "ipm-nav-org-new-tasks",
+      copilot_business: true,
+      copilot_code_review: false
+    },
+    # raf_cb nudge with Copilot Business already enabled: admin sees the
+    # nudge with "Add seats" / per-request CTA and *no* global Dismiss
+    # control (admins handle requests individually). Org is flipped to
+    # selected-team-and-users seat management so members can submit a
+    # CopilotForBusiness MemberFeatureRequest without being auto-assigned a
+    # seat. See https://github.com/github/in-product-messaging/issues/262.
+    {
+      org: "ipm-org-raf-cb-with-cb-org",
+      admin: "ipm-org-raf-cb-with-cb",
+      copilot_business: true,
+      copilot_code_review: false,
+      cb_member_requests: { count: 2, seat_management: :selected }
+    },
+    # --- Stacked organization settings nudges variants (1/2/3 cards) ---
+    # Dedicated accounts for exercising OrganizationStackableNudgeComponent
+    # (the React `nudge-card-stack` partial rendered on /settings/organizations).
+    # All variants share the SAME admin (`ipm-org-nudge-stack`) so QA can sign
+    # in once and see each variant rendered with a different card count.
+    # Per-variant card counts are produced by varying the underlying config
+    # (not by passing a static `nudge_stack: true`):
+    #
+    #   -1: CB on, NO `cb_member_requests` → only `copilot_cli_enablement`
+    #       is eligible → 1 card.
+    #   -2: CB on + `cb_member_requests` in `:selected` mode → `raf_cb` AND
+    #       `copilot_cli_enablement` are eligible → 2 cards.
+    #   -3: same as -2 plus seeded winback cohort metadata
+    #       (`nov_2025_copilot_digital_offer_for_organizations`) and a
+    #       pre-dismissed `nudge_organization_win_cb_users_back_credit_offer_to_accept`
+    #       notice, which unlocks `win_cb_users_back_credit_assign_seats`
+    #       (the only `win_cb_users_back_credit_*` variant compatible with
+    #       CB on + 0 assigned seats) → 3 cards. This is the maximum the
+    #       OrganizationStackableNudgeComponent can render in production:
+    #       the other two `win_cb_users_back_credit_*` variants require
+    #       CB off, so they're mutually exclusive with the CLI card. See
+    #       `log_org_nudge_stack_state` for the cohort/dismissal seeding.
+    {
+      org: "ipm-org-nudge-stack-1-org",
+      admin: "ipm-org-nudge-stack",
+      copilot_business: true,
+      copilot_code_review: false,
+      nudge_stack: 1
+    },
+    {
+      org: "ipm-org-nudge-stack-2-org",
+      admin: "ipm-org-nudge-stack",
+      copilot_business: true,
+      copilot_code_review: false,
+      cb_member_requests: { count: 2, seat_management: :selected },
+      nudge_stack: 2
+    },
+    {
+      org: "ipm-org-nudge-stack-3-org",
+      admin: "ipm-org-nudge-stack",
+      copilot_business: true,
+      copilot_code_review: false,
+      cb_member_requests: { count: 2, seat_management: :selected },
+      nudge_stack: 3
+    },
+    {
+      org: "ipm-dashboard-cli-org",
+      admin: "ipm-dashboard-cli-setup",
+      member: "ipm-dashboard-cli",
+      copilot_business: true,
+      copilot_code_review: true,
+      copilot_cli: true
+    },
+    # --- Copilot Business Welcome Modal test accounts ---
+    # NOTE: GitHub usernames are limited to 39 characters, so the slugs below
+    # omit the "copilot-" prefix that the human-readable names retain.
+    {
+      org: "ipm-team-welcome-modal-org",
+      admin: "ipm-team-welcome-modal-setup",
+      member: "ipm-team-welcome-modal",
+      copilot_business: true,
+      copilot_code_review: false
+    },
+    # CCA onboarding modal — tab 2 "Start with agents" CTA test account.
+    # Distinct user is required because the CTA dismisses the modal, and tests
+    # run in parallel against the same codespace state.
+    {
+      org: "ipm-team-welcome-modal-cta-agents-org",
+      admin: "ipm-team-welcome-modal-cta-agents-setup",
+      member: "ipm-team-welcome-modal-cta-agents",
+      copilot_business: true,
+      copilot_code_review: false
+    },
+    # CCA onboarding modal — non-dismissing features test account
+    # (tab navigation, dropdown, copy button, IDE links, tab-3 external CTA).
+    {
+      org: "ipm-team-welcome-modal-features-org",
+      admin: "ipm-team-welcome-modal-features-setup",
+      member: "ipm-team-welcome-modal-features",
+      copilot_business: true,
+      copilot_code_review: false
+    },
+    # --- Dismiss test accounts (mirrors of CTA accounts above) ---
+    {
+      org: "ipm-team-welcome-modal-dismiss-org",
+      admin: "ipm-team-welcome-modal-dismiss-setup",
+      member: "ipm-team-welcome-modal-dismiss",
+      copilot_business: true,
+      copilot_code_review: false
+    },
+    {
+      org: "ipm-org-cli-dismiss-org",
+      admin: "ipm-org-cli-dismiss",
+      copilot_business: true,
+      copilot_code_review: false
+    },
+    {
+      org: "ipm-dashboard-cli-dismiss-org",
+      admin: "ipm-dashboard-cli-dismiss-setup",
+      member: "ipm-dashboard-cli-dismiss",
+      copilot_business: true,
+      copilot_code_review: true,
+      copilot_cli: true
+    },
+    # --- Transactional banner test accounts ---
+    {
+      org: "ipm-transactional-org-org",
+      admin: "ipm-transactional-org",
+      copilot_business: false,
+      copilot_code_review: false,
+      dismiss_global_nudges: true
+    },
+    {
+      org: "ipm-transactional-org-dismiss-org",
+      admin: "ipm-transactional-org-dismiss",
+      copilot_business: false,
+      copilot_code_review: false,
+      dismiss_global_nudges: true
+    },
+    # --- Transactional banner test accounts (issues/prs/repos surfaces) ---
+    {
+      org: "ipm-transactional-issues-org",
+      admin: "ipm-transactional-issues",
+      copilot_business: false,
+      copilot_code_review: false,
+      dismiss_global_nudges: true,
+      has_issue: true
+    },
+    {
+      org: "ipm-transactional-issues-dismiss-org",
+      admin: "ipm-transactional-issues-dismiss",
+      copilot_business: false,
+      copilot_code_review: false,
+      dismiss_global_nudges: true,
+      has_issue: true
+    },
+    {
+      org: "ipm-transactional-prs-org",
+      admin: "ipm-transactional-prs",
+      copilot_business: false,
+      copilot_code_review: false,
+      dismiss_global_nudges: true,
+      prs_react: true
+    },
+    {
+      org: "ipm-transactional-prs-dismiss-org",
+      admin: "ipm-transactional-prs-dismiss",
+      copilot_business: false,
+      copilot_code_review: false,
+      dismiss_global_nudges: true,
+      prs_react: true
+    },
+    {
+      org: "ipm-transactional-repos-org",
+      admin: "ipm-transactional-repos",
+      copilot_business: false,
+      copilot_code_review: false,
+      dismiss_global_nudges: true
+    },
+    {
+      org: "ipm-transactional-repos-dismiss-org",
+      admin: "ipm-transactional-repos-dismiss",
+      copilot_business: false,
+      copilot_code_review: false,
+      dismiss_global_nudges: true
+    },
+    # --- Notification settings test accounts ---
+    {
+      org: "ipm-notification-org-opt-out-org",
+      admin: "ipm-notification-org-opt-out",
+      copilot_business: false,
+      copilot_code_review: false
+    },
+    # --- Security Risk Assessment banner test account ---
+    {
+      org: "ipm-code-security-team-org",
+      admin: "ipm-code-security-team-admin",
+      copilot_business: false,
+      copilot_code_review: false,
+      advanced_security: true
+    },
+    {
+      org: "ipm-code-security-team-dismiss-org",
+      admin: "ipm-code-security-team-dismiss",
+      copilot_business: false,
+      copilot_code_review: false,
+      advanced_security: true
+    },
+    # "Remind me later" ephemeral-flash test account. Same fixture as the CTA
+    # account above; the snooze recorded when the secondary CTA is clicked is
+    # reset on every setup run (reset_remind_me_later_snooze) so the flash can
+    # be re-exercised on each QA pass without waiting out the 7-day window.
+    {
+      org: "ipm-code-security-team-flash-org",
+      admin: "ipm-code-security-team-flash",
+      copilot_business: false,
+      copilot_code_review: false,
+      advanced_security: true,
+      reset_remind_me_later_snooze: true
+    },
+    # --- TBB Setup Budget nudge test accounts (team org) ---
+    {
+      org: "ipm-tbb-setup-budget-team-org",
+      admin: "ipm-tbb-setup-budget-team",
+      copilot_business: true,
+      copilot_code_review: false
+    },
+    {
+      org: "ipm-tbb-setup-budget-team-dismiss-org",
+      admin: "ipm-tbb-setup-budget-team-dismiss",
+      copilot_business: true,
+      copilot_code_review: false
+    },
+    # --- Budget Request CTA test accounts (IPM-474) ---
+    # Org member who can submit a budget request to org admin (Phase 1/2/3)
+    {
+      org: "ipm-budget-request-org-org",
+      admin: "ipm-budget-request-org-admin",
+      member: "ipm-budget-request-org-member",
+      copilot_business: true,
+      copilot_code_review: false
+    },
+    # Dismiss mirror for budget request org banner
+    {
+      org: "ipm-budget-req-org-dismiss-org",
+      admin: "ipm-budget-req-org-dismiss-admin",
+      member: "ipm-budget-req-org-dismiss-member",
+      copilot_business: true,
+    },
+    # --- Q2 2026 Roadmap Webinar nudge test accounts ---
+    {
+      org: "ipm-webinar-2026-q2-amer-emea-org",
+      admin: "ipm-webinar-2026-q2-amer-emea",
+      copilot_business: false,
+      copilot_code_review: false
+    },
+    {
+      org: "ipm-webinar-2026-q2-apac-org",
+      admin: "ipm-webinar-2026-q2-apac",
+      copilot_business: false,
+      copilot_code_review: false
+    },
+  ],
+  enterprises: [
+    { business: "ipm-ghec-cb-account", owner: "ipm-ghec-cb-owner", org: "ipm-ghec-cb-org", copilot_business: true, copilot_code_review: false },
+    { business: "ipm-ghec-cb-ccr-account", owner: "ipm-ghec-cb-ccr-owner", org: "ipm-ghec-cb-ccr-org", copilot_business: true, copilot_code_review: true },
+    { business: "ipm-ghec-no-cb-account", owner: "ipm-ghec-no-cb-owner", org: "ipm-ghec-no-cb-org", copilot_business: false, copilot_code_review: false },
+    {
+      business: "ipm-ghec-account-cb-with-copilot-cli",
+      owner: "ipm-owner-with-ent-org-copilot-cli",
+      org: "ipm-ghec-cb-cli-org",
+      member: "ipm-member-with-ent-copilot-cli",
+      copilot_business: true,
+      copilot_code_review: false,
+      copilot_cli: true
+    },
+    # --- Dedicated 1-to-1 nudge test accounts below ---
+    {
+      business: "ipm-ent-enable-cli-biz",
+      owner: "ipm-ent-enable-cli",
+      org: "ipm-ent-enable-cli-org",
+      copilot_business: true,
+      copilot_code_review: false
+    },
+    {
+      business: "ipm-nav-ent-new-tasks-biz",
+      owner: "ipm-nav-ent-new-tasks",
+      org: "ipm-nav-ent-new-tasks-org",
+      copilot_business: true,
+      copilot_code_review: false
+    },
+    {
+      business: "ipm-ent-cloud-agent-biz",
+      owner: "ipm-ent-cloud-agent",
+      org: "ipm-ent-cloud-agent-org",
+      copilot_business: true,
+      copilot_code_review: false,
+      copilot_cli: true,
+      # Seed admin-level Copilot coding-agent member requests so the
+      # enterprise "member requests" card renders on the AI Controls Agents
+      # policies page: /enterprises/ipm-ent-cloud-agent-biz/ai-controls/agents/policies
+      # Disables the swe_agent policy (required for the card to show),
+      # creates N org admins (`<org>-admin<i>`) and has each submit a
+      # CopilotCodingAgent request billed to the enterprise.
+      coding_agent_member_requests: { count: 3 }
+    },
+    # --- Stacked enterprise settings nudges variants (1/2/3 cards) ---
+    # Dedicated accounts for exercising EnterpriseStackableNudgesComponent
+    # (the React `nudge-card-stack` partial rendered on /settings/enterprises).
+    # All variants share the SAME owner (`ipm-ent-nudge-stack`) so QA can
+    # sign in once and see each variant rendered with a different card count.
+    # Per-variant card counts are produced by varying the `nudge_stack:`
+    # integer that `ensure_nudge_stack_policies` keys off:
+    #
+    #   -1: only the CLI policy is flipped off `no_policy` → only
+    #       `copilot_cli_enablement` is eligible → 1 card.
+    #   -2: CLI + Copilot coding-agent policies flipped → both cards
+    #       eligible → 2 cards.
+    #   -3: same as -2 plus seeded winback cohort metadata
+    #       (`nov_2025_copilot_digital_offer_for_enterprises`), which
+    #       unlocks the `win_cb_users_back_credit` enterprise card → 3
+    #       cards. This is the maximum the EnterpriseStackableNudgesComponent
+    #       can render today (`ENTERPRISE_PREVIEW_NUDGE_KEYS` enumerates
+    #       3 distinct cards). See `ensure_nudge_stack_policies` for the
+    #       cohort seeding.
+    {
+      business: "ipm-ent-nudge-stack-1-biz",
+      owner: "ipm-ent-nudge-stack",
+      org: "ipm-ent-nudge-stack-1-org",
+      copilot_business: true,
+      copilot_code_review: false,
+      nudge_stack: 1
+    },
+    {
+      business: "ipm-ent-nudge-stack-2-biz",
+      owner: "ipm-ent-nudge-stack",
+      org: "ipm-ent-nudge-stack-2-org",
+      copilot_business: true,
+      copilot_code_review: false,
+      nudge_stack: 2
+    },
+    {
+      business: "ipm-ent-nudge-stack-3-biz",
+      owner: "ipm-ent-nudge-stack",
+      org: "ipm-ent-nudge-stack-3-org",
+      copilot_business: true,
+      copilot_code_review: false,
+      nudge_stack: 3
+    },
+    # --- Copilot Business Welcome Modal test accounts ---
+    # NOTE: GitHub usernames are limited to 39 characters, so the slugs below
+    # omit the "copilot-" prefix that the human-readable names retain.
+    {
+      business: "ipm-ent-welcome-modal-biz",
+      owner: "ipm-ent-welcome-modal-setup",
+      org: "ipm-ent-welcome-modal-org",
+      member: "ipm-ent-welcome-modal",
+      copilot_business: true,
+      copilot_code_review: false
+    },
+    # --- Dismiss test accounts (mirrors of CTA accounts above) ---
+    {
+      business: "ipm-ent-welcome-modal-dismiss-biz",
+      owner: "ipm-ent-welcome-modal-dismiss-setup",
+      org: "ipm-ent-welcome-modal-dismiss-org",
+      member: "ipm-ent-welcome-modal-dismiss",
+      copilot_business: true,
+      copilot_code_review: false
+    },
+    {
+      business: "ipm-ent-enable-cli-dismiss-biz",
+      owner: "ipm-ent-enable-cli-dismiss",
+      org: "ipm-ent-enable-cli-dismiss-org",
+      copilot_business: true,
+      copilot_code_review: false
+    },
+    {
+      business: "ipm-ent-cloud-agent-dismiss-biz",
+      owner: "ipm-ent-cloud-agent-dismiss",
+      org: "ipm-ent-cloud-agent-dismiss-org",
+      copilot_business: true,
+      copilot_code_review: false,
+      copilot_cli: true
+    },
+    # --- Transactional banner test accounts ---
+    {
+      business: "ipm-transactional-ent-biz",
+      owner: "ipm-transactional-ent",
+      org: "ipm-transactional-ent-org",
+      copilot_business: false,
+      copilot_code_review: false,
+      dismiss_global_nudges: true
+    },
+    {
+      business: "ipm-transactional-ent-dismiss-biz",
+      owner: "ipm-transactional-ent-dismiss",
+      org: "ipm-transactional-ent-dismiss-org",
+      copilot_business: false,
+      copilot_code_review: false,
+      dismiss_global_nudges: true
+    },
+    # --- Notification settings test accounts ---
+    {
+      business: "ipm-notification-ent-opt-out-biz",
+      owner: "ipm-notification-ent-opt-out",
+      org: "ipm-notification-ent-opt-out-org",
+      copilot_business: false,
+      copilot_code_review: false
+    },
+    # --- Security Risk Assessment banner test account ---
+    {
+      business: "ipm-code-security-ghec-biz",
+      owner: "ipm-code-security-ghec-owner",
+      org: "ipm-code-security-ghec-org",
+      copilot_business: false,
+      copilot_code_review: false,
+      advanced_security: true
+    },
+    {
+      business: "ipm-code-security-ghec-dismiss-biz",
+      owner: "ipm-code-security-ghec-dismiss",
+      org: "ipm-code-security-ghec-dismiss-org",
+      copilot_business: false,
+      copilot_code_review: false,
+      advanced_security: true
+    },
+    # --- TBB Setup Budget nudge test accounts ---
+    {
+      business: "ipm-tbb-setup-budget-ent-biz",
+      owner: "ipm-tbb-setup-budget-ent",
+      org: "ipm-tbb-setup-budget-ent-org",
+      copilot_business: false,
+      copilot_code_review: false
+    },
+    {
+      business: "ipm-tbb-setup-budget-ent-dismiss-biz",
+      owner: "ipm-tbb-setup-budget-ent-dismiss",
+      org: "ipm-tbb-setup-budget-ent-dismiss-org",
+      copilot_business: false,
+      copilot_code_review: false
+    },
+    # --- Budget Request CTA test accounts (IPM-474) ---
+    # Enterprise member who can submit a budget request to enterprise owner (Phase 1/2/4)
+    {
+      business: "ipm-budget-request-ent-biz",
+      owner: "ipm-budget-request-ent-owner",
+      org: "ipm-budget-request-ent-org",
+      member: "ipm-budget-request-ent-member",
+      copilot_business: true,
+      copilot_code_review: false
+    },
+    # Dismiss mirror for budget request enterprise banner
+    {
+      business: "ipm-budget-req-ent-dismiss-biz",
+      owner: "ipm-budget-req-ent-dismiss-owner",
+      org: "ipm-budget-req-ent-dismiss-org",
+      member: "ipm-budget-req-ent-dismiss-member",
+      copilot_business: true,
+      copilot_code_review: false
+    },
+  ],
+  enterprise_trials: [
+    { business: "ipm-ghec-trial-account", owner: "ipm-ghec-trial-owner", org: nil, has_repository: false },
+    { business: "ipm-ghec-trial-nothing-account", owner: "ipm-ghec-trial-nothing-owner", org: nil, has_repository: false },
+    { business: "ipm-ghec-trial-org-account", owner: "ipm-ghec-trial-org-owner", org: "ipm-ghec-trial-org-org", has_repository: false },
+    { business: "ipm-ghec-trial-repo-account", owner: "ipm-ghec-trial-repo-owner", org: "ipm-ghec-trial-repo-org", has_repository: true },
+    # --- Dedicated 1-to-1 nudge test accounts below ---
+    # Each account shows ONLY its target card. Accounts #2–5 set dismiss_cb_nudge
+    # to hide the "Enable Copilot Business" card that otherwise co-appears on all
+    # trial enterprises aged ≥ 3 days.
+    { business: "ipm-dfd-enable-cb-ent", owner: "ipm-dfd-enable-cb", org: nil, has_repository: false, age_days: 4 },
+    { business: "ipm-dfd-create-org-ent", owner: "ipm-dfd-create-org", org: nil, has_repository: false, dismiss_cb_nudge: true },
+    { business: "ipm-dfd-create-repo-ent", owner: "ipm-dfd-create-repo", org: "ipm-dfd-create-repo-org", has_repository: false, dismiss_cb_nudge: true },
+    { business: "ipm-dfd-add-code-ent", owner: "ipm-dfd-add-code", org: "ipm-dfd-add-code-org", has_repository: true, has_code: false, dismiss_cb_nudge: true },
+    { business: "ipm-dfd-enable-ghas-ent", owner: "ipm-dfd-enable-ghas", org: "ipm-dfd-enable-ghas-org", has_repository: true, dismiss_cb_nudge: true },
+    # --- Dismiss test accounts (mirrors of CTA accounts above) ---
+    { business: "ipm-dfd-enable-cb-dismiss-ent", owner: "ipm-dfd-enable-cb-dismiss", org: nil, has_repository: false, age_days: 4 },
+    { business: "ipm-dfd-create-org-dismiss-ent", owner: "ipm-dfd-create-org-dismiss", org: nil, has_repository: false, dismiss_cb_nudge: true },
+    { business: "ipm-dfd-create-repo-dismiss-ent", owner: "ipm-dfd-create-repo-dismiss", org: "ipm-dfd-create-repo-dismiss-org", has_repository: false, dismiss_cb_nudge: true },
+    { business: "ipm-dfd-add-code-dismiss-ent", owner: "ipm-dfd-add-code-dismiss", org: "ipm-dfd-add-code-dismiss-org", has_repository: true, has_code: false, dismiss_cb_nudge: true },
+    { business: "ipm-dfd-enable-ghas-dismiss-ent", owner: "ipm-dfd-enable-ghas-dismiss", org: "ipm-dfd-enable-ghas-dismiss-org", has_repository: true, dismiss_cb_nudge: true },
+  ],
+  individual_users: [
+    { login: "ipm-copilot-pro-user", plan: :pro },
+    { login: "ipm-copilot-pro-plus-user", plan: :pro_plus },
+    { login: "ipm-copilot-pro-max-user", plan: :max },
+    { login: "ipm-copilot-cli-dashboard-pro", plan: :pro },
+    { login: "ipm-copilot-cli-dashboard-pro-plus", plan: :pro_plus },
+    { login: "ipm-copilot-cli-dashboard-dismiss", plan: :pro },
+    { login: "ipm-copilot-cli-dashboard-recent-usage", plan: :pro },
+    { login: "ipm-transactional-dashboard", plan: :pro, dismiss_global_nudges: true },
+    { login: "ipm-transactional-dashboard-dismiss", plan: :pro, dismiss_global_nudges: true },
+    # --- Transactional banner test accounts (copilot/spaces/agents surfaces) ---
+    { login: "ipm-transactional-copilot", plan: :pro, dismiss_global_nudges: true },
+    { login: "ipm-transactional-copilot-dismiss", plan: :pro, dismiss_global_nudges: true },
+    { login: "ipm-transactional-spaces", plan: :pro, dismiss_global_nudges: true },
+    { login: "ipm-transactional-spaces-dismiss", plan: :pro, dismiss_global_nudges: true },
+    { login: "ipm-transactional-agents", plan: :pro, dismiss_global_nudges: true },
+    { login: "ipm-transactional-agents-dismiss", plan: :pro, dismiss_global_nudges: true },
+    # --- Notification settings test accounts ---
+    { login: "ipm-notification-settings", plan: :pro },
+    # --- Budget Request CTA test accounts (IPM-474) ---
+    # Individual user with personal budget for deep-link path (Phase 2 personal budget banner)
+    { login: "ipm-budget-request-personal", plan: :pro_plus },
+    # Dismiss mirror for personal budget banner
+    { login: "ipm-budget-req-personal-dismiss", plan: :pro_plus },
+  ],
+}.freeze
+
+# Budget alert test accounts (only created with --with-billing flag)
+# These require the billing-platform service to be running.
+BUDGET_ALERT_CONFIG = {
+  organizations: [
+    { org: "ipm-budget-alert-75-org-org", admin: "ipm-budget-alert-75-organization", threshold: 75 },
+    { org: "ipm-budget-alert-90-org-org", admin: "ipm-budget-alert-90-organization", threshold: 90 },
+    { org: "ipm-budget-alert-100-org-org", admin: "ipm-budget-alert-100-organization", threshold: 100 },
+  ],
+  enterprises: [
+    { business: "ipm-budget-alert-75-ent-biz", owner: "ipm-budget-alert-75-enterprise", org: "ipm-budget-alert-75-ent-org", threshold: 75 },
+    { business: "ipm-budget-alert-90-ent-biz", owner: "ipm-budget-alert-90-enterprise", org: "ipm-budget-alert-90-ent-org", threshold: 90 },
+    { business: "ipm-budget-alert-100-ent-biz", owner: "ipm-budget-alert-100-enterprise", org: "ipm-budget-alert-100-ent-org", threshold: 100 },
+  ],
+  cost_centers: [
+    { business: "ipm-budget-alert-75-cc-biz", owner: "ipm-budget-alert-75-cost-center", org: "ipm-budget-alert-75-cc-org", threshold: 75 },
+    { business: "ipm-budget-alert-90-cc-biz", owner: "ipm-budget-alert-90-cost-center", org: "ipm-budget-alert-90-cc-org", threshold: 90 },
+    { business: "ipm-budget-alert-100-cc-biz", owner: "ipm-budget-alert-100-cost-center", org: "ipm-budget-alert-100-cc-org", threshold: 100 },
+  ],
+  # Budget request CTA accounts (IPM-474). These have Copilot Business enabled
+  # with a member user whose budget is exhausted (100% threshold). The member
+  # sees the "Request additional budget" banner; the admin/owner receives the request.
+  budget_request_orgs: [
+    { org: "ipm-budget-req-cta-org-org", admin: "ipm-budget-req-cta-org-admin", member: "ipm-budget-req-cta-org-member", threshold: 100 },
+    { org: "ipm-budget-req-cta-org-dismiss-org", admin: "ipm-budget-req-cta-org-dismiss-admin", member: "ipm-budget-req-cta-org-dismiss-member", threshold: 100 },
+    { org: "ipm-budget-request-org-org", admin: "ipm-budget-request-org-admin", member: "ipm-budget-request-org-member", threshold: 100 },
+    { org: "ipm-budget-req-org-dismiss-org", admin: "ipm-budget-req-org-dismiss-admin", member: "ipm-budget-req-org-dismiss-member", threshold: 100 },
+  ],
+  budget_request_enterprises: [
+    { business: "ipm-budget-req-cta-ent-biz", owner: "ipm-budget-req-cta-ent-owner", org: "ipm-budget-req-cta-ent-org", member: "ipm-budget-req-cta-ent-member", threshold: 100 },
+    { business: "ipm-budget-req-cta-ent-dismiss-biz", owner: "ipm-budget-req-cta-ent-dismiss-owner", org: "ipm-budget-req-cta-ent-dismiss-org", member: "ipm-budget-req-cta-ent-dismiss-member", threshold: 100 },
+  ],
+  budget_request_cost_centers: [
+    { business: "ipm-budget-req-cta-cc-biz", owner: "ipm-budget-req-cta-cc-owner", org: "ipm-budget-req-cta-cc-org", member: "ipm-budget-req-cta-cc-member", threshold: 100 },
+  ],
+}.freeze
+
+# Temporary test accounts for the Code Quality upcoming-charges banner
+# campaign (June 16 – July 20, 2026). Gated behind --with-cq-banners;
+# default setup does not create them.
+# Enterprise audience: ipm-cq-ent-owner of ipm-cq-ent-account.
+# Org audience: ipm-cq-org-admin of ipm-cq-org-org (no enterprise owner,
+# so the org-policy permission gate is open by default).
+# Repo audience NOT seeded: requires CodeQuality.enabled? on a repo, which
+# has no seed primitive today. QA enables it via the repo settings UI.
+CQ_UPCOMING_CHARGES_CONFIG = {
+  enterprises: [
+    { business: "ipm-cq-ent-account", owner: "ipm-cq-ent-owner", org: "ipm-cq-ent-org" },
+  ],
+  organizations: [
+    { org: "ipm-cq-org-org", admin: "ipm-cq-org-admin" },
+  ],
+}.freeze
+
+HUMAN_READABLE_ORG_NAMES = {
+  "ipm-free-org-cb" => "IPM Org 01",
+  "ipm-free-org-cb-ccr" => "IPM Org 02",
+  "ipm-free-org-no-cb" => "IPM Org 03",
+  "ipm-team-org-cb" => "IPM Org 04",
+  "ipm-team-org-cb-ccr" => "IPM Org 05",
+  "ipm-team-org-no-cb" => "IPM Org 06",
+  "ipm-team-org-cb-with-copilot-cli" => "IPM Org 07",
+  "ipm-ghec-cb-org" => "IPM Org 08",
+  "ipm-ghec-cb-ccr-org" => "IPM Org 09",
+  "ipm-ghec-no-cb-org" => "IPM Org 10",
+  "ipm-ghec-cb-cli-org" => "IPM Org 11",
+  "ipm-ghec-trial-org-org" => "IPM Org 12",
+  "ipm-ghec-trial-repo-org" => "IPM Org 13",
+  "ipm-org-cli-org" => "IPM Org CLI",
+  "ipm-webinar-2026-q2-amer-emea-org" => "IPM Webinar AMER+EMEA Org",
+  "ipm-webinar-2026-q2-apac-org" => "IPM Webinar APAC Org",
+  "ipm-nav-org-new-tasks-org" => "IPM Nav Org New Tasks",
+  "ipm-dashboard-cli-org" => "IPM Dashboard CLI Org",
+  "ipm-ent-enable-cli-org" => "IPM Ent Enable CLI Org",
+  "ipm-nav-ent-new-tasks-org" => "IPM Nav Ent New Tasks Org",
+  "ipm-ent-cloud-agent-org" => "IPM Ent Coding Agent Org",
+  "ipm-ent-nudge-stack-1-org" => "IPM Ent Nudge Stack 1 Org",
+  "ipm-ent-nudge-stack-2-org" => "IPM Ent Nudge Stack 2 Org",
+  "ipm-ent-nudge-stack-3-org" => "IPM Ent Nudge Stack 3 Org",
+  "ipm-dfd-create-repo-org" => "IPM DFD Create Repo Org",
+  "ipm-dfd-add-code-org" => "IPM DFD Add Code Org",
+  "ipm-dfd-enable-ghas-org" => "IPM DFD Enable GHAS Org",
+  "ipm-dfd-create-repo-dismiss-org" => "IPM DFD Create Repo Dismiss Org",
+  "ipm-dfd-add-code-dismiss-org" => "IPM DFD Add Code Dismiss Org",
+  "ipm-dfd-enable-ghas-dismiss-org" => "IPM DFD Enable GHAS Dismiss Org",
+  "ipm-ent-enable-cli-dismiss-org" => "IPM Ent Enable CLI Dismiss Org",
+  "ipm-ent-cloud-agent-dismiss-org" => "IPM Ent Coding Agent Dismiss Org",
+  "ipm-org-cli-dismiss-org" => "IPM Org CLI Dismiss Org",
+  "ipm-dashboard-cli-dismiss-org" => "IPM Dashboard CLI Dismiss Org",
+  "ipm-org-raf-cb-no-cb-org" => "IPM Org RAF CB No CB Org",
+  "ipm-org-raf-cb-no-cb-dismiss-org" => "IPM Org RAF CB No CB Dismiss Org",
+  "ipm-org-raf-cb-with-cb-org" => "IPM Org RAF CB With CB Org",
+  "ipm-org-nudge-stack-1-org" => "IPM Org Nudge Stack 1 Org",
+  "ipm-org-nudge-stack-2-org" => "IPM Org Nudge Stack 2 Org",
+  "ipm-org-nudge-stack-3-org" => "IPM Org Nudge Stack 3 Org",
+  "ipm-transactional-org-org" => "IPM Transactional Org",
+  "ipm-transactional-org-dismiss-org" => "IPM Transactional Org Dismiss",
+  "ipm-transactional-issues-org" => "IPM Transactional Issues",
+  "ipm-transactional-issues-dismiss-org" => "IPM Transactional Issues Dismiss",
+  "ipm-transactional-prs-org" => "IPM Transactional PRs",
+  "ipm-transactional-prs-dismiss-org" => "IPM Transactional PRs Dismiss",
+  "ipm-transactional-repos-org" => "IPM Transactional Repos",
+  "ipm-transactional-repos-dismiss-org" => "IPM Transactional Repos Dismiss",
+  "ipm-transactional-ent-org" => "IPM Transactional Ent Org",
+  "ipm-transactional-ent-dismiss-org" => "IPM Transactional Ent Dismiss Org",
+  "ipm-notification-org-opt-out-org" => "IPM Notification Org Opt-Out",
+  "ipm-notification-ent-opt-out-org" => "IPM Notification Ent Opt-Out Org",
+  "ipm-code-security-team-org" => "IPM Code Security Team Org",
+  "ipm-code-security-team-dismiss-org" => "IPM Code Security Team Dismiss Org",
+  "ipm-code-security-team-flash-org" => "IPM Code Security Team Flash Org",
+  "ipm-team-welcome-modal-org" => "IPM Team Copilot Welcome Modal Org",
+  "ipm-team-welcome-modal-cta-agents-org" => "IPM Team Copilot Welcome Modal CTA Agents Org",
+  "ipm-team-welcome-modal-features-org" => "IPM Team Copilot Welcome Modal Features Org",
+  "ipm-team-welcome-modal-dismiss-org" => "IPM Team Copilot Welcome Modal Dismiss Org",
+  "ipm-code-security-ghec-org" => "IPM Code Security GHEC Org",
+  "ipm-code-security-ghec-dismiss-org" => "IPM Code Security GHEC Dismiss Org",
+  "ipm-tbb-setup-budget-team-org" => "IPM TBB Setup Budget Team Org",
+  "ipm-tbb-setup-budget-team-dismiss-org" => "IPM TBB Setup Budget Team Dismiss Org",
+  "ipm-tbb-setup-budget-ent-org" => "IPM TBB Setup Budget Ent Org",
+  "ipm-tbb-setup-budget-ent-dismiss-org" => "IPM TBB Setup Budget Ent Dismiss Org",
+  "ipm-ent-welcome-modal-org" => "IPM Ent Copilot Welcome Modal Org",
+  "ipm-ent-welcome-modal-dismiss-org" => "IPM Ent Copilot Welcome Modal Dismiss Org",
+  "ipm-budget-request-org-org" => "IPM Budget Request Org",
+  "ipm-budget-req-org-dismiss-org" => "IPM Budget Request Org Dismiss",
+  "ipm-budget-request-ent-org" => "IPM Budget Request Ent Org",
+  "ipm-budget-req-ent-dismiss-org" => "IPM Budget Request Ent Dismiss Org",
+  "ipm-budget-alert-75-org-org" => "IPM Budget Alert 75% Org",
+  "ipm-budget-alert-90-org-org" => "IPM Budget Alert 90% Org",
+  "ipm-budget-alert-100-org-org" => "IPM Budget Alert 100% Org",
+  "ipm-budget-alert-75-ent-org" => "IPM Budget Alert 75% Ent Org",
+  "ipm-budget-alert-90-ent-org" => "IPM Budget Alert 90% Ent Org",
+  "ipm-budget-alert-100-ent-org" => "IPM Budget Alert 100% Ent Org",
+  "ipm-budget-alert-75-cc-org" => "IPM Budget Alert 75% CC Org",
+  "ipm-budget-alert-90-cc-org" => "IPM Budget Alert 90% CC Org",
+  "ipm-budget-alert-100-cc-org" => "IPM Budget Alert 100% CC Org",
+  "ipm-budget-req-cta-org-org" => "IPM Budget Request CTA Org",
+  "ipm-budget-req-cta-org-dismiss-org" => "IPM Budget Request CTA Org Dismiss",
+  "ipm-budget-req-cta-ent-org" => "IPM Budget Request CTA Ent Org",
+  "ipm-budget-req-cta-ent-dismiss-org" => "IPM Budget Request CTA Ent Dismiss Org",
+  "ipm-budget-req-cta-cc-org" => "IPM Budget Request CTA CC Org",
+  "ipm-cq-ent-org" => "IPM CQ Ent Org",
+  "ipm-cq-org-org" => "IPM CQ Org",
+}.freeze
+
+HUMAN_READABLE_BUSINESS_NAMES = {
+  "ipm-ghec-cb-account" => "IPM Business 01",
+  "ipm-ghec-cb-ccr-account" => "IPM Business 02",
+  "ipm-ghec-no-cb-account" => "IPM Business 03",
+  "ipm-ghec-account-cb-with-copilot-cli" => "IPM Business 04",
+  "ipm-ghec-trial-account" => "IPM Business 05",
+  "ipm-ghec-trial-nothing-account" => "IPM Business 06",
+  "ipm-ghec-trial-org-account" => "IPM Business 07",
+  "ipm-ghec-trial-repo-account" => "IPM Business 08",
+  "ipm-ent-enable-cli-biz" => "IPM Ent Enable CLI",
+  "ipm-nav-ent-new-tasks-biz" => "IPM Nav Ent New Tasks",
+  "ipm-ent-cloud-agent-biz" => "IPM Ent Coding Agent",
+  "ipm-ent-nudge-stack-1-biz" => "IPM Ent Nudge Stack 1",
+  "ipm-ent-nudge-stack-2-biz" => "IPM Ent Nudge Stack 2",
+  "ipm-ent-nudge-stack-3-biz" => "IPM Ent Nudge Stack 3",
+  "ipm-dfd-enable-cb-ent" => "IPM DFD Enable CB",
+  "ipm-dfd-create-org-ent" => "IPM DFD Create Org",
+  "ipm-dfd-create-repo-ent" => "IPM DFD Create Repo",
+  "ipm-dfd-add-code-ent" => "IPM DFD Add Code",
+  "ipm-dfd-enable-ghas-ent" => "IPM DFD Enable GHAS",
+  "ipm-dfd-enable-cb-dismiss-ent" => "IPM DFD Enable CB Dismiss",
+  "ipm-dfd-create-org-dismiss-ent" => "IPM DFD Create Org Dismiss",
+  "ipm-dfd-create-repo-dismiss-ent" => "IPM DFD Create Repo Dismiss",
+  "ipm-dfd-add-code-dismiss-ent" => "IPM DFD Add Code Dismiss",
+  "ipm-dfd-enable-ghas-dismiss-ent" => "IPM DFD Enable GHAS Dismiss",
+  "ipm-ent-enable-cli-dismiss-biz" => "IPM Ent Enable CLI Dismiss",
+  "ipm-ent-cloud-agent-dismiss-biz" => "IPM Ent Coding Agent Dismiss",
+  "ipm-transactional-ent-biz" => "IPM Transactional Ent",
+  "ipm-transactional-ent-dismiss-biz" => "IPM Transactional Ent Dismiss",
+  "ipm-notification-ent-opt-out-biz" => "IPM Notification Ent Opt-Out",
+  "ipm-code-security-ghec-biz" => "IPM Code Security GHEC",
+  "ipm-code-security-ghec-dismiss-biz" => "IPM Code Security GHEC Dismiss",
+  "ipm-tbb-setup-budget-ent-biz" => "IPM TBB Setup Budget Ent",
+  "ipm-tbb-setup-budget-ent-dismiss-biz" => "IPM TBB Setup Budget Ent Dismiss",
+  "ipm-ent-welcome-modal-biz" => "IPM Ent Copilot Welcome Modal",
+  "ipm-ent-welcome-modal-dismiss-biz" => "IPM Ent Copilot Welcome Modal Dismiss",
+  "ipm-budget-request-ent-biz" => "IPM Budget Request Enterprise",
+  "ipm-budget-req-ent-dismiss-biz" => "IPM Budget Request Enterprise Dismiss",
+  "ipm-budget-alert-75-ent-biz" => "IPM Budget Alert 75% Enterprise",
+  "ipm-budget-alert-90-ent-biz" => "IPM Budget Alert 90% Enterprise",
+  "ipm-budget-alert-100-ent-biz" => "IPM Budget Alert 100% Enterprise",
+  "ipm-budget-alert-75-cc-biz" => "IPM Budget Alert 75% Cost Center",
+  "ipm-budget-alert-90-cc-biz" => "IPM Budget Alert 90% Cost Center",
+  "ipm-budget-alert-100-cc-biz" => "IPM Budget Alert 100% Cost Center",
+  "ipm-budget-req-cta-ent-biz" => "IPM Budget Request CTA Enterprise",
+  "ipm-budget-req-cta-ent-dismiss-biz" => "IPM Budget Request CTA Ent Dismiss",
+  "ipm-budget-req-cta-cc-biz" => "IPM Budget Request CTA Cost Center",
+  "ipm-cq-ent-account" => "IPM CQ Enterprise",
+}.freeze
+
+# Dynamically populate entity identifier arrays from configuration
+ALL_ORG_LOGINS = (
+  ENTITY_CONFIG[:free_orgs].map { |e| e[:org] } +
+  ENTITY_CONFIG[:team_orgs].map { |e| e[:org] } +
+  ENTITY_CONFIG[:enterprises].map { |e| e[:org] } +
+  ENTITY_CONFIG[:enterprise_trials].map { |e| e[:org] }.compact +
+  BUDGET_ALERT_CONFIG[:organizations].map { |e| e[:org] } +
+  BUDGET_ALERT_CONFIG[:enterprises].map { |e| e[:org] } +
+  BUDGET_ALERT_CONFIG[:cost_centers].map { |e| e[:org] } +
+  BUDGET_ALERT_CONFIG[:budget_request_orgs].map { |e| e[:org] } +
+  BUDGET_ALERT_CONFIG[:budget_request_enterprises].map { |e| e[:org] } +
+  BUDGET_ALERT_CONFIG[:budget_request_cost_centers].map { |e| e[:org] } +
+  CQ_UPCOMING_CHARGES_CONFIG[:enterprises].map { |e| e[:org] } +
+  CQ_UPCOMING_CHARGES_CONFIG[:organizations].map { |e| e[:org] }
+).freeze
+
+# Member logins derived from `cb_member_requests:` configs. These users
+# never appear directly in ENTITY_CONFIG (they're computed as
+# `<org_login>-mem<i>`), so they have to be enumerated explicitly so
+# `destroy_seed_data` can clean them up on rerun.
+raf_cb_free_members = ENTITY_CONFIG[:free_orgs].flat_map do |e|
+  next [] unless e[:cb_member_requests]
+  (1..e[:cb_member_requests][:count]).map { |i| "#{e[:org]}-mem#{i}" }
+end
+raf_cb_team_members = ENTITY_CONFIG[:team_orgs].flat_map do |e|
+  next [] unless e[:cb_member_requests]
+  (1..e[:cb_member_requests][:count]).map { |i| "#{e[:org]}-mem#{i}" }
+end
+RAF_CB_MEMBER_LOGINS = (raf_cb_free_members + raf_cb_team_members).freeze
+
+# Admin logins derived from `coding_agent_member_requests:` configs. These
+# org admins (login `<org_login>-admin<i>`) submit enterprise-billed
+# CopilotCodingAgent requests and never appear directly in ENTITY_CONFIG,
+# so enumerate them for `destroy_seed_data` cleanup on rerun.
+CODING_AGENT_ADMIN_LOGINS = ENTITY_CONFIG[:enterprises].flat_map do |e|
+  next [] unless e[:coding_agent_member_requests]
+  (1..e[:coding_agent_member_requests][:count]).map { |i| "#{e[:org]}-admin#{i}" }
+end
+CODING_AGENT_ADMIN_LOGINS.freeze
+
+ALL_USER_LOGINS = (
+  ENTITY_CONFIG[:free_orgs].map { |e| e[:admin] } +
+  ENTITY_CONFIG[:team_orgs].map { |e| e[:admin] } +
+  ENTITY_CONFIG[:team_orgs].map { |e| e[:member] }.compact +
+  ENTITY_CONFIG[:enterprises].map { |e| e[:owner] } +
+  ENTITY_CONFIG[:enterprises].map { |e| e[:member] }.compact +
+  ENTITY_CONFIG[:enterprise_trials].map { |e| e[:owner] } +
+  ENTITY_CONFIG[:individual_users].map { |e| e[:login] } +
+  BUDGET_ALERT_CONFIG[:organizations].map { |e| e[:admin] } +
+  BUDGET_ALERT_CONFIG[:enterprises].map { |e| e[:owner] } +
+  BUDGET_ALERT_CONFIG[:cost_centers].map { |e| e[:owner] } +
+  BUDGET_ALERT_CONFIG[:budget_request_orgs].flat_map { |e| [e[:admin], e[:member]] } +
+  BUDGET_ALERT_CONFIG[:budget_request_enterprises].flat_map { |e| [e[:owner], e[:member]] } +
+  BUDGET_ALERT_CONFIG[:budget_request_cost_centers].flat_map { |e| [e[:owner], e[:member]] } +
+  CQ_UPCOMING_CHARGES_CONFIG[:enterprises].map { |e| e[:owner] } +
+  CQ_UPCOMING_CHARGES_CONFIG[:organizations].map { |e| e[:admin] } +
+  RAF_CB_MEMBER_LOGINS +
+  CODING_AGENT_ADMIN_LOGINS
+).freeze
+
+ALL_BUSINESS_SLUGS = (
+  ENTITY_CONFIG[:enterprises].map { |e| e[:business] } +
+  ENTITY_CONFIG[:enterprise_trials].map { |e| e[:business] } +
+  BUDGET_ALERT_CONFIG[:enterprises].map { |e| e[:business] } +
+  BUDGET_ALERT_CONFIG[:cost_centers].map { |e| e[:business] } +
+  BUDGET_ALERT_CONFIG[:budget_request_enterprises].map { |e| e[:business] } +
+  BUDGET_ALERT_CONFIG[:budget_request_cost_centers].map { |e| e[:business] } +
+  CQ_UPCOMING_CHARGES_CONFIG[:enterprises].map { |e| e[:business] }
+).freeze
+
+# Returns true if any user-login field in a config hash starts with the given
+# prefix. Used by --individual to select only entities belonging to a specific
+# test user (e.g. "ipm-dashboard-cli" matches the CTA, dismiss, and setup
+# accounts for the dashboard-cli test).
+def entity_matches_individual?(config, prefix)
+  %i[admin member owner login].any? { |key| config[key]&.start_with?(prefix) }
+end
+
+# The Code Quality upcoming-charges campaign flag is enabled globally in dev
+# below. Audience-specific test accounts (CQ_UPCOMING_CHARGES_CONFIG) are
+# gated behind --with-cq-banners; default setup does not create them.
+IN_PRODUCT_MESSAGING_DEV_ENABLED_FLAGS = %i[
+  accelerate_ipm_copilot_cli_dashboard_for_devs
+  copilot_coding_agent_enterprise_nudge
+  copilot_enterprise_nudge_enterprises
+  ipm_accelerate_dashboard_copilot_cli_enabled_nudge
+  hawaii_exp
+  dfd_new_tasks_enable_cb_nudge
+  dfd_new_tasks_create_org_nudge
+  dfd_new_tasks_create_repo_nudge
+  dfd_new_tasks_add_code_nudge
+  dfd_new_tasks_enable_ghas_nudge
+  dfd_new_tasks
+  copilot_add_on_for_teams_new_orgs
+  organization_new_tasks_nudges
+  organization_new_tasks_raf_cb_nudge
+  organization_new_tasks_nudges_variant_1_preference
+  ipm_settings_enterprise_stackable_nudges
+  dashboard_notify_users_cb_seat_nudge
+  dashboard_notify_users_cb_seat_nudge_1
+
+  spark_access_copilot_policy
+  copilot_ce_rollout
+  copilot_cb_rollout
+  nudge_enterprise_win_cb_users_back_credit
+  nudge_organization_win_cb_users_back_credit
+  nudge_organization_win_cb_users_back_credit_offer_to_accept
+  nudge_enterprise_win_cb_users_back_credit_offer_to_accept
+  ipm_dashboard_banners_beneath_copilot_chat
+  automatic_code_review_focus_mode
+  in_product_messaging_transactional_message_engine
+  global_nav_react
+  ipm_global_transactional_message_copilot
+  ipm_global_transactional_message_spaces
+  ipm_global_transactional_message_agents
+  ipm_global_transactional_message_issues
+  ipm_global_transactional_message_prs
+  ipm_global_transactional_message_dashboard
+  ipm_global_transactional_message_repos
+  ipm_global_transactional_message_org
+  ipm_global_transactional_message_enterprise
+  ipm_test_transactional_banner_dashboard
+  ipm_test_transactional_banner_org
+  ipm_test_transactional_banner_enterprise
+  ipm_test_transactional_banner_copilot
+  ipm_test_transactional_banner_spaces
+  ipm_test_transactional_banner_agents
+  ipm_test_transactional_banner_issues
+  ipm_test_transactional_banner_prs
+  ipm_test_transactional_banner_repos
+  general_ipm_code_quality_upcoming_charges
+  in_product_messaging_organization_opt_out
+  in_product_messaging_business_opt_out
+  in_product_messaging_organization_members_request
+  in_product_messaging_business_members_request
+  ipm_copilot_cli_ga_enterprise_nudge
+  ipm_copilot_cli_ga_organization_nudge
+  ipm_save_copilot_cli_enabled_date
+  secure_ipm_security_risk_assessment_v2
+  accelerate_ipm_copilot_business_onboarding_modal
+  ipm_budget_deep_linking
+  general_ipm_tbb_setup_budget
+  general_ipm_budget_threshold_alert
+  billing_user_level_budgets
+  billing_user_level_budgets_manage
+  remote_cache
+  copilot_budget_request_cta
+  general_ipm_roadmap_webinar_2026_q2_nudge_amer_emea
+  general_ipm_roadmap_webinar_2026_q2_nudge_apac
+  enable_stackable_enterprise_nudges
+  enable_stackable_organization_nudges
+].freeze
+
+# Logins of users seeded for the CCA onboarding modal QA tests.
+# `refresh_welcome_modal_state` re-runs eligibility-resetting work for these
+# users on every setup invocation:
+#   1. Refresh `Copilot::Seat.created_at` to `Time.now` so the
+#      `copilot_seats.created_at >= 7.days.ago` eligibility check still passes
+#      on long-lived codespaces.
+#   2. Reset the dismissed-notice KV entry for
+#      `accelerate_ipm_copilot_business_onboarding_modal` so a previous CTA or
+#      X-close test run does not permanently hide the modal for that user.
+# Scope is intentionally narrow so other fixtures aren't perturbed.
+WELCOME_MODAL_MEMBER_LOGINS = %w[
+  ipm-team-welcome-modal
+  ipm-team-welcome-modal-cta-agents
+  ipm-team-welcome-modal-features
+  ipm-team-welcome-modal-dismiss
+  ipm-ent-welcome-modal
+  ipm-ent-welcome-modal-dismiss
+].freeze
+
+WELCOME_MODAL_NUDGE_ID = "accelerate_ipm_copilot_business_onboarding_modal"
+
+# Notice ID for the raf_cb nudge (`organization_new_tasks_raf_cb_nudge`).
+# Reset on every setup run for the no-CB raf_cb test admins — that flow's
+# one-shot Dismiss control would otherwise persist across QA reruns. See
+# https://github.com/github/in-product-messaging/issues/262.
+RAF_CB_NUDGE_ID = "organization_new_tasks_raf_cb_nudge"
+
+# Notice ID for the code-security "Remind me later" secondary-CTA snooze.
+# Clicking the secondary CTA fires a dismiss POST that snoozes the upsell
+# banner for 7 days. Reset on every setup run for the flash test admin so the
+# ephemeral confirmation flash can be re-exercised on each QA pass without
+# waiting out the snooze window.
+REMIND_ME_LATER_NUDGE_ID = "secure_ipm_security_risk_assessment_v2_remind_me_later_cta"
+
+# Logins whose Copilot Business seat must be backdated past the
+# `accelerate_ipm_copilot_business_onboarding_modal` 7-day eligibility window
+# so the welcome modal does NOT render and obscure the dashboard nudges these
+# accounts exist to test (e.g., the dashboard "Get started with Copilot CLI"
+# card on `10-dashboard-cli`). The Copilot CLI access date is left untouched
+# so the CLI nudge eligibility (recent CLI grant) still holds.
+BACKDATED_BUSINESS_SEAT_LOGINS = %w[
+  ipm-dashboard-cli
+  ipm-dashboard-cli-dismiss
+].freeze
+
+BACKDATED_BUSINESS_SEAT_AGE_DAYS = 90
+
+COPILOT_CLI_USAGE_COHORT = "2026_05_copilot_cli_usage_past_60d"
+COPILOT_CLI_USAGE_SNAPSHOT_DAY = "2026-06-04"
+RECENT_COPILOT_CLI_USAGE_LOGINS = %w[
+  ipm-copilot-cli-dashboard-recent-usage
+].freeze
+
+class SetupInProductMessaging
+  include GitHub::UserTestHelpers
+  include LoggingHelpers
+
+  # Age constants for seeded entities (in days)
+  # These values represent how old each entity should appear for testing purposes
+
+  # Standalone organizations (free/team) are created 60 days ago to simulate established orgs
+  ORG_AGE_DAYS = 60
+
+  # Enterprise accounts are created 60 days ago to simulate established enterprises
+  ENTERPRISE_AGE_DAYS = 60
+
+  # Organizations under enterprises and repositories are created 30 days ago
+  ENTERPRISE_ORG_AGE_DAYS = 30
+  REPO_AGE_DAYS = 30
+
+  # Trial enterprises and their organizations are created 21 days ago (partially through trial)
+  TRIAL_ELAPSED_DAYS = 21
+
+  # Pull requests are created 14 days ago to simulate active PRs awaiting review
+  PULL_REQUEST_AGE_DAYS = 14
+
+  # Trial remaining days: 30 day trial - 21 days elapsed = 9 days remaining
+  TRIAL_REMAINING_DAYS = 9
+
+  def call(with_billing: false, with_cq_banners: false, individual: nil, multiples: nil)
+    @multiples = multiples
+    @created_users = [] # tracks [{login:, multiples: nil|N}]
+
+    label_parts = []
+    label_parts << "individual: #{individual}" if individual
+    label_parts << "multiples: #{multiples}" if multiples
+    if label_parts.any?
+      yellow("Starting In-Product Messaging setup (#{label_parts.join(', ')})")
+    else
+      yellow("Starting In-Product Messaging setup")
+    end
+    log("")
+
+    create_feature_flags
+
+    if individual
+      prefix = individual.start_with?("ipm-") ? individual : "ipm-#{individual}"
+      matched = false
+
+      matching_free_orgs = ENTITY_CONFIG[:free_orgs].select { |c| entity_matches_individual?(c, prefix) }
+      if matching_free_orgs.any?
+        matched = true
+        yellow("Creating Free Organizations (#{matching_free_orgs.size} matching)")
+        log("")
+        matching_free_orgs.each do |config|
+          create_free_org(
+            org_login: config[:org],
+            admin_login: config[:admin],
+            copilot_business: config[:copilot_business],
+            copilot_code_review: config[:copilot_code_review],
+            cb_member_requests: config[:cb_member_requests],
+            request_feature_surfaces: config[:request_feature_surfaces]
+          )
+
+          create_user_multiples(login: config[:admin], org: config[:org])
+
+          if config[:reset_raf_cb_dismissal]
+            admin = User.find_by!(login: config[:admin])
+            org = Organization.find_by!(login: config[:org])
+            reset_raf_cb_nudge_dismissal(admin: admin, organization: org)
+          end
+        end
+      end
+
+      matching_team_orgs = ENTITY_CONFIG[:team_orgs].select { |c| entity_matches_individual?(c, prefix) }
+      if matching_team_orgs.any?
+        matched = true
+        yellow("Creating Team Organizations (#{matching_team_orgs.size} matching)")
+        log("")
+        matching_team_orgs.each do |config|
+          create_team_org(
+            org_login: config[:org],
+            admin_login: config[:admin],
+            member_login: config[:member],
+            copilot_business: config[:copilot_business],
+            copilot_code_review: config[:copilot_code_review],
+            copilot_cli: config[:copilot_cli],
+            has_issue: config[:has_issue],
+            advanced_security: config[:advanced_security]
+          )
+
+          create_user_multiples(login: config[:admin], org: config[:org])
+          create_user_multiples(login: config[:member], org: config[:org], role: :member) if config[:member]
+
+          if config[:dismiss_global_nudges]
+            admin = User.find_by!(login: config[:admin])
+            dismiss_global_transactional_nudges(admin)
+          end
+
+          if config[:reset_remind_me_later_snooze]
+            admin = User.find_by!(login: config[:admin])
+            org = Organization.find_by!(login: config[:org])
+            reset_remind_me_later_snooze(admin: admin, organization: org)
+          end
+        end
+      end
+
+      matching_enterprises = ENTITY_CONFIG[:enterprises].select { |c| entity_matches_individual?(c, prefix) }
+      if matching_enterprises.any?
+        matched = true
+        yellow("Creating Enterprise Accounts (#{matching_enterprises.size} matching)")
+        log("")
+        matching_enterprises.each do |config|
+          create_enterprise_account(
+            business_slug: config[:business],
+            owner_login: config[:owner],
+            org_login: config[:org],
+            member_login: config[:member],
+            copilot_business: config[:copilot_business],
+            copilot_code_review: config[:copilot_code_review],
+            copilot_cli: config[:copilot_cli],
+            advanced_security: config[:advanced_security],
+            nudge_stack: config[:nudge_stack],
+            coding_agent_member_requests: config[:coding_agent_member_requests]
+          )
+
+          create_user_multiples(login: config[:owner], org: config[:org], business: config[:business])
+          create_user_multiples(login: config[:member], org: config[:org], role: :member) if config[:member]
+
+          if config[:dismiss_global_nudges]
+            owner = User.find_by!(login: config[:owner])
+            dismiss_global_transactional_nudges(owner)
+          end
+        end
+      end
+
+      matching_trials = ENTITY_CONFIG[:enterprise_trials].select { |c| entity_matches_individual?(c, prefix) }
+      if matching_trials.any?
+        matched = true
+        yellow("Creating Enterprise Trial Accounts (#{matching_trials.size} matching)")
+        log("")
+        matching_trials.each do |config|
+          create_enterprise_trial(
+            business_slug: config[:business],
+            owner_login: config[:owner],
+            org_login: config[:org],
+            has_repository: config[:has_repository],
+            has_code: config.fetch(:has_code, true),
+            age_days: config[:age_days],
+            dismiss_cb_nudge: config.fetch(:dismiss_cb_nudge, false)
+          )
+
+          create_user_multiples(login: config[:owner], org: config[:org], business: config[:business])
+        end
+      end
+
+      matching_individuals = ENTITY_CONFIG[:individual_users].select { |c| entity_matches_individual?(c, prefix) }
+      if matching_individuals.any?
+        matched = true
+        yellow("Creating Individual Copilot Users (#{matching_individuals.size} matching)")
+        log("")
+        ensure_copilot_product_uuids_exist
+        matching_individuals.each do |config|
+          create_individual_copilot_user(login: config[:login], plan: config[:plan])
+
+          seed_recent_copilot_cli_usage_if_needed(config[:login])
+
+          create_user_multiples(login: config[:login], plan: config[:plan])
+
+          if config[:dismiss_global_nudges]
+            user = User.find_by!(login: config[:login])
+            dismiss_global_transactional_nudges(user)
+          end
+        end
+      end
+
+      if with_cq_banners
+        matching_cq_enterprises = CQ_UPCOMING_CHARGES_CONFIG[:enterprises].select { |c| entity_matches_individual?(c, prefix) }
+        if matching_cq_enterprises.any?
+          matched = true
+          yellow("Creating CQ Banner Enterprise Accounts (#{matching_cq_enterprises.size} matching)")
+          log("")
+          matching_cq_enterprises.each do |config|
+            create_enterprise_account(
+              business_slug: config[:business],
+              owner_login: config[:owner],
+              org_login: config[:org],
+              copilot_business: false,
+              copilot_code_review: false
+            )
+            create_user_multiples(login: config[:owner], org: config[:org], business: config[:business])
+
+            owner = User.find_by!(login: config[:owner])
+            safe_dismiss_notice(owner, "ipm_test_transactional_banner_enterprise")
+
+            org = Organization.find_by!(login: config[:org])
+            Rails.cache.write("ipm550_cq_org_has_active_repo/#{org.id}", true, expires_in: 30.days)
+            log("  -> Pre-warmed cq_org_has_active_repo cache for #{user_style(org.login)}")
+          end
+        end
+
+        matching_cq_orgs = CQ_UPCOMING_CHARGES_CONFIG[:organizations].select { |c| entity_matches_individual?(c, prefix) }
+        if matching_cq_orgs.any?
+          matched = true
+          yellow("Creating CQ Banner Team Org Accounts (#{matching_cq_orgs.size} matching)")
+          log("")
+          matching_cq_orgs.each do |config|
+            create_team_org(
+              org_login: config[:org],
+              admin_login: config[:admin],
+              copilot_business: false,
+              copilot_code_review: false
+            )
+            create_user_multiples(login: config[:admin], org: config[:org])
+
+            admin = User.find_by!(login: config[:admin])
+            safe_dismiss_notice(admin, "ipm_test_transactional_banner_org")
+
+            org = Organization.find_by!(login: config[:org])
+            Rails.cache.write("ipm550_cq_org_has_active_repo/#{org.id}", true, expires_in: 30.days)
+            log("  -> Pre-warmed cq_org_has_active_repo cache for #{user_style(org.login)}")
+          end
+        end
+      end
+
+      unless matched
+        yellow("No entities found matching '#{prefix}'. Available prefixes include:")
+        all_logins = ENTITY_CONFIG[:free_orgs].map { |c| c[:admin] }.compact +
+                     ENTITY_CONFIG[:team_orgs].flat_map { |c| [c[:admin], c[:member]] }.compact +
+                     ENTITY_CONFIG[:enterprises].flat_map { |c| [c[:owner], c[:member]] }.compact +
+                     ENTITY_CONFIG[:enterprise_trials].map { |c| c[:owner] } +
+                     ENTITY_CONFIG[:individual_users].map { |c| c[:login] } +
+                     CQ_UPCOMING_CHARGES_CONFIG[:enterprises].map { |c| c[:owner] } +
+                     CQ_UPCOMING_CHARGES_CONFIG[:organizations].map { |c| c[:admin] }
+        all_logins.sort.uniq.each { |l| log("  #{l}") }
+      end
+    else
+      yellow("Creating Free Organizations")
+      log("")
+      create_free_organizations
+
+      yellow("Creating Team Organizations")
+      log("")
+      create_team_organizations
+
+      yellow("Creating Enterprise Accounts")
+      log("")
+      create_enterprise_accounts
+
+      yellow("Creating Enterprise Trial Accounts")
+      log("")
+      create_enterprise_trial_accounts
+
+      yellow("Creating Individual Copilot Users")
+      log("")
+      create_individual_copilot_users
+
+      if with_billing
+        yellow("Creating Budget Alert Accounts (--with-billing)")
+        log("")
+        create_budget_alert_accounts
+      end
+
+      if with_cq_banners
+        yellow("Creating Code Quality Upcoming Charges Banner Accounts (--with-cq-banners)")
+        log("")
+        create_cq_upcoming_charges_accounts
+      end
+    end
+
+    green("In-Product Messaging setup complete!")
+    log("")
+
+    output_user_summary
+  end
+
+  private
+
+  def output_user_summary
+    return if @created_users.empty?
+
+    title("Generated User Accounts")
+    log("Password for all accounts: #{DEFAULT_PASSWORD}")
+    log("")
+
+    # Multiple ENTITY_CONFIG rows can share the same admin/owner login (e.g.
+    # the `ipm-ent-nudge-stack` owner is reused across the `-1`/`-2`/`-3`
+    # enterprise variants, and `ipm-org-nudge-stack` is reused across the
+    # org-side variants) so QA can sign in once and see every variant.
+    # Dedupe by login here so each account is listed once, keeping the
+    # entry with multiples info if any variant set it.
+    @created_users
+      .group_by { |entry| entry[:login] }
+      .each_value do |entries|
+        entry = entries.max_by { |e| e[:multiples] || 0 }
+        login = entry[:login]
+        n = entry[:multiples]
+        if n
+          suffix_max = n - 1
+          max_base = MAX_LOGIN_LENGTH - "-#{suffix_max}".length
+          base = login.length > max_base ? login[0, max_base] : login
+          log("  #{user_style(login)}  (+ multiples #{user_style("#{base}-0")} through #{user_style("#{base}-#{suffix_max}")})")
+        else
+          log("  #{user_style(login)}")
+        end
+      end
+    log("")
+  end
+
+  def create_feature_flags
+    title("Creating feature flags")
+    # Ensure copilot-related feature flags exist
+    Copilot::FeatureFlags::ALL_FLAGS.each do |flag|
+      Seeds::Objects::FeatureFlag.ensure_feature_flag_exists(flag)
+    end
+    Copilot::FeatureFlags::DEV_ENABLED.each do |flag|
+      Seeds::Objects::FeatureFlag.enable(feature_flag: flag)
+    end
+    ipm_newly_enabled_flags = []
+    ipm_already_enabled_flags = []
+    IN_PRODUCT_MESSAGING_DEV_ENABLED_FLAGS.each do |flag|
+      Seeds::Objects::FeatureFlag.ensure_feature_flag_exists(flag)
+      if FeatureFlag.vexi.enabled?(flag, default: false)
+        ipm_already_enabled_flags << flag
+      else
+        Seeds::Objects::FeatureFlag.enable(feature_flag: flag)
+        ipm_newly_enabled_flags << flag
+      end
+    end
+    ipm_disabled_flags = IN_PRODUCT_MESSAGING_DEV_ENABLED_FLAGS.reject do |flag|
+      FeatureFlag.vexi.enabled?(flag, default: false)
+    end
+
+    log("-> In-product messaging dev flags: #{IN_PRODUCT_MESSAGING_DEV_ENABLED_FLAGS.size}")
+    log("-> Newly enabled: #{ipm_newly_enabled_flags.size}; already enabled: #{ipm_already_enabled_flags.size}")
+    if ipm_newly_enabled_flags.any?
+      log("-> Newly enabled flags: #{ipm_newly_enabled_flags.join(", ")}")
+    end
+    if ipm_disabled_flags.any?
+      log("-> Failed to enable flags: #{ipm_disabled_flags.join(", ")}")
+    else
+      log("-> Verified all in-product messaging dev flags are enabled")
+    end
+
+    # Enable the Copilot Chat App
+    Apps::Privileged::CopilotChat.seed_database!
+
+    log("")
+  end
+
+  # ============================================
+  # Free Organizations
+  # ============================================
+
+  def create_free_organizations
+    ENTITY_CONFIG[:free_orgs].each do |config|
+      create_free_org(
+        org_login: config[:org],
+        admin_login: config[:admin],
+        copilot_business: config[:copilot_business],
+        copilot_code_review: config[:copilot_code_review],
+        cb_member_requests: config[:cb_member_requests],
+        request_feature_surfaces: config[:request_feature_surfaces]
+      )
+
+      create_user_multiples(login: config[:admin], org: config[:org])
+
+      if config[:reset_raf_cb_dismissal]
+        admin = User.find_by!(login: config[:admin])
+        org = Organization.find_by!(login: config[:org])
+        reset_raf_cb_nudge_dismissal(admin: admin, organization: org)
+      end
+    end
+  end
+
+  def create_free_org(org_login:, admin_login:, copilot_business:, copilot_code_review:, cb_member_requests: nil, request_feature_surfaces: false)
+    log("-> Creating Free organization #{org_style(org_login)}")
+    org_name = human_readable_org_name(org_login)
+
+    # Check if org already exists
+    existing_org = Organization.find_by(login: org_login)
+    if existing_org
+      admin = find_or_create_user(admin_login)
+      ensure_organization_display_name(existing_org, org_name)
+      # Check if repo exists, create if missing
+      repo = Repository.nwo("#{org_login}/test-repo")
+      if repo
+        log("  -> Already exists, skipping")
+      else
+        log("  -> Organization exists, creating missing repository")
+        repo = create_org_repository(existing_org, admin)
+        log("  -> Repository: #{repo_style(repo.nwo)} (#{REPO_AGE_DAYS} days old)")
+        pr = create_pull_request(repo, admin)
+        log("  -> Pull Request: ##{pr.number} (#{PULL_REQUEST_AGE_DAYS} days old)")
+      end
+
+      # Idempotently top up raf_cb fixtures even on existing orgs so reruns
+      # restore any deleted members or feature requests.
+      if cb_member_requests
+        create_member_cb_feature_requests(
+          organization: existing_org,
+          admin: admin,
+          count: cb_member_requests[:count],
+          seat_management: cb_member_requests[:seat_management]
+        )
+      end
+
+      seed_request_feature_surfaces(organization: existing_org, admin: admin) if request_feature_surfaces
+
+      log("")
+      return
+    end
+
+    # Create admin user
+    admin = find_or_create_user(admin_login)
+    log("  -> Admin: #{user_style(admin.login)}")
+
+    # Create the free organization with credit card billing enabled for Copilot
+    # We use credit_card_organization to enable proper billing for Copilot
+    org = FactoryBot.create(:credit_card_organization, login: org_login, plan: "free", admin: admin)
+    raise "Organization #{org_login} not created" unless org.persisted?
+    ensure_organization_display_name(org, org_name)
+
+    # Set created_at to appear as an established organization
+    org.update_column(:created_at, ORG_AGE_DAYS.days.ago)
+    log("  -> Organization age: #{ORG_AGE_DAYS} days old")
+
+    # Enable Copilot Business if requested
+    if copilot_business
+      enable_copilot_business_for_standalone_org(org)
+      log("  -> Copilot Business: enabled")
+    end
+
+    # Enable/Disable Copilot Code Review
+    copilot_org = Copilot::Organization.new(org)
+    if copilot_code_review
+      copilot_org.code_review_enabled!(force: true)
+      log("  -> Copilot Code Review: enabled")
+    else
+      copilot_org.code_review_disabled!(force: true)
+      log("  -> Copilot Code Review: disabled")
+    end
+
+    # Create repository with README.md
+    repo = create_org_repository(org, admin)
+    log("  -> Repository: #{repo_style(repo.nwo)} (#{REPO_AGE_DAYS} days old)")
+
+    # Create pull request
+    pr = create_pull_request(repo, admin)
+    log("  -> Pull Request: ##{pr.number} (#{PULL_REQUEST_AGE_DAYS} days old)")
+
+    # Seed CopilotForBusiness MemberFeatureRequest rows for the
+    # `organization_new_tasks_raf_cb_nudge` (no-CB orgs only — with-CB Free
+    # orgs aren't in the issue #262 targeting; this fixture is for
+    # GitHub Free admins specifically).
+    if cb_member_requests
+      create_member_cb_feature_requests(
+        organization: org,
+        admin: admin,
+        count: cb_member_requests[:count],
+        seat_management: cb_member_requests[:seat_management]
+      )
+    end
+
+    seed_request_feature_surfaces(organization: org, admin: admin) if request_feature_surfaces
+
+    log("")
+  end
+
+  # ============================================
+  # Team Organizations
+  # ============================================
+
+  def create_team_organizations
+    ENTITY_CONFIG[:team_orgs].each do |config|
+      create_team_org(
+        org_login: config[:org],
+        admin_login: config[:admin],
+        member_login: config[:member],
+        copilot_business: config[:copilot_business],
+        copilot_code_review: config[:copilot_code_review],
+        copilot_cli: config[:copilot_cli],
+        has_issue: config[:has_issue],
+        advanced_security: config[:advanced_security],
+        cb_member_requests: config[:cb_member_requests],
+        nudge_stack: config[:nudge_stack]
+      )
+
+      create_user_multiples(login: config[:admin], org: config[:org])
+      create_user_multiples(login: config[:member], org: config[:org], role: :member) if config[:member]
+
+      if config[:dismiss_global_nudges]
+        admin = User.find_by!(login: config[:admin])
+        dismiss_global_transactional_nudges(admin)
+      end
+
+      if config[:reset_remind_me_later_snooze]
+        admin = User.find_by!(login: config[:admin])
+        org = Organization.find_by!(login: config[:org])
+        reset_remind_me_later_snooze(admin: admin, organization: org)
+      end
+    end
+  end
+
+  def create_team_org(org_login:, admin_login:, copilot_business:, copilot_code_review:, member_login: nil, copilot_cli: nil, has_issue: false, advanced_security: nil, cb_member_requests: nil, nudge_stack: nil)
+    log("-> Creating Team organization #{org_style(org_login)}")
+    org_name = human_readable_org_name(org_login)
+
+    # Check if org already exists
+    existing_org = Organization.find_by(login: org_login)
+    if existing_org
+      admin = find_or_create_user(admin_login)
+      existing_org.add_member(admin, action: :admin, adder: admin) unless existing_org.member?(admin)
+      ensure_organization_display_name(existing_org, org_name)
+      ensure_recent_copilot_cli_access_for_team_org(
+        organization: existing_org,
+        admin: admin,
+        member_login: member_login,
+        copilot_cli: copilot_cli
+      )
+      # Check if repo exists, create if missing
+      repo = Repository.nwo("#{org_login}/test-repo")
+      if repo
+        if has_issue && !repo.issues.exists?
+          issue = create_issue(repo, admin)
+          log("  -> Issue: ##{issue.number} (created)")
+        end
+        log("  -> Already exists, skipping")
+      else
+        log("  -> Organization exists, creating missing repository")
+        repo = create_org_repository(existing_org, admin)
+        log("  -> Repository: #{repo_style(repo.nwo)} (#{REPO_AGE_DAYS} days old)")
+        pr = create_pull_request(repo, admin)
+        log("  -> Pull Request: ##{pr.number} (#{PULL_REQUEST_AGE_DAYS} days old)")
+        if has_issue
+          issue = create_issue(repo, admin)
+          log("  -> Issue: ##{issue.number}")
+        end
+      end
+
+      # Idempotently top up raf_cb fixtures even on existing orgs.
+      if cb_member_requests
+        create_member_cb_feature_requests(
+          organization: existing_org,
+          admin: admin,
+          count: cb_member_requests[:count],
+          seat_management: cb_member_requests[:seat_management]
+        )
+      end
+
+      log_org_nudge_stack_state(existing_org, admin: admin, count: nudge_stack) if nudge_stack
+
+      log("")
+      return
+    end
+
+    # Create admin user
+    admin = find_or_create_user(admin_login)
+    log("  -> Admin: #{user_style(admin.login)}")
+
+    # Create the team organization (business plan) with credit card billing for Copilot
+    org = FactoryBot.create(:credit_card_organization, login: org_login, plan: "business", admin: admin)
+    raise "Organization #{org_login} not created" unless org.persisted?
+    ensure_organization_display_name(org, org_name)
+
+    # Set created_at to appear as an established organization
+    org.update_column(:created_at, ORG_AGE_DAYS.days.ago)
+    log("  -> Organization age: #{ORG_AGE_DAYS} days old")
+
+    # Enable Advanced Security if requested (for security risk assessment banner)
+    if advanced_security
+      org.billable_owner.mark_advanced_security_as_purchased_for_entity(actor: admin)
+      org.billable_owner.mark_advanced_security_as_metered_for_entity(actor: admin)
+      org.billable_owner.mark_secret_protection_as_purchased_for_entity_as_volume(actor: admin)
+      log("  -> Advanced Security: purchased (metered, with secret protection)")
+    end
+
+    # Enable Copilot Business if requested. The raf_cb-with-CB fixture
+    # (cb_member_requests: { seat_management: :selected }) needs CB enabled
+    # in *selected* seat-management mode so members can submit a
+    # CopilotForBusiness MemberFeatureRequest without being auto-assigned a
+    # seat (which would invalidate the request).
+    if copilot_business
+      if cb_member_requests && cb_member_requests[:seat_management] == :selected
+        enable_copilot_business_in_selected_mode_for_standalone_org(org)
+        log("  -> Copilot Business: enabled (selected seat management)")
+      else
+        enable_copilot_business_for_standalone_org(org)
+        log("  -> Copilot Business: enabled")
+      end
+    end
+
+    # Enable/Disable Copilot Code Review
+    copilot_org = Copilot::Organization.new(org)
+    if copilot_code_review
+      copilot_org.code_review_enabled!(force: true)
+      log("  -> Copilot Code Review: enabled")
+    else
+      copilot_org.code_review_disabled!(force: true)
+      log("  -> Copilot Code Review: disabled")
+    end
+
+    ensure_recent_copilot_cli_access_for_team_org(
+      organization: org,
+      admin: admin,
+      member_login: member_login,
+      copilot_cli: copilot_cli
+    )
+
+    # Create repository with README.md
+    repo = create_org_repository(org, admin)
+    log("  -> Repository: #{repo_style(repo.nwo)} (#{REPO_AGE_DAYS} days old)")
+
+    # Create pull request
+    pr = create_pull_request(repo, admin)
+    log("  -> Pull Request: ##{pr.number} (#{PULL_REQUEST_AGE_DAYS} days old)")
+
+    # Create issue if requested
+    if has_issue
+      issue = create_issue(repo, admin)
+      log("  -> Issue: ##{issue.number}")
+    end
+
+    # Seed CopilotForBusiness MemberFeatureRequest rows for the
+    # `organization_new_tasks_raf_cb_nudge`. For with-CB orgs, CB was
+    # enabled in selected-seat-management mode above so members aren't
+    # auto-assigned seats.
+    if cb_member_requests
+      create_member_cb_feature_requests(
+        organization: org,
+        admin: admin,
+        count: cb_member_requests[:count],
+        seat_management: cb_member_requests[:seat_management]
+      )
+    end
+
+    log_org_nudge_stack_state(org, admin: admin, count: nudge_stack) if nudge_stack
+
+    log("")
+  end
+
+  # Org-side counterpart to `ensure_nudge_stack_policies`: the
+  # OrganizationStackableNudgeComponent eligibility checks are driven by the
+  # underlying config (CB enablement, presence of `cb_member_requests:`
+  # → `raf_cb`; CLI defaults to not-enabled at the org level
+  # → `copilot_cli_enablement`). For `count >= 3` this helper additionally
+  # seeds the winback twirp cohort metadata + pre-dismisses the
+  # `offer_to_accept` notice so the `win_cb_users_back_credit_assign_seats`
+  # card becomes eligible (the only `win_cb_users_back_credit_*` variant
+  # compatible with CB on + 0 assigned seats).
+  #
+  # `count` mirrors the `nudge_stack:` integer in ENTITY_CONFIG:
+  #   1 → `copilot_cli_enablement` (set CB on, omit cb_member_requests).
+  #   2 → `copilot_cli_enablement` + `raf_cb` (set cb_member_requests).
+  #   3 → adds `win_cb_users_back_credit_assign_seats` via seeded cohort +
+  #       dismissal. This is the maximum the stackable component can render
+  #       in production (other `win_cb_*` variants require CB off, so they're
+  #       mutually exclusive with the CLI card).
+  # `true` is treated as 2 for backward compatibility.
+  def log_org_nudge_stack_state(organization, admin:, count: 2)
+    count = 2 if count == true
+    log("  -> Nudge stack: organization configured for stacked settings nudges")
+    log("  -> Nudge stack: expect `copilot_cli_enablement` card")
+    if count >= 2
+      log("  -> Nudge stack: expect `raf_cb` (with-CB \"Assign seats\" variant) card")
+    end
+    if count >= 3
+      seed_org_winback_assign_seats_cohort(organization: organization, admin: admin)
+      log("  -> Nudge stack: expect `win_cb_users_back_credit_assign_seats` card")
+    end
+  end
+
+  # Seeds the twirp cohort row + pre-dismisses the `offer_to_accept` notice
+  # so `eligible_for_win_cb_users_back_credit_assign_seats_nudge?` returns
+  # true for the given admin on the given organization. Called by
+  # `log_org_nudge_stack_state` for `count >= 3`.
+  def seed_org_winback_assign_seats_cohort(organization:, admin:)
+    ::InProductTargeting.domain.bulk_create_matches(matches: [{
+      organization_id: organization.id,
+      cohort: :nov_2025_copilot_digital_offer_for_organizations.to_s,
+      day: "2025-11-12",
+      metadata: { "feature" => "win_cb_users_back_credit_assign_seats", "variant" => "treatment" }
+    }])
+    # The `_assign_seats` and `_credit` variants both gate on the user
+    # having dismissed the `_offer_to_accept` notice first, so we mark it
+    # dismissed up front to skip the click-through step in QA.
+    admin.dismiss_organization_notice(:nudge_organization_win_cb_users_back_credit_offer_to_accept, organization)
+  end
+
+  # ============================================
+  # Enterprise Accounts
+  # ============================================
+
+  def create_enterprise_accounts
+    ENTITY_CONFIG[:enterprises].each do |config|
+      create_enterprise_account(
+        business_slug: config[:business],
+        owner_login: config[:owner],
+        org_login: config[:org],
+        member_login: config[:member],
+        copilot_business: config[:copilot_business],
+        copilot_code_review: config[:copilot_code_review],
+        copilot_cli: config[:copilot_cli],
+        advanced_security: config[:advanced_security],
+        nudge_stack: config[:nudge_stack],
+        coding_agent_member_requests: config[:coding_agent_member_requests]
+      )
+
+      create_user_multiples(login: config[:owner], org: config[:org], business: config[:business])
+      create_user_multiples(login: config[:member], org: config[:org], role: :member) if config[:member]
+
+      if config[:dismiss_global_nudges]
+        owner = User.find_by!(login: config[:owner])
+        dismiss_global_transactional_nudges(owner)
+      end
+    end
+  end
+
+  def create_enterprise_account(business_slug:, owner_login:, org_login:, copilot_business:, copilot_code_review:, member_login: nil, copilot_cli: nil, advanced_security: nil, nudge_stack: nil, coding_agent_member_requests: nil)
+    log("-> Creating Enterprise account #{enterprise_style(business_slug)}")
+    business_name = human_readable_business_name(business_slug)
+    org_name = human_readable_org_name(org_login)
+
+    # Check if business already exists
+    existing_business = Business.find_by(slug: business_slug)
+    if existing_business
+      owner = find_or_create_user(owner_login)
+      ensure_business_name(existing_business, business_name)
+      existing_org = Organization.find_by(login: org_login)
+      if existing_org
+        ensure_organization_display_name(existing_org, org_name)
+        ensure_recent_copilot_cli_access_for_enterprise_org(
+          business: existing_business,
+          organization: existing_org,
+          owner: owner,
+          member_login: member_login,
+          copilot_cli: copilot_cli
+        )
+
+        # Re-apply code review settings on existing enterprises (idempotent)
+        ensure_code_review_setting(
+          business: existing_business,
+          org: existing_org,
+          owner: owner,
+          copilot_code_review: copilot_code_review
+        )
+
+        ensure_nudge_stack_policies(business: existing_business, count: nudge_stack) if nudge_stack
+
+        # Check if repo exists, create if missing
+        repo = Repository.nwo("#{org_login}/test-repo")
+        if repo
+          log("  -> Already exists, skipping")
+        else
+          log("  -> Enterprise exists, creating missing repository")
+          # Ensure the owner is an admin of the existing org so Seeds::Objects::Repository.create
+          # can find an admin via org.admins.first (user may have been destroyed and recreated).
+          existing_org.add_member(owner, action: :admin, adder: owner) unless existing_org.direct_member?(owner, include_indirect_abilities: false)
+          repo = create_org_repository(existing_org, owner)
+          log("  -> Repository: #{repo_style(repo.nwo)} (#{REPO_AGE_DAYS} days old)")
+          pr = create_pull_request(repo, owner)
+          log("  -> Pull Request: ##{pr.number} (#{PULL_REQUEST_AGE_DAYS} days old)")
+        end
+
+        if coding_agent_member_requests
+          seed_coding_agent_member_requests(
+            business: existing_business,
+            organization: existing_org,
+            owner: owner,
+            count: coding_agent_member_requests[:count]
+          )
+        end
+      else
+        log("  -> Already exists, skipping")
+      end
+      log("")
+      return
+    end
+
+    # Create owner user
+    owner = find_or_create_user(owner_login)
+    log("  -> Owner: #{user_style(owner.login)}")
+
+    # Create the business (enterprise account)
+    business = FactoryBot.create(:business, :with_github_subscription, slug: business_slug, name: business_name, owners: [owner])
+    raise "Business #{business_slug} not created" unless business.persisted?
+
+    # Set created_at to appear as an established enterprise
+    business.update_column(:created_at, ENTERPRISE_AGE_DAYS.days.ago)
+    log("  -> Enterprise age: #{ENTERPRISE_AGE_DAYS} days old")
+
+    # Create organization under the enterprise
+    org = FactoryBot.create(:enterprise_linked_organization, login: org_login, business: business, admin: owner)
+    raise "Organization #{org_login} not created" unless org.persisted?
+    ensure_organization_display_name(org, org_name)
+
+    # Set org created_at for enterprise-linked org
+    org.update_column(:created_at, ENTERPRISE_ORG_AGE_DAYS.days.ago)
+    log("  -> Organization: #{org_style(org_login)} (#{ENTERPRISE_ORG_AGE_DAYS} days old)")
+
+    # Enable Advanced Security if requested (for security risk assessment banner)
+    if advanced_security
+      org.billable_owner.mark_advanced_security_as_purchased_for_entity(actor: owner)
+      org.billable_owner.mark_advanced_security_as_metered_for_entity(actor: owner)
+      log("  -> Advanced Security: purchased (metered)")
+    end
+
+    # Enable Copilot Business for all organizations if requested
+    if copilot_business
+      enable_copilot_business_for_enterprise(business)
+      log("  -> Copilot Business: enabled for all organizations")
+
+      # Also explicitly enable Copilot at the org level so that org-level checks
+      # (e.g. Copilot::Organization#has_copilot_for_business?) are satisfied.
+      # Enterprise-level enablement sets the business policy, but some components
+      # check org-level state directly.
+      copilot_org = Copilot::Organization.new(org)
+      copilot_org.enable_copilot!
+      copilot_org.seat_management_allow_all!
+      log("  -> Copilot Business: also enabled at org level")
+    end
+
+    # Enable/Disable Copilot Code Review at enterprise level
+    # NOTE: enable_copilot_for_all_organizations! propagates the business's
+    # default "enabled" code_review policy to all orgs with force: true.
+    # To disable code review, we must set the business to "no_policy" (breaking
+    # the inheritance chain) AND disable at the org level with force: true.
+    copilot_business = Copilot::Business.new(business)
+    if copilot_code_review
+      business.enable_code_review_repository_access(actor: owner)
+      copilot_business.code_review_enabled!
+      log("  -> Copilot Code Review: enabled")
+    else
+      business.disable_code_review_repository_access(actor: owner, force: true)
+      copilot_business.code_review_no_policy!
+      log("  -> Copilot Code Review: disabled (business set to no_policy)")
+    end
+
+    # Also explicitly set code review at the org level.
+    # Use force: true to bypass the inheritance early-return in code_review_disabled!
+    copilot_org = Copilot::Organization.new(org)
+    if copilot_code_review
+      copilot_org.code_review_enabled!(force: true)
+      log("  -> Copilot Code Review: also enabled at org level")
+    else
+      copilot_org.code_review_disabled!(force: true)
+      log("  -> Copilot Code Review: also disabled at org level")
+    end
+
+    ensure_recent_copilot_cli_access_for_enterprise_org(
+      business: business,
+      organization: org,
+      owner: owner,
+      member_login: member_login,
+      copilot_cli: copilot_cli
+    )
+
+    ensure_nudge_stack_policies(business: business, count: nudge_stack) if nudge_stack
+
+    # Create repository with README.md
+    repo = create_org_repository(org, owner)
+    log("  -> Repository: #{repo_style(repo.nwo)} (#{REPO_AGE_DAYS} days old)")
+
+    # Create pull request
+    pr = create_pull_request(repo, owner)
+    log("  -> Pull Request: ##{pr.number} (#{PULL_REQUEST_AGE_DAYS} days old)")
+
+    if coding_agent_member_requests
+      seed_coding_agent_member_requests(
+        business: business,
+        organization: org,
+        owner: owner,
+        count: coding_agent_member_requests[:count]
+      )
+    end
+
+    log("")
+  end
+
+  # Flip the enterprise-level CLI and (optionally) Copilot coding-agent
+  # policies off `no_policy` so the `EnterpriseStackableNudgesComponent`
+  # cards become eligible. `EnterpriseNudgeConcern#eligible_for_copilot_cli_nudge?`
+  # and `eligible_for_copilot_coding_agent_nudge?` both gate the nudges off
+  # when the underlying business setting is `no_policy` (the post-CB-enable
+  # default), so we have to explicitly mark them as `disabled`.
+  #
+  # `count` controls how many cards are made eligible (mapping to the
+  # nudge_stack: integer used in ENTITY_CONFIG):
+  #   1 → flip CLI only (renders `copilot_cli_enablement`).
+  #   2 → flip CLI + coding-agent (renders both that key plus
+  #         `copilot_coding_agent_enablement`).
+  #   3 → same flips as 2, plus seeded winback twirp cohort row
+  #         (`nov_2025_copilot_digital_offer_for_enterprises`) which
+  #         unlocks the `win_cb_users_back_credit` enterprise card → 3
+  #         cards. This is the maximum the EnterpriseStackableNudgesComponent
+  #         can render today (`ENTERPRISE_PREVIEW_NUDGE_KEYS` enumerates
+  #         3 distinct cards).
+  # `true` is treated as 2 for backward compatibility with any legacy
+  # `nudge_stack: true` callers.
+  #
+  # NOTE: Rendering the stack still requires `show_ai_controls?(business)` to
+  # return true, which calls into billing-platform. Run the script with
+  # `--with-billing` (or otherwise have billing-platform reachable) when
+  # validating these accounts.
+  def ensure_nudge_stack_policies(business:, count: 2)
+    count = 2 if count == true # legacy `nudge_stack: true` callers
+    copilot_business = Copilot::Business.new(business)
+    copilot_business.cli_disabled!
+    log("  -> Nudge stack: CLI policy set to disabled (off no_policy)")
+    if count >= 2
+      copilot_business.swe_agent_disabled!
+      log("  -> Nudge stack: Copilot coding-agent policy set to disabled (off no_policy)")
+    end
+    if count >= 3
+      seed_enterprise_winback_cohort(business: business)
+      log("  -> Nudge stack: expect `win_cb_users_back_credit` enterprise card")
+    end
+  end
+
+  # Seeds the twirp cohort row so
+  # `eligible_for_win_cb_users_back_credit_nudge?` returns true for the
+  # given business. Called by `ensure_nudge_stack_policies` for
+  # `count >= 3`.
+  #
+  # In addition to the cohort row, this method clears any auto-assigned
+  # Copilot seats under the enterprise. `eligible_for_win_cb_users_back_credit_nudge?`
+  # gates the nudge on (when Copilot is enabled) `copilot_seat_count == 0`
+  # OR `copilot_accessible_organization_count == 0` — and enabling CB on
+  # the linked org auto-assigns the owner a seat (count=1) and registers
+  # the org as accessible (count=1), failing both branches. We delete the
+  # seat rows via raw SQL (bypassing notification/audit callbacks) so the
+  # seat-count branch is satisfied for the nudge-stack QA accounts. The
+  # `copilot_accessible_organization_count` stays > 0, which is the
+  # production-realistic state for the winback cohort.
+  def seed_enterprise_winback_cohort(business:)
+    ::InProductTargeting.domain.bulk_create_matches(matches: [{
+      enterprise_id: business.id,
+      cohort: :nov_2025_copilot_digital_offer_for_enterprises.to_s,
+      day: "2025-11-12",
+      metadata: { "feature" => "win_cb_users_back_credit", "variant" => "treatment" }
+    }])
+
+    seats = Copilot::Seat.for_business(business)
+    seat_ids = seats.map(&:id)
+    assignment_ids = seats.map(&:copilot_seat_assignment_id).uniq.compact
+    deleted = seat_ids.any? ? Copilot::Seat.where(id: seat_ids).delete_all : 0
+    Copilot::SeatAssignment.where(id: assignment_ids).delete_all if assignment_ids.any?
+    if deleted > 0
+      log("  -> Nudge stack: cleared #{deleted} auto-assigned Copilot seat(s) so win_cb eligibility (seat_count == 0) holds")
+    end
+  end
+
+  # ============================================
+  # Budget Alert Accounts (--with-billing)
+  # ============================================
+
+  def create_budget_alert_accounts
+    verify_billing_platform_reachable!
+
+    # Phase 1: create all entities (orgs and enterprises) first.
+    # We need every Customer record to exist before we sync them to the
+    # billing-platform so that budget seeding doesn't fail with
+    # "customer not found when upserting budget".
+    BUDGET_ALERT_CONFIG[:organizations].each do |config|
+      create_team_org(
+        org_login: config[:org],
+        admin_login: config[:admin],
+        copilot_business: false,
+        copilot_code_review: false
+      )
+      @created_users << { login: config[:admin], multiples: nil }
+    end
+
+    BUDGET_ALERT_CONFIG[:enterprises].each do |config|
+      create_enterprise_account(
+        business_slug: config[:business],
+        owner_login: config[:owner],
+        org_login: config[:org],
+        copilot_business: false,
+        copilot_code_review: false
+      )
+      @created_users << { login: config[:owner], multiples: nil }
+    end
+
+    BUDGET_ALERT_CONFIG[:cost_centers].each do |config|
+      create_enterprise_account(
+        business_slug: config[:business],
+        owner_login: config[:owner],
+        org_login: config[:org],
+        copilot_business: false,
+        copilot_code_review: false
+      )
+      @created_users << { login: config[:owner], multiples: nil }
+    end
+
+    # Budget request CTA accounts — Copilot Business enabled with members
+    BUDGET_ALERT_CONFIG[:budget_request_orgs].each do |config|
+      create_team_org(
+        org_login: config[:org],
+        admin_login: config[:admin],
+        member_login: config[:member],
+        copilot_business: true,
+        copilot_code_review: false
+      )
+    end
+
+    BUDGET_ALERT_CONFIG[:budget_request_enterprises].each do |config|
+      create_enterprise_account(
+        business_slug: config[:business],
+        owner_login: config[:owner],
+        org_login: config[:org],
+        member_login: config[:member],
+        copilot_business: true,
+        copilot_code_review: false
+      )
+    end
+
+    BUDGET_ALERT_CONFIG[:budget_request_cost_centers].each do |config|
+      create_enterprise_account(
+        business_slug: config[:business],
+        owner_login: config[:owner],
+        org_login: config[:org],
+        member_login: config[:member],
+        copilot_business: true,
+        copilot_code_review: false
+      )
+    end
+
+    # Phase 2: sync every Customer in the database to billing-platform
+    # synchronously. The after_commit hook on Customer enqueues
+    # UpdateCustomerInBillingPlatformJob asynchronously, but we can't rely on
+    # Aqueduct having drained the queue before we try to seed budgets.
+    sync_all_customers_to_billing_platform
+
+    # Phase 3: seed budgets and usage for each configured entity now that
+    # billing-platform knows about every customer.
+    BUDGET_ALERT_CONFIG[:organizations].each do |config|
+      org = Organization.find_by!(login: config[:org])
+      admin = User.find_by!(login: config[:admin])
+
+      # Ensure the org has a customer record in billing-platform
+      ensure_customer_for_entity(org)
+
+      seed_budget_for_entity(
+        entity: org,
+        actor: admin,
+        threshold: config[:threshold],
+        budget_type: :organization
+      )
+    end
+
+    BUDGET_ALERT_CONFIG[:enterprises].each do |config|
+      business = Business.find_by!(slug: config[:business])
+      owner = User.find_by!(login: config[:owner])
+
+      # Ensure the enterprise has a customer record in billing-platform
+      ensure_customer_for_entity(business)
+
+      seed_budget_for_entity(
+        entity: business,
+        actor: owner,
+        threshold: config[:threshold],
+        budget_type: :enterprise
+      )
+    end
+
+    BUDGET_ALERT_CONFIG[:cost_centers].each do |config|
+      business = Business.find_by!(slug: config[:business])
+      owner = User.find_by!(login: config[:owner])
+
+      # Ensure the enterprise has a customer record in billing-platform
+      ensure_customer_for_entity(business)
+
+      seed_budget_for_entity(
+        entity: business,
+        actor: owner,
+        threshold: config[:threshold],
+        budget_type: :cost_center
+      )
+    end
+
+    # Budget request CTA accounts — seed exhausted budgets (100% threshold)
+    # so the "Request additional budget" banner renders for the member user.
+    BUDGET_ALERT_CONFIG[:budget_request_orgs].each do |config|
+      org = Organization.find_by!(login: config[:org])
+      admin = User.find_by!(login: config[:admin])
+
+      ensure_customer_for_entity(org)
+
+      seed_budget_for_entity(
+        entity: org,
+        actor: admin,
+        threshold: config[:threshold],
+        budget_type: :organization
+      )
+
+      populate_budget_request_banner_cache(org: org, member_login: config[:member])
+    end
+
+    BUDGET_ALERT_CONFIG[:budget_request_enterprises].each do |config|
+      business = Business.find_by!(slug: config[:business])
+      owner = User.find_by!(login: config[:owner])
+
+      ensure_customer_for_entity(business)
+
+      seed_budget_for_entity(
+        entity: business,
+        actor: owner,
+        threshold: config[:threshold],
+        budget_type: :enterprise
+      )
+
+      org = Organization.find_by!(login: config[:org])
+      populate_budget_request_banner_cache(org: org, member_login: config[:member])
+    end
+
+    BUDGET_ALERT_CONFIG[:budget_request_cost_centers].each do |config|
+      business = Business.find_by!(slug: config[:business])
+      owner = User.find_by!(login: config[:owner])
+
+      ensure_customer_for_entity(business)
+
+      seed_budget_for_entity(
+        entity: business,
+        actor: owner,
+        threshold: config[:threshold],
+        budget_type: :cost_center
+      )
+
+      org = Organization.find_by!(login: config[:org])
+      populate_budget_request_banner_cache(org: org, member_login: config[:member])
+    end
+  end
+
+  def sync_all_customers_to_billing_platform
+    log("Syncing all customers to billing-platform...")
+    count = 0
+    Customer.find_each do |customer|
+      Billing::UpdateCustomerInBillingPlatformJob.perform_now(customer)
+      count += 1
+    rescue => e
+      log("  -> WARNING: Failed to sync customer #{customer.id}: #{e.message}")
+    end
+    log("  -> Synced #{count} customer(s)")
+  end
+
+  # ============================================
+  # Code Quality Upcoming Charges Accounts (--with-cq-banners)
+  # ============================================
+  # Temporary; removed with the rest of the campaign post-2026-07-20.
+
+  def create_cq_upcoming_charges_accounts
+    CQ_UPCOMING_CHARGES_CONFIG[:enterprises].each do |config|
+      create_enterprise_account(
+        business_slug: config[:business],
+        owner_login: config[:owner],
+        org_login: config[:org],
+        copilot_business: false,
+        copilot_code_review: false
+      )
+      create_user_multiples(login: config[:owner], org: config[:org], business: config[:business])
+
+      # Pre-dismiss the enterprise-page test fixture so it doesn't render
+      # alongside the upcoming-charges banner during QA.
+      owner = User.find_by!(login: config[:owner])
+      owner.dismiss_notice("ipm_test_transactional_banner_enterprise")
+      log("  -> Pre-dismissed ipm_test_transactional_banner_enterprise for #{user_style(owner.login)}")
+
+      # Pre-warm the cq_org_has_active_repo? cache for the enterprise org.
+      org = Organization.find_by!(login: config[:org])
+      Rails.cache.write("ipm550_cq_org_has_active_repo/#{org.id}", true, expires_in: 30.days)
+      log("  -> Pre-warmed cq_org_has_active_repo cache for #{user_style(org.login)}")
+    end
+
+    CQ_UPCOMING_CHARGES_CONFIG[:organizations].each do |config|
+      create_team_org(
+        org_login: config[:org],
+        admin_login: config[:admin],
+        copilot_business: false,
+        copilot_code_review: false
+      )
+      create_user_multiples(login: config[:admin], org: config[:org])
+
+      # Pre-dismiss the org-page test fixture so it doesn't render
+      # alongside the upcoming-charges banner during QA.
+      admin = User.find_by!(login: config[:admin])
+      admin.dismiss_notice("ipm_test_transactional_banner_org")
+      log("  -> Pre-dismissed ipm_test_transactional_banner_org for #{user_style(admin.login)}")
+
+      # Pre-warm the cq_org_has_active_repo? cache so the org banner renders
+      # without requiring Turboscan (CodeQuality.enabled? has no seed primitive).
+      org = Organization.find_by!(login: config[:org])
+      Rails.cache.write("ipm550_cq_org_has_active_repo/#{org.id}", true, expires_in: 30.days)
+      log("  -> Pre-warmed cq_org_has_active_repo cache for #{user_style(org.login)}")
+    end
+  end
+
+  def verify_billing_platform_reachable!
+    # GitHub.billing_platform_host is unset in development; BillingPlatform::Client
+    # falls back to http://localhost:8989, so we mirror that default here.
+    host = GitHub.billing_platform_host
+    host = "http://localhost:8989" if host.nil? || host.empty?
+    # If a host was configured without a scheme (e.g. "localhost:8989"), URI.parse
+    # returns a URI::Generic which lacks #request_uri. Prepend http:// so we get
+    # a URI::HTTP and a usable request path.
+    host = "http://#{host}" unless host.match?(%r{\Ahttps?://})
+
+    uri = URI.parse(host)
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.open_timeout = 3
+    http.read_timeout = 3
+    http.use_ssl = uri.scheme == "https"
+    # billing-platform is a Twirp service and doesn't expose /health, so any HTTP
+    # response (including 404) means the service is reachable. Only connection
+    # failures (refused, timeout, DNS) indicate it's not running.
+    http.get("/")
+    log("-> Billing platform reachable at #{host}")
+  rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH, Errno::ENETUNREACH,
+         SocketError, Net::OpenTimeout, Net::ReadTimeout => e
+    abort <<~MSG
+      ERROR: Billing platform is not reachable at #{host} (#{e.class}: #{e.message}).
+
+      The --with-billing flag requires the billing-platform service to be running.
+      Set it up with:
+
+        script/setup-codespaces-billing-platform && cd ../billing-platform && script/server
+
+      Then re-run this script with --with-billing.
+    MSG
+  end
+
+  def ensure_customer_for_entity(entity)
+    if entity.customer&.persisted?
+      log("  -> Customer record exists (ID: #{entity.customer.id})")
+      return
+    end
+
+    log("  -> Creating customer record in billing-platform...")
+    ActiveRecord::Base.connected_to(role: :writing) do
+      Billing::CreateCustomer.perform(entity, details: {})
+    end
+
+    # Reload to pick up the new association
+    entity.reload
+    if entity.customer&.persisted?
+      log("  -> Customer created (ID: #{entity.customer.id})")
+    else
+      log("  -> WARNING: Failed to create customer record")
+    end
+  end
+
+  def seed_budget_for_entity(entity:, actor:, threshold:, budget_type:)
+    customer = entity.respond_to?(:customer) ? entity.customer : entity.billable_owner&.customer
+    unless customer
+      log("  -> WARNING: No customer found for #{entity.class}##{entity.id}, skipping budget seed")
+      return
+    end
+
+    target_amount = 100.0
+    # Always use AlertingOnly. The billing-platform rejects PreventFurtherUsage
+    # for high-watermark / user-months SKUs (Copilot, GHEC) with the error
+    # "High watermark products cannot have PreventFurtherUsage budget alerting
+    # except for GHAS SKUs". `copilot_enterprise` is high-watermark so we'd be
+    # rejected at 100%. The banner UI/UX is testable from AlertingOnly budgets;
+    # only the :critical (red) variant requires PreventFurtherUsage at 100%.
+    budget_limit_type = "AlertingOnly"
+
+    if budget_type == :cost_center
+      target_type = "CostCenterResource"
+      org = entity.organizations.first
+      cost_center_name = "IPM Budget Alert #{threshold}% Cost Center"
+      cost_center_uuid = create_cost_center_for_budget(customer: customer, name: cost_center_name, org: org)
+      unless cost_center_uuid
+        log("  -> WARNING: Could not create cost center, skipping budget seed")
+        return
+      end
+      target_id = cost_center_uuid
+    else
+      target_type = "CustomerResource"
+      target_id = customer.id.to_s
+    end
+
+    budget_payload = {
+      key: {
+        customerId: customer.id.to_s,
+        targetType: target_type,
+        targetId: target_id,
+        pricingTargetType: "SkuPricing",
+        pricingTargetId: "copilot_enterprise",
+      },
+      targetAmount: target_amount,
+      budgetLimitType: budget_limit_type,
+      budgetAlerting: {
+        willAlert: true,
+        recipientUserIds: [actor.id.to_s],
+      },
+    }
+
+    client = Billing::Platform::Api::Client.new(timeout: 5)
+    response = client.create_or_update_budget(budget: budget_payload)
+
+    if response.is_a?(Billing::Platform::Api::Error)
+      log("  -> WARNING: Failed to create budget: #{response.message}")
+      return
+    end
+
+    log("  -> Budget created: $#{target_amount} limit (#{budget_limit_type})")
+
+    # Generate usage to trigger the threshold alert.
+    # The billing platform computes budget state (currentAmount, thresholdMet)
+    # from accumulated usage events. We pass the dollar `amount` (e.g. 76 for
+    # 75% of a $100 budget); billing-platform divides by the SKU price to get
+    # a quantity and emits a usage event. Do NOT also pass `quantity` (the
+    # validator rejects requests that set both), and do NOT pre-multiply the
+    # amount by 10^9 — `nano.NewFromFloat` already does that internally and
+    # passing a pre-scaled value overflows int64 (gross_quantity becomes
+    # MinInt64), which silently produces zero BilledAmount and no budget state
+    # update (so currentAmount stays at 0 and the threshold banner never
+    # fires).
+    #
+    # We add $1 over the exact threshold to absorb nano-precision rounding
+    # (e.g. injecting exactly $75 for the 75% threshold lands at
+    # $74.999999997 once divided by the $39 SKU price and re-multiplied,
+    # which truncates to 74% and misses the threshold). Adding $1 ensures
+    # the threshold percentage is always crossed.
+    usage_amount = threshold.to_f + 1.0
+    org = budget_type == :organization ? entity : entity.organizations.first
+    usage_response = client.admin_generate_usage(
+      customer_id: customer.id.to_s,
+      sku: "copilot_enterprise",
+      org_id: org&.id.to_i,
+      amount: usage_amount
+    )
+
+    if usage_response.is_a?(Billing::Platform::Api::Error)
+      log("  -> WARNING: Failed to generate usage: #{usage_response.message}")
+      return
+    end
+
+    log("  -> Usage generated: $#{usage_amount} of $#{target_amount} (#{threshold}% threshold, #{budget_type})")
+
+    # Trigger watermark workflow to force threshold evaluation in billing-platform.
+    now = Time.now.utc
+    watermark_response = client.admin_trigger_watermark_workflow(
+      customer_id: customer.id.to_s,
+      sku: "copilot_enterprise",
+      year: now.year,
+      month: now.month,
+      day: now.day,
+      hour: now.hour
+    )
+
+    if watermark_response.is_a?(Billing::Platform::Api::Error)
+      log("  -> WARNING: Failed to trigger watermark workflow: #{watermark_response.message}")
+    else
+      log("  -> Watermark workflow triggered (threshold evaluation)")
+    end
+  end
+
+  def create_cost_center_for_budget(customer:, name:, org:)
+    client = Billing::Platform::Api::Client.new(timeout: 5)
+    response = client.create_cost_center(
+      customer_id: customer.id.to_s,
+      name: name,
+      target_type: "AzureSubscription",
+      target_id: "1",
+      resources: [{ id: org.id.to_s, type: "Org" }]
+    )
+
+    if response.is_a?(Billing::Platform::Api::Error)
+      log("  -> WARNING: Failed to create cost center: #{response.message}")
+      nil
+    else
+      # The CreateCostCenterResponse proto wraps the cost center under a
+      # `costCenter` key, with the UUID nested at `costCenter.costCenterKey.uuid`.
+      uuid = response.dig(:costCenter, :costCenterKey, :uuid)
+      log("  -> Cost center created: #{name} (#{uuid})")
+      uuid
+    end
+  end
+
+  # Pre-warm the BudgetExhaustedClient cache for the member user so the
+  # "Request additional budget" banner renders without waiting for the
+  # BudgetThresholdNotificationProcessor stream processor to fire.
+  def populate_budget_request_banner_cache(org:, member_login:)
+    member = User.find_by!(login: member_login)
+    reset_date = (Date.today.end_of_month + 1.day).strftime("%B %-d, %Y")
+
+    entry = {
+      org_id: org.id,
+      org_login: org.display_login,
+      reset_date: reset_date,
+      personal_budget: false,
+    }
+
+    client = Copilot::Cache::BudgetExhaustedClient.new(user_id: member.id)
+    client.upsert_entry(entry)
+    log("  -> Pre-warmed budget-exhausted cache for #{user_style(member_login)} (org: #{user_style(org.login)})")
+  end
+
+  # ============================================
+  # Enterprise Trial Accounts
+  # ============================================
+
+  def create_enterprise_trial_accounts
+    ENTITY_CONFIG[:enterprise_trials].each do |config|
+      create_enterprise_trial(
+        business_slug: config[:business],
+        owner_login: config[:owner],
+        org_login: config[:org],
+        has_repository: config[:has_repository],
+        has_code: config.fetch(:has_code, true),
+        age_days: config[:age_days],
+        dismiss_cb_nudge: config.fetch(:dismiss_cb_nudge, false)
+      )
+
+      create_user_multiples(login: config[:owner], org: config[:org], business: config[:business])
+    end
+  end
+
+  def create_enterprise_trial(business_slug:, owner_login:, org_login:, has_repository:, has_code: true, age_days: nil, dismiss_cb_nudge: false)
+    log("-> Creating Enterprise trial account #{enterprise_style(business_slug)}")
+    business_name = human_readable_business_name(business_slug)
+    org_name = org_login ? human_readable_org_name(org_login) : nil
+
+    # Check if business already exists
+    existing_business = Business.find_by(slug: business_slug)
+    if existing_business
+      ensure_business_name(existing_business, business_name)
+      ensure_active_dfd_trial(business: existing_business)
+      ensure_enterprise_copilot_disabled(business: existing_business)
+      log("  -> Copilot Business: disabled")
+      if org_name
+        existing_org = Organization.find_by(login: org_login)
+        ensure_organization_display_name(existing_org, org_name)
+      end
+      log("  -> Already exists, skipping")
+      log("")
+      return
+    end
+
+    # Create owner user
+    owner = find_or_create_user(owner_login)
+    log("  -> Owner: #{user_style(owner.login)}")
+
+    # Create the business in trial state with metered billing (no payment method)
+    # DFD trials require: metered_ghec_trial? (metered_plan + trial) and no billing setup
+    business = FactoryBot.create(:business, :in_trial, :metered_ghec, slug: business_slug, name: business_name, owners: [owner])
+    raise "Business #{business_slug} not created" unless business.persisted?
+
+    # Set created_at and trial_expires_at to simulate a trial in progress
+    elapsed = age_days || TRIAL_ELAPSED_DAYS
+    remaining = 30 - elapsed
+    business.update_columns(
+      created_at: elapsed.days.ago,
+      trial_expires_at: remaining.days.from_now,
+      dfd_trial: true
+    )
+    log("  -> Enterprise age: #{elapsed} days old (trial)")
+    ensure_enterprise_copilot_disabled(business: business, actor: owner)
+    log("  -> Copilot Business: disabled")
+
+    if org_login
+      # Create organization under the enterprise
+      org = FactoryBot.create(:enterprise_linked_organization, login: org_login, business: business, admin: owner)
+      raise "Organization #{org_login} not created" unless org.persisted?
+      ensure_organization_display_name(org, org_name)
+
+      # Set org created_at to match trial elapsed time
+      org.update_column(:created_at, TRIAL_ELAPSED_DAYS.days.ago)
+      log("  -> Organization: #{org_style(org_login)} (#{TRIAL_ELAPSED_DAYS} days old)")
+
+      if has_repository
+        if has_code
+          # Create repository with README.md
+          repo = create_org_repository(org, owner)
+          log("  -> Repository: #{repo_style(repo.nwo)} (#{REPO_AGE_DAYS} days old)")
+
+          # Create pull request
+          pr = create_pull_request(repo, owner)
+          log("  -> Pull Request: ##{pr.number} (#{PULL_REQUEST_AGE_DAYS} days old)")
+        else
+          # Create empty repository (no commits) for DFD "Add Code" testing
+          repo = create_empty_org_repository(org, owner)
+          log("  -> Repository: #{repo_style(repo.nwo)} (#{REPO_AGE_DAYS} days old, empty)")
+        end
+      else
+        log("  -> No repositories")
+      end
+    else
+      log("  -> No organizations")
+    end
+
+    # Dismiss the "Enable Copilot Business" DFD card so that only the target
+    # card is visible for this account. Without this, the CB card co-appears
+    # on every trial enterprise aged ≥ 3 days.
+    if dismiss_cb_nudge
+      owner.dismiss_business_notice("dfd_new_tasks_enable_cb_nudge", business_id: business.id)
+      log("  -> Dismissed 'Enable Copilot Business' card (so only target card shows)")
+    end
+
+    log("")
+  end
+
+  # ============================================
+  # Individual Copilot Users
+  # ============================================
+
+  def create_individual_copilot_users
+    ensure_copilot_product_uuids_exist
+
+    ENTITY_CONFIG[:individual_users].each do |config|
+      create_individual_copilot_user(
+        login: config[:login],
+        plan: config[:plan]
+      )
+
+      seed_recent_copilot_cli_usage_if_needed(config[:login])
+
+      create_user_multiples(login: config[:login], plan: config[:plan])
+
+      if config[:dismiss_global_nudges]
+        user = User.find_by!(login: config[:login])
+        dismiss_global_transactional_nudges(user)
+      end
+    end
+  end
+
+  def seed_recent_copilot_cli_usage_if_needed(login)
+    return unless RECENT_COPILOT_CLI_USAGE_LOGINS.include?(login)
+
+    user = User.find_by(login: login)
+    return if user.nil?
+
+    ::InProductTargeting.domain.bulk_create_matches(matches: [
+      {
+        user_id: user.id,
+        cohort: COPILOT_CLI_USAGE_COHORT,
+        day: COPILOT_CLI_USAGE_SNAPSHOT_DAY,
+        metadata: {},
+      }
+    ])
+
+    log("  -> Seeded Copilot CLI recent-usage cohort for #{user_style(login)}")
+  end
+
+  def create_individual_copilot_user(login:, plan:)
+    plan_label = case plan
+    when :pro_plus then "Copilot Pro+"
+    when :max then "Copilot Max"
+    else "Copilot Pro"
+    end
+    log("-> Creating individual user #{user_style(login)} with #{plan_label}")
+
+    user = User.find_by(login: login)
+    if user
+      ensure_user_has_billing_plan_subscription(user)
+
+      # User exists - verify they have the correct plan
+      copilot_user = Copilot::User.new(user)
+      has_correct_plan = case plan
+      when :pro then copilot_user.has_pro_subscription?
+      when :pro_plus then copilot_user.has_pro_plus_subscription?
+      when :max then copilot_user.has_max_subscription?
+      end
+
+      if has_correct_plan
+        log("  -> Already exists with correct plan, skipping")
+        log("")
+        return
+      end
+
+      log("  -> User exists but needs correct plan, subscribing...")
+      subscribe_to_copilot_plan(copilot_user, login, plan)
+      ensure_active_copilot_plan(user, plan)
+      log("")
+      return
+    end
+
+    # Prefer a credit-card-backed factory when available, but fall back to a
+    # regular verified user in environments where billing factories are absent.
+    user = begin
+      FactoryBot.create(:credit_card_user,
+        login: login,
+        password: DEFAULT_PASSWORD,
+        email: "#{login}@github.test.com",
+      )
+    rescue KeyError
+      existing_user = User.find_by(login: login)
+      if existing_user
+        existing_user
+      else
+        User.create!(
+          login: login,
+          password: DEFAULT_PASSWORD,
+          email: "#{login}@github.test.com",
+          require_email_verification: false,
+          billing_attempts: 0,
+          plan: "medium",
+        )
+      end
+    end
+    user.emails.map(&:verify!)
+    log("  -> User: #{user_style(user.login)}")
+
+    # Create billing plan subscription (required for Copilot subscriptions)
+    FactoryBot.create(:billing_plan_subscription, :zuora, user: user)
+    log("  -> Billing plan subscription: created")
+
+    # Subscribe to the appropriate Copilot plan
+    copilot_user = Copilot::User.new(user)
+    subscribe_to_copilot_plan(copilot_user, login, plan)
+    ensure_active_copilot_plan(user, plan)
+
+    log("")
+  end
+
+  def subscribe_to_copilot_plan(copilot_user, login, plan)
+    case plan
+    when :pro
+      # subscribe(:month) can intermittently leave a cancelled subscription item
+      # (quantity = 0) in this environment — the same flakiness documented for
+      # :pro_plus below — which leaves the user on plan `free` without Copilot Pro
+      # access. Enforce a direct active Pro subscription item for deterministic
+      # seed data instead.
+      ensure_active_copilot_plan(copilot_user.user_object, :pro)
+      log("  -> Copilot Pro: subscribed (monthly)")
+    when :pro_plus
+      # subscribe_pro_plus can leave a cancelled item in this environment (quantity = 0),
+      # so enforce a direct active Pro+ subscription item for deterministic seed data.
+      ensure_active_copilot_plan(copilot_user.user_object, :pro_plus)
+      log("  -> Copilot Pro+: subscribed (monthly)")
+    when :max
+      ensure_active_copilot_plan(copilot_user.user_object, :max)
+      log("  -> Copilot Max: subscribed (monthly)")
+    end
+  end
+
+  def ensure_user_has_billing_plan_subscription(user)
+    return if user.plan_subscription
+
+    FactoryBot.create(:billing_plan_subscription, :zuora, user: user)
+    log("  -> Billing plan subscription: created")
+  end
+
+  def ensure_active_copilot_plan(user, plan)
+    expected_product_key = case plan
+    when :pro then Copilot::INDIVIDUAL_PRO_PRODUCT_KEY
+    when :pro_plus then Copilot::INDIVIDUAL_PRO_PLUS_PRODUCT_KEY
+    when :max then Copilot::INDIVIDUAL_MAX_PRODUCT_KEY
+    end
+
+    active_subscription_item = Copilot::User.new(user.reload).copilot_active_subscription_item
+    return if active_subscription_item&.product_identifier&.product_key == expected_product_key
+
+    product_uuid = Billing::ProductUUID.find_by!(
+      product_type: Copilot::PRODUCT_TYPE,
+      product_key: expected_product_key,
+      billing_cycle: "month",
+    )
+    copilot_product_uuid_ids = Billing::ProductUUID.where(
+      product_type: Copilot::PRODUCT_TYPE,
+      product_key: Copilot::INDIVIDUAL_PRODUCT_KEYS,
+    ).pluck(:id)
+
+    Billing::SubscriptionItem.for_account(user).where(
+      subscribable_type: "Billing::ProductUUID",
+      subscribable_id: copilot_product_uuid_ids,
+    ).update_all(quantity: 0)
+
+    expected_subscription_item = Billing::SubscriptionItem.for_account(user).find_by(
+      subscribable_type: "Billing::ProductUUID",
+      subscribable_id: product_uuid.id,
+    )
+
+    if expected_subscription_item
+      expected_subscription_item.update_columns(quantity: 1, free_trial_ends_on: nil)
+    else
+      Billing::SubscriptionItem.create!(
+        plan_subscription: user.plan_subscription,
+        subscribable: product_uuid,
+        quantity: 1,
+      )
+    end
+
+    log("  -> Copilot plan corrected to #{expected_product_key} (monthly)")
+  end
+
+  # Dismiss all global transactional message nudges for a user so that
+  # page-specific test banners are not suppressed by global banners.
+  # This iterates over TRANSACTIONAL_MESSAGES dynamically so new global
+  # nudges are automatically dismissed on the next setup run.
+  def dismiss_global_transactional_nudges(user)
+    global_nudges = InProductTargeting::TransactionalMessageConcern::TRANSACTIONAL_MESSAGES.select(&:global)
+    global_nudges.each do |msg|
+      user.dismiss_notice(msg.nudge_id.to_s)
+    end
+    log("  -> Dismissed #{global_nudges.size} global transactional nudge(s) for #{user_style(user.login)}")
+  end
+
+  def safe_dismiss_notice(user, notice_name)
+    user.dismiss_notice(notice_name)
+    log("  -> Pre-dismissed #{notice_name} for #{user_style(user.login)}")
+  rescue ArgumentError
+    # Notice not registered (e.g., running --individual without full setup);
+    # safe to skip since the banner won't render anyway.
+  end
+
+  def ensure_copilot_product_uuids_exist
+    # Ensure Copilot product UUIDs exist for individual subscriptions.
+    # Create all copilot product UUIDs, individually rescuing duplicates
+    # so that missing ones are still created even if some already exist.
+    created = 0
+    copilot_product_uuid_definitions.each do |attrs|
+      Billing::ProductUUID.create!(attrs)
+      created += 1
+    rescue ActiveRecord::RecordInvalid => e
+      raise unless e.message =~ /has already been taken/
+    end
+    log("  -> Copilot product UUIDs: #{created > 0 ? "created #{created} new" : "all exist"}")
+  end
+
+  def copilot_product_uuid_definitions
+    [
+      {
+        product_type: "github.copilot", product_key: "v0", billing_cycle: "month",
+        zuora_product_id: "8ad095dd828b63d301828d69d0cc083b",
+        zuora_product_rate_plan_id: "8ad09bce828b63d901828d69e4a02b77",
+        zuora_product_rate_plan_charge_ids: { flat: "8ad095b8828b63cc01828d69ea5757d0" },
+        name: "GitHub Copilot Pro", couponable: true,
+        charges: [{ "name" => "GitHub Copilot Pro - month", "type" => "flat", "price" => "10.0",
+                     "billing_duration" => "month", "zuora_product_rate_plan_charge_id" => "8ad095b8828b63cc01828d69ea5757d0", "advance_payment_on_upgrade" => true }]
+      },
+      {
+        product_type: "github.copilot", product_key: "v0", billing_cycle: "year",
+        zuora_product_id: "8ad095dd828b63d301828d69d0cc083b",
+        zuora_product_rate_plan_id: "8ad095dd828b63d301828d69d7a10858",
+        zuora_product_rate_plan_charge_ids: { flat: "8ad09915828b63c701828d69dd4b4eaa" },
+        name: "GitHub Copilot Pro", couponable: true,
+        charges: [{ "name" => "GitHub Copilot Pro - year", "type" => "flat", "price" => "100.0",
+                     "billing_duration" => "year", "zuora_product_rate_plan_charge_id" => "8ad09915828b63c701828d69dd4b4eaa", "prorate" => false }]
+      },
+      {
+        product_type: "github.copilot", product_key: "pro-plus", billing_cycle: "month",
+        zuora_product_id: "7e280b039dc146f590157f4d9c53ca66",
+        zuora_product_rate_plan_id: "ffffc5f30ce84c299a40452a48cddea0",
+        zuora_product_rate_plan_charge_ids: { flat: "d2a6431924295842e5e5873ea422cd0e" },
+        name: "GitHub Copilot Pro+", couponable: true,
+        charges: [{ "name" => "GitHub Copilot Pro+ - month", "type" => "flat", "price" => "39.0",
+                     "billing_duration" => "month", "zuora_product_rate_plan_charge_id" => "d2a6431924295842e5e5873ea422cd0e", "advance_payment_on_upgrade" => true }]
+      },
+      {
+        product_type: "github.copilot", product_key: "pro-plus", billing_cycle: "year",
+        zuora_product_id: "7e280b039dc146f590157f4d9c53ca66",
+        zuora_product_rate_plan_id: "260112d7d7b04f74a82b897471131535",
+        zuora_product_rate_plan_charge_ids: { flat: "d2a61dba60e95844dde5873e9d5f7844" },
+        name: "GitHub Copilot Pro+", couponable: true,
+        charges: [{ "name" => "GitHub Copilot Pro+ - year", "type" => "flat", "price" => "390.0",
+                     "billing_duration" => "year", "zuora_product_rate_plan_charge_id" => "d2a61dba60e95844dde5873e9d5f7844", "prorate" => false }]
+      },
+      {
+        product_type: "github.copilot", product_key: "max", billing_cycle: "month",
+        zuora_product_id: "8ad095f6993cdc2501994f744d2c1ff1",
+        zuora_product_rate_plan_id: "d2a6b1d5abe993cdc0694f74506f0064",
+        zuora_product_rate_plan_charge_ids: { flat: "d2a6b1d5abe993cdc0694f7450b40065" },
+        name: "GitHub Copilot Max", couponable: true,
+        charges: [{ "name" => "GitHub Copilot Max - month", "type" => "flat", "price" => "99.0",
+                     "billing_duration" => "month", "zuora_product_rate_plan_charge_id" => "d2a6b1d5abe993cdc0694f7450b40065", "advance_payment_on_upgrade" => true }]
+      },
+      {
+        product_type: "github.copilot", product_key: "max", billing_cycle: "year",
+        zuora_product_id: "8ad095f6993cdc2501994f744d2c1ff1",
+        zuora_product_rate_plan_id: "d2a6b1d5abe993cdc0694f744e50005e",
+        zuora_product_rate_plan_charge_ids: { flat: "d2a6b1d5abe993cdc0694f744ee6005f" },
+        name: "GitHub Copilot Max", couponable: true,
+        charges: [{ "name" => "GitHub Copilot Max - year", "type" => "flat", "price" => "990.0",
+                     "billing_duration" => "year", "zuora_product_rate_plan_charge_id" => "d2a6b1d5abe993cdc0694f744ee6005f", "prorate" => false }]
+      },
+    ]
+  end
+
+  # ============================================
+  # Helper Methods
+  # ============================================
+
+  def human_readable_org_name(org_login)
+    HUMAN_READABLE_ORG_NAMES.fetch(org_login)
+  end
+
+  def human_readable_business_name(business_slug)
+    HUMAN_READABLE_BUSINESS_NAMES.fetch(business_slug)
+  end
+
+  def ensure_organization_display_name(organization, display_name)
+    return if organization.nil?
+    return if organization.display_name == display_name
+
+    organization.update!(display_name: display_name)
+    log("  -> Organization name: #{display_name}")
+  end
+
+  def ensure_business_name(business, name)
+    return if business.name == name
+
+    business.update!(name: name)
+    log("  -> Enterprise name: #{name}")
+  end
+
+  def ensure_recent_copilot_cli_access_for_team_org(organization:, admin:, member_login:, copilot_cli:)
+    return if member_login.nil?
+
+    member = find_or_create_user(member_login)
+    organization.add_member(member, adder: admin)
+    log("  -> Member: #{user_style(member.login)}")
+
+    # Explicitly create a Copilot seat for the member.
+    # In production, the OrganizationMemberJob creates seats asynchronously
+    # when a member is added to an "allow all" org, but that job doesn't
+    # run during script execution. Both the NUCBS and CLI dashboard nudges
+    # require a Copilot::Seat record to exist.
+    ensure_copilot_seat_for_member(organization: organization, member: member)
+
+    # For CCA-onboarding-modal QA accounts only, refresh seat age and clear
+    # any prior dismissal so the modal is eligible to render on every setup run.
+    refresh_welcome_modal_state(member: member, organization: organization)
+
+    # For dashboard-CLI QA accounts, backdate the Copilot Business seat past
+    # the welcome-modal eligibility window so it doesn't obscure the dashboard
+    # CLI nudge. CLI access is granted/refreshed below regardless.
+    backdate_copilot_business_seat(member: member, organization: organization)
+
+    return unless copilot_cli
+
+    enable_copilot_business_for_standalone_org(organization)
+    copilot_org = Copilot::Organization.new(organization)
+    Copilot::Policies::Cli.update_org(copilot_org, "disabled", send_email: false) if copilot_org.cli_enabled?
+    Copilot::Policies::Cli.update_org(copilot_org, "enabled", send_email: false)
+    log("  -> Copilot CLI access: enabled")
+  end
+
+  def ensure_recent_copilot_cli_access_for_enterprise_org(business:, organization:, owner:, member_login:, copilot_cli:)
+    if member_login
+      member = find_or_create_user(member_login)
+      organization.add_member(member, adder: owner)
+      log("  -> Member: #{user_style(member.login)}")
+
+      # Explicitly create a Copilot seat for the member.
+      # In production, the OrganizationMemberJob creates seats asynchronously
+      # when a member is added to an "allow all" org, but that job doesn't
+      # run during script execution.
+      ensure_copilot_seat_for_member(organization: organization, member: member)
+
+      # For CCA-onboarding-modal QA accounts only, refresh seat age and clear
+      # any prior dismissal so the modal is eligible to render on every setup run.
+      refresh_welcome_modal_state(member: member, organization: organization)
+    end
+
+    return unless copilot_cli
+
+    enable_copilot_business_for_enterprise(business)
+    copilot_business = Copilot::Business.new(business)
+    Copilot::Policies::Cli.update_business(copilot_business, "disabled") if copilot_business.cli_enabled?
+    Copilot::Policies::Cli.update_business(copilot_business, "enabled")
+    log("  -> Copilot CLI access: enabled")
+  end
+
+  def find_or_create_user(login)
+    user = User.find_by(login: login)
+    return user if user
+
+    user = User.create!(
+      login: login,
+      password: DEFAULT_PASSWORD,
+      email: "#{login}@github.test.com",
+      require_email_verification: false,
+      billing_attempts: 0,
+      plan: "medium"
+    )
+    user.emails.map(&:verify!)
+    user
+  end
+
+  # Creates N copies of a user with suffix -0 through -(n-1), inheriting the
+  # same access and characteristics. Called after the primary user is created
+  # when --multiples is specified. Truncates the base login if needed to stay
+  # within GitHub's 39-character username limit.
+  MAX_LOGIN_LENGTH = 39
+
+  def create_user_multiples(login:, plan: nil, org: nil, role: :admin, business: nil)
+    # Track this user for the end-of-run summary
+    @created_users << { login: login, multiples: @multiples }
+
+    return unless @multiples
+
+    yellow("  -> Creating #{@multiples} multiples of #{user_style(login)}")
+    @multiples.times do |i|
+      suffix = "-#{i}"
+      max_base = MAX_LOGIN_LENGTH - suffix.length
+      base = login.length > max_base ? login[0, max_base] : login
+      clone_login = "#{base}#{suffix}"
+
+      if plan
+        create_individual_copilot_user(login: clone_login, plan: plan)
+      else
+        user = find_or_create_user(clone_login)
+
+        # Add to org with the same role as the primary user
+        if org
+          organization = Organization.find_by!(login: org)
+          unless organization.direct_or_team_member?(user)
+            if role == :admin
+              organization.add_admin(user)
+            else
+              organization.add_member(user)
+            end
+          end
+        end
+
+        # Add as enterprise owner
+        if business
+          biz = Business.find_by!(slug: business)
+          biz.add_owner(user, actor: user) unless biz.owner?(user)
+        end
+
+        log("    -> Created #{user_style(clone_login)}")
+      end
+    end
+  end
+
+  def enable_copilot_business_for_standalone_org(org)
+    # For standalone orgs (free/team without enterprise), enable Copilot
+    # Enable the feature flag to allow Copilot for business on free orgs
+    Seeds::Objects::FeatureFlag.enable(feature_flag: :copilot_for_business_free, actor: org)
+
+    copilot_org = Copilot::Organization.new(org)
+    copilot_org.enable_copilot!
+    copilot_org.seat_management_allow_all!
+  end
+
+  def enable_copilot_business_for_enterprise(business)
+    # For enterprise-linked orgs, enable Copilot at the business level
+    copilot_business = Copilot::Business.new(business)
+    copilot_business.enable_copilot_for_all_organizations!
+  end
+
+  # Enable Copilot Business on a standalone org but in *selected*
+  # teams-and-users seat management mode. Used by the raf_cb-with-CB fixture
+  # so members can submit a `MemberFeatureRequest` for CopilotForBusiness
+  # (the validator forbids requests when the org is in `allow_all` mode and
+  # would also fail if the requester already has a seat).
+  #
+  # Compared with `enable_copilot_business_for_standalone_org`, this skips
+  # the `seat_management_allow_all!` step entirely — that step would create
+  # an org seat assignment and queue a converter job that we'd then have to
+  # mark pending-cancellation by flipping to selected mode.
+  def enable_copilot_business_in_selected_mode_for_standalone_org(org)
+    Seeds::Objects::FeatureFlag.enable(feature_flag: :copilot_for_business_free, actor: org)
+
+    copilot_org = Copilot::Organization.new(org)
+    copilot_org.enable_copilot!
+    copilot_org.seat_management_selected_teams_and_users!
+  end
+
+  # Seed `MemberFeatureRequest` rows for the
+  # `organization_new_tasks_raf_cb_nudge` (issue #262). Idempotent: safe to
+  # call on existing-org reruns of setup.
+  #
+  # Adds `count` member users (login `<org_login>-mem<i>`) to the org and
+  # has each submit a request for `Feature::CopilotForBusiness`. Members are
+  # *not* assigned Copilot seats (the validator
+  # `copilot_seat_enabled_for_member` would otherwise reject the request).
+  #
+  # `seat_management:` of `:selected` indicates the caller already flipped
+  # the org to `seat_management_selected_teams_and_users!` (or has CB
+  # disabled), so member-add will not auto-assign seats.
+  def create_member_cb_feature_requests(organization:, admin:, count:, seat_management: nil)
+    members = (1..count).map do |i|
+      member_login = "#{organization.login}-mem#{i}"
+      member = find_or_create_user(member_login)
+      organization.add_member(member, adder: admin) unless organization.direct_or_team_member?(member)
+      member
+    end
+
+    members.each do |member|
+      next if MemberFeatureRequest.already_requested?(
+        member,
+        organization,
+        MemberFeatureRequest::Feature::CopilotForBusiness,
+        organization
+      )
+
+      MemberFeatureRequest.create!(
+        feature: MemberFeatureRequest::Feature::CopilotForBusiness,
+        requester: member,
+        request_entity: organization,
+        billing_entity: organization
+      )
+    end
+
+    log("  -> Member CB feature requests: #{count} (seat_management: #{seat_management || :default})")
+  end
+
+  # Seed the member-driven "Request a feature" entry points for a Free org so a
+  # member (`<org>-mem1`) can reproduce them after a plain setup + login.
+  # Idempotent: safe on existing-org reruns.
+  #
+  # Sets up:
+  #   - mem1 as a repo ADMIN on test-repo. This unlocks the custom repository
+  #     roles upsell (/{org}/test-repo/settings/access) and lets mem1 view the
+  #     branch protection settings page.
+  #   - a classic branch protection rule on test-repo's default branch, which
+  #     makes the "won't be enforced on this private repository" warning render
+  #     on /{org}/test-repo/settings/branches with an "Ask admin for access" CTA.
+  #   - an empty repo (`empty-demo`) with mem1 as a WRITE member, which renders
+  #     the empty-repo Copilot onboarding prompt ("Ask admin for access").
+  #
+  # NOTE: Two member request entry points cannot be seeded here and require
+  # manual steps (documented in the script header): the Draft PRs upgrade dialog
+  # (A3 — needs a temporary config/plans.yml change) and the code-editor Copilot
+  # popover (A5 — gated entirely in the github-ui frontend, not reproducible in
+  # the monolith dev environment).
+  def seed_request_feature_surfaces(organization:, admin:)
+    mem1 = User.find_by(login: "#{organization.login}-mem1")
+    unless mem1
+      log("  -> Request-a-feature surfaces: skipped (no #{organization.login}-mem1)")
+      return
+    end
+
+    repo = Repository.nwo("#{organization.login}/test-repo")
+    if repo
+      with_retries do
+        GH::Context.enabled do
+          if repo.direct_member_ids.include?(mem1.id)
+            unless repo.direct_member_ids(min_action: :admin).include?(mem1.id)
+              repo.update_member(mem1, action: :admin, actor: admin)
+            end
+          else
+            repo.add_member(mem1, admin, action: :admin)
+          end
+        end
+      end
+
+      Seeds::Objects::ProtectedBranch.create!(repo: repo, creator: admin)
+      log("  -> Request-a-feature surfaces: mem1 repo-admin + branch protection on #{repo_style(repo.nwo)}")
+    end
+
+    # Empty repo for the empty-repo Copilot onboarding prompt.
+    empty_repo = Repository.nwo("#{organization.login}/empty-demo")
+    empty_repo ||= with_retries do
+      GH::Context.enabled do
+        r = Seeds::Objects::Repository.create(
+          owner_name: organization.login,
+          repo_name: "empty-demo",
+          setup_master: false,
+          description: "Empty repo for Copilot onboarding prompt (request-a-feature)"
+        )
+        r.update_column(:created_at, REPO_AGE_DAYS.days.ago)
+        r
+      end
+    end
+    with_retries do
+      GH::Context.enabled do
+        if empty_repo.direct_member_ids.include?(mem1.id)
+          unless empty_repo.direct_member_ids(min_action: :write).include?(mem1.id)
+            empty_repo.update_member(mem1, action: :write, actor: admin)
+          end
+        else
+          empty_repo.add_member(mem1, admin, action: :write)
+        end
+      end
+    end
+    log("  -> Request-a-feature surfaces: empty repo #{repo_style(empty_repo.nwo)} with mem1 write")
+  end
+
+  # Seed enterprise-billed Copilot coding-agent member requests so the
+  # "member requests" card renders on the AI Controls Agents policies page:
+  #   /enterprises/<business_slug>/ai-controls/agents/policies
+  # Idempotent: safe on existing-enterprise reruns.
+  #
+  # The card only renders when (1) the swe_agent policy is DISABLED at the
+  # business level (not enabled, not no_policy), and (2) there are pending
+  # CopilotCodingAgent requests billed to the enterprise. Such requests are
+  # only valid when the requester is an ORG ADMIN (the MemberFeatureRequest
+  # validator requires `org.role_of(requester).admin?` for Business-billed
+  # requests), so we create `count` org admins and have each submit one.
+  def seed_coding_agent_member_requests(business:, organization:, owner:, count:)
+    copilot_business = Copilot::Business.new(business)
+    copilot_business.swe_agent_disabled! unless copilot_business.swe_agent_disabled?
+
+    admins = (1..count).map do |i|
+      admin_login = "#{organization.login}-admin#{i}"
+      admin = find_or_create_user(admin_login)
+      if organization.direct_or_team_member?(admin)
+        organization.update_member(admin, action: :admin, updater: owner) unless organization.role_of(admin).admin?
+      else
+        organization.add_admin(admin, adder: owner)
+      end
+      admin
+    end
+
+    admins.each do |admin|
+      next if MemberFeatureRequest.already_requested?(
+        admin,
+        organization,
+        MemberFeatureRequest::Feature::CopilotCodingAgent,
+        business
+      )
+
+      MemberFeatureRequest.create!(
+        feature: MemberFeatureRequest::Feature::CopilotCodingAgent,
+        requester: admin,
+        request_entity: organization,
+        billing_entity: business
+      )
+    end
+
+    log("  -> Coding-agent member requests: #{count} (swe_agent disabled, enterprise-billed)")
+  end
+
+  # Reset the global dismissal of the raf_cb nudge for the given admin/org.
+  # The no-CB raf_cb flow has a one-shot Dismiss control, so without this
+  # reset the nudge stops rendering after the first QA dismiss until the
+  # org buys CB — which would make every subsequent setup rerun fail to
+  # restore the test fixture. Mirrors the welcome-modal dismissal-reset
+  # documented in qa/34-cca-modal-dismiss.md.
+  def reset_raf_cb_nudge_dismissal(admin:, organization:)
+    admin.reset_organization_notice(RAF_CB_NUDGE_ID, organization)
+    log("  -> Reset raf_cb nudge dismissal for #{user_style(admin.login)}")
+  end
+
+  # Reset the "Remind me later" snooze for the code-security flash test admin.
+  # The secondary CTA records a 7-day snooze (dismiss POST) when clicked, which
+  # would hide the banner — and therefore the ephemeral confirmation flash —
+  # on every subsequent QA rerun. Resetting it keeps the flash re-testable.
+  def reset_remind_me_later_snooze(admin:, organization:)
+    admin.reset_organization_notice(REMIND_ME_LATER_NUDGE_ID, organization)
+    log("  -> Reset Remind me later snooze for #{user_style(admin.login)}")
+  end
+
+  def ensure_copilot_seat_for_member(organization:, member:)
+    copilot_org = Copilot::Organization.new(organization)
+    org_seat_assignment = copilot_org.organization_seat_assignment
+    return unless org_seat_assignment
+
+    existing = Copilot::Seat.where(organization_id: organization.id, assigned_user_id: member.id).first
+    if existing
+      log("  -> Copilot seat: already exists for #{user_style(member.login)}")
+      return
+    end
+
+    # Also check for a seat in any org (unique constraint on assigned_user_id)
+    any_seat = Copilot::Seat.where(assigned_user_id: member.id).first
+    if any_seat
+      log("  -> Copilot seat: already exists for #{user_style(member.login)} (org_id=#{any_seat.organization_id})")
+      return
+    end
+
+    Copilot::Seat.create!(
+      seat_assignment: org_seat_assignment,
+      organization: organization,
+      assigned_user: member,
+    )
+    log("  -> Copilot seat: created for #{user_style(member.login)}")
+  rescue ActiveRecord::RecordInvalid => e
+    if e.message.include?("has already been taken")
+      log("  -> Copilot seat: already exists for #{user_style(member.login)} (caught validation)")
+    else
+      raise
+    end
+  end
+
+  # No-op for non-allowlisted users. For accounts seeded specifically to test
+  # the CCA onboarding modal, this:
+  #   1. Refreshes the user's `Copilot::Seat.created_at` in this organization
+  #      to `Time.now`, so the
+  #      `copilot_seats.created_at >= 7.days.ago` eligibility check still
+  #      passes when setup is re-run on a long-lived codespace.
+  #   2. Clears the dismissed-notice KV entry for the modal, so a previous CTA
+  #      or X-close test run doesn't permanently hide the modal for that user.
+  # See WELCOME_MODAL_MEMBER_LOGINS for the allowlist.
+  def refresh_welcome_modal_state(member:, organization:)
+    return unless WELCOME_MODAL_MEMBER_LOGINS.include?(member.login)
+
+    seat = Copilot::Seat.where(organization_id: organization.id, assigned_user_id: member.id).first
+    if seat
+      # Use update_column to bypass timestamp-touching callbacks; the eligibility
+      # check reads created_at directly.
+      seat.update_column(:created_at, Time.now)
+    end
+
+    member.reset_notice(WELCOME_MODAL_NUDGE_ID)
+    log("  -> Refreshed welcome-modal state for #{user_style(member.login)} (seat age + dismissal)")
+  end
+
+  # No-op for non-allowlisted users. For dashboard-CLI QA accounts, backdates
+  # `Copilot::Seat.created_at` past the
+  # `accelerate_ipm_copilot_business_onboarding_modal` 7-day eligibility window
+  # so the welcome modal does NOT render and block the dashboard CLI nudge
+  # under test. Copilot CLI access (granted via team policy in
+  # `ensure_recent_copilot_cli_access_for_team_org`) is intentionally left
+  # untouched so the CLI nudge eligibility (recent CLI grant) still holds.
+  # See BACKDATED_BUSINESS_SEAT_LOGINS for the allowlist.
+  def backdate_copilot_business_seat(member:, organization:)
+    return unless BACKDATED_BUSINESS_SEAT_LOGINS.include?(member.login)
+
+    seat = Copilot::Seat.where(organization_id: organization.id, assigned_user_id: member.id).first
+    return unless seat
+
+    # Use update_column to bypass timestamp-touching callbacks; the modal
+    # eligibility check reads created_at directly.
+    seat.update_column(:created_at, BACKDATED_BUSINESS_SEAT_AGE_DAYS.days.ago)
+    log("  -> Backdated Copilot Business seat for #{user_style(member.login)} to #{BACKDATED_BUSINESS_SEAT_AGE_DAYS} days ago")
+  end
+
+  def ensure_enterprise_copilot_disabled(business:, actor: nil)
+    copilot_business = Copilot::Business.new(business)
+    return if copilot_business.copilot_disabled?
+
+    copilot_business.disable_copilot!(actor)
+  end
+
+  def ensure_code_review_setting(business:, org:, owner:, copilot_code_review:)
+    copilot_biz = Copilot::Business.new(business)
+    copilot_org = Copilot::Organization.new(org)
+    if copilot_code_review
+      business.enable_code_review_repository_access(actor: owner)
+      copilot_biz.code_review_enabled!
+      copilot_org.code_review_enabled!(force: true)
+      log("  -> Copilot Code Review: ensured enabled")
+    else
+      business.disable_code_review_repository_access(actor: owner, force: true)
+      copilot_biz.code_review_no_policy!
+      copilot_org.code_review_disabled!(force: true)
+      log("  -> Copilot Code Review: ensured disabled")
+    end
+  end
+
+  def ensure_active_dfd_trial(business:)
+    updates = {}
+    updates[:dfd_trial] = true unless business.dfd_trial?
+    if business.trial_expires_at.nil? || business.trial_expires_at < Time.current
+      updates[:trial_expires_at] = TRIAL_REMAINING_DAYS.days.from_now
+    end
+    business.update!(updates) if updates.any?
+
+    # DFD trials require metered_plan for metered_ghec_trial? to return true
+    if business.customer && !business.customer.metered_plan?
+      business.customer.update!(metered_plan: true)
+    end
+  end
+
+  def create_org_repository(org, committer)
+    with_retries do
+      GH::Context.enabled do
+        repo_name = "test-repo"
+
+        # Use Seeds::Objects::Repository.create which handles all edge cases
+        repo = Seeds::Objects::Repository.create(
+          owner_name: org.login,
+          repo_name: repo_name,
+          setup_master: true,
+          description: "Test repository for in-product messaging"
+        )
+
+        # Set created_at for repository age
+        repo.update_column(:created_at, REPO_AGE_DAYS.days.ago)
+
+        # Create README.md with "Hello World" content
+        Seeds::Objects::Commit.create(
+          repo: repo,
+          message: "Initial commit - add README",
+          committer: committer,
+          branch_name: repo.default_branch,
+          files: { "README.md" => "Hello World" }
+        )
+
+        repo
+      end
+    end
+  end
+
+  def create_empty_org_repository(org, committer)
+    with_retries do
+      GH::Context.enabled do
+        repo_name = "test-repo"
+
+        # Use Seeds::Objects::Repository.create which handles all edge cases
+        repo = Seeds::Objects::Repository.create(
+          owner_name: org.login,
+          repo_name: repo_name,
+          setup_master: false,
+          description: "Test repository for in-product messaging"
+        )
+
+        # Set created_at for repository age (no commits — repo remains empty)
+        repo.update_column(:created_at, REPO_AGE_DAYS.days.ago)
+
+        repo
+      end
+    end
+  end
+
+  def create_pull_request(repo, committer)
+    with_retries do
+      GH::Context.enabled do
+        repo = wait_for_active_repository(repo.id)
+
+        # Create a branch with a change
+        branch_name = "feature-branch"
+
+        Seeds::Objects::Commit.create(
+          repo: repo,
+          message: "Add feature file",
+          committer: committer,
+          branch_name: branch_name,
+          files: { "feature.md" => "This is a feature file" }
+        )
+
+        # Create the pull request
+        pr = ::PullRequest.create_for!(
+          repo,
+          user: committer,
+          title: "Add feature",
+          body: "This pull request adds a new feature.",
+          head: branch_name,
+          base: repo.default_branch,
+          draft: false
+        )
+
+        raise "Pull request not created for #{repo.nwo}" unless pr&.persisted?
+
+        # Set created_at for pull request age
+        pr.update_column(:created_at, PULL_REQUEST_AGE_DAYS.days.ago)
+        pr.issue.update_column(:created_at, PULL_REQUEST_AGE_DAYS.days.ago) if pr.issue
+
+        pr
+      end
+    end
+  end
+
+  def create_issue(repo, author)
+    issue = repo.issues.create!(
+      user: author,
+      title: "Test issue",
+      body: "This is a test issue for in-product messaging."
+    )
+
+    raise "Issue not created for #{repo.nwo}" unless issue.persisted?
+
+    issue
+  end
+
+  def wait_for_active_repository(repo_id, attempts: 10, delay: 0.2)
+    attempts.times do
+      repo = Repositories::Public.find_active(repo_id)
+      return repo if repo
+
+      sleep(delay)
+    end
+
+    raise "Repository #{repo_id} did not become active after creation"
+  end
+
+  # ============================================
+  # Logging Helpers
+  # ============================================
+
+  def bold_white(string)
+    LOGGER.info colorize(string, "white", style: :bold)
+  end
+
+  def org_style(login)
+    colorize(login, "green", style: :underline)
+  end
+
+  def user_style(login)
+    colorize(login, "cyan", style: :underline)
+  end
+
+  def enterprise_style(slug)
+    colorize(slug, "red", style: :underline)
+  end
+
+  def repo_style(name)
+    colorize(name, "magenta")
+  end
+end
+
+class DestroyInProductMessaging
+  include LoggingHelpers
+  def call(individual: nil)
+    if individual
+      prefix = individual.start_with?("ipm-") ? individual : "ipm-#{individual}"
+      yellow("Destroying In-Product Messaging seed data (individual: #{prefix})")
+    else
+      yellow("Destroying In-Product Messaging seed data")
+    end
+    log("")
+
+    if individual
+      prefix = individual.start_with?("ipm-") ? individual : "ipm-#{individual}"
+      scoped_business_slugs = (
+        ENTITY_CONFIG[:enterprises].select { |c| entity_matches_individual?(c, prefix) }.map { |c| c[:business] } +
+        ENTITY_CONFIG[:enterprise_trials].select { |c| entity_matches_individual?(c, prefix) }.map { |c| c[:business] } +
+        CQ_UPCOMING_CHARGES_CONFIG[:enterprises].select { |c| entity_matches_individual?(c, prefix) }.map { |c| c[:business] }
+      )
+      scoped_org_logins = (
+        ENTITY_CONFIG[:team_orgs].select { |c| entity_matches_individual?(c, prefix) }.map { |c| c[:org] } +
+        ENTITY_CONFIG[:enterprises].select { |c| entity_matches_individual?(c, prefix) }.map { |c| c[:org] } +
+        CQ_UPCOMING_CHARGES_CONFIG[:enterprises].select { |c| entity_matches_individual?(c, prefix) }.map { |c| c[:org] } +
+        CQ_UPCOMING_CHARGES_CONFIG[:organizations].select { |c| entity_matches_individual?(c, prefix) }.map { |c| c[:org] }
+      ).compact
+      scoped_user_logins = (
+        ENTITY_CONFIG[:team_orgs].select { |c| entity_matches_individual?(c, prefix) }.flat_map { |c| [c[:admin], c[:member]] } +
+        ENTITY_CONFIG[:enterprises].select { |c| entity_matches_individual?(c, prefix) }.flat_map { |c| [c[:owner], c[:member]] } +
+        ENTITY_CONFIG[:enterprise_trials].select { |c| entity_matches_individual?(c, prefix) }.map { |c| c[:owner] } +
+        ENTITY_CONFIG[:individual_users].select { |c| entity_matches_individual?(c, prefix) }.map { |c| c[:login] } +
+        CQ_UPCOMING_CHARGES_CONFIG[:enterprises].select { |c| entity_matches_individual?(c, prefix) }.map { |c| c[:owner] } +
+        CQ_UPCOMING_CHARGES_CONFIG[:organizations].select { |c| entity_matches_individual?(c, prefix) }.map { |c| c[:admin] }
+      ).compact
+
+      destroy_businesses(scoped_business_slugs) if scoped_business_slugs.any?
+      destroy_organizations(scoped_org_logins) if scoped_org_logins.any?
+      destroy_users(scoped_user_logins) if scoped_user_logins.any?
+      cleanup_reserved_logins(scoped_org_logins + scoped_user_logins + scoped_business_slugs)
+    else
+      destroy_businesses(ALL_BUSINESS_SLUGS)
+      destroy_organizations(ALL_ORG_LOGINS)
+      destroy_users(ALL_USER_LOGINS)
+      cleanup_reserved_logins(ALL_ORG_LOGINS + ALL_USER_LOGINS + ALL_BUSINESS_SLUGS)
+    end
+
+    green("In-Product Messaging seed data destroyed!")
+  end
+
+  private
+
+  def destroy_businesses(slugs)
+    title("Destroying Enterprise Accounts")
+    slugs.each do |slug|
+      business = Business.find_by(slug: slug)
+      if business
+        # Delete associated orgs first (they'll be handled by org deletion)
+        business.delete
+        log("  -> Destroyed: #{slug}")
+      else
+        log("  -> Not found: #{slug}")
+      end
+    end
+    log("")
+  end
+
+  def destroy_organizations(logins)
+    title("Destroying Organizations")
+    logins.each do |login|
+      org = Organization.find_by(login: login)
+      if org
+        # Get all repository IDs for this org
+        repo_ids = Repository.where(owner_id: org.id).pluck(:id)
+
+        if repo_ids.any?
+          # Delete pull requests and issues at the database level
+          pr_ids = PullRequest.where(repository_id: repo_ids).pluck(:id)
+          if pr_ids.any?
+            # Delete issues associated with pull requests
+            Issue.where(pull_request_id: pr_ids).delete_all
+            # Delete the pull requests themselves
+            PullRequest.where(id: pr_ids).delete_all
+          end
+
+          # Delete any remaining issues for these repos
+          Issue.where(repository_id: repo_ids).delete_all
+
+          # Delete repositories
+          Repository.where(id: repo_ids).delete_all
+        end
+
+        # Explicitly delete member feature request rows for this org. The
+        # association on Organization is `delete_dependents_in_background`,
+        # which enqueues a background job rather than synchronously deleting
+        # rows, and we use `org.delete` (not `destroy`) below, which bypasses
+        # that callback entirely. Without this, raf_cb seed requests would be
+        # orphaned across `--destroy` runs. `dual_write_entities` sets
+        # `organization_id = request_entity_id` for every row, so this single
+        # filter covers both polymorphic columns for our seed data.
+        MemberFeatureRequest.where(organization: org).delete_all
+
+        org.delete
+        log("  -> Destroyed: #{login}")
+      else
+        log("  -> Not found: #{login}")
+      end
+    end
+    log("")
+  end
+
+  def destroy_users(logins)
+    title("Destroying Users")
+    logins.each do |login|
+      user = User.find_by(login: login)
+      if user
+        # Delete any Copilot subscription items for this user
+        Billing::SubscriptionItem.for_account(user).delete_all
+        # Explicitly delete any remaining member feature requests by this
+        # requester (user.delete bypasses `dependent: :delete_all`). Most
+        # rows are already deleted above by destroy_organizations; this
+        # catches any whose org was already gone or owned by a non-seeded
+        # entity.
+        MemberFeatureRequest.where(requester: user).delete_all
+        # Delete user's emails first, then the user
+        UserEmail.where(user_id: user.id).delete_all
+        user.delete
+        log("  -> Destroyed: #{login}")
+      else
+        log("  -> Not found: #{login}")
+        # Clean up any orphaned emails with this pattern
+        UserEmail.where(email: "#{login}@github.test.com").delete_all
+      end
+    end
+    log("")
+  end
+
+  def cleanup_reserved_logins(all_logins)
+    title("Cleaning up Reserved Logins")
+    count = ReservedLogin.where(login: all_logins).delete_all
+    log("  -> Removed #{count} reserved logins")
+    log("")
+  end
+end
+
+$stdout.reopen(File.new("/dev/null", "w")) # ONLY LOGGER EXISTS!
+$VERBOSE = nil
+
+with_billing = ARGV.include?("--with-billing")
+with_cq_banners = ARGV.include?("--with-cq-banners")
+
+individual_idx = ARGV.index("--individual")
+individuals = individual_idx ? ARGV[individual_idx + 1]&.split(",") : nil
+
+multiples_idx = ARGV.index("--multiples")
+multiples = multiples_idx ? ARGV[multiples_idx + 1]&.to_i : nil
+
+if individuals
+  individuals.each do |individual|
+    if ARGV.include?("--destroy")
+      DestroyInProductMessaging.new.call(individual: individual)
+    else
+      DestroyInProductMessaging.new.call(individual: individual)
+      SetupInProductMessaging.new.call(with_billing: with_billing, with_cq_banners: with_cq_banners, individual: individual, multiples: multiples)
+    end
+  end
+else
+  if ARGV.include?("--destroy")
+    DestroyInProductMessaging.new.call(individual: nil)
+  else
+    DestroyInProductMessaging.new.call(individual: nil)
+    SetupInProductMessaging.new.call(with_billing: with_billing, with_cq_banners: with_cq_banners, individual: nil, multiples: multiples)
+  end
+end

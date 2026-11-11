@@ -1,0 +1,92 @@
+<%# Shared form fields for allowlist dialogs (Name, Description, Assign).
+    Locals:
+      name_value       - pre-filled name value (String, default "")
+      description_value - pre-filled description value (String, default "")
+      name_id          - HTML id for name field (String, optional)
+      description_id   - HTML id for description field (String, optional)
+      name_test_selector       - test selector for name (String, default "allowlist-name-input")
+      description_test_selector - test selector for description (String, default "allowlist-description-input")
+      assign_label_id  - HTML id for assign label (String, default "assign-allowlist-label")
+      assigned_names   - Array of assigned org names (Array, default [])
+      organizations    - Array of Organization records with id and login (default [])
+      select_panel_id  - HTML id for the org select panel (String, default "allowlist-org-select-panel")
+      org_select_test_selector - test selector for org select (String, default "allowlist-org-select") %>
+<% name_value = local_assigns.fetch(:name_value, "") %>
+<% description_value = local_assigns.fetch(:description_value, "") %>
+<% name_test_selector = local_assigns.fetch(:name_test_selector, "allowlist-name-input") %>
+<% description_test_selector = local_assigns.fetch(:description_test_selector, "allowlist-description-input") %>
+<% assign_label_id = local_assigns.fetch(:assign_label_id, "assign-allowlist-label") %>
+<% assigned_names = local_assigns.fetch(:assigned_names, []) %>
+<% organizations = local_assigns.fetch(:organizations, []) %>
+<% select_panel_id = local_assigns.fetch(:select_panel_id, "allowlist-org-select-panel") %>
+<% org_select_test_selector = local_assigns.fetch(:org_select_test_selector, "allowlist-org-select") %>
+
+<%# Name field (required) %>
+<% name_opts = {
+  name: "allowlist[name]",
+  label: "Name",
+  required: true,
+  placeholder: "Allowlist name",
+  full_width: true,
+  test_selector: name_test_selector,
+} %>
+<% name_opts[:value] = name_value if name_value.present? %>
+<% name_opts[:id] = name_id if local_assigns.key?(:name_id) %>
+<%= render(Primer::Alpha::TextField.new(**name_opts)) %>
+
+<%# Description field %>
+<% description_opts = {
+  name: "allowlist[description]",
+  label: "Description",
+  placeholder: "What is this allowlist all about?",
+  full_width: true,
+  rows: 3,
+  test_selector: description_test_selector,
+} %>
+<% description_opts[:value] = description_value if description_value.present? %>
+<% description_opts[:id] = description_id if local_assigns.key?(:description_id) %>
+<%= render(Primer::Alpha::TextArea.new(**description_opts)) %>
+
+<%# Assign allowlist section %>
+<%= render(Primer::Box.new) do %>
+  <%= render(Primer::Beta::Text.new(tag: :span, font_weight: :semibold, display: :block, mb: 2, id: assign_label_id)) do %>
+    Assign allowlist
+  <% end %>
+  <%# For create (assigned_names empty), default to unassigned (nothing selected).
+      For edit, show the currently assigned orgs as selected. %>
+<% none_assigned = assigned_names.empty? %>
+<% if organizations.any? %>
+    <%= render(Primer::Alpha::SelectPanel.new(
+      title: "Select organizations",
+      select_variant: :multiple,
+      fetch_strategy: :local,
+      show_filter: true,
+      id: select_panel_id,
+      test_selector: org_select_test_selector,
+    )) do |panel| %>
+      <% panel.with_show_button(scheme: :default, aria: { labelledby: assign_label_id }, data: { allowlist_dialog_target: "orgSelectButton" }) do |button| %>
+        <% button.with_leading_visual_icon(icon: :organization) %>
+        <span data-allowlist-dialog-target="orgSelectText"><%= none_assigned ? "Unassigned" : assigned_names.join(", ") %></span>
+        <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+      <% end %>
+      <% organizations.each do |org| %>
+        <% panel.with_item(
+          label: org.display_login,
+          selected: assigned_names.include?(org.display_login),
+          content_arguments: { data: { value: org.id, org_name: org.display_login } }
+        ) do |item| %>
+          <% item.with_leading_visual_icon(icon: :organization) %>
+        <% end %>
+      <% end %>
+    <% end %>
+    <div data-allowlist-dialog-target="orgHiddenInputs">
+      <% organizations.select { |org| assigned_names.include?(org.display_login) }.each do |org| %>
+        <input type="hidden" name="allowlist[organization_ids][]" value="<%= org.id %>">
+      <% end %>
+    </div>
+  <% else %>
+    <%= render(Primer::Beta::Text.new(tag: :p, color: :muted, font_size: :small)) do %>
+      No organizations available for this enterprise.
+    <% end %>
+  <% end %>
+<% end %>

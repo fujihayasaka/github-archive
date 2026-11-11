@@ -1,0 +1,2 @@
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[68900],{111087(e,h,t){t.r(h);var c=t(331635),i=t(651135);class a extends HTMLElement{dispatchCheckboxChangeEvent(){this.dispatchEvent(new CustomEvent("alertCheckboxChange",{bubbles:!0,detail:{value:this.checkbox.value,checked:this.checkbox.checked}}))}}(0,c.Cg)([i.aC],a.prototype,"checkbox",void 0),(0,c.Cg)([(0,i.p_)("dependabot-alert-row")],a)}}]);
+//# sourceMappingURL=chunk-68900-4c7c6856df0a9f7d-cd1fc49694824aae.js.map

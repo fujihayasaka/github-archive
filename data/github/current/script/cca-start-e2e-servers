@@ -1,0 +1,1201 @@
+#!/bin/bash
+#
+# Start all e2e development servers for Copilot Coding Agent development.
+#
+# Creates a tmux session with named windows for each service, starts them
+# in dependency order with health-check gates, and provides a status dashboard.
+#
+# Usage:
+#   script/cca-start-e2e-servers           # Start all services in a tmux session
+#   script/cca-start-e2e-servers --yes     # Same, but auto-kill stale ports
+#                                          # and skip the port-forwarding wait
+#                                          # (used by setup-codespaces-copilot-swe-agent-v2
+#                                          # for fully unattended setup)
+#   script/cca-start-e2e-servers --stop    # Stop all services and tear down
+#   script/cca-start-e2e-servers --reset   # Reset emulators/storage and restart fresh
+#   script/cca-start-e2e-servers --status  # Show health of all services
+#
+# Requires: tmux (pre-installed in GitHub Codespaces)
+#
+# Emits structured status to /tmp/cca-e2e-server-status.json for tooling integration.
+#
+
+set -eo pipefail
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+SESSION_NAME="e2e-dev"
+# Dedicated tmux socket name. Passing `-L "$TMUX_SOCKET"` to every tmux command
+# scopes this script to its own tmux server (at /tmp/tmux-$UID/$TMUX_SOCKET),
+# so cleanup and lifecycle operations never touch unrelated tmux sessions the
+# user may have running in the codespace.
+TMUX_SOCKET="cca-e2e"
+STATUS_FILE="/tmp/cca-e2e-server-status.json"
+ERROR_LOG="/tmp/cca-e2e-server-error.log"
+LOG_DIR="/tmp/cca-e2e-logs"
+
+# When true (set by --yes / -y), suppress interactive prompts: auto-kill stale
+# processes on the e2e ports and skip the 15s port-forwarding wait. Used by
+# script/setup-codespaces-copilot-swe-agent-v2 so the full setup is unattended.
+YES=false
+
+# Service definitions: name, directory, start command, health port, health endpoint
+declare -A SVC_DIR SVC_CMD SVC_PORT SVC_HEALTH SVC_LOG SVC_LABEL SVC_STOP_CMD
+declare -a SVC_ORDER=("copilot-api" "sweagentd" "copilot-mission-control")
+
+SVC_LABEL["copilot-api"]="Copilot API (CAPI)"
+SVC_DIR["copilot-api"]="/workspaces/copilot-api"
+SVC_CMD["copilot-api"]="script/manage-overmind-capi stop 2>/dev/null; script/server"
+SVC_PORT["copilot-api"]=2206
+SVC_HEALTH["copilot-api"]="/"
+SVC_LOG["copilot-api"]="${LOG_DIR}/copilot-api.log"
+SVC_STOP_CMD["copilot-api"]=""
+
+SVC_LABEL["sweagentd"]="SWE Agent Daemon"
+SVC_DIR["sweagentd"]="/workspaces/sweagentd"
+SVC_CMD["sweagentd"]="rm -f /tmp/overmind-sweagentd.sock; script/server"
+SVC_PORT["sweagentd"]=2208
+SVC_HEALTH["sweagentd"]="/_ping"
+SVC_LOG["sweagentd"]="${LOG_DIR}/sweagentd.log"
+SVC_STOP_CMD["sweagentd"]=""
+
+SVC_LABEL["copilot-mission-control"]="Copilot Mission Control"
+SVC_DIR["copilot-mission-control"]="/workspaces/copilot-mission-control"
+SVC_CMD["copilot-mission-control"]="make run"
+SVC_PORT["copilot-mission-control"]=2210  # REST flavor (also: streaming=19080, twirp=28080, analytics=29080)
+SVC_HEALTH["copilot-mission-control"]="/_ping"
+SVC_LOG["copilot-mission-control"]="${LOG_DIR}/copilot-mission-control.log"
+SVC_STOP_CMD["copilot-mission-control"]="make stop"
+
+# Services that must be healthy before the next service starts
+# sweagentd must be healthy before CMC (Cosmos emulator conflict)
+declare -A SVC_WAIT_FOR
+SVC_WAIT_FOR["copilot-mission-control"]="sweagentd"
+
+# ---------------------------------------------------------------------------
+# Colors
+# ---------------------------------------------------------------------------
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+log_info()    { echo -e "${BLUE}[INFO]${NC}  $1"; }
+log_ok()      { echo -e "${GREEN}[  OK]${NC}  $1"; }
+log_warn()    { echo -e "${YELLOW}[WARN]${NC}  $1"; }
+log_error()   { echo -e "${RED}[FAIL]${NC}  $1"; }
+log_step()    { echo -e "${CYAN}[STEP]${NC}  ${BOLD}$1${NC}"; }
+
+timestamp() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+
+# ---------------------------------------------------------------------------
+# Status file management (for medic skill)
+# ---------------------------------------------------------------------------
+init_status_file() {
+  mkdir -p "$LOG_DIR"
+  cat > "$STATUS_FILE" <<EOF
+{
+  "session": "${SESSION_NAME}",
+  "started_at": "$(timestamp)",
+  "services": {}
+}
+EOF
+}
+
+update_service_status() {
+  local svc="$1" status="$2" error="${3:-}"
+  local port="${SVC_PORT[$svc]:-0}"
+  local log="${SVC_LOG[$svc]:-}"
+  local label="${SVC_LABEL[$svc]:-$svc}"
+  local pid=""
+
+  # Try to find PID by port
+  if [[ -n "$port" && "$port" -gt 0 ]]; then
+    pid=$(lsof -ti ":${port}" 2>/dev/null | head -1 || true)
+  fi
+
+  # Build the JSON entry using python with env vars for safe escaping
+  E2E_SVC="$svc" \
+  E2E_LABEL="$label" \
+  E2E_STATUS="$status" \
+  E2E_PORT="$port" \
+  E2E_PID="$pid" \
+  E2E_LOG="$log" \
+  E2E_ERROR="$error" \
+  E2E_SESSION="$SESSION_NAME" \
+  E2E_STATUS_FILE="$STATUS_FILE" \
+  E2E_TIMESTAMP="$(timestamp)" \
+  python3 -c '
+import json, os
+
+status_file = os.environ["E2E_STATUS_FILE"]
+try:
+    with open(status_file, "r") as f:
+        data = json.load(f)
+except Exception:
+    data = {"session": os.environ["E2E_SESSION"], "started_at": os.environ["E2E_TIMESTAMP"], "services": {}}
+
+port_val = os.environ.get("E2E_PORT", "0")
+pid_val = os.environ.get("E2E_PID", "")
+error_val = os.environ.get("E2E_ERROR", "")
+
+data["services"][os.environ["E2E_SVC"]] = {
+    "label": os.environ.get("E2E_LABEL", os.environ["E2E_SVC"]),
+    "status": os.environ["E2E_STATUS"],
+    "port": int(port_val) if port_val.isdigit() else 0,
+    "pid": pid_val if pid_val else None,
+    "log": os.environ.get("E2E_LOG", ""),
+    "error": error_val if error_val else None,
+    "updated_at": os.environ["E2E_TIMESTAMP"],
+}
+data["updated_at"] = os.environ["E2E_TIMESTAMP"]
+
+tmp = status_file + ".tmp"
+with open(tmp, "w") as f:
+    json.dump(data, f, indent=2)
+os.rename(tmp, status_file)
+' 2>/dev/null || true
+}
+
+# Capture last N lines from a service log on failure
+capture_failure_logs() {
+  local svc="$1" lines="${2:-50}"
+  local log="${SVC_LOG[$svc]}"
+
+  {
+    echo "===== ${svc} failure at $(timestamp) ====="
+    echo "Log file: ${log}"
+    echo "---"
+    if [[ -f "$log" ]]; then
+      tail -n "$lines" "$log"
+    else
+      echo "(no log file found)"
+    fi
+    echo ""
+  } >> "$ERROR_LOG"
+}
+
+# ---------------------------------------------------------------------------
+# Health checks
+# ---------------------------------------------------------------------------
+check_port_health() {
+  local svc="$1"
+  local port="${SVC_PORT[$svc]}"
+  local endpoint="${SVC_HEALTH[$svc]}"
+
+  local url="http://localhost:${port}${endpoint}"
+  local status_code
+  status_code=$(curl -s --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || true)
+  status_code="${status_code:0:3}"
+  [[ "$status_code" =~ ^(200|204|301|302|404)$ ]]
+}
+
+wait_for_service() {
+  local svc="$1"
+  local max_attempts="${2:-60}"
+  local interval="${3:-2}"
+  local label="${SVC_LABEL[$svc]}"
+  local port="${SVC_PORT[$svc]}"
+  local attempt=1
+
+  log_info "Waiting for ${label} to become healthy (port ${port})..."
+
+  while [[ $attempt -le $max_attempts ]]; do
+    if check_port_health "$svc"; then
+      log_ok "${label} is healthy"
+      update_service_status "$svc" "running"
+      return 0
+    fi
+    printf "."
+    sleep "$interval"
+    ((attempt++))
+  done
+
+  echo ""
+  log_error "${label} did not become healthy after $((max_attempts * interval))s"
+  update_service_status "$svc" "failed" "Health check timed out on port ${port} after $((max_attempts * interval))s"
+  capture_failure_logs "$svc"
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# Prepare github/github (dotcom) -- stop existing server and restart clean
+# ---------------------------------------------------------------------------
+is_dotcom_running() {
+  local status_code
+  status_code=$(curl -s --connect-timeout 3 --max-time 10 -o /dev/null -w "%{http_code}" "http://github.localhost/" 2>/dev/null || true)
+  status_code="${status_code:0:3}"
+  [[ "$status_code" =~ ^(200|301|302)$ ]]
+}
+
+# ---------------------------------------------------------------------------
+# Check for stale processes on service ports (e.g. after codespace reconnect)
+# ---------------------------------------------------------------------------
+check_stale_ports() {
+  local stale_found=false
+  local stale_info=""
+
+  # Ports used by e2e services (excluding dotcom — handled by prepare_dotcom)
+  declare -A PORT_DESC
+  PORT_DESC[2206]="copilot-api — routes Copilot requests to sweagentd and mission control"
+  PORT_DESC[2208]="sweagentd HTTP — handles coding agent job execution"
+  PORT_DESC[2210]="copilot-mission-control (REST) — session management and agent orchestration"
+
+  for port in 2206 2208 2210; do
+    local pids
+    pids=$(lsof -ti ":${port}" 2>/dev/null || true)
+    if [[ -n "$pids" ]]; then
+      stale_found=true
+      for pid in $pids; do
+        local proc_name
+        proc_name=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
+        stale_info+="  Port ${port} — ${PORT_DESC[$port]}\n"
+        stale_info+="    └─ PID ${pid} (${proc_name})\n"
+      done
+    fi
+  done
+
+  if [[ "$stale_found" == "true" ]]; then
+    echo ""
+    log_warn "Stale processes detected on ports needed by e2e services:"
+    echo -e "$stale_info"
+    log_info "These ports must be free for the e2e stack to start correctly."
+
+    local kill_now=false
+    if [[ "$YES" == "true" ]]; then
+      log_info "--yes: auto-killing stale processes on e2e ports."
+      kill_now=true
+    elif [[ -t 0 ]]; then
+      read -rp "Kill these processes and continue? [y/N] " answer
+      if [[ "$answer" =~ ^[Yy] ]]; then
+        kill_now=true
+      else
+        log_error "Aborting — clear the ports manually or use: script/cca-start-e2e-servers --stop"
+        exit 1
+      fi
+    else
+      log_warn "Not a TTY — skipping prompt. Use --stop to clear ports first."
+    fi
+
+    if [[ "$kill_now" == "true" ]]; then
+      for port in 2206 2208 2210; do
+        local pids
+        pids=$(lsof -ti ":${port}" 2>/dev/null || true)
+        if [[ -n "$pids" ]]; then
+          echo "$pids" | xargs -r kill 2>/dev/null || true
+        fi
+      done
+      log_ok "Stale processes killed"
+      sleep 1
+    fi
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Remind user to verify port forwarding in VS Code Ports tab
+# TODO: Replace with a VS Code extension that queries vscode.workspace.tunnels
+#       API — the only reliable way to detect local port forwarding state.
+# ---------------------------------------------------------------------------
+check_port_forwarding() {
+  local cs_name
+  cs_name=$(python3 -c "import json; print(json.load(open('/workspaces/.codespaces/shared/environment-variables.json')).get('CODESPACE_NAME',''))" 2>/dev/null || true)
+
+  echo ""
+  log_info "Before continuing, verify port forwarding in the VS Code Ports tab."
+  echo ""
+  echo "  These ports must be forwarded from this codespace:"
+  echo "    Port 80   — github/github (dotcom)"
+  echo "    Port 2206 — Copilot API (CAPI)"
+  echo ""
+  if [[ -n "$cs_name" ]]; then
+    echo "  This codespace: ${cs_name}"
+  fi
+  echo ""
+  echo "  If another codespace has claimed these ports, you can:"
+  echo "    • Reassign them in the VS Code Ports tab"
+  echo "    • Or stop the other codespace (run on your local machine):"
+  echo "        gh cs list         # find other running codespaces"
+  echo "        gh cs stop -c <other-codespace-name>"
+  echo ""
+
+  if [[ "$YES" == "true" ]]; then
+    log_info "--yes: skipping port-forwarding wait."
+  elif [[ -t 0 ]]; then
+    log_info "Press Enter to continue, or wait 15 seconds..."
+    read -r -t 15 _ || true
+  else
+    log_info "Continuing in 15 seconds..."
+    sleep 15
+  fi
+}
+
+prepare_dotcom() {
+  log_step "Preparing github/github server..."
+
+  if [[ ! -d "/workspaces/github" ]]; then
+    log_error "github/github not found at /workspaces/github"
+    update_service_status "github" "failed" "Directory /workspaces/github not found"
+    return 1
+  fi
+
+  # Stop fauxpilot overmind process (CAPI replaces it in e2e mode)
+  log_info "Stopping fauxpilot API server..."
+  (cd /workspaces/copilot-api && script/manage-overmind-capi stop) 2>/dev/null || true
+
+  # If dotcom is already running (e.g., started by setup script), keep it
+  if is_dotcom_running; then
+    log_ok "github/github is already running"
+    update_service_status "github" "running"
+    return 0
+  fi
+
+  # Dotcom not running -- start it
+  log_info "Starting github/github with --ui..."
+  (cd /workspaces/github && script/dx/server-start --ui) || true
+
+  # Wait for dotcom to be ready
+  local max_attempts=30
+  local attempt=1
+  log_info "Waiting for github/github to be ready..."
+  while [[ $attempt -le $max_attempts ]]; do
+    if is_dotcom_running; then
+      log_ok "github/github is running"
+      update_service_status "github" "running"
+      return 0
+    fi
+    printf "."
+    sleep 2
+    ((attempt++))
+  done
+
+  echo ""
+  log_error "github/github did not start within 60s"
+  log_error "Hint: Check logs with: cd /workspaces/github && script/dx/server-logs"
+  update_service_status "github" "failed" "Did not start within 60s. Check: script/dx/server-logs"
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# 1Password pre-flight (for copilot-api)
+# ---------------------------------------------------------------------------
+ONEP_ENV_VARS=(
+  "ONEP_PASSWORD"
+  "ONEP_SECRET_KEY"
+  "GITHUB_USER"
+)
+
+# Collect OP_SESSION_* vars dynamically
+collect_op_session_vars() {
+  env | grep -o '^OP_SESSION_[^=]*' 2>/dev/null || true
+}
+
+preflight_onep() {
+  # Skip if copilot-api dir doesn't exist or op CLI isn't installed
+  if [[ ! -d "/workspaces/copilot-api" ]]; then
+    return 0
+  fi
+  if ! command -v op &> /dev/null; then
+    log_warn "1Password CLI not found -- CAPI will start without 1P integration"
+    return 0
+  fi
+
+  log_step "Checking 1Password authentication (needed by Copilot API)..."
+
+  # Check if we already have a valid session
+  if op whoami &> /dev/null; then
+    log_ok "1Password session is active"
+    return 0
+  fi
+
+  # Try to sign in using ONEP_PASSWORD if available
+  if [[ -n "${ONEP_PASSWORD:-}" ]]; then
+    log_info "Signing in to 1Password using ONEP_PASSWORD..."
+    if eval "$(printf '%s' "${ONEP_PASSWORD}" | op signin 2>/dev/null)"; then
+      log_ok "1Password sign-in successful"
+      return 0
+    else
+      log_warn "Auto sign-in failed -- prompting manually"
+    fi
+  fi
+
+  # Interactive sign-in as last resort
+  if [[ -t 0 ]]; then
+    log_info "1Password session expired. Please sign in:"
+    if eval "$(op signin)"; then
+      log_ok "1Password sign-in successful"
+      return 0
+    else
+      log_error "1Password sign-in failed"
+      log_error "Hint: CAPI will likely fail to start. You can sign in later in the CAPI window (Ctrl-b 1)."
+      update_service_status "copilot-api" "warning" "1Password auth failed -- CAPI may not start correctly"
+      return 1
+    fi
+  else
+    log_warn "Not a TTY and no ONEP_PASSWORD -- cannot authenticate 1Password"
+    log_warn "Hint: CAPI may fail. Set ONEP_PASSWORD or sign in manually in the CAPI window."
+    return 1
+  fi
+}
+
+forward_env_to_tmux() {
+  # Forward 1Password env vars so tmux windows can use the active session
+  for var in "${ONEP_ENV_VARS[@]}"; do
+    if [[ -n "${!var:-}" ]]; then
+      tmux_e2e set-environment -t "$SESSION_NAME" "$var" "${!var}"
+    fi
+  done
+
+  # Forward all OP_SESSION_* vars
+  while IFS= read -r var; do
+    if [[ -n "$var" ]]; then
+      tmux_e2e set-environment -t "$SESSION_NAME" "$var" "${!var}"
+    fi
+  done < <(collect_op_session_vars)
+
+  # Forward GITHUB_TOKEN if set (used by various scripts)
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    tmux_e2e set-environment -t "$SESSION_NAME" "GITHUB_TOKEN" "${GITHUB_TOKEN}"
+  fi
+
+  # Ensure ~/.local/bin is in PATH for tools like uv (installed by CMC)
+  local extended_path="${HOME}/.local/bin:${PATH}"
+  tmux_e2e set-environment -t "$SESSION_NAME" "PATH" "$extended_path"
+}
+
+# ---------------------------------------------------------------------------
+# tmux helpers
+# ---------------------------------------------------------------------------
+ensure_tmux() {
+  if ! command -v tmux &> /dev/null; then
+    log_error "tmux is not installed. Install with: sudo apt-get install -y tmux"
+    exit 1
+  fi
+}
+
+# All tmux operations in this script go through this helper so they are scoped
+# to the dedicated e2e tmux server/socket (see TMUX_SOCKET above). This avoids
+# touching any tmux sessions the user may have running on the default socket.
+tmux_e2e() {
+  tmux -L "$TMUX_SOCKET" "$@"
+}
+
+session_exists() {
+  tmux_e2e has-session -t "$SESSION_NAME" 2>/dev/null
+}
+
+create_session() {
+  # Defensive cleanup before creating the session. `tmux new-session` can fail
+  # with "server exited unexpectedly" in codespaces for three common reasons:
+  #   1. A stale socket at /tmp/tmux-$UID/$TMUX_SOCKET from a prior codespace
+  #      lifecycle.
+  #   2. $TMUX / $TMUX_PANE leaked in from a shell running inside another tmux.
+  #   3. A user's ~/.tmux.conf (auto-cloned dotfiles) containing a directive
+  #      the codespace's tmux version rejects, killing the freshly-spawned
+  #      server during config load.
+  # All tmux operations below target the dedicated e2e socket (see TMUX_SOCKET
+  # near the top of this script), so cleanup NEVER affects unrelated tmux
+  # sessions the user may have running on the default socket.
+  unset TMUX TMUX_PANE
+  tmux_e2e kill-server 2>/dev/null || true
+  rm -f "/tmp/tmux-$(id -u)/${TMUX_SOCKET}" 2>/dev/null || true
+
+  # Isolate the e2e tmux session from user dotfiles. Later tmux_e2e calls
+  # attach to this same server, so `-f` is only needed on the initial
+  # new-session call.
+  local conf="/tmp/cca-e2e-tmux.conf"
+  cat > "$conf" <<'TMUX_CONF_EOF'
+set -g default-terminal "screen-256color"
+set -g history-limit 50000
+set -g status-interval 5
+TMUX_CONF_EOF
+
+  if ! tmux_e2e -f "$conf" new-session -d -s "$SESSION_NAME" -n "status" -x 200 -y 50; then
+    log_error "Failed to create tmux session '${SESSION_NAME}' on socket '${TMUX_SOCKET}'."
+    log_error "Recovery: tmux -L ${TMUX_SOCKET} kill-server; rm -f /tmp/tmux-\$(id -u)/${TMUX_SOCKET}; unset TMUX; re-run."
+    log_error "If the error persists, your ~/.tmux.conf may be incompatible with this"
+    log_error "codespace's tmux version. Try: mv ~/.tmux.conf ~/.tmux.conf.bak; re-run."
+    return 1
+  fi
+}
+
+create_service_window() {
+  local svc="$1"
+  local window_name="$svc"
+  local dir="${SVC_DIR[$svc]}"
+  local cmd="${SVC_CMD[$svc]}"
+  local log="${SVC_LOG[$svc]}"
+
+  tmux_e2e new-window -t "$SESSION_NAME" -n "$window_name"
+  # cd to service dir, tee output to log file, and run the start command
+  tmux_e2e send-keys -t "${SESSION_NAME}:${window_name}" \
+    "cd ${dir} && echo '--- Starting ${SVC_LABEL[$svc]} at $(date) ---' | tee ${log} && (${cmd}) 2>&1 | tee -a ${log}" C-m
+}
+
+# ---------------------------------------------------------------------------
+# Status dashboard (runs in the status window)
+# ---------------------------------------------------------------------------
+write_status_dashboard_script() {
+  cat > /tmp/cca-e2e-status-dashboard.sh <<'DASHBOARD_EOF'
+#!/bin/bash
+# E2E Dev Status Dashboard — refreshes every 5 seconds
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
+
+STATUS_FILE="/tmp/cca-e2e-server-status.json"
+
+declare -A CHECK_PORT CHECK_ENDPOINT CHECK_LABEL CHECK_DIR CHECK_HINT
+CHECK_LABEL["github"]="github/github (dotcom)"
+CHECK_PORT["github"]=80
+CHECK_ENDPOINT["github"]="http://github.localhost/"
+CHECK_DIR["github"]="/workspaces/github"
+CHECK_HINT["github"]="cd /workspaces/github && script/dx/server-start --ui"
+
+CHECK_LABEL["copilot-api"]="Copilot API (CAPI)"
+CHECK_PORT["copilot-api"]=2206
+CHECK_ENDPOINT["copilot-api"]="http://localhost:2206/"
+CHECK_DIR["copilot-api"]="/workspaces/copilot-api"
+
+CHECK_LABEL["sweagentd"]="SWE Agent Daemon"
+CHECK_PORT["sweagentd"]=2208
+CHECK_ENDPOINT["sweagentd"]="http://localhost:2208/_ping"
+CHECK_DIR["sweagentd"]="/workspaces/sweagentd"
+
+CHECK_LABEL["copilot-mission-control"]="Copilot Mission Control"
+CHECK_PORT["copilot-mission-control"]=2210
+CHECK_ENDPOINT["copilot-mission-control"]="http://localhost:2210/_ping"
+CHECK_DIR["copilot-mission-control"]="/workspaces/copilot-mission-control"
+
+SVC_ORDER=("github" "copilot-api" "sweagentd" "copilot-mission-control")
+
+check_health() {
+  local svc="$1"
+  local endpoint="${CHECK_ENDPOINT[$svc]}"
+
+  if [[ -z "$endpoint" ]]; then
+    return 1
+  fi
+
+  local code
+  code=$(curl -s --connect-timeout 2 --max-time 3 -o /dev/null -w "%{http_code}" "$endpoint" 2>/dev/null || true)
+  code="${code:0:3}"
+  [[ "$code" =~ ^(200|204|301|302|404)$ ]]
+}
+
+tput civis 2>/dev/null  # hide cursor during refresh
+trap 'tput cnorm 2>/dev/null' EXIT
+
+while true; do
+  printf '\033[H'      # move cursor to top-left (no flicker)
+  echo -e "${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${BOLD}║            🚀 E2E Development Server Dashboard              ║${NC}"
+  echo -e "${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
+  echo ""
+  echo -e "  ${DIM}Session: e2e-dev | $(date '+%H:%M:%S') | Ctrl-C to exit dashboard${NC}"
+  echo ""
+
+  for svc in "${SVC_ORDER[@]}"; do
+    label="${CHECK_LABEL[$svc]}"
+    port="${CHECK_PORT[$svc]}"
+    dir="${CHECK_DIR[$svc]}"
+
+    if check_health "$svc"; then
+      status="${GREEN}● RUNNING${NC}"
+    else
+      status="${RED}○ DOWN${NC}"
+    fi
+
+    port_info="port ${port}"
+
+    printf "  %-35s %b  ${DIM}(%s)${NC}\n" "$label" "$status" "$port_info"
+  done
+
+  echo ""
+  echo -e "  ${BOLD}tmux windows:${NC}"
+  echo -e "    ${DIM}Ctrl-b 0${NC}  this dashboard"
+  echo -e "    ${DIM}Ctrl-b 1${NC}  copilot-api logs"
+  echo -e "    ${DIM}Ctrl-b 2${NC}  sweagentd logs"
+  echo -e "    ${DIM}Ctrl-b 3${NC}  copilot-mission-control logs"
+  echo ""
+  echo -e "  ${BOLD}Files:${NC}"
+  echo -e "    ${DIM}Status JSON:${NC}  ${STATUS_FILE}"
+  echo -e "    ${DIM}Error log:${NC}    /tmp/cca-e2e-server-error.log"
+  echo -e "    ${DIM}Service logs:${NC} /tmp/cca-e2e-logs/<service>.log"
+  echo ""
+  echo -e "  ${BOLD}Commands:${NC}"
+  echo -e "    ${DIM}Stop all:${NC}     script/cca-start-e2e-servers --stop"
+  echo -e "    ${DIM}Status:${NC}       script/cca-start-e2e-servers --status"
+  printf '\033[J'      # clear any leftover lines below
+
+  sleep 5
+done
+DASHBOARD_EOF
+  chmod +x /tmp/cca-e2e-status-dashboard.sh
+}
+
+# ---------------------------------------------------------------------------
+# --status: one-shot health check
+# ---------------------------------------------------------------------------
+cmd_status() {
+  echo -e "${BOLD}E2E Server Health Check${NC}"
+  echo ""
+
+  all_ok=true
+
+  # Load JSON status if available
+  local json_status=""
+  if [[ -f "$STATUS_FILE" ]]; then
+    json_status=$(cat "$STATUS_FILE")
+  fi
+
+  # Helper: get a field from the JSON for a service
+  json_field() {
+    local svc="$1" field="$2"
+    if [[ -n "$json_status" ]]; then
+      echo "$json_status" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    val = data.get('services', {}).get('$svc', {}).get('$field', '')
+    print(val if val is not None else '')
+except: pass
+" 2>/dev/null
+    fi
+  }
+
+  # Show status for a service: live port check + JSON startup result
+  show_svc_status() {
+    local svc="$1" label="$2" port="$3" live_ok="$4"
+    local json_st json_err json_pid
+
+    json_st=$(json_field "$svc" "status")
+    json_err=$(json_field "$svc" "error")
+    json_pid=$(json_field "$svc" "pid")
+
+    if [[ "$live_ok" == "true" ]]; then
+      if [[ "$json_st" == "failed" ]]; then
+        # Port is live but JSON says failed — check if our PID is actually running
+        if [[ -n "$json_pid" && "$json_pid" != "None" ]] && kill -0 "$json_pid" 2>/dev/null; then
+          # Our process recovered (e.g. slow startup after health check timeout)
+          printf "  ${GREEN}●${NC} %-35s ${GREEN}running${NC}   (port %s)  ${DIM}(recovered)${NC}\n" "$label" "$port"
+        else
+          # Port is held by something else — our startup genuinely failed
+          printf "  ${YELLOW}●${NC} %-35s ${YELLOW}port open${NC}  (port %s)  ${RED}startup: failed${NC}\n" "$label" "$port"
+          all_ok=false
+        fi
+      else
+        printf "  ${GREEN}●${NC} %-35s ${GREEN}running${NC}   (port %s)\n" "$label" "$port"
+      fi
+    else
+      printf "  ${RED}○${NC} %-35s ${RED}down${NC}      (port %s)" "$label" "$port"
+      if [[ "$json_st" == "failed" ]]; then
+        printf "  ${RED}startup: failed${NC}"
+      fi
+      echo ""
+      all_ok=false
+    fi
+
+    # Show error from JSON if present (skip if service recovered)
+    local recovered=false
+    if [[ "$live_ok" == "true" && "$json_st" == "failed" && -n "$json_pid" && "$json_pid" != "None" ]]; then
+      kill -0 "$json_pid" 2>/dev/null && recovered=true
+    fi
+    if [[ -n "$json_err" && "$json_err" != "None" && "$recovered" != "true" ]]; then
+      echo -e "    └─ ${DIM}${json_err}${NC}"
+    fi
+  }
+
+  # Check dotcom
+  local dotcom_live=false
+  is_dotcom_running && dotcom_live=true
+  show_svc_status "github" "github/github (dotcom)" "80" "$dotcom_live"
+
+  # Check each service
+  for svc in "${SVC_ORDER[@]}"; do
+    local label="${SVC_LABEL[$svc]}"
+    local port="${SVC_PORT[$svc]}"
+    local live_ok=false
+    check_port_health "$svc" && live_ok=true
+    show_svc_status "$svc" "$label" "$port" "$live_ok"
+  done
+
+  echo ""
+
+  if [[ "$all_ok" == true ]]; then
+    echo -e "  ${GREEN}All services healthy ✅${NC}"
+  else
+    echo -e "  ${YELLOW}Some services need attention ⚠️${NC}"
+    if [[ -f "$ERROR_LOG" && -s "$ERROR_LOG" ]]; then
+      echo -e "  Error log: ${ERROR_LOG}"
+    fi
+  fi
+
+  # Show status file path
+  if [[ -f "$STATUS_FILE" ]]; then
+    echo -e "\n  ${BLUE}Status JSON:${NC} ${STATUS_FILE}"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# --stop: tear down everything
+# ---------------------------------------------------------------------------
+cmd_stop() {
+  log_step "Stopping e2e development servers..."
+
+  # Stop CMC first (reverse order)
+  for svc in "copilot-mission-control" "sweagentd" "copilot-api"; do
+    local label="${SVC_LABEL[$svc]}"
+    local port="${SVC_PORT[$svc]}"
+    local stop_cmd="${SVC_STOP_CMD[$svc]}"
+    local dir="${SVC_DIR[$svc]}"
+
+    if [[ -n "$stop_cmd" ]]; then
+      log_info "Stopping ${label} via ${stop_cmd}..."
+      (cd "$dir" && eval "$stop_cmd") 2>/dev/null || true
+    fi
+
+    # Kill by port if still running
+    if [[ "$port" -gt 0 ]]; then
+      local pids
+      pids=$(lsof -ti ":${port}" 2>/dev/null || true)
+      if [[ -n "$pids" ]]; then
+        log_info "Stopping ${label} (port ${port}, PIDs: ${pids})..."
+        echo "$pids" | xargs -r kill 2>/dev/null || true
+      fi
+    fi
+
+    update_service_status "$svc" "stopped"
+  done
+
+  # Stop github/github
+  log_info "Stopping github/github..."
+  if [[ -d "/workspaces/github" ]]; then
+    (cd /workspaces/github && script/dx/server-stop) || true
+  fi
+  update_service_status "github" "stopped"
+
+  # Kill the tmux session (stops the status dashboard). All operations here
+  # target the dedicated e2e tmux server (see tmux_e2e helper), so this NEVER
+  # affects unrelated tmux sessions the user may have running on the default
+  # socket. If our server has no sessions left, tear it down and remove its
+  # socket file so the next `start` gets a clean slate (prevents "server
+  # exited unexpectedly" on the subsequent new-session).
+  if session_exists; then
+    log_info "Killing tmux session '${SESSION_NAME}' on socket '${TMUX_SOCKET}'..."
+    tmux_e2e kill-session -t "$SESSION_NAME" 2>/dev/null || true
+  fi
+  if ! tmux_e2e list-sessions 2>/dev/null | grep -q .; then
+    tmux_e2e kill-server 2>/dev/null || true
+    rm -f "/tmp/tmux-$(id -u)/${TMUX_SOCKET}" 2>/dev/null || true
+  fi
+
+  # Clean up status file and dashboard script so no stale output lingers
+  rm -f "$STATUS_FILE" "${STATUS_FILE}.tmp" /tmp/cca-e2e-status-dashboard.sh 2>/dev/null
+
+  log_ok "All e2e servers stopped"
+}
+
+# ---------------------------------------------------------------------------
+# --reset: nuke and pave -- tear down everything and restart fresh
+# ---------------------------------------------------------------------------
+cmd_reset() {
+  log_step "Resetting e2e development environment..."
+  echo ""
+
+  # Phase 1: Stop all application servers
+  log_step "[1/5] Stopping application servers..."
+  cmd_stop 2>/dev/null || true
+  echo ""
+
+  # Phase 2: Reset Cosmos DB emulator
+  log_step "[2/5] Resetting Cosmos DB emulator..."
+  if [[ -d "/workspaces/sweagentd" ]]; then
+    if (cd /workspaces/sweagentd && script/cosmos-dev stop 2>&1); then
+      log_ok "Cosmos DB emulator stopped"
+      update_service_status "cosmos-emulator" "reset"
+    else
+      log_error "Cosmos DB emulator stop failed"
+      log_error "Hint: Try manually: cd /workspaces/sweagentd && script/cosmos-dev stop"
+      update_service_status "cosmos-emulator" "failed" "Stop failed. Try: cd /workspaces/sweagentd && script/cosmos-dev stop"
+      capture_failure_logs "sweagentd"
+    fi
+  else
+    log_warn "sweagentd not found at /workspaces/sweagentd -- skipping Cosmos reset"
+  fi
+  echo ""
+
+  # Phase 3: Reset Redis
+  log_step "[3/5] Resetting Redis..."
+  if [[ -d "/workspaces/sweagentd" ]]; then
+    if (cd /workspaces/sweagentd && script/redis-dev stop 2>&1); then
+      log_ok "Redis stopped"
+      update_service_status "redis" "reset"
+    else
+      log_error "Redis stop failed"
+      log_error "Hint: Try manually: cd /workspaces/sweagentd && script/redis-dev stop"
+      update_service_status "redis" "failed" "Stop failed. Try: cd /workspaces/sweagentd && script/redis-dev stop"
+    fi
+  else
+    log_warn "sweagentd not found -- skipping Redis reset"
+  fi
+  echo ""
+
+  # Phase 4: Reset Azurite (CMC blob storage)
+  log_step "[4/5] Resetting Azurite (blob storage)..."
+  if [[ -d "/workspaces/copilot-mission-control" ]]; then
+    if (cd /workspaces/copilot-mission-control && make dev-down 2>&1); then
+      log_ok "Azurite and CMC dev services torn down"
+      update_service_status "azurite" "reset"
+    else
+      log_error "Azurite teardown failed"
+      log_error "Hint: Try manually: cd /workspaces/copilot-mission-control && make dev-down"
+      update_service_status "azurite" "failed" "Teardown failed. Try: make dev-down"
+    fi
+  else
+    log_warn "copilot-mission-control not found -- skipping Azurite reset"
+  fi
+  echo ""
+
+  # Phase 5: Clean up stale sockets and temp files
+  log_step "[5/5] Cleaning up sockets and temp files..."
+  rm -f /tmp/overmind-sweagentd.sock /tmp/overmind-capi.sock 2>/dev/null
+  rm -f "$STATUS_FILE" "$ERROR_LOG" 2>/dev/null
+  rm -rf /tmp/cca-e2e-logs 2>/dev/null
+  # Ensure no orphaned e2e tmux server or socket remains before the next start.
+  # Scoped via tmux_e2e so only the e2e server (on socket $TMUX_SOCKET) is
+  # killed — unrelated tmux sessions on the default socket are untouched.
+  tmux_e2e kill-server 2>/dev/null || true
+  rm -f "/tmp/tmux-$(id -u)/${TMUX_SOCKET}" /tmp/cca-e2e-tmux.conf 2>/dev/null
+  log_ok "Temp files cleaned"
+  echo ""
+
+  log_ok "Environment reset complete"
+  echo ""
+
+  # Ask whether to restart
+  if [[ -t 0 ]]; then
+    echo -e "${BOLD}Ready to restart servers.${NC}"
+    read -r -p "Start e2e servers now? [Y/n] " response
+    case "$response" in
+      [nN]*)
+        log_info "Skipping server start. Run 'script/cca-start-e2e-servers' when ready."
+        ;;
+      *)
+        echo ""
+        cmd_start
+        ;;
+    esac
+  else
+    log_info "Not a TTY -- skipping auto-restart. Run 'script/cca-start-e2e-servers' when ready."
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Main: start all services
+# ---------------------------------------------------------------------------
+cmd_start() {
+  ensure_tmux
+  mkdir -p "$LOG_DIR"
+  : > "$ERROR_LOG"
+  init_status_file
+
+  echo ""
+  echo -e "${BOLD}🚀 Starting E2E Development Servers${NC}"
+  echo -e "${BOLD}════════════════════════════════════${NC}"
+  echo ""
+
+  # Check for stale processes on service ports
+  check_stale_ports
+
+  # Verify critical ports are forwarded from this codespace
+  check_port_forwarding
+
+  # Stop existing servers and restart dotcom clean
+  if ! prepare_dotcom; then
+    log_error "Cannot proceed without github/github. Aborting."
+    exit 1
+  fi
+
+  # Pre-flight: authenticate 1Password before tmux (so the prompt appears here)
+  preflight_onep || true
+
+  # Pre-flight: ensure CAPI .env is populated (race condition fix)
+  # CAPI's script/server creates an empty .env via `touch`, and setup_dotenv
+  # sees it exists and skips the .env.example copy — leaving MODEL_REGISTRY_ENDPOINT unset.
+  if [[ -d "/workspaces/copilot-api" ]]; then
+    local capi_env="/workspaces/copilot-api/.env"
+    local capi_env_example="/workspaces/copilot-api/.env.example"
+    if [[ ! -s "$capi_env" ]] && [[ -f "$capi_env_example" ]]; then
+      log_warn "CAPI .env is empty — repopulating from .env.example"
+      cp "$capi_env_example" "$capi_env"
+      sed -i 's/^WITH_DOTCOM=false/WITH_DOTCOM=true/' "$capi_env" 2>/dev/null || true
+    fi
+    log_ok "CAPI .env is ready"
+  fi
+
+  # Pre-flight: ensure CMC twirp env file exists. CMC's `make run` calls
+  # script/ensure-env on its own, but doing it eagerly here guarantees the
+  # twirp listener config (port 28080, SWEAGENTD_HMAC_KEY=local-dev-hmac-key)
+  # is locked in before sweagentd starts depending on it.
+  if [[ -d "/workspaces/copilot-mission-control" ]] && [[ -x "/workspaces/copilot-mission-control/script/ensure-env" ]]; then
+    (cd /workspaces/copilot-mission-control && script/ensure-env >/dev/null 2>&1) || true
+    log_ok "CMC env files are ready"
+  fi
+
+  # Pre-flight: ensure CMC's rest server has DEV_AUTH_BYPASS=true. The
+  # .env.local.rest.example ships it commented out, and CMC's ensure-env
+  # always copies straight from the example. Without this, the rest server
+  # fails on startup with "USERSD_ADDR environment variable is required"
+  # (cmd/rest/main.go only ignores that error when DevAuthBypass && IsDevelopmentEnv).
+  local mc_rest_env="/workspaces/copilot-mission-control/.env/.env.local.rest"
+  if [[ -f "$mc_rest_env" ]]; then
+    if grep -qE "^#\s*DEV_AUTH_BYPASS=" "$mc_rest_env"; then
+      sed -i 's/^#\s*DEV_AUTH_BYPASS=.*/DEV_AUTH_BYPASS=true/' "$mc_rest_env"
+      log_warn "Uncommented DEV_AUTH_BYPASS=true in .env.local.rest"
+    elif ! grep -qE "^DEV_AUTH_BYPASS=" "$mc_rest_env"; then
+      echo 'DEV_AUTH_BYPASS=true' >> "$mc_rest_env"
+      log_warn "Appended DEV_AUTH_BYPASS=true to .env.local.rest"
+    fi
+    log_ok "CMC rest DEV_AUTH_BYPASS is set"
+
+    # Enable real sweagentd client (default is NoOp in dev mode)
+    if ! grep -qE "^DEV_USE_REAL_SWEAGENTD=" "$mc_rest_env"; then
+      echo 'DEV_USE_REAL_SWEAGENTD=true' >> "$mc_rest_env"
+      log_warn "Appended DEV_USE_REAL_SWEAGENTD=true to .env.local.rest"
+    fi
+    log_ok "CMC DEV_USE_REAL_SWEAGENTD is set"
+
+    # Register dotcom-chat agent with a placeholder app ID so PostTaskCreation fires
+    if ! grep -qE "^INTEGRATION_APPLICATION_IDS_DOTCOM_CHAT=" "$mc_rest_env"; then
+      echo 'INTEGRATION_APPLICATION_IDS_DOTCOM_CHAT=888' >> "$mc_rest_env"
+      log_warn "Appended INTEGRATION_APPLICATION_IDS_DOTCOM_CHAT=888 to .env.local.rest"
+    fi
+    log_ok "CMC DOTCOM_CHAT app ID is set"
+
+    # Move the local WPS emulator off its default 127.0.0.1:8088, which collides
+    # with the monolith's `api` server (bound to *:8088) in this combined
+    # codespace. Without this, MC's emulator fails to bind and silently falls
+    # back to unsigned tokens + a NoOp publisher, leaving the WPS data plane
+    # dark. Clients discover the actual endpoint from the /environments token
+    # response, so the specific port only needs to be free.
+    if ! grep -qE "^WEB_PUBSUB_EMULATOR_ADDR=" "$mc_rest_env"; then
+      echo 'WEB_PUBSUB_EMULATOR_ADDR=127.0.0.1:18088' >> "$mc_rest_env"
+      log_warn "Appended WEB_PUBSUB_EMULATOR_ADDR=127.0.0.1:18088 to .env.local.rest (8088 is taken by the monolith api)"
+    fi
+    log_ok "CMC WPS emulator addr is set"
+  fi
+
+  # Pre-flight: enable feature flags needed for chat/AHP sandbox sessions.
+  # These are no-ops if already enabled; fm is idempotent.
+  local chat_ffs=(
+    copilot_mission_control_chat_sessions
+    copilot_mission_control_environments_api
+    copilot_mission_control_internal_api_on_gateway
+  )
+  for ff in "${chat_ffs[@]}"; do
+    fm feature enable --create -n "$ff" 2>/dev/null \
+      && log_ok "FF $ff enabled" \
+      || log_warn "Could not enable FF $ff (fm not available or failed)"
+  done
+
+  # Pre-flight: ensure the sandbox Docker image (with copilotd) is available.
+  # The image is built via `make build-sandbox-image` in sweagentd, which uses
+  # the devcontainer CLI to layer copilotd (from github/copilot-host) on top of
+  # the CCA runtime. Without this, copilotd won't be found inside the container.
+  local sandbox_image="sweagentd/cca-runtime:local"
+  if ! docker image inspect "$sandbox_image" &>/dev/null; then
+    if [[ -f /workspaces/sweagentd/Makefile ]]; then
+      log_warn "Sandbox image '$sandbox_image' not found — building (this may take a few minutes)..."
+      (cd /workspaces/sweagentd && make build-sandbox-image) || {
+        log_warn "build-sandbox-image failed. Run 'cd /workspaces/sweagentd && make build-sandbox-image' manually."
+      }
+    else
+      log_warn "Sandbox image '$sandbox_image' not found and sweagentd repo missing. copilotd will not launch."
+    fi
+  else
+    log_ok "Sandbox image '$sandbox_image' is available"
+  fi
+
+  # Pre-flight: ensure sweagentd is configured for local sandbox Docker backend.
+  # This enables AHP (copilotd) sessions to be provisioned locally without the
+  # cloud Sandbox API.
+  local swe_env="/workspaces/sweagentd/.env"
+  if [[ -f "$swe_env" ]]; then
+    local sandbox_vars=(
+      "SANDBOX_USE_DOCKER=true"
+      "SWEAGENTD_SANDBOX_IMAGE=${sandbox_image}"
+      "SANDBOX_MC_BASE_URL=http://localhost:2210"
+    )
+    local sandbox_changed=false
+    for var_line in "${sandbox_vars[@]}"; do
+      local key="${var_line%%=*}"
+      if ! grep -qE "^${key}=" "$swe_env"; then
+        echo "$var_line" >> "$swe_env"
+        sandbox_changed=true
+      fi
+    done
+    if [[ "$sandbox_changed" == "true" ]]; then
+      log_warn "Added sandbox Docker backend config to sweagentd .env"
+    fi
+    log_ok "sweagentd sandbox Docker config is set"
+  fi
+
+  # Kill existing session if present
+  if session_exists; then
+    log_warn "Existing tmux session '${SESSION_NAME}' found — replacing it"
+    tmux_e2e kill-session -t "$SESSION_NAME" 2>/dev/null || true
+    sleep 1
+  fi
+
+  # Create tmux session
+  log_step "Creating tmux session '${SESSION_NAME}'..."
+  create_session
+
+  # Forward 1Password and auth env vars into tmux session
+  forward_env_to_tmux
+
+  # Start each service in order
+  for svc in "${SVC_ORDER[@]}"; do
+    local label="${SVC_LABEL[$svc]}"
+    local dir="${SVC_DIR[$svc]}"
+
+    echo ""
+    log_step "Starting ${label}..."
+
+    # Check if service directory exists
+    if [[ ! -d "$dir" ]]; then
+      log_error "${label}: directory ${dir} not found"
+      log_error "Hint: Did the setup script run correctly? Check setup output above."
+      update_service_status "$svc" "failed" "Directory ${dir} not found. Re-run setup."
+      capture_failure_logs "$svc"
+      continue
+    fi
+
+    # Wait for dependency if needed
+    local wait_for="${SVC_WAIT_FOR[$svc]:-}"
+    if [[ -n "$wait_for" ]]; then
+      log_info "Waiting for dependency: ${SVC_LABEL[$wait_for]}..."
+      # Generous timeout (12 min): on first run sweagentd has to pull the
+      # ~1.3 GB Cosmos DB emulator image plus boot the emulator before its
+      # HTTP server comes up, which alone can eat 5+ minutes of this budget.
+      if ! wait_for_service "$wait_for" 360 2; then
+        log_error "${label}: dependency ${SVC_LABEL[$wait_for]} is not healthy"
+        log_error "Hint: Check the ${wait_for} tmux window (Ctrl-b + window#) for errors"
+        update_service_status "$svc" "blocked" "Dependency '${wait_for}' not healthy"
+        continue
+      fi
+    fi
+
+    # Create window and start service
+    update_service_status "$svc" "starting"
+    create_service_window "$svc"
+    log_ok "Started ${label} in tmux window '${svc}'"
+  done
+
+  # Give services a moment to initialize
+  echo ""
+  log_step "Waiting for services to initialize..."
+  sleep 5
+
+  # Final health check
+  echo ""
+  log_step "Running final health checks..."
+  local all_healthy=true
+  for svc in "${SVC_ORDER[@]}"; do
+    local label="${SVC_LABEL[$svc]}"
+
+    # Give each service up to 30s for final check
+    if wait_for_service "$svc" 15 2; then
+      log_ok "${label}: healthy ✅"
+    else
+      log_warn "${label}: not yet healthy (may still be starting)"
+      all_healthy=false
+    fi
+  done
+
+  # Write the status dashboard script and start it in window 0
+  write_status_dashboard_script
+  tmux_e2e send-keys -t "${SESSION_NAME}:status" "bash /tmp/cca-e2e-status-dashboard.sh" C-m
+
+  echo ""
+  echo -e "${BOLD}════════════════════════════════════════════════════════${NC}"
+  if [[ "$all_healthy" == true ]]; then
+    echo -e "${GREEN}${BOLD}🎉 All e2e servers started successfully!${NC}"
+  else
+    echo -e "${YELLOW}${BOLD}⚠️  Servers started but some may still be initializing${NC}"
+    echo -e "${YELLOW}   Check the status dashboard for live updates${NC}"
+  fi
+  echo ""
+  echo -e "  ${BOLD}Attach to dashboard:${NC}  tmux -L ${TMUX_SOCKET} attach -t ${SESSION_NAME}"
+  echo -e "  ${BOLD}Quick status:${NC}         script/cca-start-e2e-servers --status"
+  echo -e "  ${BOLD}Stop everything:${NC}      script/cca-start-e2e-servers --stop"
+  echo -e "  ${BOLD}Status JSON:${NC}          ${STATUS_FILE}"
+  echo -e "  ${BOLD}Error log:${NC}            ${ERROR_LOG}"
+  echo ""
+
+  # Attach to the session
+  if [[ -t 0 ]]; then
+    log_info "Attaching to tmux session..."
+    tmux_e2e select-window -t "${SESSION_NAME}:status"
+    tmux_e2e attach -t "$SESSION_NAME"
+  else
+    log_info "Not a TTY — skipping auto-attach. Use: tmux -L ${TMUX_SOCKET} attach -t ${SESSION_NAME}"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+# Consume --yes / -y from anywhere in the arg list so it composes with any
+# action flag (e.g. `script/cca-start-e2e-servers --yes`,
+# `script/cca-start-e2e-servers --reset --yes`).
+_args=()
+for _arg in "$@"; do
+  case "$_arg" in
+    --yes|-y) YES=true ;;
+    *) _args+=("$_arg") ;;
+  esac
+done
+set -- "${_args[@]}"
+
+case "${1:-}" in
+  --stop)
+    cmd_stop
+    ;;
+  --reset)
+    cmd_reset
+    ;;
+  --status)
+    cmd_status
+    ;;
+  --help|-h)
+    echo "Usage: $0 [--yes] [--stop|--reset|--status|--help]"
+    echo ""
+    echo "  (no args)   Start all e2e servers in a tmux session"
+    echo "  --yes, -y   Non-interactive: auto-kill stale ports, skip prompts"
+    echo "  --stop      Stop all servers and tear down the tmux session"
+    echo "  --reset     Reset all emulators/storage and restart fresh"
+    echo "  --status    Show health status of all services"
+    echo "  --help      Show this help message"
+    ;;
+  "")
+    cmd_start
+    ;;
+  *)
+    echo "Unknown option: $1"
+    echo "Usage: $0 [--yes] [--stop|--reset|--status|--help]"
+    exit 1
+    ;;
+esac

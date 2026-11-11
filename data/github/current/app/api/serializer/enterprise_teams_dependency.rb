@@ -1,0 +1,38 @@
+# typed: strict
+# frozen_string_literal: true
+
+module Api::Serializer::EnterpriseTeamsDependency
+  extend T::Helpers
+
+  requires_ancestor { Api::Serializer }
+
+  # Creates a Hash to be serialized to JSON.
+  #
+  # data - EnterpriseTeam instance
+  # options - Hash
+  #
+  # Returns Hash.
+  sig { params(enterprise_team: T.nilable(EnterpriseTeam), options: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  def enterprise_team_hash(enterprise_team, options = {})
+    return unless enterprise_team
+
+    team_api_path = "/enterprises/#{T.must(enterprise_team.business).slug}/teams/#{enterprise_team.id}"
+    group_mapping = EnterpriseTeam.includes(:enterprise_team_group_mappings).find(enterprise_team.id).enterprise_team_group_mappings.first
+    group_id = group_mapping&.external_group&.guid
+    group_name = group_mapping&.external_group&.display_name
+
+    {
+      id: enterprise_team.id,
+      name: enterprise_team.name,
+      slug: enterprise_team.slug,
+      sync_to_organizations: enterprise_team.sync_to_organizations,
+      url: url(team_api_path),
+      group_id: group_id,
+      group_name: group_name,
+      html_url: "#{GitHub.url}/enterprises/#{T.must(enterprise_team.business).slug}/teams/#{enterprise_team.slug}",
+      members_url: url("#{team_api_path}/memberships{/member}"),
+      created_at: time(enterprise_team.created_at),
+      updated_at: time(enterprise_team.updated_at),
+    }
+  end
+end

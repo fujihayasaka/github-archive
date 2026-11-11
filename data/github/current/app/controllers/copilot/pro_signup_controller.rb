@@ -1,0 +1,348 @@
+# typed: true
+# frozen_string_literal: true
+
+class Copilot::ProSignupController < Copilot::Signup::BaseController
+  include PullRequests::Copilot::CodeReview::ControllerMethods
+  include Copilot::VscodeRedirectConcern
+  include Billing::ManualPaymentRedirect
+
+  before_action :login_required, except: [:index]
+  before_action :restrict_emu_access, except: [:index]
+  before_action :set_vscode_return_to, only: [:index, :new]
+  before_action :add_vscode_form_action_csp, only: [:new]
+  before_action :check_for_active_copilot_pro_or_pro_plus_subscription, only: [:new]
+
+  before_action only: [:new] do
+    T.bind(self, Copilot::ProSignupController)
+    check_trade_compliance(target: current_user)
+  end
+
+  before_action only: [:create] do
+    T.bind(self, Copilot::ProSignupController)
+    check_trade_compliance(target: current_user, feature_type: :copilot, sdn_redirect: true)
+  end
+
+  before_action :set_trial_signup, only: [:create]
+
+  include Site::MicrosoftAnalyticsDependency
+  before_action :enable_microsoft_analytics, only: [:new]
+  before_action :add_microsoft_analytics_csp_exceptions, only: [:new]
+  before_action :enable_fullstory_for_us_visitors, only: [:new], if: :us_visitor?
+  before_action :add_fullstory_csp_exceptions, only: [:new], if: :us_visitor?
+
+  javascript_bundle :billing, only: [:new]
+  global_navigation_title "Copilot Pro checkout", only: [:new]
+
+  depends_on_clusters ApplicationRecord::Mysql1,
+    ApplicationRecord::IamAbilities,
+    ApplicationRecord::Billing,
+    ApplicationRecord::Copilot,
+    ApplicationRecord::Collab,
+    ApplicationRecord::Mysql2,
+    ApplicationRecord::NotificationsEntries,
+    ApplicationRecord::Mysql5,
+    ApplicationRecord::Repositories,
+    ApplicationRecord::Configurations,
+    only: [:index, :new]
+
+  def index
+    redirect_to preserve_tracking_params_path(copilot_pro_signup_new_path)
+  end
+
+  def new
+    Copilot::Instrumenter.instrument_page_view(
+      Copilot::Events::COPILOT_PRO_SIGNUP_PAGE_VIEW,
+      copilot_user,
+      utm_query_params: utm_query_params
+    )
+
+    render "copilot/pro/new", locals: {
+      payment_duration: "monthly",
+      premium_requests: signup_params[:premium_requests],
+      return_to_path: preserve_tracking_params_path(copilot_pro_signup_new_path, signup_params),
+      success_path: signup_params[:success_path],
+      subscribe_path: preserve_tracking_params_path(copilot_pro_signup_create_path),
+      tracking_params: tracking_params,
+      copilot_user: copilot_user,
+    }, formats: :html
+  end
+
+  sig { void }
+  def update
+    if FeatureFlag.vexi.enabled_or_raise?(:copilot_pro_premium_requests, current_user) # rubocop:disable GitHub/FeatureManagement/NoVexiEnabledOrRaiseUsage
+      redirect_to preserve_tracking_params_path(copilot_pro_signup_new_path, signup_params.slice(:premium_requests))
+    else
+      redirect_to preserve_tracking_params_path(copilot_pro_signup_new_path)
+    end
+  end
+
+  def create
+    return_to_path = signup_params[:return_to_path] || copilot_pro_signup_new_path
+
+    unless required_signup_params?
+      flash[:error] = "Missing required parameters"
+      return redirect_to preserve_tracking_params_path(return_to_path)
+    end
+
+    duration = :month
+
+    url_options = { host: GitHub.admin_host_name, protocol: "https" }
+    staff_url = stafftools_user_copilot_settings_url(current_user, **url_options)
+
+    blocked = copilot_user.block_if_sharing_payment_method_with_other_blocked_users!
+
+    if blocked
+      copilot_user.send_abuse_notification(
+        url: staff_url,
+        is_trial_signup: trial_signup?,
+        duration: duration.to_s,
+        signed_up: false,
+      )
+
+      flash[:error] = "Unable to sign up for Copilot"
+      return redirect_to preserve_tracking_params_path(copilot_signup_path)
+    end
+
+    if copilot_user.shares_payment_method_with_blocked_user?
+      copilot_user.send_abuse_notification(
+        url: staff_url,
+        is_trial_signup: trial_signup?,
+        duration: duration.to_s,
+        signed_up: true,
+      )
+    end
+
+    if trial_signup? && invalid_contact_email?
+      flash[:error] = "Please enter a valid email address"
+      return redirect_to preserve_tracking_params_path(return_to_path)
+    end
+
+    if FeatureFlag.vexi.enabled_or_raise?(:copilot_pro_premium_requests, current_user) # rubocop:disable GitHub/FeatureManagement/NoVexiEnabledOrRaiseUsage
+      if signup_params[:premium_requests] == "enabled"
+        copilot_user.overages_enabled!
+      elsif signup_params[:premium_requests] == "disabled"
+        copilot_user.overages_disabled!
+      end
+    end
+
+    result = copilot_user.subscribe(duration)
+    reloaded_copilot_user = Copilot::User.new(current_user)
+
+    if result.ok?
+      # Queue up an auth and capture check so we can find out whether the payment details are
+      # valid before the trial ends
+      if trial_signup? && current_user.feature_flag_enabled?(:copilot_billing_auth_and_capture_users, default: false)
+        is_trusted = TrustTiers::Tier.for_billable_owner(copilot_user.user_object).tier <= TrustTiers::Tier::TRUSTED
+        reloaded_copilot_user.perform_auth_and_capture!(audit_log_reason: "trial_signup", delay: 1.minute) unless is_trusted
+      end
+
+      if !current_user.feature_flag_enabled?(:copilot_delay_limited_user_destroy, default: false)
+        # this should be inside the subscribe
+        Copilot::LimitedUser.find_by(user_id: copilot_user.id)&.destroy
+      end
+      subscription = result.value { nil }
+
+      Copilot::Instrumenter.instrument_signup_subscription_created(
+        reloaded_copilot_user,
+        duration.to_s,
+        subscription.free_trial_length.to_i,
+        utm_query_params: utm_query_params
+      )
+
+      Copilot::Instrumenter.instrument_pro_subscription_created(
+        reloaded_copilot_user,
+        billing_frequency: duration.to_s,
+      )
+
+      if (pull = referring_pull_request) && pull_request_reviewer_bot
+        review_requested = pull.request_review_from(reviewers: [pull_request_reviewer_bot], actor: current_user, append: true)
+        if review_requested && pull.review_requested_for?(pull_request_reviewer_bot)
+          analytics_event(
+            category: "copilot_assisted_review_upsell",
+            action: "converted"
+          )
+          upsell_log("requested review from Copilot bot on pull request", pull:)
+          success_path = signup_params[:success_path] + "?copilot_automatically_added=1"
+        else
+          upsell_log("failed to request review from Copilot bot on pull request", pull:)
+        end
+      end
+
+      # Create or update the Copilot settings cache from new Copilot::User instance
+      # https://github.com/github/heart-services/issues/5978
+      reloaded_copilot_user.create_copilot_settings_cache(Copilot::PolicyCacheVersion.current_version, reason: "signup_pro")
+      Copilot::Instrumenter.instrument_copilot_license_or_billable_customer_change(Copilot::Public::User.for(current_user))
+
+      if trial_signup?
+        send_new_trial_signup_notifications
+      elsif has_marketing_email_consent?
+        send_marketing_email_consent
+      end
+
+      if reloaded_copilot_user.is_technical_preview_user?
+        tp_user = Copilot::TechnicalPreviewUser.find_by(user: reloaded_copilot_user)
+        tp_user.subscribe if tp_user.present?
+      end
+
+      return if redirect_to_vscode_if_needed
+
+      success_path ||= signup_params[:success_path] || copilot_immersive_path
+      redirect_to preserve_tracking_params_path(success_path)
+    else
+      # If this is a re-POST from the manual payments page and we can confirm the payment was actually
+      # collected, send them back to the upgrade page to activate again (the upgrade just hasn't caught
+      # up yet) rather than looping them to the payment page. If we can't confirm payment went through,
+      # fall through so they're redirected back to complete it instead of being reassured prematurely.
+      if manual_payment_finalization? && result.error.is_a?(Billing::ManualPaymentRequiredError) &&
+          manual_payment_collected?(target: current_user, invoice_id: result.error.invoice_id)
+        flash[:error] = Billing::ManualPaymentRedirect::FINALIZATION_RETRY_MESSAGE
+        redirect_to preserve_tracking_params_path(return_to_path)
+        return
+      end
+
+      # An advance payment may have been declined because the customer must pay manually (India RBI),
+      # e.g. when an EDU user upgrades to paid Pro. If so, send them to the manual payments page to
+      # complete payment, which finalizes the upgrade.
+      pending_upgrade = Copilot::Billing::PendingManualPaymentUpgrade.build(user: current_user, product_key: Copilot::INDIVIDUAL_PRO_PRODUCT_KEY)
+      return if redirect_to_manual_payment_if_required(result.error, target: current_user, pending_upgrade: pending_upgrade)
+
+      flash[:error] = result.error.message
+      redirect_to preserve_tracking_params_path(copilot_signup_path)
+    end
+  end
+
+  private
+
+  def us_visitor?
+    GitHub::Location.look_up(request.remote_ip).fetch(:country_code, nil) == "US"
+  end
+
+  def enable_fullstory_for_us_visitors
+    enable_fullstory(allow_logged_in: true)
+  end
+
+  sig { returns(T.nilable(::PullRequest)) }
+  memoize def referring_pull_request
+    path = rails_success_path
+    return nil unless path.present?
+    upsell_log("rails_success_path is present")
+    return nil unless path[:controller] == "pull_requests"
+    upsell_log("rails_success_path controller is pull_requests")
+    return nil unless path[:action] == "show"
+    upsell_log("rails_success_path action is show")
+    return nil unless path[:user_id].present? && path[:repository].present? && path[:id].present?
+    upsell_log("rails_success_path has user_id, repository, and id")
+
+    return nil unless repository = ::Repository.nwo(path[:user_id], path[:repository])
+
+    pull = T.let(repository.issues.find_by_number(path[:id])&.pull_request, T.nilable(PullRequest))
+  end
+
+  sig { returns(T.nilable(T::Hash[Symbol, String])) }
+  memoize def rails_success_path
+    return nil unless params[:success_path].present?
+
+    # Attempt to recognize the path to ensure it is valid
+    # This will raise ActionController::RoutingError if the path is invalid
+    # We rescue it and return nil to avoid breaking the flow
+    # This is useful for paths that are not recognized by Rails routing
+    # but are still valid URLs (e.g., external links)
+    return nil unless params[:success_path].is_a?(String)
+    upsell_log("rails_success_path is #{params[:success_path]}")
+    Rails.application.routes.recognize_path params[:success_path] # rubocop:disable Rails/RecognizePath
+  rescue ActionController::RoutingError => e
+    upsell_log("RoutingError for rails_success_path: #{e.message}")
+    nil
+  end
+
+  sig { params(message: String, pull: T.nilable(PullRequest)).void }
+  def upsell_log(message, pull: nil)
+    PullRequests::Copilot::CodeReviewUpsellLogger.upsell_log("ProSignupController #{message}", actor: current_user, pull: pull)
+  end
+
+  sig { void }
+  def check_for_active_copilot_pro_or_pro_plus_subscription
+    # Allow students to upgrade to paid Pro
+    return if copilot_user.has_educational_access?
+    redirect_to copilot_immersive_path if copilot_user.has_pro_plus_access? || copilot_user.has_pro_access?
+  end
+
+  sig { returns(T::Boolean) }
+  def required_signup_params?
+    if FeatureFlag.vexi.enabled_or_raise?(:copilot_pro_premium_requests, current_user) # rubocop:disable GitHub/FeatureManagement/NoVexiEnabledOrRaiseUsage
+      %w(disabled enabled).include?(signup_params[:premium_requests])
+    else
+      true
+    end
+  end
+
+  memoize def user_contact_info_params
+    params.require(:user_contact_info).permit(
+      :first_name,
+      :last_name,
+      :email,
+      :country,
+      :marketing_consent,
+    )
+  end
+
+  def user_signup_contact_info_for_marketing
+    cdl_program_name = GitHub.copilot_trial_campaign_id
+    source = GitHub.copilot_trial_lead_source.presence || GitHub.copilot_trial_campaign_id
+    sf_status = GitHub.copilot_trial_sf_status
+    {
+      first_name: user_contact_info_params[:first_name],
+      last_name: user_contact_info_params[:last_name],
+      email_address: user_contact_info_params[:email],
+      country: user_contact_info_params[:country],
+      marketingConsent: user_contact_info_params[:marketing_consent] ? "optInExplicit" : nil,
+      cDLProgramName: cdl_program_name,
+      source: source,
+      sFDCLastCampaignStatus: sf_status,
+    }.merge(
+      utm_query_params.slice(:utm_campaign, :utm_medium, :utm_source)
+    ).stringify_keys
+  end
+
+  sig { returns(T::Boolean) }
+  def trial_signup?
+    !!@trial_signup
+  end
+
+  # Memoizing trial signup in a before_action so that it is not affected by the user state changing
+  sig { void }
+  def set_trial_signup
+    @trial_signup = T.let(copilot_user.eligible_for_trial?, T.nilable(T::Boolean))
+  end
+
+  def microsoft_analytics_order_id
+    timestamp = Time.now.strftime("%m%d") # month, day
+    Digest::SHA256.hexdigest("#{timestamp}-#{Copilot.individual_product_name}-#{current_user.display_login}")
+  end
+
+  def send_new_trial_signup_notifications
+    MarketingFormsSubmissionJob.perform_later(form_name: "copilot-trial-new", raw_data: user_signup_contact_info_for_marketing)
+  end
+
+  sig { returns(T::Boolean) }
+  def has_marketing_email_consent?
+    return false unless user_contact_info_params.present?
+    return false unless user_contact_info_params[:marketing_consent].present?
+
+    user_contact_info_params[:marketing_consent] == "1"
+  end
+
+  sig { void }
+  def send_marketing_email_consent
+    MarketingConsentSubmissionJob.perform_later(
+      email: user_contact_info_params[:email],
+      country: user_contact_info_params[:country],
+      source: "copilot-pro-signup"
+    )
+  end
+
+  def invalid_contact_email?
+    return true unless user_contact_info_params[:email].present?
+    !user_contact_info_params[:email].match?(UserEmail::MarketingDependency::EMAIL_REGEX)
+  end
+end

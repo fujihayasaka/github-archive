@@ -1,0 +1,2 @@
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[11697],{371368(t,e,a){a.r(e);var i=a(331635),r=a(651135);class s extends HTMLElement{targetElement="body";connectedCallback(){this.parentNode!==this.targetNode&&this.targetNode?.appendChild(this)}get targetNode(){return this.closest(this.targetElement)}}(0,i.Cg)([r.CF],s.prototype,"targetElement",void 0),s=(0,i.Cg)([(0,r.p_)("portal-fragment")],s),a.d(e,{PortalFragmentElement:()=>s})}}]);
+//# sourceMappingURL=chunk-11697-a876dacdfb87fb4b-dd502388c1e9aa70.js.map

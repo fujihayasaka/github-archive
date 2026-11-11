@@ -1,0 +1,32 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+require_relative "../config/environment"
+
+correlation_id = SecureRandom.urlsafe_base64(18)
+elapsed_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time) * 1000).round(2)
+GitHub.logger.info("start", { "code.namespace" => "script/feature-flag-update-processor", "gh.correlation_id" => correlation_id, "gh.duration_ms" => elapsed_ms })
+
+processor = GitHub::StreamProcessors::FeatureManagement::FeatureFlagUpdateProcessor.new(use_memcached_host_group_id: true)
+consumer_options = processor.options.merge({ deliver_tombstone_messages: true })
+if GitHub::AppEnvironment.production? && !GitHub.enterprise? && GitHub.server_site == GitHub::Config::HydroConfig::GC_CUS_02_HYDRO_SITE
+  consumer_options[:seed_brokers] = GitHub.hydro_seed_kv_gc_cus_02_brokers(ssl: GitHub.hydro_consumer_ssl_enabled?)
+end
+consumer = GitHub.hydro_consumer(consumer_options)
+
+FeatureFlagUpdateProcessorError = Class.new(StandardError)
+
+begin
+  File.write("/tmp/feature_flag_update_processor.startup", "ready")
+  elapsed_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time) * 1000).round(2)
+  GitHub.logger.info("ready", { "code.namespace" => "script/feature-flag-update-processor", "gh.correlation_id" => correlation_id, "gh.duration_ms" => elapsed_ms })
+  GitHub.hydro_client.run(processor, consumer: consumer, shutdown_signals: [:INT, :TERM])
+  elapsed_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time) * 1000).round(2)
+  GitHub.logger.info("finish", { "code.namespace" => "script/feature-flag-update-processor", "gh.correlation_id" => correlation_id, "gh.duration_ms" => elapsed_ms })
+rescue => e
+  GitHub.logger.error("failed to run stream processor", { "code.namespace" => "script/feature-flag-update-processor", "gh.correlation_id" => correlation_id, :exception => e })
+  Failbot.report(FeatureFlagUpdateProcessorError.new(e))
+  raise
+end

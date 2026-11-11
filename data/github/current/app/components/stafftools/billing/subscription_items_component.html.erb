@@ -1,0 +1,161 @@
+<%= render Primer::Beta::Subhead.new do |component| %>
+  <% component.with_heading(tag: :h3) do %>
+    <%= render Primer::Beta::Octicon.new(icon: :calendar, size: :medium) %> Subscription items
+  <% end %>
+<% end %>
+
+<% if in_app_purchases? %>
+  <p>
+    Note: Cancelling in-app purchased subscriptions will not automatically cancel the subscription in the Apple App Store or Google Play Store.
+    The user must also cancel the subscription in the respective app store.
+  </p>
+<% end %>
+
+<%= render Primer::Alpha::UnderlinePanels.new(label: "Subscription items") do |component| %>
+  <% component.with_tab(id: "tab-1", selected: true) do |t| %>
+    <% t.with_text { "Active" } %>
+    <% t.with_counter(count: active_subscription_items.size) %>
+    <% t.with_panel do %>
+      <% if active_subscription_items.empty? %>
+        <%= render(Primer::Beta::Blankslate.new(border: true, classes: "tmp-mt-3")) do |blankslate| %>
+          <% blankslate.with_visual_icon(icon: :calendar) %>
+          <% blankslate.with_heading(tag: :h3) { "No active subscription items" } %>
+        <% end %>
+      <% else %>
+        <%= render Primer::Beta::BorderBox.new(classes: "tmp-mt-3") do |box| %>
+          <% box.with_body(p: 0) do %>
+            <table class="stafftools-table">
+              <thead>
+                <tr>
+                  <th class="no-wrap billing-table-cell pr-0">ID</th>
+                  <th class="no-wrap billing-table-cell pr-0">Product</th>
+                  <th class="no-wrap billing-table-cell pr-0">Duration</th>
+                  <th class="no-wrap billing-table-cell pr-0 text-right">Qty</th>
+                  <th class="no-wrap billing-table-cell pr-0 text-right">Price per quantity</th>
+                  <th class="no-wrap billing-table-cell pr-0">State</th>
+                  <th class="no-wrap billing-table-cell pr-0"><span class="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                <% active_subscription_items.each do |item| %>
+                  <tr>
+                    <td>
+                      <%= link_to subscription_item_path(item), class: "text-mono" do %>
+                        <%= item.id %>
+                      <% end %>
+                    </td>
+                    <td>
+                      <%= render(Primer::Beta::Truncate.new) do |truncate| %>
+                        <% truncate.with_item(expandable: true, max_width: 200) do %>
+                          <%= item.subscribable.name %>
+                        <% end %>
+                      <% end %>
+                    </td>
+                    <td class="color-fg-muted"><%= duration_for(item) %></td>
+                    <td class="text-right"><%= item.quantity %></td>
+                    <td class="text-right text-mono"><%= item.price.format %></td>
+                    <td>
+                      <% label = active_state_label(item) %>
+                      <%= render(Primer::Beta::Label.new(title: label[:title], scheme: label[:scheme])) { label[:text] } %>
+
+                      <% if item.pending_subscription_item_change.present? %>
+                        <%= link_to billing_path, class: "d-inline-block mt-1" do %>
+                          <%= render(Primer::Beta::Label.new(title: "A change to this item is scheduled", scheme: :attention)) do %>
+                            <%= render Primer::Beta::Octicon.new(icon: :clock, size: :small) %> Pending change
+                          <% end %>
+                        <% end %>
+                      <% end %>
+                    </td>
+                    <td class="text-right">
+                      <%= render(Primer::Alpha::ActionMenu.new(anchor_align: :end)) do |menu| %>
+                        <% menu.with_show_button(icon: :"kebab-horizontal", scheme: :invisible, "aria-label": "Actions for subscription item #{item.id}") %>
+                        <% menu.with_item(label: "View details", href: subscription_item_path(item)) %>
+                        <% menu.with_item(
+                          label: "Cancel immediately",
+                          scheme: :danger,
+                          href: subscription_item_path(item),
+                          form_arguments: { method: :delete },
+                          content_arguments: { data: { confirm: "Are you sure you want to cancel immediately?" } }
+                        ) %>
+                        <% if can_cancel_and_refund_item?(item) %>
+                          <% menu.with_item(
+                            label: "Cancel and refund",
+                            scheme: :danger,
+                            href: subscription_item_path(item),
+                            form_arguments: { method: :delete, name: "operation", value: "cancel_and_refund" },
+                            content_arguments: { data: { confirm: "This will cancel the subscription & refund the account at a prorated amount. Are you sure you want to continue?" } }
+                          ) %>
+                        <% end %>
+                      <% end %>
+                    </td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% component.with_tab(id: "tab-2") do |t| %>
+    <% t.with_text { "Cancelled" } %>
+    <% t.with_counter(count: cancelled_subscription_items.size) %>
+    <% t.with_panel do %>
+      <% if cancelled_subscription_items.empty? %>
+        <%= render(Primer::Beta::Blankslate.new(border: true, classes: "tmp-mt-3")) do |blankslate| %>
+          <% blankslate.with_visual_icon(icon: :calendar) %>
+          <% blankslate.with_heading(tag: :h3) { "No cancelled subscription items" } %>
+        <% end %>
+      <% else %>
+        <%= render Primer::Beta::BorderBox.new(classes: "tmp-mt-3") do |box| %>
+          <% box.with_body(p: 0) do %>
+            <table class="stafftools-table">
+              <thead>
+                <tr>
+                  <th class="no-wrap billing-table-cell pr-0">ID</th>
+                  <th class="no-wrap billing-table-cell pr-0">Product</th>
+                  <th class="no-wrap billing-table-cell pr-0">Duration</th>
+                  <th class="no-wrap billing-table-cell pr-0 text-right">Qty</th>
+                  <th class="no-wrap billing-table-cell pr-0 text-right">Price per quantity</th>
+                  <th class="no-wrap billing-table-cell pr-0">State</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% cancelled_subscription_items.each do |item| %>
+                  <tr>
+                    <td>
+                      <%= link_to subscription_item_path(item), class: "text-mono" do %>
+                        <%= item.id %>
+                      <% end %>
+                    </td>
+                    <td>
+                      <%= render(Primer::Beta::Truncate.new) do |truncate| %>
+                        <% truncate.with_item(expandable: true, max_width: 200) do %>
+                          <%= item.subscribable.name %>
+                        <% end %>
+                      <% end %>
+                    </td>
+                    <td class="color-fg-muted"><%= duration_for(item) %></td>
+                    <td class="text-right"><%= item.quantity %></td>
+                    <td class="text-right text-mono"><%= item.price.format %></td>
+                    <td>
+                      <% label = cancelled_state_label(item) %>
+                      <% if (transaction_path = cancelled_transaction_path(item)) %>
+                        <%= link_to transaction_path do %>
+                          <%= render(Primer::Beta::Label.new(title: label[:title], scheme: label[:scheme])) { label[:text] } %>
+                        <% end %>
+                      <% else %>
+                        <%= render(Primer::Beta::Label.new(title: label[:title], scheme: label[:scheme])) { label[:text] } %>
+                      <% end %>
+                    </td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

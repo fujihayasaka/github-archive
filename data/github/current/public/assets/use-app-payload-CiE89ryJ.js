@@ -1,0 +1,1 @@
+import{o as e}from"./chunk-jRWAZmH_.js";import{Qp as t}from"./index-M6n1L9AM.js";var n=e(t()),r=(0,n.createContext)(void 0);r.displayName=`AppPayloadContext`;function i(){let e=(0,n.use)(r);return e===void 0?{helpUrl:`https://docs.github.com`,findFileWorkerPath:``,findInFileWorkerPath:``,githubDevUrl:`https://github.dev`}:e}export{i as n,r as t};

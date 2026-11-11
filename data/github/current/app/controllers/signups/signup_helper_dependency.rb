@@ -1,0 +1,101 @@
+# typed: true
+# frozen_string_literal: true
+
+module Signups
+  module SignupHelperDependency
+    extend T::Helpers
+    extend ActiveSupport::Concern
+
+    requires_ancestor { ApplicationController }
+
+    included do
+      # Global helpers for general use
+      T.bind(self, T.class_of(ApplicationController))
+      helper_method :device_and_ip_updates
+      helper_method :conditional_free_copilot_license
+      helper_method :signup_tasks_and_data_collection
+    end
+
+    sig { params(user: User).returns(T.nilable(AuthenticatedDevice)) }
+    def device_and_ip_updates(user)
+      current_device = if user.sign_in_analysis_enabled?
+        # approve devices on new accounts by default
+        user.authenticated_devices.create!(
+          accessed_at: Time.now,
+          approved_at: Time.now,
+          device_id: current_device_id,
+          display_name: AuthenticatedDevice.generated_display_name(parsed_useragent),
+        )
+      end
+
+      GlobalInstrumenter.instrument "user.signup.ip_update", {
+        actor: user,
+        signup_email: user.emails.first,
+        actor_ip: user.most_recent_session&.ip,
+        actor_location: user.most_recent_session&.location,
+      }
+
+      current_device
+    end
+
+    def conditional_free_copilot_license(user)
+      return unless GitHub.social_sisu_enabled?(user: user) && (vscode_return_to)
+      # optimistically provision free license if the user is coming from VSCode and has been shown the legal warning
+      copilot_user = Copilot::User.new(user)
+      restrictor = Copilot::Authorization::TradeRestrictor.new(copilot_user)
+      if GitHub.context.present? && restrictor.restricted?(GitHub.context, {})
+        return GitHub.logger.info("trade restricted", "code.namespace": "SignupsController", "code.function": "verify_email_and_register_social_identity", "gh.request_id": request_id)
+      end
+
+      result = copilot_user.subscribe_limited_user(skip_copilot_signup_email: true)
+      if result.ok?
+        return Copilot::Instrumenter.instrument_signup_limited_subscription_created(copilot_user,
+          utm_query_params: {
+            utm_medium: "social_signup",
+          })
+      end
+
+      GitHub.logger.info(result.error.message, "code.namespace": "SignupsController", "code.function": "verify_email_and_register_social_identity", "gh.request_id": request_id)
+    end
+
+    sig { params(user: User, copilot_opt_in: T.nilable(T::Boolean)).void }
+    def provision_copilot_free_if_opted_in(user, copilot_opt_in:)
+      return unless copilot_opt_in
+
+      copilot_user = Copilot::User.new(user)
+      return if copilot_user.has_limited_access?
+
+      restrictor = Copilot::Authorization::TradeRestrictor.new(copilot_user)
+      if GitHub.context.present? && restrictor.restricted?(GitHub.context, {})
+        GitHub.dogstats.increment("signup.copilot_opt_in.provisioned", tags: ["result:trade_restricted"])
+        return GitHub.logger.info("trade restricted", "code.namespace": "SignupsController", "code.function": "provision_copilot_free_if_opted_in", "gh.request_id": request_id)
+      end
+
+      result = copilot_user.subscribe_limited_user(skip_copilot_signup_email: true)
+      if result.ok?
+        GitHub.dogstats.increment("signup.copilot_opt_in.provisioned", tags: ["result:success"])
+        return Copilot::Instrumenter.instrument_signup_limited_subscription_created(copilot_user,
+          utm_query_params: {
+            utm_medium: "signup_opt_in",
+          })
+      end
+
+      GitHub.dogstats.increment("signup.copilot_opt_in.provisioned", tags: ["result:error"])
+      GitHub.logger.info(result.error.message, "code.namespace": "SignupsController", "code.function": "provision_copilot_free_if_opted_in", "gh.request_id": request_id)
+    end
+
+    def signup_tasks_and_data_collection(user, email, country_code, marketing_consent)
+      user.queue_signup_tasks
+      user.accept_tos
+
+      if country_code.present? && !marketing_consent.nil?
+        UserMarketingConsent.capture_user_signup_data(
+          user_id: user.id,
+          email: email,
+          country_code: country_code,
+          gave_explicit_marketing_consent: marketing_consent
+        )
+      end
+    end
+  end
+end

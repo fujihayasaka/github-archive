@@ -1,0 +1,134 @@
+<% page_info title: "Requests from members",
+             selected_link: :businesses_member_requests,
+             sidebar: :settings,
+             stafftools: stafftools_enterprise_path(this_business) %>
+
+<%= render layout: "businesses/layout",
+  locals: {
+    business: this_business,
+    title: "Requests from members"
+  } do %>
+
+  <div data-hpc>
+    <p class="color-fg-muted">
+      Members of your organizations can request features and additional Copilot budget that are billed to
+      <%= this_business.name %>. Review their requests to discover what your teams need.
+    </p>
+
+    <% if addon_requests.empty? && budget_requests_by_org.empty? %>
+      <%= render(Primer::Beta::Blankslate.new(border: true, test_selector: "enterprise-member-requests-empty")) do |component| %>
+        <% component.with_visual_icon(icon: :bell) %>
+        <% component.with_heading(tag: :h2) { "No pending requests" } %>
+        <% component.with_description { "When members of your organizations request enterprise-billed features or additional Copilot budget, they will show up here." } %>
+      <% end %>
+    <% end %>
+
+    <% unless addon_requests.empty? %>
+      <%= render Primer::Beta::Subhead.new(display: :flex, flex_wrap: :wrap) do |component| %>
+        <% component.with_heading(tag: :h2, test_selector: "enterprise-addons-heading", display: :flex, flex_wrap: :wrap, width: :full) do %>
+          <span class="flex-auto">Member requests for GitHub Add-Ons</span>
+        <% end %>
+      <% end %>
+      <%= render(Primer::Beta::BorderBox.new(padding: :spacious, classes: "tmp-mt-4 tmp-mb-3")) do |box| %>
+        <% addon_requests.each do |feature, data| %>
+          <% box.with_row(id: feature.to_s) do %>
+            <div class="d-flex flex-column flex-md-row">
+              <div class="d-flex flex-items-start mr-2 tmp-mr-md-3 mb-2 mb-md-0">
+                <span class="d-flex flex-row circle p-2 color-bg-subtle">
+                  <%= render Primer::Beta::Octicon.new(icon: feature.icon, color: :muted) %>
+                </span>
+              </div>
+              <div class="d-flex flex-column col-12 col-md-8 min-width-0">
+                <div class="d-flex flex-row flex-items-center flex-wrap">
+                  <span class="h4 mr-2"><%= feature.name %></span>
+                </div>
+                <p class="color-fg-muted mb-0">
+                  <%= feature.description %>
+                  <%= render(Primer::Beta::Link.new(
+                    test_selector: "enterprise-member-requests-view-docs-#{feature.to_s.dasherize}-cta",
+                    href: feature.docs_url,
+                    classes: "Link--inTextBlock",
+                    data: analytics_click_attributes(
+                      category: "enterprise_member_requests_page",
+                      action: "click_to_view_docs_#{feature}",
+                      label: "ref_cta:view_docs; ref_loc:enterprise_member_requests_page_add_ons"
+                  ))) { "View #{feature.name} docs" } %>
+                </p>
+                <%= render(Primer::Box.new(display: :flex, align_items: :center, mt: 2)) do %>
+                  <%= render(Primer::Beta::AvatarStack.new(disable_expand: true, style: "pointer-events: none")) do |stack| %>
+                    <% data[:recent].map(&:requester).compact.uniq.take(5).each do |requester| %>
+                      <% stack.with_avatar(
+                        src: avatar_url_for(requester, 20),
+                        alt: requester.display_login,
+                        size: 20
+                      ) %>
+                    <% end %>
+                  <% end %>
+                  <%= render(Primer::Beta::Text.new(tag: :span, color: :muted, font_size: :small, test_selector: "addon-orgs-#{feature}")) do %>
+                    Requested in <%= data[:recent].map(&:request_entity).compact.uniq.map(&:display_login).to_sentence %>
+                  <% end %>
+                <% end %>
+              </div>
+              <div class="d-flex flex-md-justify-end flex-items-baseline col-md-4 mt-2 mt-md-0">
+                <span class="h3 mr-2" <%= test_selector("total-addon-#{feature}") %>><%= data[:count] %></span>
+                <span class="color-fg-muted"><%= "request".pluralize(data[:count]) %></span>
+              </div>
+            </div>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <% unless budget_requests_by_org.empty? %>
+      <% budget_total_cents = budget_requests_by_org.values.sum { |data| data[:total_cents].to_i } %>
+      <%= render Primer::Beta::Subhead.new(display: :flex, flex_wrap: :wrap) do |component| %>
+        <% component.with_heading(tag: :h2, test_selector: "enterprise-budget-requests-heading", display: :flex, flex_wrap: :wrap, width: :full) do %>
+          <span class="flex-auto">Member requests for Additional Copilot Budget</span>
+        <% end %>
+        <% component.with_description do %>
+          <span <%= test_selector("budget-requests-grand-total") %>>
+            <%= Billing::Money.new(budget_total_cents).format %> requested across
+            <%= pluralize(budget_requests_by_org.size, "organization") %>
+          </span>
+        <% end %>
+      <% end %>
+      <%= render(Primer::Beta::BorderBox.new(padding: :spacious, classes: "tmp-mt-4")) do |box| %>
+        <% budget_requests_by_org.each do |organization, data| %>
+          <% box.with_row(test_selector: "budget-requests-org-#{organization.display_login}") do %>
+            <div class="d-flex flex-column flex-md-row">
+              <div class="d-flex flex-items-start mr-2 tmp-mr-md-3 mb-2 mb-md-0">
+                <%= render(Primer::Beta::Avatar.new(
+                  src: avatar_url_for(organization, 40),
+                  alt: organization.display_login,
+                  size: 40,
+                  shape: :square
+                )) %>
+              </div>
+              <div class="d-flex flex-column col-12 col-md-8 min-width-0">
+                <span class="h4"><%= organization.display_login %></span>
+                <%= render(Primer::Box.new(display: :flex, align_items: :center, mt: 2)) do %>
+                  <%= render(Primer::Beta::AvatarStack.new(disable_expand: true, style: "pointer-events: none")) do |stack| %>
+                    <% data[:recent].map(&:requester).compact.uniq.take(5).each do |requester| %>
+                      <% stack.with_avatar(
+                        src: avatar_url_for(requester, 20),
+                        alt: requester.display_login,
+                        size: 20
+                      ) %>
+                    <% end %>
+                  <% end %>
+                  <%= render(Primer::Beta::Text.new(tag: :span, color: :muted, font_size: :small)) do %>
+                    <%= pluralize(data[:requester_count], "member") %> requested additional budget
+                  <% end %>
+                <% end %>
+              </div>
+              <div class="d-flex flex-md-justify-end flex-items-baseline col-md-4 mt-2 mt-md-0">
+                <span class="h3 mr-2" <%= test_selector("budget-total-#{organization.display_login}") %>><%= Billing::Money.new(data[:total_cents]).format %></span>
+                <span class="color-fg-muted">requested</span>
+              </div>
+            </div>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  </div>
+<% end %>

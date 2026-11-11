@@ -1,0 +1,442 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "fileutils"
+require "open3"
+require "optparse"
+require "time"
+
+class BootstrapFailureReporter
+  DEFAULT_ISSUE_REPO = "github/github-bootstrap-failures-redux"
+  ISSUE_LOG_EXCERPT_BYTES = 56 * 1024
+  PROCESS_CONTEXT_MARKER = "--- begin caller tree ---"
+  LOG_MARKER = "--- begin bootstrap log ---"
+  # Interpreter (e.g. ruby) option flags that consume the following token as
+  # their value, so invoker_path can skip past them to find the real program.
+  FLAGS_TAKING_VALUE = %w[-r -I -C -E -F -K -S -T -W].freeze
+  TOKEN_PATTERNS = [
+    /(ghp_)[A-Za-z0-9_]+/,
+    /(ghu_)[A-Za-z0-9_]+/,
+    /(ghs_)[A-Za-z0-9_]+/,
+    /(gho_)[A-Za-z0-9_]+/,
+    /(github_pat_)[A-Za-z0-9_]+/,
+  ].freeze
+
+  def self.run(argv)
+    ENV["GH_PROMPT_DISABLED"] = "1" if ENV["GH_PROMPT_DISABLED"].to_s.empty?
+    new(argv).run
+  rescue StandardError => e
+    # This is a best-effort diagnostic tool; never let it crash (or print a
+    # stack trace into bootstrap output) on top of the failure it is reporting.
+    warn "report-bootstrap-failure: skipped after #{e.class}: #{e.message}"
+    0
+  end
+
+  def initialize(argv)
+    @options = {
+      failed_component: "",
+      failure_bucket: "unknown",
+      exit_status: nil,
+      log_path: nil,
+    }
+    @bootstrap_args = parse_options(argv)
+  end
+
+  def run
+    capture = write_failure_logs
+    report_issue(capture) if capture
+
+    0
+  end
+
+  private
+
+  attr_reader :options, :bootstrap_args
+
+  def parse_options(argv)
+    parser = OptionParser.new do |opts|
+      opts.on("--log PATH") { |value| options[:log_path] = value }
+      opts.on("--exit-status STATUS") { |value| options[:exit_status] = value.to_i }
+      opts.on("--failed-component COMPONENT") { |value| options[:failed_component] = value.to_s }
+      opts.on("--failure-bucket BUCKET") { |value| options[:failure_bucket] = value.to_s }
+    end
+
+    parser.order!(argv)
+    argv
+  end
+
+  def write_failure_logs
+    return nil if options[:log_path].to_s.empty? || !File.file?(options[:log_path])
+
+    timestamp = Time.now.utc
+    timestamp_slug = timestamp.strftime("%Y%m%dT%H%M%SZ")
+    captured_at = timestamp.iso8601
+    short_sha = git_short_sha
+
+    FileUtils.mkdir_p("tmp/bootstrap-failures")
+
+    latest_log = "tmp/bootstrap-failure.log"
+    timestamped_log = "tmp/bootstrap-failures/bootstrap-#{timestamp_slug}#{short_sha.empty? ? "" : "-#{short_sha}"}.log"
+    content = failure_log_content(captured_at, short_sha)
+
+    File.write(timestamped_log, content)
+    FileUtils.cp(timestamped_log, latest_log)
+
+    warn "Bootstrap failure log written to #{latest_log}"
+    warn "Timestamped bootstrap failure log written to #{timestamped_log}"
+
+    { latest_log: latest_log, timestamped_log: timestamped_log, captured_at: captured_at, short_sha: short_sha }
+  rescue StandardError => e
+    warn "report-bootstrap-failure: could not write failure log (#{e.class}: #{e.message})"
+    nil
+  end
+
+  def failure_log_content(captured_at, short_sha)
+    redacted_log = redact(File.binread(options[:log_path]).force_encoding(Encoding::UTF_8).scrub)
+    snapshot = process_snapshot
+    header = [
+      "script/bootstrap failed",
+      "captured_at: #{captured_at}",
+      "exit_status: #{options[:exit_status]}",
+      "bootstrap_args: #{bootstrap_args.join(" ")}",
+      "bundle_install_mode: #{bundle_install_mode}",
+      "failed_component: #{options[:failed_component]}",
+      "failure_bucket: #{options[:failure_bucket]}",
+      "commit: #{commit_sha(short_sha)}",
+      "bootstrap_invoker: #{snapshot[:invoker]}",
+      "",
+      PROCESS_CONTEXT_MARKER,
+      snapshot[:context],
+      "",
+      LOG_MARKER,
+    ].join("\n")
+
+    "#{header}\n#{redacted_log}"
+  end
+
+  def redact(content)
+    TOKEN_PATTERNS.each do |pattern|
+      content = content.gsub(pattern, "\\1<redacted>")
+    end
+
+    [ENV["GITHUB_TOKEN"], ENV["GH_TOKEN"]].compact.reject(&:empty?).each do |secret|
+      content = content.gsub(secret, "<redacted>")
+    end
+
+    content
+  end
+
+  def bundle_install_mode
+    bootstrap_args.include?("--no-local") ? "remote" : "local"
+  end
+
+  def report_issue(capture)
+    user = ENV["GITHUB_USER"].to_s
+    user = gh_user if user.empty?
+    return if user.empty?
+
+    body_file = "tmp/bootstrap-failure-issue-body.md"
+    File.write(body_file, issue_body(capture[:latest_log]))
+
+    create_issue(
+      title: "script/bootstrap failed for #{user} in #{options[:failure_bucket]} at #{capture[:captured_at]} #{capture[:short_sha]}",
+      body_file: body_file,
+      bucket_label: "bucket: #{options[:failure_bucket]}",
+      environment_label: "environment: #{issue_environment}",
+      invoker_label: issue_invoker_label(capture[:latest_log]),
+    )
+  rescue StandardError => e
+    # The local artifact is already written; failing to open an issue should
+    # not discard it or crash the reporter.
+    warn "report-bootstrap-failure: could not open issue (#{e.class}: #{e.message})"
+  ensure
+    FileUtils.rm_f(body_file) if body_file
+  end
+
+  def issue_body(log_path)
+    content = File.binread(log_path).force_encoding(Encoding::UTF_8).scrub
+    header, caller_tree, log = issue_body_sections(content)
+    invoker = bootstrap_invoker_from_header(header)
+    log ||= content
+    excerpt = tail_bytes(log, ISSUE_LOG_EXCERPT_BYTES)
+
+    sections = [
+      "### Bootstrap failure",
+      markdown_code_block(header),
+      "",
+      "The local artifact contains the full log.",
+      "",
+    ]
+
+    unless invoker.to_s.empty?
+      sections.push(
+        "### Bootstrap invoker",
+        markdown_code_block(invoker),
+        "",
+      )
+    end
+
+    unless caller_tree.to_s.empty?
+      sections.push(
+        "### Caller tree",
+        markdown_code_block(caller_tree),
+        "",
+      )
+    end
+
+    sections.push(
+      "### Bootstrap log excerpt (tail)",
+      markdown_code_block(excerpt),
+    )
+
+    sections.join("\n")
+  end
+
+  def issue_body_sections(content)
+    header, remainder = content.split("\n#{PROCESS_CONTEXT_MARKER}\n", 2)
+    unless remainder
+      header, log = content.split("\n#{LOG_MARKER}\n", 2)
+      return [header, nil, log]
+    end
+
+    caller_tree, log = remainder.split("\n#{LOG_MARKER}\n", 2)
+    [header, caller_tree, log]
+  end
+
+  def bootstrap_invoker_from_header(header)
+    header.each_line.find { |line| line.start_with?("bootstrap_invoker: ") }.to_s.sub("bootstrap_invoker: ", "").strip
+  end
+
+  def issue_invoker_label(log_path)
+    content = File.binread(log_path).force_encoding(Encoding::UTF_8).scrub
+    header, _caller_tree, _log = issue_body_sections(content)
+    "invoker: #{bootstrap_invoker_type(bootstrap_invoker_from_header(header))}"
+  rescue StandardError
+    "invoker: unknown"
+  end
+
+  def bootstrap_invoker_type(invoker)
+    return "manual" if invoker.start_with?("interactive terminal")
+    return "unknown" if invoker.empty? || invoker == "unavailable"
+
+    "tool"
+  end
+
+  def markdown_code_block(content)
+    max_backticks = content.scan(/`+/).map(&:length).max.to_i
+    fence = "`" * [3, max_backticks + 1].max
+
+    ["#{fence}text", content.chomp, fence].join("\n")
+  end
+
+  def tail_bytes(content, byte_count)
+    tail = content.bytesize > byte_count ? content.byteslice(-byte_count, byte_count) : content
+    tail.to_s.force_encoding(Encoding::UTF_8).scrub
+  end
+
+  def process_snapshot
+    pids = process_ancestry(Process.pid)
+    return { invoker: "unavailable", context: "unavailable" } if pids.empty?
+
+    context = caller_context(pids)
+    { invoker: process_invoker(pids), context: context.empty? ? "unavailable" : context }
+  rescue StandardError
+    { invoker: "unavailable", context: "unavailable" }
+  end
+
+  # Builds the caller tree: the process ancestry up from script/bootstrap,
+  # reduced to one command per line. Each command is the executable plus the
+  # program/script it runs, dropping the trailing arguments (which may contain
+  # secrets).
+  def caller_context(pids)
+    stdout, _stderr, status = Open3.capture3("ps", "-o", "command=", "-p", pids.join(","))
+    return "" unless status.success?
+
+    rows = stdout.each_line.filter_map { |line| redact_ps_row(line) }
+    return "" if rows.empty?
+
+    rows.join("\n")
+  rescue StandardError
+    ""
+  end
+
+  def redact_ps_row(line)
+    command = line.strip
+    return nil if command.empty?
+
+    redact(invoker_path(command))
+  end
+
+  def process_ancestry(pid)
+    pids = []
+    seen = {}
+    current_pid = pid
+
+    while current_pid && current_pid.positive? && !seen[current_pid] && pids.length < 16
+      seen[current_pid] = true
+      pids << current_pid
+      current_pid = parent_pid(current_pid)
+    end
+
+    pids
+  end
+
+  def parent_pid(pid)
+    stdout, _stderr, status = Open3.capture3("ps", "-o", "ppid=", "-p", pid.to_s)
+    return nil unless status.success?
+
+    stdout.to_i
+  rescue StandardError
+    nil
+  end
+
+  def process_invoker(pids)
+    candidates = pids.drop(2).map { |pid| [pid, ps_command(pid)] }
+    selected = candidates.find { |_, candidate_command| tool_invoker_command?(candidate_command) }
+    selected ||= candidates.find { |_, candidate_command| !candidate_command.empty? }
+    invoker_pid, command = selected
+    return "unavailable" unless invoker_pid
+
+    return terminal_invoker_summary(invoker_pid, command) if terminal_shell_command?(command)
+    return "pid #{invoker_pid}" if command.empty?
+
+    redact("pid #{invoker_pid}: #{invoker_path(command)}")
+  end
+
+  def tool_invoker_command?(command)
+    !tool_invoker(command).nil?
+  end
+
+  def tool_invoker(command)
+    {
+      "rubocop" => ["bin/rubocop"],
+      "packwerk" => ["bin/packwerk", "script/packwerk"],
+      "rails" => ["bin/rails"],
+      "rake" => ["bin/rake"],
+      "srb" => ["bin/srb"],
+      "tapioca" => ["bin/tapioca"],
+    }.find { |_, patterns| patterns.any? { |pattern| command.include?(pattern) } }
+  end
+
+  # Reduces a full command line to "the path to the tool" - the executable
+  # plus the script/program it runs (e.g. "ruby script/bootstrap.rb",
+  # "ruby bin/rubocop", "node /path/to/server.js") - while dropping the
+  # arguments that follow, since those are where secrets typically appear.
+  #
+  # Interpreter option flags, and the values of flags that take a separate
+  # argument (e.g. "-r .../config/basic"), are skipped so the real tool is
+  # recovered from launcher invocations like
+  # "ruby -r .../config/basic --yjit-disable bin/rubocop --stdin ...".
+  # redact() is still applied on top as a safety net.
+  def invoker_path(command)
+    tokens = command.to_s.split(/\s+/)
+    return "" if tokens.empty?
+
+    exe = tokens.first
+    rest = tokens.drop(1)
+
+    index = 0
+    while index < rest.length && rest[index].start_with?("-")
+      # "-e"/"-c" introduce inline code/commands rather than a program path;
+      # stop here so we never capture their (possibly sensitive) argument.
+      return "#{exe} #{rest[index]}" if rest[index] == "-e" || rest[index] == "-c"
+
+      index += 1 if FLAGS_TAKING_VALUE.include?(rest[index])
+      index += 1
+    end
+
+    program = rest[index]
+    program ? "#{exe} #{program}" : exe
+  end
+
+  def terminal_shell_command?(command)
+    command.include?("shellIntegration-") || command.match?(%r{\A(?:/bin/)?(?:ba|z|fi|k)?sh(?:\s|\z)})
+  end
+
+  def terminal_invoker_summary(pid, command)
+    if command.include?("shellIntegration-")
+      "interactive terminal (pid #{pid}, VS Code shell integration)"
+    else
+      "interactive terminal (pid #{pid})"
+    end
+  end
+
+  def ps_command(pid)
+    stdout, _stderr, status = Open3.capture3("ps", "-o", "command=", "-p", pid.to_s)
+    return "" unless status.success?
+
+    stdout.strip
+  rescue StandardError
+    ""
+  end
+
+  def create_issue(title:, body_file:, bucket_label:, environment_label:, invoker_label:)
+    required_labels = [bucket_label, environment_label]
+    issue_url = create_issue_with_labels(title: title, body_file: body_file, labels: [*required_labels, invoker_label])
+
+    if issue_url.empty?
+      issue_url = create_issue_with_labels(title: title, body_file: body_file, labels: required_labels)
+    end
+
+    if issue_url.empty?
+      issue_url = create_issue_with_labels(title: title, body_file: body_file, labels: [])
+    end
+
+    warn "Bootstrap failure issue created: #{issue_url}" unless issue_url.empty?
+  end
+
+  def create_issue_with_labels(title:, body_file:, labels:)
+    args = [
+      "repos/#{issue_repo}/issues",
+      "-f", "title=#{title}",
+      "-F", "body=@#{body_file}",
+    ]
+    labels.each do |label|
+      args.push("-f", "labels[]=#{label}")
+    end
+    args.push("--jq", ".html_url")
+
+    gh_api(*args)
+  end
+
+  def issue_repo
+    ENV.fetch("BOOTSTRAP_FAILURE_ISSUE_REPO", DEFAULT_ISSUE_REPO)
+  end
+
+  def issue_environment
+    return "local" if env_present?("LOCAL_DEVCONTAINER")
+    return "codespace" if env_present?("CODESPACES")
+
+    "unknown"
+  end
+
+  def gh_user
+    gh_api("user", "--jq", ".login")
+  end
+
+  def gh_api(*args)
+    stdout, _stderr, status = Open3.capture3("gh", "api", *args)
+    return "" unless status.success?
+
+    stdout.strip
+  rescue StandardError
+    ""
+  end
+
+  def git_short_sha
+    stdout, _stderr, status = Open3.capture3("git", "rev-parse", "--short=12", "HEAD")
+    status.success? ? stdout.strip : ""
+  rescue StandardError
+    ""
+  end
+
+  def commit_sha(short_sha)
+    ENV["BUILD_SHA"].to_s.empty? ? short_sha : ENV["BUILD_SHA"]
+  end
+
+  def env_present?(name)
+    !ENV[name].to_s.empty?
+  end
+end
+
+exit BootstrapFailureReporter.run(ARGV)

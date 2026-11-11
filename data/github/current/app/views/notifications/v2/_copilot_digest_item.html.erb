@@ -1,0 +1,168 @@
+<%# view is an instance of Notification::V2::IndexView %>
+
+<%
+  locals = ensure_local_vars(local_assigns, {
+    required: [:notification, :view, :copilot_notification],
+    optional: [],
+    defaults: {},
+  })
+%>
+
+<%= render(Primer::BaseComponent.new(
+  tag: :div,
+  border: true,
+  border_radius: 2,
+  classes: "notifications-list-item js-notifications-list-item",
+  data: { notification_id: notification.global_relay_id },
+  style: "border-bottom: 1px solid var(--borderColor-default) !important;"
+)) do %>
+  <%
+    notification_href = view.previewless_notification_url(
+      notification.url,
+      notification.global_relay_id
+    )
+
+    notification_link_id = "notification_#{notification.global_relay_id}_link"
+
+    hydro_data_attributes = hydro_click_tracking_attributes("copilot_digest_item.read", {
+      list_type: notification.list_type,
+      list_id: notification.list_id,
+      thread_type: notification.thread_type,
+      thread_id: notification.thread_id,
+      comment_type: notification.last_comment_type,
+      comment_id: notification.last_comment_id,
+      version: "V2"
+    })
+  %>
+
+  <div class="d-flex py-2 tmp-px-3 flex-row justify-content-between align-items-center">
+    <div class="d-flex flex-auto">
+      <a class="d-flex flex-column flex-auto min-width-0 no-underline py-2 js-navigation-open wb-break-word color-fg-default"
+        href="<%= notification_href %>"
+        <%= safe_data_attributes(hydro_data_attributes) %>
+      >
+        <%# Recommendation & Summary %>
+        <% if copilot_notification.recommendation.present? %>
+          <div class="d-flex flex-column tmp-pb-3">
+            <div class="flex-auto">
+              <%= render(Primer::Beta::Heading.new(tag: :h4)) do %>
+                <%= copilot_notification.recommendation %>
+              <% end %>
+            </div>
+
+            <% if copilot_notification.summary.present? %>
+              <%= render(Primer::Beta::Heading.new(tag: :h5, mb: 1, color: :muted, font_weight: :light)) do %>
+                <%= copilot_notification.summary %>
+              <% end %>
+            <% end %>
+          </div>
+        <% end %>
+
+        <%# Subject %>
+        <div class="d-flex">
+          <%# Icon %>
+          <div class="d-flex flex-md-row mr-2 flex-self-start flex-items-center">
+            <div class="flex-shrink-0 flex-self-start text-center" style="width: 16px;">
+              <% if notification.subject.is_a?(CheckSuite) && notification.check_suite_summary_conclusion %>
+                <% conclusion_view = Notifications::CheckSuiteConclusionView.new(notification.check_suite_summary_conclusion) %>
+                <%= octicon(conclusion_view.icon, class: conclusion_view.text_color) %>
+              <% elsif !notification.subject.is_a?(CheckSuite) %>
+                <%= notification_octicon_for(notification.subject) %>
+              <% end %>
+            </div>
+
+            <div class="notification-list-item-unread-indicator circle d-md-none d-block mt-1"></div>
+          </div>
+
+          <%# Repo and title %>
+          <div class="d-flex flex-column flex-auto" id="<%= notification_link_id %>">
+            <%# Title %>
+            <p class="m-0 text-bold pr-2 pr-md-0 markdown-title" <%= test_selector("notifications-list-item-title") %>>
+              <% case notification.thread_type %>
+              <% when "Issue" %>
+                <%= title_markdown(notification.title) %>
+              <% when "RepositoryAdvisory" %>
+                <%= notification.subject.get_title(current_user) %>
+              <% else %>
+                <%= notification.title %>
+              <% end %>
+            </p>
+
+            <%# Repo %>
+            <p class="m-0 f6 flex-auto color-fg-muted">
+              <% case notification.subject %>
+              <% when Issue, PullRequest %>
+                <%= notification.list.name_with_display_owner %>
+                <span class="text-normal">
+                  #<%= notification.subject.number %>
+                </span>
+                <% if notification.subject.is_a?(PullRequest) && copilot_notification.subject_data[:additions].present? %>
+                  <span class="d-inline-block ml-2">
+                      <span>•</span>
+                      <span class="color-fg-success text-bold mx-1">+<%= number_with_delimiter(copilot_notification.subject_data[:additions]) %></span>
+                      <span class="color-fg-danger text-bold">-<%= number_with_delimiter(copilot_notification.subject_data[:deletions]) %></span>
+                  </span>
+                <% end %>
+              <% when Discussion %>
+                <% if notification.subject.organization_discussion? %>
+                  <%= notification.list.organization.name %> Discussion
+                <% else %>
+                  <%= notification.list.name_with_display_owner %>
+                <% end %>
+                <span class="text-normal">
+                  #<%= notification.subject.number %>
+                </span>
+              <% when RepositoryVulnerabilityAlert, Commit, RepositoryDependabotAlertsThread, RepositoryInvitation %>
+                <%= notification.list.name_with_display_owner %>
+              <% when RepositoryAdvisory, AdvisoryCredit %>
+                <%= notification.list.name_with_display_owner %>
+                <span class="text-normal">
+                  <%= notification.subject.ghsa_id %>
+                </span>
+              <% when SecurityAdvisory %>
+                <%= notification.subject.ghsa_id %>
+              <% when Release %>
+                <%= notification.subject.tag_name %> in <%= notification.list.name_with_display_owner %>
+              <% when CheckSuite %>
+                <%= notification.list.name_with_display_owner %>
+                <% if notification.subject.workflow_run %>
+                  <span class="text-normal">
+                    – <%= notification.subject.workflow_name %> #<%= notification.subject.workflow_run.run_number %>
+                  </span>
+                <% end %>
+              <% when Actions::WorkflowRun %>
+                <%= notification.list.name_with_display_owner %>
+                <% if notification.subject.workflow %>
+                  <span class="text-normal">
+                    – <%= notification.subject.workflow.name %> #<%= notification.subject.run_number %>
+                  </span>
+                <% end %>
+              <% when MemexProject %>
+                <%= notification.list.name_with_display_owner %>
+                <span class="text-normal">
+                  #<%= notification.subject.number %>
+                </span>
+              <% end %>
+            </p>
+          </div>
+        </div>
+      </a>
+    </div>
+
+    <%# CTAs %>
+    <div class="d-flex flex-row flex-justify-center">
+      <div class="d-flex flex-row flex-items-center">
+        <%= render partial: "notifications/v2/copilot_notification_ctas", locals: { copilot_notification: copilot_notification } %>
+
+        <ul class="d-flex list-style-none flex-items-center">
+          <%= render partial: "notifications/v2/actions/item_actions", locals: {
+              notification_id: notification.global_relay_id,
+              list_is_ignored: notification.subscription_status == "list_ignored",
+              button_classes: "btn-octicon"
+            }
+          %>
+        </ul>
+      </div>
+    </div>
+  </div>
+<% end %>

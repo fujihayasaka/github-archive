@@ -1,0 +1,215 @@
+<%# Helper lambdas for building curl commands %>
+<%
+  curl_auth_flag = ->(provider, secret_name) do
+    case provider.to_s
+    when "openai", "xAI", "fireworks", "cerebras"
+      %(-H "Authorization: Bearer $#{secret_name}")
+    else
+      %(-H "Api-Key: $#{secret_name}")
+    end
+  end
+
+  curl_base_url = ->(url) do
+    idx = url.to_s.rindex("/v1")
+    idx ? url.to_s[0..idx+2] : url.to_s
+  end
+%>
+
+<turbo-frame id="endpoint-health-summary-<%= model_id %>">
+<% if error || health.nil? %>
+  <div class="tmp-mb-2 text-small color-fg-muted">
+    <%= render(Primer::Beta::Octicon.new(:alert, size: :small, mr: 1)) %>
+    <span>Health check unavailable</span>
+  </div>
+<% else %>
+  <% endpoints = health[:endpoints] || [] %>
+  <% if endpoints.any? %>
+    <%
+      healthy_count = endpoints.count { |ep| ep.dig(:checks, :authenticated_ping, :status) == "pass" || ep.dig(:checks, :connectivity, :status) == "pass" }
+      total_count = endpoints.size
+    %>
+    <div class="tmp-mb-2 text-small">
+      <% if healthy_count == total_count %>
+        <%= render(Primer::Beta::Octicon.new("check-circle-fill", color: :success, size: :small, mr: 1)) %>
+        <span class="color-fg-success"><%= healthy_count %>/<%= total_count %> endpoints healthy</span>
+      <% elsif healthy_count > 0 %>
+        <%= render(Primer::Beta::Octicon.new("alert-fill", color: :attention, size: :small, mr: 1)) %>
+        <span class="color-fg-attention"><%= healthy_count %>/<%= total_count %> endpoints healthy</span>
+      <% else %>
+        <%= render(Primer::Beta::Octicon.new("x-circle-fill", color: :danger, size: :small, mr: 1)) %>
+        <span class="color-fg-danger">0/<%= total_count %> endpoints healthy</span>
+      <% end %>
+    </div>
+  <% end %>
+<% end %>
+</turbo-frame>
+
+<turbo-frame id="endpoint-health-detail-<%= model_id %>">
+<% if error %>
+  <%
+    is_endpoint_issue = false
+    banner_scheme = if error.include?("not an endpoint failure") || error.include?("network issue") || error.include?("CAPI")
+      :warning
+    else
+      is_endpoint_issue = true
+      :danger
+    end
+  %>
+  <%= render Primer::Alpha::Banner.new(icon: :alert, scheme: banner_scheme, classes: "tmp-mt-3") do %>
+    <%= error %>
+  <% end %>
+<% elsif health.nil? %>
+  <%= render Primer::Alpha::Banner.new(icon: :alert, scheme: :warning, classes: "tmp-mt-3") do %>
+    Endpoint health data unavailable
+  <% end %>
+<% else %>
+  <% endpoints = health[:endpoints] || [] %>
+  <% if endpoints.empty? %>
+    <div class="blankslate">
+      <p>No endpoints configured for this model.</p>
+    </div>
+  <% else %>
+    <%
+      healthy_count = endpoints.count { |ep| ep.dig(:checks, :authenticated_ping, :status) == "pass" || ep.dig(:checks, :connectivity, :status) == "pass" }
+      total_count = endpoints.size
+      all_healthy = healthy_count == total_count
+    %>
+    <div class="tmp-mb-3 d-flex flex-items-center" style="gap: 8px;">
+      <% if all_healthy %>
+        <%= render(Primer::Beta::Label.new(scheme: :success)) { "#{healthy_count}/#{total_count} endpoints healthy" } %>
+      <% elsif healthy_count > 0 %>
+        <%= render(Primer::Beta::Label.new(scheme: :attention)) { "#{healthy_count}/#{total_count} endpoints healthy" } %>
+      <% else %>
+        <%= render(Primer::Beta::Label.new(scheme: :danger)) { "0/#{total_count} endpoints healthy" } %>
+      <% end %>
+    </div>
+
+    <div class="Box tmp-mb-3">
+      <div class="Box-header d-flex flex-items-center flex-justify-between">
+        <h4 class="Box-title">Endpoint Health Checks</h4>
+        <%
+          all_curls = endpoints.map { |ep|
+            base = curl_base_url.call(ep[:url])
+            auth = curl_auth_flag.call(ep[:provider], ep[:secret_name] || "API_KEY")
+            "# #{ep[:name]}\ncurl -s -w '\\nHTTP %{http_code}' #{auth} '#{base}/chat/completions'"
+          }.join("\n\n")
+        %>
+        <%= render(Primer::Beta::ClipboardCopy.new(
+          value: all_curls,
+          "aria-label": "Copy curl commands for all endpoints",
+          "data-copy-feedback": "Copied!",
+          classes: "btn btn-sm"
+        )) do %>
+          <%= render(Primer::Beta::Octicon.new(:copy, size: :small, mr: 1)) %>
+          Copy all curls
+        <% end %>
+      </div>
+      <table class="width-full">
+        <thead>
+          <tr class="Box-row Box-row--gray">
+            <th class="p-2 text-left text-small">Endpoint</th>
+            <th class="p-2 text-left text-small text-nowrap">Provider</th>
+            <th class="p-2 text-center text-small text-nowrap">Secret</th>
+            <th class="p-2 text-center text-small text-nowrap">DNS</th>
+            <th class="p-2 text-center text-small text-nowrap">Ping</th>
+            <th class="p-2 text-center text-small text-nowrap">Auth</th>
+            <th class="p-2 text-center text-small text-nowrap">Inference</th>
+            <th class="p-2 text-right text-small text-nowrap">Latency</th>
+            <th class="p-2 text-center text-small"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <% endpoints.each do |ep| %>
+            <%
+              checks = ep[:checks] || {}
+              secret_ok = checks.dig(:secret_exists, :status) == "pass"
+              dns_ok = checks.dig(:dns_resolves, :status) == "pass"
+              conn_ok = checks.dig(:connectivity, :status) == "pass"
+              auth_ok = checks.dig(:authenticated_ping, :status) == "pass"
+              auth_skip = checks.dig(:authenticated_ping, :status) == "skip"
+              inference_ok = checks.dig(:inference_latency, :status) == "pass"
+              inference_skip = checks.dig(:inference_latency, :status) == "skip"
+              inference_latency = checks.dig(:inference_latency, :latency_ms)
+              conn_latency = checks.dig(:connectivity, :latency_ms)
+              best_latency = inference_latency || conn_latency
+            %>
+            <tr class="Box-row">
+              <td class="p-2">
+                <code class="text-small"><%= ep[:name] %></code>
+                <div class="text-small color-fg-muted" style="word-break: break-all;"><%= ep[:url] %></div>
+              </td>
+              <td class="p-2 text-small">
+                <%= ep[:provider] %>
+                <% if ep[:region].present? %>
+                  (<%= ep[:region] %>)
+                <% end %>
+              </td>
+              <td class="p-2 text-center">
+                <% if secret_ok %>
+                  <%= render(Primer::Beta::Octicon.new("check-circle-fill", color: :success, size: :small)) %>
+                <% else %>
+                  <%= render(Primer::Beta::Octicon.new("x-circle-fill", color: :danger, size: :small)) %>
+                <% end %>
+              </td>
+              <td class="p-2 text-center">
+                <% if dns_ok %>
+                  <%= render(Primer::Beta::Octicon.new("check-circle-fill", color: :success, size: :small)) %>
+                <% else %>
+                  <%= render(Primer::Beta::Octicon.new("x-circle-fill", color: :danger, size: :small)) %>
+                <% end %>
+              </td>
+              <td class="p-2 text-center">
+                <% if conn_ok %>
+                  <%= render(Primer::Beta::Octicon.new("check-circle-fill", color: :success, size: :small)) %>
+                <% else %>
+                  <%= render(Primer::Beta::Octicon.new("x-circle-fill", color: :danger, size: :small)) %>
+                <% end %>
+              </td>
+              <td class="p-2 text-center">
+                <% if auth_skip %>
+                  <span class="text-small color-fg-muted">—</span>
+                <% elsif auth_ok %>
+                  <%= render(Primer::Beta::Octicon.new("check-circle-fill", color: :success, size: :small)) %>
+                <% else %>
+                  <%= render(Primer::Beta::Octicon.new("x-circle-fill", color: :danger, size: :small)) %>
+                <% end %>
+              </td>
+              <td class="p-2 text-center">
+                <% if inference_skip %>
+                  <span class="text-small color-fg-muted">—</span>
+                <% elsif inference_ok %>
+                  <%= render(Primer::Beta::Octicon.new("check-circle-fill", color: :success, size: :small)) %>
+                <% else %>
+                  <%= render(Primer::Beta::Octicon.new("x-circle-fill", color: :danger, size: :small)) %>
+                <% end %>
+              </td>
+              <td class="p-2 text-right text-small font-mono">
+                <% if best_latency %>
+                  <%= best_latency %>ms
+                <% else %>
+                  —
+                <% end %>
+              </td>
+              <td class="p-2 text-center">
+                <%
+                  ep_base = curl_base_url.call(ep[:url])
+                  ep_auth = curl_auth_flag.call(ep[:provider], ep[:secret_name] || "API_KEY")
+                  ep_curl = "curl -s -w '\\nHTTP %{http_code}' #{ep_auth} '#{ep_base}/chat/completions'"
+                %>
+                <%= render(Primer::Beta::ClipboardCopy.new(
+                  value: ep_curl,
+                  "aria-label": "Copy curl for #{ep[:name]}",
+                  "data-copy-feedback": "Copied!",
+                  classes: "btn-octicon"
+                )) do %>
+                  <%= render(Primer::Beta::Octicon.new(:copy, size: :small)) %>
+                <% end %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  <% end %>
+<% end %>
+</turbo-frame>

@@ -1,0 +1,149 @@
+<% page_info title: "Actions" %>
+
+<%= render Primer::Beta::Subhead.new do |component| %>
+  <% component.with_heading(tag: :h2) do %>Actions<% end %>
+<% end %>
+
+<%= render partial: "stafftools/businesses/actions/action_invocation" %>
+
+<!-- Business level billing info -->
+<% if GitHub.billing_enabled? %>
+  <div class="Box Box--condensed tmp-mt-3">
+    <div class="Box-header">
+      <h3 class="Box-title">
+        Concurrency
+      </h3>
+    </div>
+    <ul>
+      <li class="Box-row">
+        <div class="summary">
+          <dl>
+            <dt class="tmp-mr-5"><b>GitHub plan</b></dt>
+            <dd><%= plan_name %></dd>
+          </dl>
+          <dl>
+            <dt class="tmp-mr-5"><b>Trust Tier</b></dt>
+            <dd>
+              <%= render Primer::Beta::Label.new(scheme: trust_tier == 1 ? :success : trust_tier == 2 ? :attention : :danger) do %>
+                Tier <%= trust_tier %> - <%= trust_tier_name %>
+              <% end %>
+            </dd>
+          </dl>
+          <dl>
+            <dt class="tmp-mr-5"><b>Total concurrent jobs</b></dt>
+            <dd><%= concurrency_limits&.dig(:total) || max_concurrent_jobs %><% unless concurrency_limits.present? %><sup>*</sup><% end %></dd>
+          </dl>
+          <dl>
+            <dt class="tmp-mr-5"><b>Maximum concurrent macOS jobs</b></dt>
+            <dd><%= concurrency_limits&.dig(:macos) || max_concurrent_macos_jobs %><% unless concurrency_limits.present? %><sup>*</sup><% end %></dd>
+          </dl>
+          <% unless concurrency_limits.present? %>
+            <p><sup>*</sup>We calculate these numbers from the plan based on <a class="Link--inTextBlock" href="https://docs.github.com/actions/reference/usage-limits-billing-and-administration#usage-limits">documentation</a> and they may be outdated or overridden for this enterprise.</p>
+          <% end %>
+        </div>
+      </li>
+      <li class="Box-row">
+        <details>
+          <%= render(Primer::Beta::Button.new(tag: :summary, size: :small)) do %>
+            Update concurrency limits
+          <% end %>
+          <div class="tmp-mt-3">
+            <%= form_tag enterprise_actions_update_concurrency_limits_stafftools_enterprise_path(this_business), method: :post, class: "width-full" do %>
+              <div class="form-group">
+                <div class="form-group-header">
+                  <label for="total_limit">Total concurrent jobs</label>
+                </div>
+                <div class="form-group-body">
+                  <%= number_field_tag :total_limit, concurrency_limits&.dig(:total) || max_concurrent_jobs,
+                      min: 0, max: max_concurrent_jobs * 2, class: "form-control input-sm", style: "width: 200px;", autocomplete: "off" %>
+                  <p class="note">Maximum allowed: <%= max_concurrent_jobs * 2 %> (2x plan-based limit). Set to 0 to disable.</p>
+                </div>
+              </div>
+              <div class="form-group">
+                <div class="form-group-header">
+                  <label for="macos_limit">Maximum concurrent macOS jobs</label>
+                </div>
+                <div class="form-group-body">
+                  <%= number_field_tag :macos_limit, concurrency_limits&.dig(:macos) || max_concurrent_macos_jobs,
+                      min: 0, max: max_concurrent_macos_jobs_stafftools_limit, class: "form-control input-sm", style: "width: 200px;", autocomplete: "off" %>
+                  <p class="note">Maximum allowed: <%= max_concurrent_macos_jobs_stafftools_limit %> (stafftools limit for this plan, default: <%= max_concurrent_macos_jobs %>). Set to 0 to disable.</p>
+                </div>
+              </div>
+              <%= render(Primer::Alpha::Banner.new(scheme: :warning, classes: "tmp-mb-3")) do %>
+                <strong>Need higher concurrency limits?</strong> To request an increase beyond the maximum limits shown above,
+                please follow the process documented in the
+                <a href="https://github.com/github/support-knowledge-base/blob/main/docs/support/c2c/actions/requesting-concurrency-increase.md" target="_blank" class="Link--inTextBlock">
+                  concurrency increase request guide
+                </a>.
+              <% end %>
+              <div class="form-actions">
+                <%= render(Primer::Beta::Button.new(type: :submit)) do %>
+                  Update Limits
+                <% end %>
+              </div>
+            <% end %>
+          </div>
+        </details>
+      </li>
+    </ul>
+  </div>
+<% end %>
+
+<%# Actions Four Nines Onboarding info %>
+<div class="tmp-mt-5">
+  <%= render(Actions::FourNinesInfoComponent.new(account: this_business)) %>
+</div>
+
+<%# Larger-hosted runners Onboarding info %>
+<div class="tmp-my-5">
+  <%= render(Actions::LargerRunnersOnboardingInfoComponent.new(owner: this_business)) %>
+</div>
+
+<% if runner_groups.none? %>
+<div class="Box Box--condensed tmp-mt-3">
+  <div class="Box-header">
+    <h3 class="Box-title">
+      Runner Groups
+    </h3>
+  </div>
+  <%= render Primer::Beta::Blankslate.new do |c| %>
+    <% c.with_heading(tag: :h2) do %>
+      There are no runner groups configured for this enterprise.
+    <% end %>
+  <% end %>
+</div>
+<% else %>
+    <%= render(Actions::RunnerGroupsComponent.new(
+      owner: this_business,
+      owner_settings: Actions::EnterpriseRunnersView.new(settings_owner: this_business, current_user: current_user),
+      runner_groups: runner_groups,
+      can_create_groups: false,
+      can_update_groups: false,
+      can_manage_runners: false,
+      disabled_runner_group_ids: disabled_runner_group_ids
+    )) %>
+<% end %>
+
+<% if runner_groups.none? %>
+  <div class="Box Box--condensed tmp-mt-3">
+    <div class="Box-header">
+      <h3 class="Box-title">
+        Runners
+      </h3>
+    </div>
+    <%= render Primer::Beta::Blankslate.new do |c| %>
+      <% c.with_heading(tag: :h2) do %>
+        There are no runners configured for this enterprise.
+      <% end %>
+    <% end %>
+  </div>
+<% else %>
+  <div class="tmp-mt-5">
+    <%= render(Stafftools::ActionsRunners::RunnersListComponent.new(
+      runners: runners,
+      business: this_business,
+      hosted_runner_group: hosted_runner_group,
+      viewing_from_a_repository: false)
+    ) %>
+  </div>
+<% end %>

@@ -1,0 +1,393 @@
+<%# erblint:counter DeprecatedComponentsCounter 1 %>
+<%# erblint:counter DeprecatedComponentsCounter 1 %>
+<% page_info title: this_business.name, selected_link: :business_security %>
+
+<% two_factor_auth_available = !this_business.enterprise_managed_user_enabled? %>
+
+<% if two_factor_auth_available %>
+  <%= render Primer::Beta::Subhead.new do |component| %>
+    <% component.with_heading(tag: :h2) do %>Two-factor authentication<% end %>
+  <% end %>
+  <p class="color-fg-muted">
+    <% if this_business.two_factor_requirement_enabled? %>
+      <%= primer_octicon(:lock, mr: 2) %>
+      Two-factor authentication is <strong>required</strong> for all organizations in the enterprise.
+
+      <%= render(Primer::Beta::BorderBox.new(border_color: :danger)) do |box| %>
+        <% box.with_body border_color: :danger do %>
+          <%= render(Primer::Alpha::Dialog.new(
+            size: :large,
+            title: "Disable two-factor authentication",
+            id: "disable-two-factor-auth",
+          )) do |d| %>
+            <% d.with_show_button(
+              float: :right,
+              scheme: :danger,
+              "data-disable-invalid": "",
+              "data-disable-with": "Disable two-factor authentication"
+            ) { "Disable two-factor authentication" } %>
+            <% d.with_header(show_divider: true) do %>
+              Disable the two-factor authentication requirement?
+            <% end %>
+            <% d.with_body do %>
+              <%= render(Primer::Beta::Flash.new(scheme: :warning)) do
+                "Please ensure appropriate authorization has been obtained before disabling
+                the two-factor authentication requirement."
+              end %>
+              <p>
+                If the two-factor authentication requirement is disabled, it will need to be
+                re-enabled by an enterprise owner.
+              </p>
+            <% end %>
+            <% d.with_footer(show_divider: true) do %>
+              <%= render(Primer::Beta::Button.new(
+                data: { "close-dialog-id": "disable-two-factor-auth" }
+              )) { "Cancel" } %>
+              <%= form_with \
+                url: stafftools_enterprise_two_factor_requirement_path(this_business),
+                method: :delete do %>
+                <%= render(Primer::Beta::Button.new(
+                  scheme: :danger,
+                  type: :submit,
+                  "data-disable-invalid": "",
+                  "data-disable-with": "Disabling two-factor authentication..."
+                )) { "Disable two-factor authentication" } %>
+              <% end %>
+            <% end %>
+          <% end %>
+
+          <div>
+            <div class="listgroup-item-title">Disable two-factor authentication requirement</div>
+            <div class="listgroup-item-body">
+              This will disable the two-factor authentication requirement for the enterprise.<br>
+              Please be certain.
+            </div>
+          </div>
+        <% end %>
+      <% end %>
+    <% else %>
+      <%= primer_octicon(:x, mr: 2) %>
+      Two-factor authentication is <strong>not required</strong> for all organizations in the enterprise.
+    <% end %>
+  </p>
+<% end %>
+
+<%= render partial: "stafftools/businesses/single_sign_on_settings", locals: { spacious: two_factor_auth_available } %>
+
+<%= render partial: "stafftools/businesses/ssh_certificate_authorities" %>
+
+<% if !GitHub.enterprise? && (this_business&.external_provider_enabled? || this_business&.organization_saml_enabled?) %>
+  <%= render partial: "stafftools/businesses/credentials", locals: { business: this_business } %>
+<% end %>
+
+<% if !GitHub.enterprise? && (this_business&.external_provider_enabled? || this_business&.organization_saml_enabled?) %>
+  <%# Staff Credential Revocation Danger Zone %>
+  <%= render Primer::Beta::Subhead.new(border_bottom: 0, test_selector: "staff-credential-revocation-danger-zone", classes: "tmp-mt-4") do |subhead| %>
+    <% subhead.with_heading(tag: :h2, mt: 4, mb: 0) do %>
+      Danger zone
+    <% end %>
+  <% end %>
+
+<%= render(Primer::Beta::BorderBox.new(border_color: :danger)) do |box| %>
+  <% single_user_revocation_enabled = FeatureFlag.vexi.enabled?(:credential_revocation_single_user, current_user, default: false) %>
+
+  <%# Row 1: Deauthorize credentials (all enterprises) %>
+  <% box.with_row(test_selector: "staff-revoke-credential-authorizations") do %>
+    <div class="d-flex flex-items-center">
+
+      <div class="flex-auto width-full">
+        <span class="text-bold color-fg-default">
+          Deauthorize all credentials
+        </span>
+        <div class="color-fg-default mt-1 f5" <%= test_selector "staff-revoke-credential-authorizations-description" %>>
+          Deauthorize all credentials that have access to the enterprise.
+        </div>
+      </div>
+
+      <% if single_user_revocation_enabled %>
+        <%# Deauthorize dropdown menu (single-user FF enabled) %>
+        <%= render(Primer::Alpha::ActionMenu.new(anchor_align: :end, size: :medium)) do |menu| %>
+          <% menu.with_show_button(scheme: :danger) do |button| %>
+            <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+            Deauthorize
+          <% end %>
+          <% menu.with_item(label: "A specific user", content_arguments: { "data-show-dialog-id": "staff-revoke-single-user-authorizations-dialog" }) do |item| %>
+            <% item.with_description { "Deauthorize a specific user\u2019s credentials in this enterprise" } %>
+          <% end %>
+          <% menu.with_item(label: "All users in this enterprise", content_arguments: { "data-show-dialog-id": "staff-revoke-credential-authorizations-dialog" }) do |item| %>
+            <% item.with_description { "Deauthorize all credentials in this enterprise" } %>
+          <% end %>
+        <% end %>
+
+        <%# Dialog: Deauthorize a specific user %>
+        <%= render(Primer::Alpha::Dialog.new(
+          size: :medium_portrait,
+          id: "staff-revoke-single-user-authorizations-dialog",
+          title: "Deauthorize a user\u2019s credentials",
+          test_selector: "staff-revoke-single-user-authorizations-dialog",
+        )) do |dialog| %>
+          <% dialog.with_header(show_divider: true) %>
+          <%= form_tag revoke_credentials_stafftools_enterprise_security_path(this_business, revocation_type: "authorizations"), method: :delete do %>
+            <%= render(Primer::Alpha::Dialog::Body.new) do %>
+              <p>
+                You are about to <strong>deauthorize all credentials for a specific user</strong> that have access to organizations in the enterprise.
+              </p>
+              <p>
+                All of the user's SSO-authorized credentials (Personal Access Tokens, SSH keys, OAuth tokens) will lose their authorization.
+              </p>
+
+              <dl class="form-group">
+                <dt><label for="staff-revoke-single-user-auth-login">Username</label></dt>
+                <dd>
+                  <%= render(Primer::Beta::AutoComplete.new(
+                    src: credential_member_suggestions_stafftools_enterprise_security_path(this_business),
+                    label_text: "Search for an enterprise member",
+                    visually_hide_label: true,
+                    input_name: "target_user_login",
+                    input_id: "staff-revoke-single-user-auth-login",
+                    list_id: "staff-revoke-single-user-auth-results",
+                    full_width: true,
+                    with_icon: true,
+                    test_selector: "staff-revoke-single-user-auth-autocomplete",
+                  )) do |autocomplete| %>
+                    <% autocomplete.with_leading_visual_icon(icon: :search) %>
+                    <% autocomplete.with_input(required: true, placeholder: "Search for a member") %>
+                  <% end %>
+                </dd>
+              </dl>
+
+              <dl class="form-group">
+                <dt><label for="staff-revoke-single-user-auth-verify">Enter "<%= this_business.slug %>" to confirm</label></dt>
+                <dd>
+                  <input class="form-control input-block"
+                    type="text"
+                    id="staff-revoke-single-user-auth-verify"
+                    name="verify"
+                    pattern="<%= case_insensitive_pattern(this_business.slug) %>"
+                    required>
+                </dd>
+              </dl>
+            <% end %>
+
+            <%= render(Primer::Alpha::Dialog::Footer.new(show_divider: true)) do %>
+              <%= render(Primer::Beta::Button.new(
+                type: :button,
+                data: { "close-dialog-id": "staff-revoke-single-user-authorizations-dialog" }
+              )) { "Cancel" } %>
+
+              <%= render(Primer::Beta::Button.new(
+                type: :submit,
+                scheme: :danger,
+                "data-disable-invalid": "",
+                "data-disable-with": ""
+              )) { "Deauthorize user\u2019s credentials" } %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <%# Dialog: Deauthorize all users %>
+      <%= render(Primer::Alpha::Dialog.new(
+        size: :medium_portrait,
+        id: "staff-revoke-credential-authorizations-dialog",
+        title: "Deauthorize all credentials",
+        test_selector: "staff-revoke-credential-authorizations-dialog",
+      )) do |dialog| %>
+        <% unless single_user_revocation_enabled %>
+          <% dialog.with_show_button(scheme: :danger) do %>
+            Deauthorize all credentials
+          <% end %>
+        <% end %>
+        <% dialog.with_header(show_divider: true) %>
+        <%= form_tag revoke_credentials_stafftools_enterprise_security_path(this_business, revocation_type: "authorizations"), method: :delete do %>
+          <%= render(Primer::Alpha::Dialog::Body.new) do %>
+            <p>
+              You are about to <strong>deauthorize all credentials</strong> that have access to organizations in the enterprise.
+            </p>
+            <p>
+              All SSO-authorized credentials (Personal Access Tokens, SSH keys, OAuth tokens) will lose their authorization.
+            </p>
+
+            <dl class="form-group">
+              <dt><label for="staff-revoke-auth-verify">Enter "<%= this_business.slug %>" to confirm</label></dt>
+              <dd>
+                <input class="form-control input-block"
+                  type="text"
+                  id="staff-revoke-auth-verify"
+                  name="verify"
+                  pattern="<%= case_insensitive_pattern(this_business.slug) %>"
+                  required
+                  autofocus>
+              </dd>
+            </dl>
+          <% end %>
+
+          <%= render(Primer::Alpha::Dialog::Footer.new(show_divider: true)) do %>
+            <%= render(Primer::Beta::Button.new(
+              type: :button,
+              data: { "close-dialog-id": "staff-revoke-credential-authorizations-dialog" }
+            )) { "Cancel" } %>
+
+            <%= render(Primer::Beta::Button.new(
+              type: :submit,
+              scheme: :danger,
+              "data-disable-invalid": "",
+              "data-disable-with": ""
+            )) { "Deauthorize all credentials" } %>
+          <% end %>
+        <% end %>
+      <% end %>
+    </div>
+  <% end %>
+
+  <%# Row 2: Revoke/delete credentials AND authorizations (EMU only) %>
+  <% if this_business.enterprise_managed_user_enabled? %>
+    <% box.with_row(test_selector: "staff-revoke-credentials-and-authorizations") do %>
+      <div class="d-flex flex-items-center">
+        <div class="flex-auto width-full">
+          <span class="text-bold color-fg-default">
+            Revoke all credentials
+          </span>
+          <div class="color-fg-default mt-1 f5" <%= test_selector "staff-revoke-credentials-and-authorizations-description" %>>
+            Revoke all credentials and their authorizations that have access to the enterprise, including those that are not SAML-authorized.
+          </div>
+        </div>
+
+        <% if single_user_revocation_enabled %>
+          <%# Revoke dropdown menu (single-user FF enabled) %>
+          <%= render(Primer::Alpha::ActionMenu.new(anchor_align: :end, size: :medium)) do |menu| %>
+            <% menu.with_show_button(scheme: :danger) do |button| %>
+              <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+              Revoke
+            <% end %>
+            <% menu.with_item(label: "A specific user", content_arguments: { "data-show-dialog-id": "staff-revoke-single-user-credentials-and-authorizations-dialog" }) do |item| %>
+              <% item.with_description { "Revoke a specific user\u2019s credentials and authorizations in this enterprise" } %>
+            <% end %>
+            <% menu.with_item(label: "All users in this enterprise", content_arguments: { "data-show-dialog-id": "staff-revoke-credentials-and-authorizations-dialog" }) do |item| %>
+              <% item.with_description { "Revoke all credentials and authorizations in this enterprise" } %>
+            <% end %>
+          <% end %>
+
+          <%# Dialog: Revoke a specific user's credentials %>
+          <%= render(Primer::Alpha::Dialog.new(
+            size: :medium_portrait,
+            id: "staff-revoke-single-user-credentials-and-authorizations-dialog",
+            title: "Revoke a user\u2019s credentials",
+            test_selector: "staff-revoke-single-user-credentials-and-authorizations-dialog",
+          )) do |dialog| %>
+            <% dialog.with_header(show_divider: true) %>
+            <%= form_tag revoke_credentials_stafftools_enterprise_security_path(this_business, revocation_type: "credentials_and_authorizations"), method: :delete do %>
+              <%= render(Primer::Alpha::Dialog::Body.new) do %>
+                <p>
+                  You are about to <strong>revoke all credentials and their authorizations for a specific user</strong> that have access to organizations in the enterprise.
+                </p>
+                <p>
+                  <strong>All of the user's credentials will be permanently deleted</strong> (Personal Access Tokens, SSH keys, OAuth tokens).
+                </p>
+
+                <dl class="form-group">
+                  <dt><label for="staff-revoke-single-user-creds-login">Username</label></dt>
+                  <dd>
+                    <%= render(Primer::Beta::AutoComplete.new(
+                      src: credential_member_suggestions_stafftools_enterprise_security_path(this_business),
+                      label_text: "Search for an enterprise member",
+                      visually_hide_label: true,
+                      input_name: "target_user_login",
+                      input_id: "staff-revoke-single-user-creds-login",
+                      list_id: "staff-revoke-single-user-creds-results",
+                      full_width: true,
+                      with_icon: true,
+                      test_selector: "staff-revoke-single-user-creds-autocomplete",
+                    )) do |autocomplete| %>
+                      <% autocomplete.with_leading_visual_icon(icon: :search) %>
+                      <% autocomplete.with_input(required: true, placeholder: "Search for a member") %>
+                    <% end %>
+                  </dd>
+                </dl>
+
+                <dl class="form-group">
+                  <dt><label for="staff-revoke-single-user-creds-verify">Enter "<%= this_business.slug %>" to confirm</label></dt>
+                  <dd>
+                    <input class="form-control input-block"
+                      type="text"
+                      id="staff-revoke-single-user-creds-verify"
+                      name="verify"
+                      pattern="<%= case_insensitive_pattern(this_business.slug) %>"
+                      required>
+                  </dd>
+                </dl>
+              <% end %>
+
+              <%= render(Primer::Alpha::Dialog::Footer.new(show_divider: true)) do %>
+                <%= render(Primer::Beta::Button.new(
+                  type: :button,
+                  data: { "close-dialog-id": "staff-revoke-single-user-credentials-and-authorizations-dialog" }
+                )) { "Cancel" } %>
+
+                <%= render(Primer::Beta::Button.new(
+                  type: :submit,
+                  scheme: :danger,
+                  "data-disable-invalid": "",
+                  "data-disable-with": ""
+                )) { "Revoke user\u2019s credentials" } %>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+
+        <%# Dialog: Revoke all credentials %>
+        <%= render(Primer::Alpha::Dialog.new(
+          size: :medium_portrait,
+          id: "staff-revoke-credentials-and-authorizations-dialog",
+          title: "Revoke all credentials",
+          test_selector: "staff-revoke-credentials-and-authorizations-dialog",
+        )) do |dialog| %>
+          <% unless single_user_revocation_enabled %>
+            <% dialog.with_show_button(scheme: :danger) do %>
+              Revoke all credentials
+            <% end %>
+          <% end %>
+          <% dialog.with_header(show_divider: true) %>
+          <%= form_tag revoke_credentials_stafftools_enterprise_security_path(this_business, revocation_type: "credentials_and_authorizations"), method: :delete do %>
+            <%= render(Primer::Alpha::Dialog::Body.new) do %>
+              <p>
+                You are about to <strong>revoke all credentials and their authorizations</strong> that have access to organizations in the enterprise.
+              </p>
+              <p>
+                <strong>All credentials will be permanently deleted</strong> (Personal Access Tokens, SSH keys, OAuth tokens).
+              </p>
+
+              <dl class="form-group">
+                <dt><label for="staff-revoke-creds-verify">Enter "<%= this_business.slug %>" to confirm</label></dt>
+                <dd>
+                  <input class="form-control input-block"
+                    type="text"
+                    id="staff-revoke-creds-verify"
+                    name="verify"
+                    pattern="<%= case_insensitive_pattern(this_business.slug) %>"
+                    required
+                    autofocus>
+                </dd>
+              </dl>
+            <% end %>
+
+            <%= render(Primer::Alpha::Dialog::Footer.new(show_divider: true)) do %>
+              <%= render(Primer::Beta::Button.new(
+                type: :button,
+                data: { "close-dialog-id": "staff-revoke-credentials-and-authorizations-dialog" }
+              )) { "Cancel" } %>
+
+              <%= render(Primer::Beta::Button.new(
+                type: :submit,
+                scheme: :danger,
+                "data-disable-invalid": "",
+                "data-disable-with": ""
+              )) { "Revoke all credentials" } %>
+            <% end %>
+          <% end %>
+        <% end %>
+      </div>
+    <% end %>
+  <% end %>
+<% end %>
+<% end %>

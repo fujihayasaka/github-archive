@@ -1,0 +1,101 @@
+name: "Cleanup open pull request"
+description: "Cleanup the open pull request copilot created"
+inputs:
+  token:
+    description: "The GitHub token to use for API calls"
+    required: true
+  session_id:
+    description: "The id of the session for this CCA run"
+    required: true
+  repo_nwo:
+    description: "The owner/name of the repo that has the pull request"
+    required: true
+    type: string
+  capi_base_url:
+    description: "The Copilot API base URL"
+    required: false
+    default: "https://api.githubcopilot.com"
+  integration_id:
+    description: "The Copilot-Integration-Id header value"
+    required: false
+    default: "playground-dev"
+  github_api_url:
+    description: "The GitHub API base URL"
+    required: false
+    default: "https://api.github.com"
+  github_server_url:
+    description: "The GitHub Server URL"
+    required: false
+    default: "https://github.com"
+outputs:
+  pull_request_number:
+    description: "The pull request number that was cleaned up"
+    value: ${{ steps.cleanup.outputs.pull_request_number }}
+  pull_request_url:
+    description: "The pull request URL"
+    value: ${{ steps.cleanup.outputs.pull_request_url }}
+  cleanup_performed:
+    description: "Whether the PR was closed by this action"
+    value: ${{ steps.cleanup.outputs.cleanup_performed }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Cleanup open pull request
+      id: cleanup
+      shell: bash
+      run: |
+        echo "Cleaning up pull request associated with session ${{ inputs.session_id }}"
+        pull_request_id=$(curl -s --fail-with-body ${{ inputs.capi_base_url }}/agents/sessions/${{ inputs.session_id }} -H "Authorization: Bearer ${{ inputs.token }}" -H "Copilot-Integration-Id: ${{ inputs.integration_id }}" | jq -r '.resource_id')
+
+        echo "Found pull request ID $pull_request_id"
+
+        # Search both open and closed PRs to find the PR number for this ID.
+        # Paginate up to 5 pages (500 PRs) to avoid missing it.
+        pr_info=""
+        for page in 1 2 3 4 5; do
+          prs_http_code=$(curl -s -o /tmp/cleanup_prs.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ inputs.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            "${{ inputs.github_api_url }}/repos/${{ inputs.repo_nwo }}/pulls?state=all&sort=created&direction=desc&per_page=100&page=$page")
+
+          if [ "$prs_http_code" -lt 200 ] || [ "$prs_http_code" -ge 300 ]; then
+            echo "Warning: PRs API returned HTTP $prs_http_code on page $page, skipping cleanup"
+            echo "cleanup_performed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          pr_info=$(cat /tmp/cleanup_prs.json | jq -r --arg id "$pull_request_id" '.[] | select(.id == ($id | tonumber)) | "\(.number)\t\(.state)"')
+          if [ -n "$pr_info" ]; then
+            break
+          fi
+
+          # Stop paginating if we got fewer than 100 results (last page)
+          count=$(cat /tmp/cleanup_prs.json | jq length)
+          if [ "$count" -lt 100 ]; then
+            break
+          fi
+        done
+
+        if [ -z "$pr_info" ]; then
+          echo "Warning: no pull request found for id $pull_request_id after searching, skipping cleanup"
+          echo "cleanup_performed=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        IFS=$'\t' read -r pull_request_number pr_state <<< "$pr_info"
+        echo "Found pull request #$pull_request_number (state: $pr_state)"
+        echo "pull_request_number=$pull_request_number" >> "$GITHUB_OUTPUT"
+        echo "pull_request_url=${{ inputs.github_server_url }}/${{ inputs.repo_nwo }}/pull/$pull_request_number" >> "$GITHUB_OUTPUT"
+
+        if [ "$pr_state" = "closed" ]; then
+          echo "Pull request #$pull_request_number is already closed, nothing to do"
+          echo "cleanup_performed=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        curl -s -X PATCH -H "Authorization: Bearer ${{ inputs.token }}" -H "Accept: application/vnd.github+json" \
+          "${{ inputs.github_api_url }}/repos/${{ inputs.repo_nwo }}/pulls/$pull_request_number" \
+          -d '{"state": "closed"}'
+        echo "Closed pull request #$pull_request_number"
+        echo "cleanup_performed=true" >> "$GITHUB_OUTPUT"

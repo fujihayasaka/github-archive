@@ -1,0 +1,350 @@
+<%= render Primer::Beta::Subhead.new do |component| %>
+  <% component.with_heading do %>
+    <%= link_to "Safeguard limits", safeguard_limits_url, class: "Link--inTextBlock" %>
+    / Enterprise team limits
+  <% end %>
+<% end %>
+
+<%= render Primer::Alpha::Banner.new(scheme: :danger) do %>
+  <% if GitHub.single_business_environment? %>
+    These limits are in place to prevent overloading system resources. Please contact support if you'd
+    like to update these values.
+  <% else %>
+    This is for engineering use only. Please contact
+    <a href="https://github-grid.enterprise.slack.com/archives/CFC9WQ53Q" class="Link--inTextBlock" target="_blank">#enterprise-primitives</a>
+    if you'd like to update these values.
+  <% end %>
+<% end %>
+
+<%= render(Primer::Beta::Heading.new(tag: :h3)) { "Default global limits" } %>
+<p>
+  The default global enterprise team limits are listed below for reference.
+</p>
+
+<div>
+  <div>
+    <strong>Enterprise teams per enterprise limit</strong>:
+    <%= number_with_delimiter(
+      Configurable::BusinessTeamsPerBusinessLimit::DEFAULT_BUSINESS_TEAMS_PER_BUSINESS_LIMIT
+    ) %>
+  </div>
+  <div>
+    <strong>Enterprise teams per enterprise soft limit</strong>:
+    <%= number_with_delimiter(
+      Configurable::BusinessTeamsPerBusinessLimit::DEFAULT_BUSINESS_TEAMS_PER_BUSINESS_SOFT_LIMIT
+    ) %>
+  </div>
+  <div>
+    <strong>Members per enterprise team limit</strong>:
+    <%= number_with_delimiter(
+      Configurable::BusinessTeamMemberLimit::DEFAULT_BUSINESS_TEAM_MEMBER_LIMIT
+    ) %>
+  </div>
+  <div>
+    <strong>Members per enterprise team soft limit</strong>:
+    <%= number_with_delimiter(
+      Configurable::BusinessTeamMemberLimit::DEFAULT_BUSINESS_TEAM_MEMBER_SOFT_LIMIT
+    ) %>
+  </div>
+  <div>
+    <strong>Organization assignments per enterprise team limit</strong>:
+    <%= number_with_delimiter(
+      Configurable::BusinessTeamOrganizationAssignmentLimit::DEFAULT_BUSINESS_TEAM_ORGANIZATION_ASSIGNMENT_LIMIT
+    ) %>
+  </div>
+  <div>
+    <strong>Organization assignments per enterprise team soft limit</strong>:
+    <%= number_with_delimiter(
+      Configurable::BusinessTeamOrganizationAssignmentLimit::DEFAULT_BUSINESS_TEAM_ORGANIZATION_ASSIGNMENT_SOFT_LIMIT
+    ) %>
+  </div>
+  <% if global_target? %>
+    <div>
+      <strong>Concurrent organization bulk remove members cleanup job limit</strong>:
+      <%= number_with_delimiter(
+        Configurable::BusinessTeamOrgRemoveMemberJobLimit::DEFAULT_BUSINESS_TEAM_ORG_REMOVE_MEMBER_JOB_LIMIT
+      ) %>
+    </div>
+    <div>
+      <strong>Concurrent business team clear team indirect org access job limit</strong>:
+      <%= number_with_delimiter(
+        GitHub.default_business_team_clear_team_indirect_org_access_job_limit
+      ) %>
+    </div>
+    <div>
+      <strong>Concurrent business orchestration remove org user email settings job limit</strong>:
+      <%= number_with_delimiter(
+        Configurable::BusinessOrchestrationRemoveOrgUserEmailSettingsJobLimit::DEFAULT_BUSINESS_ORCHESTRATION_REMOVE_ORG_USER_EMAIL_SETTINGS_JOB_LIMIT
+      ) %>
+    </div>
+    <div>
+      <strong>Concurrent business orchestration notify repository access changed job limit</strong>:
+      <%= number_with_delimiter(
+        Configurable::BusinessOrchestrationNotifyRepositoryAccessChangedJobLimit::DEFAULT_BUSINESS_ORCHESTRATION_NOTIFY_REPOSITORY_ACCESS_CHANGED_JOB_LIMIT
+      ) %>
+    </div>
+    <div>
+      <strong>Concurrent business orchestration instrument removal job limit</strong>:
+      <%= number_with_delimiter(
+        Configurable::BusinessOrchestrationInstrumentRemovalJobLimit::DEFAULT_BUSINESS_ORCHESTRATION_INSTRUMENT_REMOVAL_JOB_LIMIT
+      ) %>
+    </div>
+  <% end %>
+</div>
+
+<% if global_target? %>
+  <%= render(Primer::Beta::Heading.new(tag: :h3, classes: "tmp-mt-4")) { "Configured global limits" } %>
+  <p>
+    You can set the global limits below. Global limits may also be overridden
+    at the individual enterprise level.
+  </p>
+<% else %>
+  <%= render(Primer::Beta::Heading.new(tag: :h3, classes: "tmp-mt-4")) { "Configured enterprise limits" } %>
+  <p>
+    You can set the limits for this enterprise below. The limits set for this enterprise override the
+    <%= link_to \
+      "global enterprise team limits",
+      stafftools_enterprise_team_limits_path,
+      class: "Link--inTextBlock" %>.
+  </p>
+<% end %>
+
+<%= form_with(
+  url: form_url,
+  method: "patch",
+  data: { test_selector: "enterprise-team-limits-form" }
+) do |form| %>
+
+  <%= render(Primer::Beta::Heading.new(tag: :h4, mb: 2, classes: "tmp-mt-4")) do %>
+    Enterprise teams per enterprise
+  <% end %>
+
+  <% unless global_target? %>
+    <% if limits_target.business_teams_limit_reached? %>
+      <%= render(Primer::Alpha::Banner.new(
+        icon: :stop,
+        scheme: :danger,
+        test_selector: "business-teams-current-state",
+        classes: "tmp-mb-3")) { business_teams_current_state } %>
+    <% elsif limits_target.business_teams_soft_limit_reached? %>
+      <%= render(Primer::Alpha::Banner.new(
+        icon: :alert,
+        scheme: :warning,
+        test_selector: "business-teams-current-state",
+        classes: "tmp-mb-3")) { business_teams_current_state } %>
+    <% else %>
+      <%= render(Primer::Alpha::Banner.new(
+        icon: :info,
+        scheme: :default,
+        test_selector: "business-teams-current-state",
+        classes: "tmp-mb-3")) { business_teams_current_state } %>
+    <% end %>
+  <% end %>
+
+  <dl class="form-group">
+    <dt>
+      <%= form.label "Hard limit", for: "teams_per_business_limit" %>
+    </dt>
+    <dd>
+      <%= form.text_field \
+        :teams_per_business_limit,
+        id: :teams_per_business_limit,
+        class: "form-control",
+        value: teams_per_business_limit %>
+    </dd>
+  </dl>
+
+  <dl class="form-group">
+    <dt>
+      <%= form.label "Soft limit", for: "teams_per_business_soft_limit" %>
+    </dt>
+    <dd>
+      <%= form.text_field \
+        :teams_per_business_soft_limit,
+        id: :teams_per_business_soft_limit,
+        class: "form-control",
+        value: teams_per_business_soft_limit %>
+    </dd>
+  </dl>
+
+  <%= render(Primer::Beta::Heading.new(tag: :h4, mb: 2, classes: "tmp-mt-4")) do %>
+    Members per enterprise team
+  <% end %>
+
+  <dl class="form-group">
+    <dt>
+      <%= form.label "Hard limit", for: "member_limit" %>
+    </dt>
+    <dd>
+      <%= form.text_field \
+        :member_limit,
+        id: :member_limit,
+        class: "form-control",
+        value: member_limit %>
+    </dd>
+  </dl>
+
+  <dl class="form-group">
+    <dt>
+      <%= form.label "Soft limit", for: "member_soft_limit" %>
+    </dt>
+    <dd>
+      <%= form.text_field \
+        :member_soft_limit,
+        id: :member_soft_limit,
+        class: "form-control",
+        value: member_soft_limit %>
+    </dd>
+  </dl>
+
+  <%= render(Primer::Beta::Heading.new(tag: :h4, mb: 2, classes: "tmp-mt-4")) do %>
+    Organization assignments per enterprise team
+  <% end %>
+
+  <dl class="form-group">
+    <dt>
+      <%= form.label "Hard limit", for: "organization_assignment_limit" %>
+    </dt>
+    <dd>
+      <%= form.text_field \
+        :organization_assignment_limit,
+        id: :organization_assignment_limit,
+        class: "form-control",
+        value: organization_assignment_limit %>
+    </dd>
+  </dl>
+
+  <dl class="form-group">
+    <dt>
+      <%= form.label "Soft limit", for: "organization_assignment_soft_limit" %>
+    </dt>
+    <dd>
+      <%= form.text_field \
+        :organization_assignment_soft_limit,
+        id: :organization_assignment_soft_limit,
+        class: "form-control",
+        value: organization_assignment_soft_limit %>
+    </dd>
+  </dl>
+
+  <% if global_target? %>
+    <%= render(Primer::Beta::Heading.new(tag: :h4, mb: 2, classes: "tmp-mt-4")) { "Background job limits" } %>
+
+    <dl class="form-group">
+      <dt>
+        <%= form.label "Concurrent business team clear team indirect org access job limit",
+          for: "clear_team_indirect_org_access_job_limit" %>
+      </dt>
+      <dd>
+        <%= form.text_field \
+          :clear_team_indirect_org_access_job_limit,
+          id: :clear_team_indirect_org_access_job_limit,
+          class: "form-control",
+          value: GitHub.business_team_clear_team_indirect_org_access_job_limit %>
+      </dd>
+    </dl>
+
+    <dl class="form-group">
+      <dt>
+        <%= form.label "Concurrent organization_bulk_remove_members_cleanup job limit",
+          for: "org_remove_member_job_limit" %>
+      </dt>
+      <dd>
+        <%= form.text_field \
+          :org_remove_member_job_limit,
+          id: :org_remove_member_job_limit,
+          class: "form-control",
+          value: GitHub.business_team_org_remove_member_job_limit %>
+      </dd>
+    </dl>
+
+    <dl class="form-group">
+      <dt>
+        <%= form.label "Concurrent business_orchestration_remove_org_user_email_settings job limit",
+          for: "orchestration_remove_org_user_email_settings_job_limit" %>
+      </dt>
+      <dd>
+        <%= form.text_field \
+          :orchestration_remove_org_user_email_settings_job_limit,
+          id: :orchestration_remove_org_user_email_settings_job_limit,
+          class: "form-control",
+          value: GitHub.business_orchestration_remove_org_user_email_settings_job_limit %>
+      </dd>
+    </dl>
+
+    <dl class="form-group">
+      <dt>
+        <%= form.label "Concurrent business_orchestration_notify_repository_access_changed job limit",
+          for: "orchestration_notify_repository_access_changed_job_limit" %>
+      </dt>
+      <dd>
+        <%= form.text_field \
+          :orchestration_notify_repository_access_changed_job_limit,
+          id: :orchestration_notify_repository_access_changed_job_limit,
+          class: "form-control",
+          value: GitHub.business_orchestration_notify_repository_access_changed_job_limit %>
+      </dd>
+    </dl>
+
+    <dl class="form-group">
+      <dt>
+        <%= form.label "Concurrent business_orchestration_instrument_removal job limit",
+          for: "orchestration_instrument_removal_job_limit" %>
+      </dt>
+      <dd>
+        <%= form.text_field \
+          :orchestration_instrument_removal_job_limit,
+          id: :orchestration_instrument_removal_job_limit,
+          class: "form-control",
+          value: GitHub.business_orchestration_instrument_removal_job_limit %>
+      </dd>
+    </dl>
+  <% end %>
+
+  <%= render(Primer::Beta::Button.new(
+    type: :submit,
+    data: { disable_with: "" }
+  )) { "Update" } %>
+<% end %>
+
+<% unless global_target? %>
+  <div>
+    <%= render(Primer::Alpha::Dialog.new(
+      id: "reset-limits",
+      title: "Confirm reset to global enterprise team limits"
+    )) do |c| %>
+      <% c.with_show_button(
+        scheme: :danger,
+        mt: 3
+      ) do |c| %>
+        Reset to global enterprise team limits
+      <% end %>
+      <% c.with_header(show_divider: true) do %>
+          Confirm reset to global enterprise team limits
+      <% end %>
+      <% c.with_body do %>
+        <p>
+          This will reset all the currently configured limit values shown above to the global enterprise team
+          limit values.
+        </p>
+      <% end %>
+      <% c.with_footer(show_divider: true) do %>
+        <%= render(Primer::Beta::Button.new(
+          data: { "close-dialog-id": "reset-limits" }
+        )) { "Cancel" } %>
+
+        <%= form_with(
+          url: stafftools_enterprise_enterprise_team_limits_path(limits_target.slug),
+          method: "delete",
+          data: { test_selector: "enterprise-team-limits-reset-form" }
+        ) do %>
+          <%= render(Primer::Beta::Button.new(
+            scheme: :danger,
+            type: :submit,
+            data: { disable_with: "" },
+            )) { "Reset to global enterprise team limits" } %>
+        <% end %>
+      <% end %>
+    <% end %>
+  </div>
+<% end %>

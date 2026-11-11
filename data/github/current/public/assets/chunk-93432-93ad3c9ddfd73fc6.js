@@ -1,0 +1,2 @@
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[93432],{92139(e,t,i){var n=i(331635),o=i(651135);class u extends HTMLElement{connectedCallback(){let e=document.getElementById("education-benefits-dialog");e&&e.addEventListener("close",()=>{window.location.reload()})}}(0,n.Cg)([(0,o.p_)("education-overview-component")],u)}}]);
+//# sourceMappingURL=chunk-93432-93ad3c9ddfd73fc6-63be964392b2212e.js.map

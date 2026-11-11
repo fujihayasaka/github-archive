@@ -1,0 +1,3 @@
+var e=`
+
+`,t=/^data:\s+/,n=`[DONE]`,r=class extends Error{error;constructor(e){super(e.description),this.error=e,this.name=`CopilotStreamingError`}},i=class{reader;constructor(e){this.reader=e}async*stream(){let i=new TextDecoder(`utf-8`),a=``;for(;;){let o,s;try{({value:o,done:s}=await this.reader.read())}catch{throw new r({type:`error`,errorType:`networkError`,description:`NETWORK_CONNECTION_INTERRUPTED`})}if(s)break;for(a+=i.decode(o);;){let r=a.indexOf(e);if(r===-1)break;let i=a.slice(0,r).replace(t,``);if(i===n)return;let o=JSON.parse(i);if(yield o,o?.type===`complete`)return;a=a.slice(r+2)}}}async stop(){return this.reader.cancel()}};export{i as t};

@@ -1,0 +1,2 @@
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[71686],{539749(t,i,c){var o=c(826316);c.d(i,{},{softNavigate:(t,i)=>{let c;try{c=new URL(String(t),o.cg?.location.href)}catch{return}("http:"===c.protocol||"https:"===c.protocol)&&(i?.action==="replace"?o.cg?.location.replace(c.href):o.cg?.location.assign(c.href))}})}}]);
+//# sourceMappingURL=chunk-71686-ed60c50f0ec4dec2-7bc2a2a1590b883b.js.map

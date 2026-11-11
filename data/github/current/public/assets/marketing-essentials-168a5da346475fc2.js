@@ -1,0 +1,3 @@
+performance.mark("js-parse-end:marketing-essentials-168a5da346475fc2.js");
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[79962],{152268(e,i,l){l(315785),l(763222),l(951117),(0,l(651135).Se)({"active-global-banners":()=>Promise.all([l.e(13726),l.e(52864)]).then(l.bind(l,529923)),"global-banner":()=>Promise.all([l.e(13726),l.e(62664)]).then(l.bind(l,255739)),"locale-selector":()=>Promise.all([l.e(13726),l.e(68015)]).then(l.bind(l,515730))})}},function(e){e.O(0,[22445,99778],function(){return e(e.s=152268)}),e.O()}]);
+//# sourceMappingURL=marketing-essentials-168a5da346475fc2-e6d5bdb039c12f96.js.map

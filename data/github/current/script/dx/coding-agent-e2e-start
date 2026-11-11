@@ -1,0 +1,258 @@
+#!/bin/bash
+#
+# Starts the full E2E flow for dotcom + sweagentd + locally-hosted CAPI.
+#
+# What gets started:
+#   1. GitHub dotcom server  (script/server, daemonized via overmind)
+#   2. sweagentd server      (script/server, daemonized via overmind)
+#   3. GitHub MCP server remote on port 9042 (optional, with --with-mcp-server)
+#
+# Any arguments passed to this script are currently ignored, except
+# --with-mcp-server which starts the GitHub MCP server remote on port 9042.
+# TODO: Support forwarding arguments to the dotcom script/server
+# (e.g. --debug, --vite, --multi-tenant). Note that --debug mode is
+# incompatible with daemonisation and would need special handling.
+#
+# To view live output, open separate terminal windows and run:
+#
+#   cd /workspaces/github  && overmind echo
+#   cd /workspaces/sweagentd && OVERMIND_SOCKET=/tmp/overmind-sweagentd.sock overmind echo
+#
+# Note: --debug mode is not currently supported by this script.
+# To use --debug, start the dotcom server manually in a separate
+# terminal and then run this script without arguments.
+#
+# After both are launched the script polls the following ports and reports
+# their status:
+#   - 80   : GitHub web
+#   - 2206 : CAPI
+#   - 2208 : sweagentd HTTP server
+#   - 2209 : sweagentd Twirp server
+#   - 9042 : GitHub MCP server remote (only with --with-mcp-server)
+#
+
+set -euo pipefail
+
+echo ""
+echo -e "\033[1;33m⚠️  WARNING: This script is still under development and may not work as expected.\033[0m"
+echo -e "\033[1;33m   Please report any issues to @github/codespaces-dpe.\033[0m"
+echo ""
+
+# ── Colour helpers ───────────────────────────────────────────────────────
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Colour
+
+# ── Configuration ────────────────────────────────────────────────────────
+MAX_WAIT=180        # Total seconds to wait for all ports
+POLL_INTERVAL=5     # Seconds between retries
+
+# ── Parse arguments ──────────────────────────────────────────────────────
+WITH_MCP_SERVER=false
+for arg in "$@"; do
+  case "$arg" in
+    --with-mcp-server) WITH_MCP_SERVER=true ;;
+  esac
+done
+
+declare -A PORT_LABELS=(
+  [80]="GitHub web"
+  [2206]="CAPI"
+  [2208]="sweagentd HTTP server"
+  [2209]="sweagentd Twirp server"
+)
+PORTS=(80 2206 2208 2209)
+
+if $WITH_MCP_SERVER; then
+  PORT_LABELS[9042]="GitHub MCP server remote"
+  PORTS+=(9042)
+fi
+
+# ── Helpers ──────────────────────────────────────────────────────────────
+github_overmind_running() {
+  if [ -S /tmp/overmind.sock ]; then
+    if lsof_output=$(lsof -F p /tmp/overmind.sock 2>/dev/null); then
+      overmind_pid=$(echo "$lsof_output" | grep '^p' | cut -c2-)
+      if ps -p "$overmind_pid" > /dev/null 2>&1; then
+        return 0
+      fi
+    fi
+  fi
+  return 1
+}
+
+sweagentd_overmind_running() {
+  if [ -S /tmp/overmind-sweagentd.sock ]; then
+    if lsof_output=$(lsof -F p /tmp/overmind-sweagentd.sock 2>/dev/null); then
+      overmind_pid=$(echo "$lsof_output" | grep '^p' | cut -c2-)
+      if ps -p "$overmind_pid" > /dev/null 2>&1; then
+        return 0
+      fi
+    fi
+  fi
+  return 1
+}
+
+check_port() {
+  local port=$1
+  if command -v nc &>/dev/null; then
+    nc -z 127.0.0.1 "$port" 2>/dev/null
+  else
+    (echo > /dev/tcp/127.0.0.1/"$port") 2>/dev/null
+  fi
+}
+
+# ── Start GitHub dotcom server ───────────────────────────────────────────
+if github_overmind_running; then
+  echo -e "${GREEN}  ✓ GitHub dotcom server is already running (overmind socket found).${NC}"
+else
+  echo -e "${YELLOW}▶ Starting GitHub dotcom server…${NC}"
+  # Clean up stale socket and tmux temp dirs if overmind is not actually running
+  rm -f /workspaces/github/.overmind.sock /tmp/overmind.sock
+  rm -rf /tmp/overmind-github-*
+
+  (
+    cd /workspaces/github
+    export OVERMIND_DAEMONIZE=1
+    script/server
+  ) || true  # overmind sends SIGUSR1 when daemonising; ignore the resulting exit code
+  echo -e "${GREEN}  ✓ GitHub dotcom server launched (daemonised).${NC}"
+  echo -e "    View output: ${YELLOW}cd /workspaces/github && overmind echo${NC}"
+fi
+
+# ── Start sweagentd server ───────────────────────────────────────────────
+# sweagentd depends on dotcom services (kafka-lite on 9092, aqueduct-lite on 18081).
+# Wait for them before starting sweagentd.
+if ! sweagentd_overmind_running; then
+  echo -e "${YELLOW}▶ Waiting for dotcom dependencies before starting sweagentd…${NC}"
+  for dep_port in 9092 18081; do
+    echo -ne "  Waiting for port ${dep_port}..."
+    while ! check_port "$dep_port"; do
+      echo -n "."
+      sleep "$POLL_INTERVAL"
+    done
+    echo -e " ${GREEN}up${NC}"
+  done
+
+  # Stop dotcom's github-mcp-server-remote which defaults to port 2209,
+  # conflicting with sweagentd's Twirp server on the same port.
+  if github_overmind_running; then
+    echo -e "  Stopping dotcom's github-mcp-server-remote (port 2209 conflict with sweagentd Twirp)…"
+    (cd /workspaces/github && overmind stop github-mcp-server-remote) 2>/dev/null || true
+  fi
+fi
+
+if sweagentd_overmind_running; then
+  echo -e "${GREEN}  ✓ sweagentd server is already running (overmind socket found).${NC}"
+else
+  echo -e "${YELLOW}▶ Starting sweagentd server…${NC}"
+  # Clean up stale socket and tmux temp dirs if overmind is not actually running
+  rm -f /tmp/overmind-sweagentd.sock
+  rm -rf /tmp/overmind-sweagentd-*
+
+  (
+    cd /workspaces/sweagentd
+    export OVERMIND_DAEMONIZE=1
+    export OVERMIND_SOCKET="/tmp/overmind-sweagentd.sock"
+    script/server
+  ) || true  # overmind sends SIGUSR1 when daemonising; ignore the resulting exit code
+  echo -e "${GREEN}  ✓ sweagentd server launched (daemonised).${NC}"
+  echo -e "    View output: ${YELLOW}cd /workspaces/sweagentd && OVERMIND_SOCKET=/tmp/overmind-sweagentd.sock overmind echo${NC}"
+fi
+
+# ── Start GitHub MCP server remote (optional) ────────────────────────────
+if $WITH_MCP_SERVER; then
+  MCP_REPO="/workspaces/github-mcp-server-remote"
+  if check_port 9042; then
+    echo -e "${GREEN}  ✓ GitHub MCP server remote is already running on port 9042.${NC}"
+  elif [ -f "${MCP_REPO}/cmd/http/main.go" ]; then
+    echo -e "${YELLOW}▶ Starting GitHub MCP server remote on port 9042…${NC}"
+    (
+      cd "$MCP_REPO"
+      export OTEL_RESOURCE_ATTRIBUTES="service.name=github-mcp-server-remote"
+      export GITHUB_TELEMETRY_LOGS_LEVEL="debug"
+      export GITHUB_API_URL="http://api.github.localhost/"
+      export PORT=9042
+      nohup go run ./cmd/http/main.go > /tmp/github-mcp-server-remote.log 2>&1 &
+    )
+    echo -e "${GREEN}  ✓ GitHub MCP server remote launched on port 9042.${NC}"
+    echo -e "    View output: ${YELLOW}tail -f /tmp/github-mcp-server-remote.log${NC}"
+    echo ""
+    echo -e "    ${YELLOW}For triage agent workflow:${NC}"
+    echo -e "    ${YELLOW}  Make sure the MCP server URL in Issues::Domain::Triage#github_mcp_server_config${NC}"
+    echo -e "    ${YELLOW}  (packages/issues/app/public/issues/domain/triage.rb) points to:${NC}"
+    echo -e "    ${YELLOW}    http://localhost:9042/mcp${NC}"
+    echo ""
+    echo -e "    ${YELLOW}For other workflows:${NC}"
+    echo -e "    ${YELLOW}  Make sure you set the getCapiMcpUrl function${NC}"
+    echo -e "    ${YELLOW}  (https://github.com/github/sweagentd/blob/e0f9dad1073803caf0b901266cc6090f0d0fb082/runtime/src/mcp-client/server-config-processor.ts#L289-L295)${NC}"
+    echo -e "    ${YELLOW}  in the mcp client to match port 9042.${NC}"
+  else
+    echo -e "${RED}  ✗ github/github-mcp-server-remote is not cloned.${NC}"
+    echo -e "    Run ${YELLOW}script/setup-github-mcp-server${NC} first, then re-run this script."
+  fi
+fi
+
+# ── Poll ports ───────────────────────────────────────────────────────────
+echo ""
+echo -e "${YELLOW}▶ Waiting for services to become available (timeout: ${MAX_WAIT}s)…${NC}"
+
+declare -A PORT_STATUS
+for port in "${PORTS[@]}"; do
+  PORT_STATUS[$port]="pending"
+done
+
+elapsed=0
+while (( elapsed < MAX_WAIT )); do
+  all_up=true
+  for port in "${PORTS[@]}"; do
+    if [[ "${PORT_STATUS[$port]}" == "pending" ]]; then
+      if check_port "$port"; then
+        PORT_STATUS[$port]="up"
+        echo -e "  ${GREEN}✓ Port ${port} (${PORT_LABELS[$port]}) is up${NC}"
+      else
+        all_up=false
+      fi
+    fi
+  done
+
+  if $all_up; then
+    break
+  fi
+
+  sleep "$POLL_INTERVAL"
+  elapsed=$(( elapsed + POLL_INTERVAL ))
+done
+
+# ── Final status report ─────────────────────────────────────────────────
+echo ""
+all_ok=true
+for port in "${PORTS[@]}"; do
+  if [[ "${PORT_STATUS[$port]}" != "up" ]]; then
+    echo -e "  ${RED}✗ Port ${port} (${PORT_LABELS[$port]}) is NOT reachable after ${MAX_WAIT}s${NC}"
+    all_ok=false
+  fi
+done
+
+if $all_ok; then
+  echo -e "${GREEN}All services are up and running!${NC}"
+  echo ""
+  echo "To view live server output (open in separate terminal windows):"
+  echo "  • GitHub dotcom : cd /workspaces/github  && overmind echo"
+  echo "  • sweagentd     : cd /workspaces/sweagentd  && OVERMIND_SOCKET=/tmp/overmind-sweagentd.sock overmind echo"
+  echo ""
+  echo "  Note: overmind echo will only work once the servers have finished"
+  echo "  bootstrapping and their sockets are created."
+  echo ""
+  echo "To stop everything:"
+  echo "  • GitHub dotcom : cd /workspaces/github  && overmind quit"
+  echo "  • sweagentd     : cd /workspaces/sweagentd && OVERMIND_SOCKET=/tmp/overmind-sweagentd.sock overmind quit"
+else
+  echo ""
+  echo -e "${RED}⚠  Some services failed to start within ${MAX_WAIT}s.${NC}"
+  echo "Troubleshooting tips:"
+  echo "  • Check GitHub dotcom logs : cd /workspaces/github  && overmind echo"
+  echo "  • Check sweagentd logs     : cd /workspaces/sweagentd && OVERMIND_SOCKET=/tmp/overmind-sweagentd.sock overmind echo"
+  exit 1
+fi

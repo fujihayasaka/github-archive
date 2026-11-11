@@ -1,0 +1,87 @@
+<%
+# Example of selective rendering based on the current request path
+#
+# First define the paths you want to render the banner on. This has to be an Array or Nil.
+#  `my_paths = ["/features/copilot", "/features/copilot/plans", "/features/preview"] if FeatureFlag.vexi.enabled?(:my_feature_flag, current_user, default: false)`
+#
+# The `allowed_on_pages?` helper is used to specify which paths the banner should be rendered on. It takes an `allowed_paths` option and an `excluded_paths` option which can be Array or Nil. Remember render is true by default.
+# Within the banner data hash, you can use the `render` key to specify which paths the banner should be rendered on.
+#  `render: allowed_on_pages?(allowed_paths: my_paths)`
+
+# And for the other banner, you can use the `render` key to specify which paths the banner should NOT be rendered on.
+#  `render: allowed_on_pages?(excluded_paths: my_paths)`
+#
+# @see app/helpers/site_helper.rb:120
+
+# Note that the `allowed_on_pages?` helper doesn't support wildcard matching
+#  `render: allowed_on_pages?(allowed_paths: ["/resources/*"]),`
+# If you want to include/exclude a whole section of the site, you can use `request.path.starts_with?("/section")`
+
+# If you want to exclude locale paths (banner shouldn't be seen in other languages),
+# you can use `render: allowed_on_pages?(excluded_paths: ["/team"]) && !params[:locale]`
+
+# Example banner
+# {
+#   uid: "my_unique_id",
+#   title: "My Banner Title",
+#   link: "https://my-url.com/?utm_source=github&utm_medium=banner&utm_campaign=my_campaign",
+#   link_label: "Click now",
+#   icon: :megaphone, # Either an Octicon
+#   icon: image_path("modules/site/global-banner/my_unique_id.svg"), # Or image asset
+#   classes: "fgColor-onEmphasis fgColor-onEmphasis fgColor-onEmphasis", #   render: allowed_on_pages?(excluded_paths: ["/team"]),
+#   enabled: FeatureFlag.vexi.enabled?(:site_my_unique_id_global_banner, current_user, default: false),
+# },
+
+  global_banners = [
+    {
+      uid: "my_uid",
+      title: "My banner title",
+      link: "https://github.com",
+      link_label: "Click me",
+      render: allowed_on_pages?(allowed_paths: ["/home"]),
+      enabled: false, # We just keep this so we don't have to delete the request_path_parametrize helper
+    },
+    {
+      uid: "universe26_seblaunch",
+      title: "Save $600 with Super Early Bird passes through July 8.",
+      link: "https://githubuniverse.com/?utm_source=github&utm_medium=banner&utm_campaign=gb_seblaunch_uni26",
+      link_label: "Register now",
+      classes: "global-banner--universe_26",
+      render: allowed_on_pages?(allowed_paths: ["/open-source/sponsors", "/open-source/accelerator", "/enterprise", "/enterprise/startups", "/features/copilot/copilot-business", "/team", "/security/advanced-security"]),
+      enabled: FeatureFlag.vexi.enabled?(:universe26_banners_seblaunch, current_user, default: false),
+      mode: "light",
+      custom_design: "universe_26",
+    },
+    {
+      uid: "pricing_update_2026",
+      icon: :bell,
+      title: _("Promotion available for Copilot Business and Copilot Enterprise customers through August 2026 —"),
+      link: "https://github.blog/news-insights/company-news/github-copilot-is-moving-to-usage-based-billing/?utm_source=github&utm_medium=banner&utm_campaign=pricing_update_2026&utm_content=learn_more",
+      link_label: _("Learn more"),
+      classes: "bgColor-muted",
+      render: allowed_on_pages?(allowed_paths: ["/pricing", "/features/copilot/plans"]),
+      enabled: FeatureFlag.vexi.enabled?(:site_banner_pricing_update_2026, current_user, default: false),
+    },
+    {
+      uid: "desktop_copilot_app",
+      title: "Looking for an agent-driven desktop experience?",
+      link: "https://github.com/features/ai/github-app?utm_source=github&utm_medium=banner&utm_campaign=desktop_copilot_app",
+      link_label: "Download the GitHub Copilot app",
+      render: allowed_on_pages?(allowed_paths: ["/apps/desktop"]),
+      enabled: FeatureFlag.vexi.enabled?(:site_banner_desktop_copilot_app, current_user, default: false),
+    },
+  ]
+
+  active_global_banners = global_banners.select { |banner| banner[:enabled] }
+  active_global_banners_uids = active_global_banners.map { |banner| banner[:uid] }.join(",")
+%>
+
+<% for banner in active_global_banners %>
+  <%= render Site::GlobalBannerComponent.new(**banner) if !user_disabled_global_banner?(banner[:uid]) %>
+<% end %>
+
+<% if !logged_in? %>
+  <%= javascript_bundle("global-banner-disable.js") %>
+<% end %>
+
+<active-global-banners data-banners="<%= active_global_banners_uids %>"></active-global-banners>

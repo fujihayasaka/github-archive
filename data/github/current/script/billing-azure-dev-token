@@ -1,0 +1,38 @@
+#!/bin/bash
+# Fetches an Azure Management API access token via Azure CLI and exports it
+# as BILLING_AZURE_DEV_TOKEN for local development.
+#
+# In development, the subscription clients skip the OAuth code exchange
+# entirely and store this token directly as the Bearer token for ARM calls.
+# This bypasses both client_secret and OIDC authentication since neither
+# is available outside a deployed environment.
+#
+# Usage:
+#   eval "$(script/billing-azure-dev-token)"
+#
+# Prerequisites:
+#   - Azure CLI installed (https://aka.ms/InstallAzureCLIDeb)
+#   - Logged in via `az login`
+
+set -e
+
+if ! command -v az &> /dev/null; then
+  echo "Error: Azure CLI (az) is not installed." >&2
+  echo "Install it with: curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash" >&2
+  exit 1
+fi
+
+if ! az account show &> /dev/null 2>&1; then
+  echo "Not logged in to Azure CLI. Running 'az login'..." >&2
+  az login >&2
+fi
+
+TOKEN=$(az account get-access-token --resource https://management.azure.com --query accessToken -o tsv)
+
+if [ -z "$TOKEN" ]; then
+  echo "Error: Failed to get Azure token." >&2
+  exit 1
+fi
+
+echo "export BILLING_AZURE_DEV_TOKEN='${TOKEN}'"
+echo "# Token fetched. Expires in ~1 hour. Re-run this script to refresh." >&2

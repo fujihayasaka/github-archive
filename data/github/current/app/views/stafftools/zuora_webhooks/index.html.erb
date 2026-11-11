@@ -1,0 +1,244 @@
+<% page_info title: "Zuora Webhooks", container_xl: true %>
+<%= render layout: "stafftools/stafftools" do %>
+  <%# Page Header with tabs %>
+  <div class="d-flex flex-items-center flex-justify-between flex-wrap tmp-mb-3" style="gap: 8px;">
+    <div>
+      <h2 class="f2 mb-0 d-flex flex-items-center" style="gap: 8px;">
+        <%= render(Primer::Beta::Octicon.new(:webhook)) %>
+        Zuora Webhooks
+      </h2>
+      <p class="f6 color-fg-muted mb-0">Operational triage dashboard for unprocessed Zuora billing webhooks</p>
+    </div>
+    <nav class="UnderlineNav" aria-label="Billing webhooks" style="border-bottom: none;">
+      <%= link_to "Zuora webhooks", stafftools_zuora_webhooks_path, class: "UnderlineNav-item selected" %>
+      <%= link_to "Stripe webhooks", stafftools_stripe_webhooks_path, class: "UnderlineNav-item" %>
+    </nav>
+  </div>
+
+  <%# Warning Banner %>
+  <%= render(Primer::Alpha::Banner.new(icon: :alert, scheme: :warning, classes: "tmp-mb-3")) do %>
+    Webhooks created in the past 5 minutes are excluded.
+    <%= link_to "See Playbook →", "https://github.com/github/gitcoin/blob/main/docs/playbook/alerts/zuora_webhook_errors.md", class: "Link--inTextBlock" %>
+  <% end %>
+
+  <%# Stat Cards %>
+  <div class="d-flex flex-wrap tmp-mb-4" style="gap: 12px;">
+    <a href="<%= stafftools_zuora_webhooks_path(webhook_type: "pending") %>" class="Box tmp-p-3 rounded-2 no-underline color-fg-default" style="min-width: 160px; flex: 1 1 160px; transition: box-shadow 0.15s;" <%= test_selector("stat-card-pending") %>>
+      <div class="d-flex flex-items-center mb-1" style="gap: 6px;">
+        <%= render(Primer::Beta::Octicon.new(:clock, color: :attention)) %>
+        <span class="f6 color-fg-muted text-bold">Pending</span>
+      </div>
+      <span class="f1 text-bold color-fg-attention"><%= pending_count %></span>
+      <p class="f6 color-fg-muted mb-0">Awaiting processing</p>
+    </a>
+
+    <a href="<%= stafftools_zuora_webhooks_path(webhook_type: "investigating") %>" class="Box tmp-p-3 rounded-2 no-underline color-fg-default" style="min-width: 160px; flex: 1 1 160px; transition: box-shadow 0.15s;" <%= test_selector("stat-card-investigating") %>>
+      <div class="d-flex flex-items-center mb-1" style="gap: 6px;">
+        <%= render(Primer::Beta::Octicon.new(:search, color: :accent)) %>
+        <span class="f6 color-fg-muted text-bold">Investigating</span>
+      </div>
+      <span class="f1 text-bold color-fg-accent"><%= investigating_count %></span>
+      <p class="f6 color-fg-muted mb-0">Under review</p>
+    </a>
+
+    <a href="<%= stafftools_zuora_webhooks_path(webhook_type: "ignored") %>" class="Box tmp-p-3 rounded-2 no-underline color-fg-default" style="min-width: 160px; flex: 1 1 160px; transition: box-shadow 0.15s;" <%= test_selector("stat-card-ignored") %>>
+      <div class="d-flex flex-items-center mb-1" style="gap: 6px;">
+        <%= render(Primer::Beta::Octicon.new(:archive, color: :muted)) %>
+        <span class="f6 color-fg-muted text-bold">Ignored</span>
+      </div>
+      <span class="f1 text-bold color-fg-muted"><%= ignored_count %></span>
+      <p class="f6 color-fg-muted mb-0">Permanently dismissed</p>
+    </a>
+
+    <% if stale_count > 0 %>
+      <div class="Box tmp-p-3 rounded-2" style="min-width: 160px; flex: 1 1 160px; border-left: 3px solid var(--borderColor-danger-emphasis, #cf222e);" <%= test_selector("stat-card-stale") %>>
+        <div class="d-flex flex-items-center mb-1" style="gap: 6px;">
+          <%= render(Primer::Beta::Octicon.new(:stop, color: :danger)) %>
+          <span class="f6 color-fg-muted text-bold">Stale Alert</span>
+        </div>
+        <span class="f1 text-bold color-fg-danger"><%= stale_count %></span>
+        <p class="f6 color-fg-muted mb-0">Approaching alert threshold</p>
+      </div>
+    <% end %>
+  </div>
+
+  <%# Investigating Webhooks Panel %>
+  <% if investigating_webhooks.any? %>
+    <details open class="tmp-mb-4">
+      <summary class="Box-header rounded-top-2 cursor-pointer tmp-p-3" style="background: var(--bgColor-accent-muted, #ddf4ff); border: 1px solid var(--borderColor-accent-muted, #54aeff66); list-style: none;">
+        <div class="d-flex flex-items-center">
+          <%= render(Primer::Beta::Octicon.new(:search, color: :accent, mr: 2)) %>
+          <span class="text-bold color-fg-accent">Active Investigations</span>
+          <%= render(Primer::Beta::Counter.new(count: investigating_webhooks.size, scheme: :primary, ml: 2)) %>
+          <span class="ml-auto"><%= render(Primer::Beta::Octicon.new(:"chevron-down", color: :muted)) %></span>
+        </div>
+      </summary>
+      <div class="Box rounded-top-0 tmp-p-3" style="border: 1px solid var(--borderColor-accent-muted, #54aeff66); border-top: 0;">
+        <div class="d-flex flex-column" style="gap: 8px;">
+          <% investigating_webhooks.each do |inv_webhook| %>
+            <div class="Box tmp-p-3 rounded-2 color-bg-default">
+              <div class="d-flex flex-items-center flex-wrap" style="gap: 8px;">
+                <span class="text-bold f5">#<%= inv_webhook.id %></span>
+                <%= render(Primer::Beta::Label.new(scheme: :secondary)) { inv_webhook.kind.titleize } %>
+                <span class="f6 color-fg-muted">· <%= time_ago_in_words(inv_webhook.created_at) %> ago</span>
+                <% if inv_webhook.investigation_notes_url.present? %>
+                  <span class="ml-auto">
+                    <%= render partial: "stafftools/zuora_webhooks/issue_pill", locals: { webhook: inv_webhook } %>
+                  </span>
+                <% end %>
+              </div>
+              <% if inv_webhook.investigation_notes.present? %>
+                <p class="f6 color-fg-muted mt-1 mb-0" style="max-width: 600px;"><%= truncate(inv_webhook.investigation_notes, length: 120) %></p>
+              <% end %>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    </details>
+  <% end %>
+
+  <%# Toolbar: Actions + Filter %>
+  <div class="d-flex flex-items-center flex-justify-between flex-wrap tmp-mb-3" style="gap: 8px;">
+    <div class="d-flex flex-items-center" style="gap: 8px;">
+      <%= form_tag retry_all_stafftools_zuora_webhooks_path, method: :post do %>
+        <%= render Primer::Beta::Button.new(type: :submit, size: :small, "data-confirm": "Are you sure you want to retry all webhooks? This will make a lot of requests to the Zuora API and should not be run during the daily billing run. This command will only re-run webhooks older than 5 minutes.") do %>
+          <%= render(Primer::Beta::Octicon.new(:sync, mr: 1)) %>
+          Retry All Pending
+        <% end %>
+      <% end %>
+
+      <%= form_tag verify_publishes_stafftools_zuora_webhooks_path, method: :post do %>
+        <%= render Primer::Beta::Button.new(type: :submit, size: :small) do %>
+          Verify Hydro Publishes
+        <% end %>
+      <% end %>
+    </div>
+
+    <%= render(Primer::Experimental::ActionMenu.new(menu_id: "filter")) do |component| %>
+      <% component.with_trigger do |trigger| %>
+        <% trigger.with_trailing_action_icon(icon: :"triangle-down") %>
+        Filter: <%= show_status.tr('_', ' ') %>
+      <% end %>
+      <% component.with_item(tag: :a, href: stafftools_zuora_webhooks_path) do %>
+        All
+      <% end %>
+      <% component.with_item(tag: :a, href: stafftools_zuora_webhooks_path(webhook_type: "pending")) do %>
+        Pending
+      <% end %>
+      <% component.with_item(tag: :a, href: stafftools_zuora_webhooks_path(webhook_type: "investigating")) do %>
+        Investigating
+      <% end %>
+      <% component.with_item(tag: :a, href: stafftools_zuora_webhooks_path(webhook_type: "invoiced")) do %>
+        Invoiced
+      <% end %>
+      <% component.with_item(tag: :a, href: stafftools_zuora_webhooks_path(webhook_type: "ignored")) do %>
+        Ignored
+      <% end %>
+    <% end %>
+  </div>
+
+  <%# Webhooks Table %>
+  <div class="Box">
+    <div class="Box-header d-flex flex-items-center flex-justify-between">
+      <h3 class="Box-title f5"><%= show_status %> Zuora Webhooks</h3>
+      <% if webhooks.any? %>
+        <%= render(Primer::Beta::Counter.new(count: webhooks.total_entries, scheme: :primary)) %>
+      <% end %>
+    </div>
+    <div class="Box-body p-0">
+      <table class="stafftools-table width-full" style="border-collapse: collapse;">
+        <% if webhooks.any? %>
+          <thead>
+            <tr class="color-bg-subtle">
+              <th class="text-left p-2 tmp-pl-3 f6 color-fg-muted" style="width: 32px;"><span class="sr-only">Status</span></th>
+              <th class="text-left p-2 f6 color-fg-muted">ID</th>
+              <th class="text-left p-2 f6 color-fg-muted">Kind</th>
+              <th class="text-left p-2 f6 color-fg-muted">Account</th>
+              <th class="text-left p-2 f6 color-fg-muted">Age</th>
+              <th class="text-left p-2 f6 color-fg-muted">Issue</th>
+              <th class="text-right p-2 tmp-pr-3 f6 color-fg-muted" style="width: 120px;">Actions</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <% webhooks.each do |webhook| %>
+              <% is_stale = webhook.pending? && webhook.created_at < Billing::ZuoraWebhook::STALE_THRESHOLD.ago %>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);<%= ' background: var(--bgColor-danger-muted, #ffebe9);' if is_stale %>">
+                <td class="p-2 tmp-pl-3 text-center">
+                  <% if is_stale %>
+                    <%= render(Primer::Beta::Octicon.new(:clock, color: :danger)) %>
+                  <% elsif webhook.processed? %>
+                    <%= render(Primer::Beta::Octicon.new(:check, color: :success)) %>
+                  <% elsif webhook.pending? %>
+                    <%= render(Primer::Beta::Octicon.new(:clock, color: :attention)) %>
+                  <% elsif webhook.ignored? %>
+                    <%= render(Primer::Beta::Octicon.new(:archive, color: :muted)) %>
+                  <% elsif webhook.investigating? %>
+                    <%= render(Primer::Beta::Octicon.new(:search, color: :accent)) %>
+                  <% end %>
+                </td>
+                <td class="p-2 text-bold"><%= webhook.id %></td>
+                <td class="p-2">
+                  <%= render(Primer::Beta::Label.new(scheme: :secondary)) { webhook.kind.titleize } %>
+                </td>
+                <td class="p-2">
+                  <% if webhook.account_id %>
+                    <a href="<%= webhook.customer_account_url %>" class="Link--primary f6" target="_blank" rel="noopener">...<%= webhook.account_id.last(5) %> ↗</a>
+                    <% if webhook.business_account? %>
+                      <span class="d-block f6 color-fg-muted"><%= link_to webhook.account.name, stafftools_enterprise_path(webhook.account), class: "Link--muted", title: "Stafftools page for business account" %></span>
+                    <% elsif webhook.account %>
+                      <span class="d-block f6 color-fg-muted"><%= link_to "@#{webhook.account.login}", billing_stafftools_user_path(webhook.account), class: "Link--muted", title: "Stafftools Billing page" %></span>
+                    <% end %>
+                  <% else %>
+                    <span class="f6 color-fg-muted">N/A</span>
+                  <% end %>
+                </td>
+                <td class="p-2 f6 no-wrap">
+                  <% if is_stale %>
+                    <span class="color-fg-danger text-bold"><%= time_ago_in_words(webhook.created_at) %> ago ⚠</span>
+                  <% else %>
+                    <span class="color-fg-muted"><%= time_ago_in_words(webhook.created_at) %> ago</span>
+                  <% end %>
+                </td>
+                <td class="p-2">
+                  <% if webhook.investigation_notes_url.present? %>
+                    <%= render partial: "stafftools/zuora_webhooks/issue_pill", locals: { webhook: webhook } %>
+                  <% else %>
+                    <span class="f6 color-fg-muted">&mdash;</span>
+                  <% end %>
+                </td>
+                <td class="p-2 tmp-pr-3 text-right no-wrap">
+                  <%= render partial: "stafftools/zuora_webhooks/detail_drawer", locals: { webhook: webhook } %>
+                  <% unless webhook.processed? || webhook.ignored? %>
+                    <%= form_tag stafftools_zuora_webhook_perform_path(webhook), class: "inline-form", method: :put do %>
+                      <%= render Primer::Beta::Button.new(type: :submit, id: "process_#{webhook.id}", scheme: :invisible, size: :small, "aria-label": "Process webhook", "data-confirm": "Are you sure you want to process this webhook?") do |component| %>
+                        <% component.with_tooltip(text: "Process webhook") %>
+                        <%= render(Primer::Beta::Octicon.new(:sync)) %>
+                      <% end %>
+                    <% end %>
+                    <%= form_tag stafftools_zuora_webhook_ignore_path(webhook), class: "inline-form", method: :put do %>
+                      <%= render Primer::Beta::Button.new(type: :submit, id: "ignore_#{webhook.id}", scheme: :invisible, size: :small, "aria-label": "Ignore webhook", "data-confirm": "Are you sure you want to permanently ignore this webhook?") do |component| %>
+                        <% component.with_tooltip(text: "Ignore webhook") %>
+                        <%= render(Primer::Beta::Octicon.new(:archive)) %>
+                      <% end %>
+                    <% end %>
+                  <% end %>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        <% else %>
+          <%= render Primer::Beta::Blankslate.new(test_selector: "zuora_webhooks_blank_slate") do |c| %>
+            <% c.with_visual_icon(icon: :webhook) %>
+            <% c.with_heading(tag: :h2).with_content("No pending Zuora webhooks found!") %>
+          <% end %>
+        <% end %>
+      </table>
+    </div>
+  </div>
+  <% if webhooks.any? && webhooks.total_pages > 1 %>
+    <nav class="paginate-container" aria-label="Pagination">
+      <%= will_paginate(webhooks) %>
+    </nav>
+  <% end %>
+<% end %>

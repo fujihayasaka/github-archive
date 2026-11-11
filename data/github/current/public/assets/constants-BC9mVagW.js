@@ -1,0 +1,1 @@
+import{o as e}from"./chunk-jRWAZmH_.js";import{Qp as t}from"./index-M6n1L9AM.js";var n=e(t());function r(e){let t=(0,n.lazy)(e);return Object.assign(t,{preload:async()=>{await e()}})}var i=`GLOBAL_NAV_USER_MENU`;export{r as n,i as t};

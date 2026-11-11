@@ -1,0 +1,159 @@
+<% pull_request_creation_config = PullRequestCreationConfig.new(repo) %>
+<% limit_enabled = pull_request_creation_config.pull_request_creation_cap_enabled? %>
+<% cap = pull_request_creation_config.pull_request_creation_cap %>
+<% bypass_count = pull_request_creation_config.pull_request_creation_cap_bypass_user_ids.size %>
+
+<turbo-frame id="pull-request-creation-cap">
+  <p class="note tmp-mt-2">
+    Restrict how many pull requests users without write access can have open at one time and add specific users to a bypass list. These settings stay in effect until you change them.
+  </p>
+
+  <div class="js-toggler-container pr-cap-toggler <% if limit_enabled %>on<% end %>">
+    <p class="note tmp-mt-2 pr-cap-show-when-off">
+      Currently, users without write access can open an unlimited number of pull requests.
+    </p>
+
+    <p class="note tmp-mt-2 pr-cap-show-when-on">
+      Currently, users without write access can have up to <strong><%= cap %></strong> open <%= "pull request".pluralize(cap) %> at a time.<% if bypass_count > 0 %> <strong><%= bypass_count %></strong> <%= "user".pluralize(bypass_count) %> <%= bypass_count == 1 ? "bypasses" : "bypass" %> the limit.<% end %>
+    </p>
+
+    <div class="tmp-mt-2 form-checkbox">
+      <div class="js-repo-option">
+        <%= form_tag repository_pull_request_creation_cap_toggle_path(repo.owner, repo), :method => :put, :class => "js-repo-features-form", "data-autosubmit" => true do %>
+          <input type="hidden" name="enable_pull_request_creation_cap" value="0">
+          <input type="checkbox"
+            name="enable_pull_request_creation_cap"
+            id="pull_request_creation_cap_checkbox"
+            value="1"
+            class="js-toggler-target"
+            <%= "checked" if limit_enabled %>
+          >
+          <label for="pull_request_creation_cap_checkbox">Limit open pull requests from users without write access</label>
+          <span class="hx_status-indicator status-indicator ml-1 js-status-indicator">
+            <%= render(Primer::Beta::Spinner.new(size: :small, classes: "status-indicator-spinner")) %>
+            <%= render(Primer::Beta::Octicon.new(icon: "check")) %>
+            <%= render(Primer::Beta::Octicon.new(icon: "x")) %>
+          </span>
+        <% end %>
+      </div>
+
+      <div class="pr-cap-show-when-on">
+        <%= form_with url: repository_pull_request_creation_cap_path(repo.owner, repo), method: :put, data: { turbo_frame: "pull-request-creation-cap" } do %>
+          <div class="tmp-mt-3">
+            <label for="pull_request_creation_cap_input">Maximum open pull requests per user</label>
+            <div class="d-flex flex-items-center gap-1">
+              <%= number_field_tag(
+                :pull_request_creation_cap,
+                pull_request_creation_config.pull_request_creation_cap,
+                min: Configurable::PullRequestCreationCap::MINIMUM_CAP,
+                max: Configurable::PullRequestCreationCap::MAXIMUM_CAP,
+                step: 1,
+                class: "form-control d-flex flex-column",
+                id: "pull_request_creation_cap_input",
+                style: "width: 14em",
+                "aria-describedby": "pull_request_creation_cap_description",
+              ) %>
+              <%= render(Primer::Beta::Button.new(type: :submit)) { "Save" } %>
+            </div>
+            <p class="note">Enter a number from <%= Configurable::PullRequestCreationCap::MINIMUM_CAP %> to <%= Configurable::PullRequestCreationCap::MAXIMUM_CAP %></p>
+            <span id="pull_request_creation_cap_description" class="sr-only">Enter a number from <%= Configurable::PullRequestCreationCap::MINIMUM_CAP %> to <%= Configurable::PullRequestCreationCap::MAXIMUM_CAP %>. Users who have more open PRs than the above limit will not be able to create new PRs.</span>
+          </div>
+        <% end %>
+
+        <% if bypass_list_enabled? %>
+          <% bypass_users = User.where(id: pull_request_creation_config.pull_request_creation_cap_bypass_user_ids).to_a %>
+          <% remove_selected_form_id = "pr-cap-bypass-remove-selected-#{repo.id}" %>
+
+          <%= form_with url: repository_pull_request_creation_cap_bypass_remove_users_path(repo.owner, repo),
+                        method: :delete,
+                        id: remove_selected_form_id,
+                        data: { turbo_frame: "pull-request-creation-cap" } do %><% end %>
+
+          <div class="border-top tmp-mt-3 tmp-pt-3">
+            <div class="d-flex flex-items-center flex-justify-between">
+              <div>
+                <%= render Primer::Beta::Subhead.new(hide_border: true) do |c| %>
+                  <% c.with_heading(tag: :h3, font_size: 5, font_weight: :bold) do %>
+                    Bypass list
+                  <% end %>
+                  <% c.with_description do %>
+                    Users listed here can open pull requests regardless of the configured limit.
+                  <% end %>
+                <% end %>
+              </div>
+
+              <% list_full = pull_request_creation_config.pull_request_creation_cap_bypass_user_list_full? %>
+              <%= render(Primer::Alpha::SelectPanel.new(
+                title: "Add users to bypass list",
+                src: repository_pull_request_creation_cap_bypass_user_suggestions_path(repo.owner, repo),
+                fetch_strategy: :remote,
+                select_variant: :single,
+                anchor_side: :outside_left,
+                size: :small,
+              )) do |panel| %>
+                <% panel.with_show_button(disabled: list_full) do |btn| %>
+                  <% if list_full %>
+                    <% btn.with_tooltip(text: "The bypass list has reached the maximum") %>
+                  <% end %>
+                  Add users
+                <% end %>
+              <% end %>
+            </div>
+
+            <div class="Box tmp-mt-2 js-check-all-container pr-cap-bypass-list">
+              <div class="Box-header d-flex flex-items-center tmp-py-2">
+                <% if bypass_users.any? %>
+                  <label class="form-checkbox tmp-my-0">
+                    <input type="checkbox" class="tmp-mr-2" data-check-all>
+                    <span class="pr-cap-select-all-text">Users <%= render(Primer::Beta::Counter.new(count: bypass_users.size)) %></span>
+                    <span class="pr-cap-selected-text"><span data-check-all-count>0</span> selected</span>
+                  </label>
+
+                  <%= render(Primer::Alpha::ActionMenu.new(anchor_align: :end, ml: :auto)) do |menu| %>
+                    <% menu.with_show_button(icon: "kebab-horizontal", "aria-label": "More actions", scheme: :invisible) %>
+                    <% menu.with_item(label: "Remove selected users", content_arguments: { tag: :button, type: :submit, form: remove_selected_form_id }) %>
+                  <% end %>
+                  <% else %>
+                    <span class="pr-cap-select-all-text">Users <%= render(Primer::Beta::Counter.new(count: bypass_users.size)) %></span>
+                <% end %>
+              </div>
+              <% if bypass_users.any? %>
+                <% bypass_users.each do |user| %>
+                  <div class="Box-row d-flex flex-items-center flex-justify-between tmp-py-1">
+                    <div class="form-checkbox tmp-my-0">
+                      <input type="checkbox" data-check-all-item name="user_ids[]" value="<%= user.id %>" form="<%= remove_selected_form_id %>" aria-label="Select <%= user.display_login %>">
+                      <%= render Primer::Beta::Avatar.new(src: helpers.avatar_url_for(user), alt: user.display_login, size: 16, classes: "tmp-mr-1") %>
+                      <span class="flex-auto"><%= user.display_login %></span>
+                    </div>
+                    <%= button_to "Remove",
+                        repository_pull_request_creation_cap_bypass_remove_users_path(repo.owner, repo),
+                        method: :delete,
+                        params: { user_ids: [user.id] },
+                        class: "btn btn-sm btn-danger",
+                        data: { turbo_frame: "pull-request-creation-cap" } %>
+                  </div>
+                <% end %>
+              <% else %>
+                <div class="Box-row text-center">
+                  <%= render(Primer::Beta::Text.new(font_weight: :bold, mt: 2, font_size: 4)) { "No users can bypass the open pull request limit" } %>
+                </div>
+              <% end %>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    </div>
+  </div>
+</turbo-frame>
+
+<style>
+  .pr-cap-toggler .pr-cap-show-when-on { display: none; }
+  .pr-cap-toggler.on .pr-cap-show-when-on { display: block; }
+  .pr-cap-toggler.on .pr-cap-show-when-off { display: none; }
+
+  /* any checkboxes checked: hide "Users N" header, show selected count */
+  .pr-cap-select-all-text { display: inline; }
+  .pr-cap-selected-text { display: none; }
+  .pr-cap-bypass-list:has([data-check-all-item]:checked) .pr-cap-select-all-text { display: none; }
+  .pr-cap-bypass-list:has([data-check-all-item]:checked) .pr-cap-selected-text { display: inline; }
+</style>

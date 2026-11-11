@@ -1,0 +1,198 @@
+<% if has_active_self_serve_trial? %>
+  <div class="d-flex flex-justify-between flex-items-start tmp-mb-3">
+    <%= render(Primer::Beta::Subhead.new(hide_border: true)) do |subhead| %>
+      <% subhead.with_heading(tag: :h3, classes: "h4") do %>Self-Serve GHAS Trial<% end %>
+    <% end %>
+    <div class="d-flex">
+      <%= form_with url: extend_trial_form_path, method: :patch, local: true, class: "mr-2" do |form| %>
+        <input type="hidden" name="operation_id" value="extend_trial">
+        <%= render(Primer::Beta::Button.new(
+          size: :small,
+          scheme: :primary,
+          type: :submit,
+          test_selector: "extend-self-serve-trial-btn",
+          "data-confirm": "This will extend the trial by 7 days, for a maximum of 60 days from today."
+        )) do %>
+          Extend Trial
+        <% end %>
+      <% end %>
+      <%= form_with url: end_trial_form_path, method: :patch, local: true do |form| %>
+        <input type="hidden" name="operation_id" value="expire_trial">
+        <%= render(Primer::Beta::Button.new(
+          size: :small,
+          scheme: :danger,
+          type: :submit,
+          "data-confirm": "Are you sure you want to expire this trial?\n\nThis will immediately end the trial and remove Advanced Security access without billing the customer.",
+          test_selector: "expire-self-serve-trial-btn"
+        )) do %>
+          Expire Trial
+        <% end %>
+      <% end %>
+    </div>
+  </div>
+  <%= render(Primer::Alpha::Banner.new(variant: :default, icon: :check, classes: "tmp-mb-3")) do %>
+    <strong>Trial Active</strong>
+    <% if get_active_trial_type %>
+      <%= render(Primer::Beta::Label.new(scheme: :accent, ml: 2)) { trial_type_display_name(get_active_trial_type) } %>
+    <% end %>
+  <% end %>
+
+  <dl class="form-group">
+    <dt><label>Total trial duration</label></dt>
+    <dd class="f4 tmp-mb-3"><%= current_trial_duration_days %> days</dd>
+  </dl>
+
+  <dl class="form-group">
+    <dt><label>Expiration date</label></dt>
+    <dd class="f4 tmp-mb-3"><%= expires_at&.strftime("%B %d, %Y at %l:%M %p %Z") %></dd>
+  </dl>
+<% elsif has_active_sales_led_trial? %>
+  <%# A sales-led trial is active - don't show self-serve controls %>
+  <%= render(Primer::Beta::Subhead.new(hide_border: true)) do |subhead| %>
+    <% subhead.with_heading(tag: :h3, classes: "h4") do %>Self-Serve GHAS Trial<% end %>
+  <% end %>
+  <%= render(Primer::Alpha::Banner.new(variant: :default, icon: :info, classes: "tmp-mb-3")) do %>
+    <strong>Sales-Led Trial Active</strong>
+    <div class="mt-1 text-small">A sales-led trial is currently active for this enterprise. Manage the trial using the per-SKU trial controls below.</div>
+  <% end %>
+<% end %>
+
+<%# Trial History Section with integrated Sales-Led Trial Management %>
+<%= render(Primer::Beta::Subhead.new(hide_border: true, classes: "tmp-mt-4")) do |subhead| %>
+  <% subhead.with_heading(tag: :h3, classes: "h4") do %>Trial Management (Per SKU)<% end %>
+<% end %>
+
+<%= render(Primer::Alpha::Banner.new(variant: :default, icon: :info, classes: "tmp-mb-3")) do %>
+  <strong>Note:</strong> Self-serve GHAS trials start both SKUs together (Secret Protection and Code Security).
+  Both must be eligible for the customer to start a self-serve trial. Staff can start sales-led trials regardless of self-serve eligibility.
+<% end %>
+
+<% [secret_protection_trial, code_security_trial].each do |trial| %>
+    <% details = trial.eligibility_details %>
+    <% sku_name = sku_display_name(trial: trial) %>
+    <% sku = sku_for_trial(trial: trial) %>
+
+    <%= render(Primer::Beta::BorderBox.new(test_selector: "trial-history-#{sku_name.parameterize}", classes: "tmp-mb-3")) do |box| %>
+      <% box.with_header do %>
+        <div class="d-flex flex-justify-between flex-items-center">
+          <h4 class="h5 mb-0"><%= sku_name %></h4>
+          <div class="d-flex flex-items-center">
+            <%# Use combined eligibility since users start one GHAS trial for both SKUs %>
+            <% if combined_self_serve_eligible? %>
+              <%= render(Primer::Beta::Label.new(scheme: :success, mr: 2)) { "Self-Serve Eligible" } %>
+            <% else %>
+              <%= render(Primer::Beta::Label.new(scheme: :attention, mr: 2)) { "Self-Serve Ineligible" } %>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+
+      <% box.with_row do %>
+        <%# Sales-Led Trial Management Section %>
+        <div class="tmp-mb-4 tmp-pb-4 border-bottom">
+          <%= render Stafftools::GhasTrialManagementComponent.new(billable_entity: billable_entity, sku: sku) %>
+        </div>
+
+        <div class="tmp-mt-3">
+          <dl class="form-group mb-0">
+            <dt><label>Total Trial Count</label></dt>
+            <dd class="tmp-mb-3">
+              <strong><%= details[:trial_count] %></strong>
+              <div class="text-small color-fg-muted mt-1">
+                Includes all trial types (sales-led, DFD, self-serve).
+              </div>
+            </dd>
+          </dl>
+
+          <% if details[:last_trial_ended_at].present? %>
+            <dl class="form-group mb-0">
+              <dt><label>Last Trial Ended</label></dt>
+              <dd class="tmp-mb-3"><%= details[:last_trial_ended_at].strftime("%B %d, %Y") %></dd>
+            </dl>
+          <% end %>
+
+          <% if details[:within_cooldown_period] && !details[:trial_count_limit_reached] %>
+            <dl class="form-group mb-0">
+              <dt><label>Next Trial Eligible In</label></dt>
+              <dd class="tmp-mb-3">
+                <%= render(Primer::Beta::Label.new(scheme: :attention)) do %>
+                  <%= details[:remaining_cooldown_days] %> days
+                <% end %>
+                <div class="text-small color-fg-muted mt-1">
+                  <%= details[:cooldown_period_days] %>-day cooldown between trials
+                </div>
+              </dd>
+            </dl>
+          <% end %>
+
+          <dl class="form-group mb-0">
+            <dt>
+              <label>
+                <% if details[:metered_ghe] %>
+                  Consumed GHE Seats (Metered)
+                <% else %>
+                  Current GHE Seats
+                <% end %>
+              </label>
+            </dt>
+            <dd class="tmp-mb-3"><%= details[:current_seats] %></dd>
+          </dl>
+
+          <dl class="form-group mb-0">
+            <dt><label>Self-Serve Trial GHE Seat Limit</label></dt>
+            <dd class="tmp-mb-3">
+              <%= details[:self_serve_trial_max_seats] %> seats
+              <% if details[:seat_limit_exceeded] %>
+                <%= render(Primer::Beta::Label.new(scheme: :danger)) { "Exceeded" } %>
+              <% end %>
+            </dd>
+          </dl>
+
+          <dl class="form-group mb-0">
+            <dt><label>GHAS Usage</label></dt>
+            <dd class="tmp-mb-3">
+              <% if details[:ghas_in_use] %>
+                <%= render(Primer::Beta::Label.new(scheme: :attention)) { "In Use" } %>
+                <div class="text-small color-fg-muted mt-1">Must have zero GHAS usage to start self-serve trial</div>
+              <% else %>
+                <%= render(Primer::Beta::Label.new(scheme: :success)) { "Not In Use" } %>
+              <% end %>
+            </dd>
+          </dl>
+
+          <% if details[:cooldown_period_days].to_i > 0 %>
+            <dl class="form-group mb-0">
+              <dt><label>Paid GHAS Usage (Cooldown)</label></dt>
+              <dd class="tmp-mb-3">
+                <% if details[:had_paid_ghas_usage_within_cooldown] %>
+                  <%= render(Primer::Beta::Label.new(scheme: :danger)) { "Recent Paid Usage" } %>
+                  <div class="text-small color-fg-muted mt-1">
+                    Account had paid GHAS usage within the last <%= details[:cooldown_period_days] %> days.
+                    Former paying customers must wait <%= details[:cooldown_period_days] %> days after last paid usage before starting a free trial.
+                  </div>
+                <% else %>
+                  <%= render(Primer::Beta::Label.new(scheme: :success)) { "No Recent Paid Usage" } %>
+                  <div class="text-small color-fg-muted mt-1">No paid GHAS usage found within the last <%= details[:cooldown_period_days] %> days</div>
+                <% end %>
+              </dd>
+            </dl>
+          <% end %>
+
+          <% unless details[:eligible] %>
+            <dl class="form-group mb-0">
+              <dt><label>Self-Serve Ineligibility Reasons</label></dt>
+              <dd class="mb-0">
+                <ul class="tmp-pl-3 mt-2 mb-0">
+                  <% format_ineligibility_reasons(details: details).each do |reason| %>
+                    <li class="text-small"><%= reason %></li>
+                  <% end %>
+                </ul>
+              </dd>
+            </dl>
+          <% end %>
+        </div>
+      <% end %>
+    <% end %>
+  <% end %>
+
+

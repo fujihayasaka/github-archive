@@ -1,0 +1,269 @@
+<% page_info title: view.page_title %>
+
+<%= render Primer::Beta::Subhead.new do |component| %>
+  <% component.with_heading(tag: :h2) do %>Actions<% end %>
+<% end %>
+
+<%= render(Primer::Beta::BorderBox.new) do |component| %>
+  <% component.with_row do %>
+    <% if stafftools_action_authorized?(
+      controller: Stafftools::Users::SearchRecords::ReindexRequestsController,
+      action: :create,
+    ) %>
+      <%= render "stafftools/users/search_records/reindex" %>
+    <% else %>
+      <h3>Reindex</h3>
+      <p><%= stafftools_not_authorized_html %></p>
+    <% end %>
+  <% end %>
+
+  <% if stafftools_action_authorized?(
+    controller: Stafftools::Users::SearchRecords::BlackbirdReindexOrgsController,
+    action: :create,
+  )  && FeatureFlag.vexi.enabled?(:react_code_search_enabled, default: false) %>
+    <% component.with_row do %>
+      <%= form_tag stafftools_user_search_record_blackbird_reindex_org_path do %>
+        <%= render Primer::Beta::Button.new(
+          type: :submit,
+          float: :right,
+        ) do %>
+          Index all repositories
+        <% end %>
+      <% end %>
+      <h3>Code search (blackbird)</h3>
+      <p>
+        <br>
+        Index all this user's repositories. Use this sparingly as indexing happens automatically, lazily, when any
+        user searches in a specific organization or repository using the qualifiers: <code>org:</code> or
+        <code>repo:</code>.
+      </p>
+    <% end %>
+  <% end %>
+<% end %>
+
+<%= render Primer::Beta::Subhead.new(spacious: true) do |component| %>
+  <% component.with_heading(tag: :h2) do %>Search record<% end %>
+<% end %>
+
+<% if view.search_record_exists? %>
+  <%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+    <% view.each_entry do |k, v| %>
+      <% component.with_row(display: :flex) do %>
+        <span class="col-4 text-bold">
+          <%= k %>
+        </span>
+        <span class="col-8">
+          <%= v %>
+        </span>
+      <% end %>
+    <% end %>
+  <% end %>
+<% else %>
+  <p>No search record.</p>
+<% end %>
+
+<% if view.is_organization? %>
+  <% if FeatureFlag.vexi.enabled?(:elasticsearch_organization_reindex, current_user, default: false) %>
+  <%= render(Primer::Beta::BorderBox.new(classes: "tmp-mt-6")) do |component| %>
+    <% component.with_row(p: 3) do %>
+      <div class="d-flex flex-column width-full">
+        <% if stafftools_action_authorized?(
+          controller: Stafftools::Users::SearchRecords::BackfillsController,
+          action: :create,
+        ) %>
+          <h3 class="mb-1">Search index backfill</h3>
+          <p>
+            Use this to backfill records for all repositories owned by this organization into the search index.
+            Start with the default worker count and adjust only if needed.
+          </p>
+
+          <%= form_tag stafftools_user_search_record_backfill_path do %>
+            <%= hidden_field_tag :operation, "start" %>
+            <%= hidden_field_tag :organization_id, this_user.id %>
+            <div class="d-flex flex-items-end">
+              <div class="d-flex flex-column">
+                <div class="form-group mb-2">
+                  <%= label_tag :backfill_type, "Backfill type:" %>
+                  <%= select_tag :backfill_type,
+                    options_for_select(
+                      Stafftools::Users::SearchRecords::BackfillJob::BACKFILL_TYPES.map { |key, config| [config[:label], key] },
+                    ),
+                    class: "form-select" %>
+                </div>
+                <div class="form-group mb-0">
+                  <%= label_tag :workers,
+                    "Number of workers (1-#{Stafftools::User::SearchView::MAX_BACKFILL_WORKERS}):" %>
+                  <%= number_field_tag :workers,
+                    Stafftools::User::SearchView::DEFAULT_BACKFILL_WORKERS,
+                    min: 1,
+                    max: Stafftools::User::SearchView::MAX_BACKFILL_WORKERS,
+                    class: "form-control",
+                    style: "width: 100px;" %>
+                </div>
+              </div>
+
+              <%= render Primer::Beta::Button.new(type: :submit, ml: :auto, test_selector: "stafftools-user-search-record-pr-backfill-button") do %>
+                Start backfill
+              <% end %>
+            </div>
+          <% end %>
+        <% else %>
+          <h3>Search index backfill</h3>
+          <p><%= stafftools_not_authorized_html %></p>
+        <% end %>
+      </div>
+    <% end %>
+
+    <% if stafftools_action_authorized?(
+      controller: Stafftools::Users::SearchRecords::BackfillsController,
+      action: :create,
+    ) %>
+      <% backfill_jobs = view.backfill_jobs %>
+      <% if backfill_jobs.any? %>
+        <% component.with_row(p: 3) do %>
+          <div class="d-flex flex-column width-full">
+            <h3 class="mb-1">Backfill jobs in progress</h3>
+            <p>
+              Pause an in-progress backfill or adjust its worker count without resetting progress.
+            </p>
+
+            <div class="d-flex flex-wrap" style="gap: 16px;" <%= test_selector("stafftools-user-search-record-backfill-jobs") %>>
+              <% backfill_jobs.each do |bf| %>
+                <div
+                  <%= test_selector("stafftools-user-search-record-backfill-job-row") %>
+                  class="Box tmp-p-3 d-flex flex-column flex-1"
+                  style="min-width: 260px; flex-basis: calc(50% - 16px);"
+                >
+                  <div class="d-flex flex-justify-between flex-items-center mb-2">
+                    <h4 class="f4 mb-0"><%= bf[:label] %></h4>
+                    <% if bf[:finished] %>
+                      <%= render Primer::Beta::Label.new(scheme: :success) do %>
+                        Finished
+                      <% end %>
+                    <% elsif bf[:paused] %>
+                      <%= render Primer::Beta::Label.new(scheme: :secondary) do %>
+                        Paused
+                      <% end %>
+                    <% elsif bf[:active] %>
+                      <%= render Primer::Beta::Label.new(scheme: :accent) do %>
+                        Active
+                      <% end %>
+                    <% else %>
+                      <%= render Primer::Beta::Label.new do %>
+                        Unknown
+                      <% end %>
+                    <% end %>
+                  </div>
+
+                  <div class="mb-2">
+                    <div class="d-flex flex-justify-between flex-items-center py-1">
+                      <span class="text-bold">Progress</span>
+                      <span class="color-fg-muted"><%= number_with_precision(bf[:progress], precision: 1) %>%</span>
+                    </div>
+                    <div class="py-1">
+                      <%= progress_bar(bf[:progress], percentage: true, precision: 1) %>
+                    </div>
+                    <div class="d-flex flex-justify-between py-1">
+                      <span class="text-bold">Workers</span>
+                      <span>
+                        <%= bf[:workers] %> <span class="color-fg-muted">(<%= bf[:working] %> active)</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div class="d-flex flex-items-end flex-justify-end flex-wrap mt-auto pt-2 border-top" style="gap: 8px;">
+                    <% unless bf[:finished] %>
+                      <%= form_tag stafftools_user_search_record_backfill_path, class: "d-inline-flex flex-items-end" do %>
+                        <%= hidden_field_tag :operation, "update_workers" %>
+                        <%= hidden_field_tag :backfill_type, bf[:key] %>
+                        <div class="form-group mb-0 mr-2">
+                          <%= label_tag "workers_#{bf[:key]}",
+                            "Workers (1-#{Stafftools::User::SearchView::MAX_BACKFILL_WORKERS})",
+                            class: "f6 color-fg-muted mb-1 d-block" %>
+                          <%= number_field_tag :workers, bf[:workers],
+                            min: 1,
+                            max: Stafftools::User::SearchView::MAX_BACKFILL_WORKERS,
+                            id: "workers_#{bf[:key]}",
+                            class: "form-control", style: "width: 80px;" %>
+                        </div>
+                        <%= render Primer::Beta::Button.new(
+                          type: :submit,
+                          test_selector: "stafftools-user-search-record-update-workers-button-#{bf[:key]}",
+                        ) do %>
+                          Update
+                        <% end %>
+                      <% end %>
+                    <% end %>
+
+                    <% if bf[:finished] %>
+                      <%= form_tag stafftools_user_search_record_backfill_path do %>
+                        <%= hidden_field_tag :operation, "clear" %>
+                        <%= hidden_field_tag :backfill_type, bf[:key] %>
+                        <%= render Primer::Beta::Button.new(
+                          type: :submit,
+                          test_selector: "stafftools-user-search-record-clear-button-#{bf[:key]}",
+                        ) do %>
+                          Clear
+                        <% end %>
+                      <% end %>
+                    <% elsif !bf[:paused] %>
+                      <%= form_tag stafftools_user_search_record_backfill_path do %>
+                        <%= hidden_field_tag :operation, "pause" %>
+                        <%= hidden_field_tag :backfill_type, bf[:key] %>
+                        <%= render Primer::Beta::Button.new(
+                          type: :submit,
+                          test_selector: "stafftools-user-search-record-pause-button-#{bf[:key]}",
+                        ) do %>
+                          Pause
+                        <% end %>
+                      <% end %>
+                    <% end %>
+                  </div>
+                </div>
+              <% end %>
+            </div>
+          </div>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+  <% end %>
+
+  <%= render(Primer::Beta::BorderBox.new(padding: :condensed, classes: "tmp-mt-6")) do |component| %>
+    <% component.with_header(display: :flex, bg: :danger_emphasis, color: :on_emphasis, classes: 'dangerzone', font_weight: :emphasized) do %>
+      <h3 style="font-size: 14px">Danger Zone</h3>
+    <% end %>
+    <% component.with_row do %>
+      <div class="d-flex flex-row flex-items-center">
+        <% if stafftools_action_authorized?(
+          controller: Stafftools::Users::SearchRecords::ReindexOrgsController,
+          action: :create,
+        ) %>
+          <div class="mr-2">
+            <h3 class="mb-1">Reindex organization</h3>
+            <p>
+              This button is only for use on very small organizations, otherwise the process may timeout and/or cause other issues. Before using this button, try reindexing a single repository first to see if that resolves any issue.
+              <br>
+              This button reindexes many, but not all, search types in an entire organization (commits, discussions, issues, projects, PRs, releases, repos, and wikis). This button also indexes code in environments other than github.com.
+            </p>
+          </div>
+          <div>
+            <%= form_tag stafftools_user_search_record_reindex_org_path do %>
+              <%= render Primer::Beta::Button.new(
+                type: :submit,
+                scheme: :danger,
+                float: :right,
+                test_selector: "stafftools-user-search-record-reindex-org-button",
+              ) do %>
+                Start reindex
+              <% end %>
+            <% end %>
+          </div>
+        <% else %>
+          <h3>Reindex</h3>
+          <p><%= stafftools_not_authorized_html %></p>
+        <% end %>
+      </div>
+    <% end %>
+  <% end %>
+<% end %>

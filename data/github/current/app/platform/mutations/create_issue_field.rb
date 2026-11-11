@@ -1,0 +1,103 @@
+# typed: true
+# frozen_string_literal: true
+
+module Platform
+  module Mutations
+    class CreateIssueField < Platform::Mutations::Base
+      docs_category :issues
+      description "Creates a new issue field."
+      minimum_accepted_scopes ["admin:org"]
+
+      error_fields
+
+      argument :owner_id, ID, "The ID of the organization where the issue field will be created.", required: true, loads: Objects::Organization
+      argument :name, String, "The name of the issue field.", required: true
+      argument :description, String, "A description of the issue field.", required: false
+      argument :data_type, Enums::IssueFieldDataType, "The data type of the issue field.", required: true
+      argument :options, [Inputs::IssueFieldSingleSelectOptionInput], "The options for the issue field if applicable.", required: false
+      argument :visibility, Enums::IssueFieldVisibility, "The visibility of the issue field.", required: false
+
+      field :issue_field, Unions::IssueFields, "The newly created issue field.", null: true
+
+      extras [:execution_errors]
+
+      # Determine whether the viewer can access this mutation via the API (called internally).
+      # This is where Egress checks for OAuth scopes and GitHub Apps go.
+      # Returns `true`, `false`, or `Promise` resolving to `true` or `false`
+      def self.async_api_can_modify?(permission, owner:, **inputs)
+        return false unless IssueFieldsFeature.enabled?(owner, actor: permission.viewer)
+
+        permission.access_allowed?(:write_org_issue_fields,
+          resource: owner,
+          current_repo: nil,
+          current_org: owner,
+          allow_integrations: true,
+          allow_user_via_granular_actor: true
+        )
+      end
+
+      def resolve(execution_errors:, owner:, name:, description: nil, data_type:, options: nil, visibility: nil)
+        unless IssueFieldsFeature.enabled?(owner, actor: context[:viewer])
+          raise Errors::Forbidden.new("Issue fields feature is not enabled for this organization")
+        end
+
+        field_attributes = Issues::IssueFieldNewAttributes.new(
+          name: name,
+          data_type: data_type.to_s,
+          description: description
+        )
+
+        result = if data_type.to_sym == :single_select || data_type.to_sym == :multi_select
+          if options.nil? || options.empty?
+            raise Errors::Unprocessable.new("Options are required for select type fields.")
+          end
+          select_options = options&.map do |option|
+            Issues::IssueFieldOptionNewAttributes.new(
+              name: option.name,
+              color: option.color,
+              description: option.description,
+              priority: option.priority
+            )
+          end
+          create_select_args = {
+            org: owner,
+            name: field_attributes.name,
+            description: field_attributes.description,
+            options: select_options,
+            actor: context[:viewer]
+          }
+          create_select_args[:visibility] = visibility.to_s if visibility
+          if data_type.to_sym == :multi_select
+            Issues.domain.issue_fields.create_multi_select_field(**create_select_args)
+          else
+            Issues.domain.issue_fields.create_single_select_field(**create_select_args)
+          end
+        else
+          create_field_args = {
+            org: owner,
+            name: field_attributes.name,
+            data_type: field_attributes.data_type,
+            actor: context[:viewer],
+            description: field_attributes.description
+          }
+          create_field_args[:visibility] = visibility.to_s if visibility
+          Issues.domain.issue_fields.create_field(**create_field_args)
+        end
+
+        case result
+        when GH::Result::Ok
+          {
+            issue_field: result.value,
+            errors: []
+          }
+        when GH::Result::Error::Validation
+          message = result.model.errors.full_messages.join(", ")
+          Platform::UserErrors.append_legacy_mutation_error_messages_to_context([message], execution_errors)
+          { issue_field: nil, errors: Platform::UserErrors.mutation_errors_for_model(result.model, translate: { name_slug: "name" }) }
+        when GH::Result::Error
+          raise Errors::ServiceUnavailable.new("Encountered an error while creating the issue field: #{result.message}")
+        end
+      end
+    end
+  end
+end

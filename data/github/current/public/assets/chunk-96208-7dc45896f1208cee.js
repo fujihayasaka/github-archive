@@ -1,0 +1,2 @@
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[96208],{758035(t,i,e){e.r(i);var a=e(331635),n=e(651135);class g extends HTMLElement{displayRemainingEvents(){this.timelineEvents.toggleAttribute("hidden"),this.paginationLoader.toggleAttribute("hidden")}}(0,a.Cg)([n.aC],g.prototype,"timelineEvents",void 0),(0,a.Cg)([n.aC],g.prototype,"paginationLoader",void 0),(0,a.Cg)([(0,n.p_)("dependabot-alert-load-all")],g)}}]);
+//# sourceMappingURL=chunk-96208-7dc45896f1208cee-45bd4e0142be7c78.js.map

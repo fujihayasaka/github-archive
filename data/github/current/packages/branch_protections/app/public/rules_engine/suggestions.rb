@@ -1,0 +1,350 @@
+# typed: strict
+# frozen_string_literal: true
+
+module RulesEngine
+  module Suggestions
+    extend RuleEngine::Timing
+
+    TEAMS_BYPASS_LIMIT = 10
+    MAX_SUGGESTIONS = 100
+
+    # TODO: Remove support for ruleset_id as it is no longer necessaary
+    # Public: Fetch integrations with write access for the specified source,
+    # as well as integrations from the last week of check runs
+    sig do
+      params(
+        source: RuleEngine::Types::RuleSource,
+        ruleset_id: T.nilable(Integer),
+        query: T.nilable(String),
+      )
+      .returns(T::Array[{ id: Integer, name: String, preferred_avatar_url: String }])
+    end
+    def self.status_check_integrations_for(
+      source,
+      ruleset_id: nil,
+      query: nil
+    )
+      ruleset = unless ruleset_id.blank?
+        all_rulesets = Repositories.domain.rulesets.load_rulesets(source, include_inherited: true, targets: %w[branch tag push repository])
+        all_rulesets.find { |rs| rs.id == ruleset_id.to_i }
+      end
+
+      bypass_actors = IntegrationBypassActor.suggest_bypassers(
+        ruleset&.source || source,
+        query,
+        resources: %w[statuses checks],
+      )
+
+      if source.is_a?(::Repository)
+        trace_time("suggestions.status_check_integrations.duration", tags: ["type:check_runs", "source:#{source.class.name}"]) do
+          check_runs = CheckRun.recent_check_names_and_integrations(repo: source, start: 1.week.ago, limit: MAX_SUGGESTIONS)
+
+          check_runs.values.flat_map do |check_run_integrations|
+            check_run_integrations.each do |integration|
+              owner = integration.owner.display_login
+
+              bypass_actors << IntegrationBypassActor.new(actor: integration)
+            end
+          end
+        end
+      end
+
+      unless ruleset.nil?
+        trace_time("suggestions.integrations.duration", tags: ["type:ruleset", "source:#{source.class.name}"]) do
+          required_status_check_rule = ruleset.rule_configurations.find { |rule| rule.rule_type == "required_status_checks" }
+
+          required_status_checks = required_status_check_rule&.param("required_status_checks")
+          integration_ids = required_status_checks&.filter_map { |required_status_check| required_status_check["integration_id"] }
+
+          unless integration_ids.blank?
+            Integration.where(id: integration_ids.uniq).each do |integration|
+              owner = integration.owner.display_login
+
+              bypass_actors << IntegrationBypassActor.new(actor: integration)
+            end
+          end
+        end
+      end
+
+      bypass_actors
+        .flatten
+        .uniq { |bypass_actor| bypass_actor.integration&.id }
+        .sort_by { |bypass_actor| bypass_actor.integration&.name }
+        .map do |bypass_actor|
+          {
+            id: T.must(bypass_actor.integration).id,
+            name: T.must(bypass_actor.integration).name,
+            preferred_avatar_url: T.must(bypass_actor.actor_preferred_avatar_url),
+            owner: T.must(bypass_actor.actor_owner_name),
+          }
+        end
+    end
+
+    # Public: Fetch recent status checks for the specified source
+    sig do
+      params(
+        source: RuleEngine::Types::RuleSource,
+        query: String,
+        limit: Integer
+      )
+      .returns(T::Array[{ context: String, latest_integration_id: T.nilable(Integer) }])
+    end
+    def self.recent_status_checks_for(source, query, limit: 100)
+      trace_time("suggestions.recent_status_checks_for", tags: ["source:#{source.class.name}"]) do
+        return [] unless source.is_a?(::Repository)
+
+        start = 1.week.ago
+
+        # Neither query supports filtering by context, so we overfetch to ensure we have enough
+        # potential matches to return the requested number of results.
+        status_checks = trace_time("suggestions.recent_status_checks.load", tags: ["source:statuses"]) do
+          Statuses.domain.recent_status_contexts_and_integrations(repository_id: source.id, start: start, limit: MAX_SUGGESTIONS)
+        end
+
+        check_runs = trace_time("suggestions.recent_status_checks.load", tags: ["source:check_runs"]) do
+          CheckRun.recent_check_names_and_integrations(repo: source, start:, limit: MAX_SUGGESTIONS)
+        end
+
+        recent_status_checks = status_checks.merge(check_runs) { |_, set_a, set_b| set_a | set_b }
+
+        recent_status_checks
+          .select { |context| context.downcase.include?(query.downcase) }
+          .map do |context, integrations|
+            {
+              context: context,
+              latest_integration_id: integrations.first&.id,
+            }
+          end
+          .sort_by { |status_check| status_check[:context] }
+          .take(limit)
+      end
+    end
+
+    # Public: Fetch deployment environments for the specified source
+    sig do
+      params(
+        source: RuleEngine::Types::RuleSource,
+        query: T.nilable(String)
+      )
+      .returns(T::Array[String])
+    end
+    def self.deployment_environments_for(source, query)
+      return [] unless source.is_a?(::Repository)
+
+      if query.blank?
+        return source.environments.order(:name).limit(MAX_SUGGESTIONS).pluck(:name)
+      end
+
+      source.environments.where("name LIKE ?", "%#{query}%").order(:name).limit(MAX_SUGGESTIONS).pluck(:name)
+    end
+
+    sig { params(source: RuleEngine::Types::RuleSource).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
+    def self.merge_queue_merge_methods_for(source)
+      return [] unless source.is_a?(::Repository)
+
+      settings = source.async_allowable_merge_methods.sync
+
+      MergeQueues::IConfiguration::MergeMethod.values.map do |merge_method|
+        value = {
+          label: RuleEngine::Rules::MergeQueueRule::Configuration.label_for_merge_method(merge_method),
+          value: merge_method.serialize.upcase
+        }
+
+        setting = settings.get(merge_method)
+        if setting.allowed?
+          value.merge(enabled: true)
+        elsif setting.error?
+          value.merge(enabled: false, disabled_reason: "Failed to load repository settings.")
+        else
+          value.merge(enabled: false, disabled_reason: "Not enabled for this repository.")
+        end
+      end
+    end
+
+    sig do
+      params(
+        source: RuleEngine::Types::RuleSource
+      )
+      .returns(T::Array[User])
+    end
+    def self.insights_users_for(source)
+      query = if source.is_a?(Repository)
+        RuleEngine::RuleSuite.where(repository: source)
+      elsif source.is_a?(Organization)
+        RuleEngine::RuleSuite.where(owner: source).annotate("cross-shard-query-exempted")
+      else
+        RuleEngine::RuleSuite.where(business: source).annotate("cross-shard-query-exempted")
+      end
+
+      actor_ids_with_type = query
+        .distinct
+        .pluck(:actor_id, :actor_type)
+
+      # User and PublicKey are the only actor types that are currently supported. Filter here to ensure we don't break
+      # if a new actor type is added
+      actor_ids_with_type = actor_ids_with_type.filter { |_, actor_type| %w[User PublicKey].include?(actor_type) }
+
+      return [] unless actor_ids_with_type&.any?
+
+      users_with_type, public_keys_with_type = actor_ids_with_type.partition { |_, actor_type| actor_type == "User" }
+      user_ids = users_with_type.map(&:first)
+      public_key_ids = public_keys_with_type.map(&:first)
+
+      if public_key_ids.any?
+        keys = PublicKey.where(id: public_key_ids).includes(:repository)
+        key_owner_ids = keys.map { |key| key.deploy_key? ? key.verifier_id : key.user_id }
+        user_ids = user_ids.concat(key_owner_ids)
+      end
+
+      User.where(id: user_ids).order(:login).compact.to_a
+    end
+
+    sig do
+      params(
+        source: RuleEngine::Types::RuleSource,
+        current_user: User,
+        query: T.nilable(String),
+        exclude_integrations: T.nilable(T::Boolean),
+        enterprise_apps_only: T::Boolean
+      )
+      .returns(T::Array[{ actorId: Integer, actorType: Symbol, name: String, preferred_avatar_url: T.nilable(String), owner: T.nilable(String) }])
+    end
+    def self.bypass_actors_for(source, current_user, query: nil, exclude_integrations: false, enterprise_apps_only: false)
+      bypass_actors = RepositoryRulesetBypassActor.suggest_all_bypassers(source, current_user, query, exclude_integrations:, enterprise_apps_only: enterprise_apps_only)
+      bypass_actors.map(&:to_suggestions_hash)
+    end
+
+    sig do
+      params(organization: Organization, query: String, exclude_public_repos: T::Boolean)
+      .returns(T::Array[T::Hash[Symbol, String]])
+    end
+    def self.repos_for(organization, query, exclude_public_repos = false)
+      matching_repos = []
+      if query.present?
+        scope = Repository.active.where(owner_id: organization.id)
+        scope = scope.where(public: false) if exclude_public_repos
+        scope = scope.includes(:owner)
+        exact_match = scope.where("repositories.name = :query", query: query).first
+
+        scope = scope.where("repositories.name like :query", query: "%#{ActiveRecord::Base.sanitize_sql_like(query)}%")
+        if scope.present? && scope.any?
+          scope = scope.order("repositories.name").limit(MAX_SUGGESTIONS)
+
+          matching_repos = scope.to_a
+          matching_repos = matching_repos.prepend(exact_match) if exact_match
+          matching_repos = matching_repos.uniq.compact
+        end
+      else
+        scope = Repository.active.where(owner_id: organization.id)
+        scope = scope.where(public: false) if exclude_public_repos
+        scope = scope.includes(:owner)
+        matching_repos = scope.recently_updated.order("repositories.name").limit(MAX_SUGGESTIONS)
+      end
+
+      matching_repos.map { |repo| RulesEngine::ReactPayload.simple_repository_payload(repo) }
+    end
+
+    sig do
+      params(enterprise: Business, query: T.nilable(String))
+      .returns(T::Array[T::Hash[Symbol, String]])
+    end
+    def self.orgs_for(enterprise, query)
+      matching_repos = []
+      if query.present?
+        scope = enterprise.organizations.active
+        exact_match = scope.where("users.display_login = :query", query: query).first
+
+        scope = scope.where("users.display_login like :query", query: "%#{ActiveRecord::Base.sanitize_sql_like(query)}%")
+        if scope.present? && scope.any?
+          scope = scope.order("users.display_login").limit(MAX_SUGGESTIONS)
+
+          matching_orgs = scope.to_a
+          matching_orgs = matching_orgs.prepend(exact_match) if exact_match
+          matching_orgs = matching_orgs.uniq.compact
+        end
+      else
+        scope = enterprise.organizations.active
+        matching_orgs = scope.order("users.display_login").limit(MAX_SUGGESTIONS)
+      end
+
+      matching_orgs&.map { |org| RulesEngine::ReactPayload.simple_organization_payload(org) } || []
+    end
+
+    sig do
+      params(
+        source: RuleEngine::Types::RuleSource,
+        request_type: T.nilable(String),
+      )
+      .returns(T::Array[User])
+    end
+    def self.bypass_requests_requesters_for(source, request_type = nil)
+      query = Exemptions::ExemptionRequest.for_source(source).where(created_at: 1.month.ago..)
+      query = query.where(request_type:) unless request_type.nil?
+      query = query.annotate("cross-shard-query-exempted")
+      requester_ids = query.distinct.pluck(:requester_id)
+
+      return [] unless requester_ids&.any?
+
+      User.where(id: requester_ids).order(:login).compact.to_a
+    end
+
+    sig do
+      params(
+        source: RuleEngine::Types::RuleSource,
+        request_type: T.nilable(String),
+      )
+      .returns(T::Array[User])
+    end
+    def self.bypass_requests_approvers_for(source, request_type = nil)
+      query = Exemptions::ExemptionResponse
+    .joins("INNER JOIN exemption_requests ON exemption_requests.id = exemption_responses.exemption_request_id
+        AND exemption_requests.repository_id = exemption_responses.repository_id")
+    .merge(Exemptions::ExemptionRequest.for_source(source)
+    .where(created_at: 1.month.ago..))
+    .annotate("cross-shard-query-exempted")
+      query = query.where(exemption_requests: { request_type: }) unless request_type.nil?
+      reviewer_ids = query.pluck(:reviewer_id)
+
+      return [] unless reviewer_ids&.any?
+
+      User.where(id: reviewer_ids).order(:login).compact.to_a
+    end
+
+    # Deprecated: prefer IntegrationBypassActor.merge_queue_can_bypass
+    sig do
+      params(source: RuleEngine::Types::RuleSource).
+      returns(T::Boolean)
+    end
+    private_class_method def self.dependabot_can_bypass(source)
+      source.is_a?(Business) || source.dependabot_installed?
+    end
+
+    # see packages/pull_requests/app/models/repository/merge_queue_dependency.rb#merge_queue_enabled?
+    sig { params(source: RuleEngine::Types::RuleSource).returns(T::Boolean) }
+    private_class_method def self.merge_queue_can_bypass?(source)
+      # Merge queue is globally enabled for this instance
+      return false unless GitHub.merge_queues_enabled?
+      return false unless GitHub.merge_queue_bot.present?
+
+      GitHub.enterprise? || \
+        source.plan_supports?(:merge_queue) || \
+        (source.is_a?(Organization) && source.plan_supports?(:merge_queue, visibility: :public)) || \
+        (source.is_a?(Business) && source.plan.supports?(:merge_queue, org: true, visibility: :public)) || \
+        source.feature_flag_enabled?(:merge_queue, memoize: false, default: false)
+    end
+
+    sig { params(source: RuleEngine::Types::RuleSource).returns(T::Boolean) }
+    private_class_method def self.copilot_coding_agent_can_bypass?(source)
+      return false unless Apps::Privileged.integration(:copilot_swe_agent).present?
+
+      true
+    end
+
+    sig { params(source: RuleEngine::Types::RuleSource).returns(T::Boolean) }
+    private_class_method def self.copilot_code_review_can_bypass?(source)
+      return false unless Apps::Privileged.integration(:copilot_pull_request_reviewer).present?
+
+      true
+    end
+  end
+end

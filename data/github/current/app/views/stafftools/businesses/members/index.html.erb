@@ -1,0 +1,108 @@
+<% page_info title: this_business.name, selected_link: :business_people %>
+
+<% members_title ||= "Members" %>
+<% members_url ||= stafftools_enterprise_members_path(this_business) %>
+<%= render Primer::Beta::Subhead.new do |component| %>
+  <% component.with_heading(tag: :h2) do %>
+    <%= link_to "People", stafftools_enterprise_people_path(this_business) %>
+    / <%= members_title %>
+  <% end %>
+<% end %>
+
+<%= render Stafftools::SimpleSearchFormComponent.new(
+  query_label: "Search members",
+  form_url: members_url
+) %>
+
+<% if members.any? %>
+  <% disallowed_2fa_methods = this_business.get_two_factor_disallowed_methods %>
+  <div class="Box Box--condensed">
+    <ul>
+      <% members.each do |member| %>
+        <li class="Box-row d-flex flex-items-center" <%= test_selector "li-member-#{member.login}" %>>
+          <span class="flex-auto">
+            <% if member.user.present? %>
+              <%= avatar_for member.user, 20, class: :avatar %>
+              <%= link_to member.user.login, stafftools_enterprise_member_path(this_business, member.id) %>
+              <% if member.user.is_first_emu_owner? %>
+                <%= render Primer::Beta::Label.new(
+                  title: "Label: First owner account",
+                  test_selector: "emu-first-admin-owner-label"
+                ) do %>
+                  first owner account
+                <% end %>
+              <% end %>
+            <% else %>
+              <%= primer_octicon(:person, height: 20, color: :muted) %>
+              <%= link_to member.login, stafftools_enterprise_member_path(this_business, member.id) %>
+            <% end %>
+          </span>
+          <span class="tmp-mr-4">
+            <% if !member.two_factor_authentication_enabled? %>
+              2FA not enabled
+            <% elsif member.has_any_given_2fa_methods_configured?(disallowed_2fa_methods) %>
+              2FA disallowed method
+            <% end %>
+          </span>
+          <% if member.is_a?(BusinessUserAccount) %>
+            <span>
+              <%= pluralize member.enterprise_organizations(current_user).count, "organization" %>,
+              <%= pluralize member.user_enterprise_installations.count, "installation" %>
+              <% if member.user.present? &&
+                this_business.supports_unaffiliated_user_accounts? &&
+                this_business.exclusive_unaffiliated_member?(member.user) %>
+                <%= render(Primer::Alpha::Dialog.new(
+                  id: "remove-unaffiliated-member-#{member.user.id}",
+                  title: "Remove unaffiliated member"
+                )) do |c| %>
+                  <% c.with_show_button(
+                    ml: 2,
+                    size: :small,
+                    scheme: :danger,
+                    test_selector: "remove-unaffiliated-member-#{member.user.id}"
+                  ) do |c| %>
+                    Remove
+                  <% end %>
+                  <% c.with_body do %>
+                    <p>
+                      This will remove the unaffiliated member <%= member.user.login %> from the enterprise.
+                    </p>
+                  <% end %>
+                  <% c.with_footer(show_divider: true) do %>
+                    <%= render(Primer::Beta::Button.new(
+                      data: { "close-dialog-id": "remove-unaffiliated-member-#{member.user.id}" }
+                    )) { "Cancel" } %>
+                    <%= form_with(
+                      url: stafftools_enterprise_unaffiliated_member_path(this_business, member.user.id),
+                      method: :delete) do |form| %>
+                      <%= render(Primer::Beta::Button.new(
+                        type: :submit,
+                        scheme: :danger,
+                        "data-disable-invalid": "",
+                        "data-disable-with": ""
+                      )) { "Remove #{member.user.login}" } %>
+                    <% end %>
+                  <% end %>
+                <% end %>
+              <% end %>
+            </span>
+          <% end %>
+        </li>
+      <% end %>
+    </ul>
+  </div>
+
+  <div class="paginate-container">
+    <%= will_paginate members %>
+  </div>
+<% else %>
+  <%= render Primer::Beta::Blankslate.new(classes: "tmp-mb-3") do |c| %>
+    <% c.with_heading(tag: :h2) do %>
+      No members
+      <% if params[:query].present? %>
+        matching <em><%= params[:query] %></em>
+      <% end %>
+      in this enterprise.
+    <% end %>
+  <% end %>
+<% end %>

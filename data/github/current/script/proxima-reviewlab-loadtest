@@ -1,0 +1,145 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "fileutils"
+require "json"
+require "open3"
+require "resolv"
+
+module ProximaReviewLabLoadtest
+  module_function
+
+  CODESPACES_URL = "https://thehub.github.com/security/security-operations/tailscale/codespaces/"
+  LOADTEST_REPO  = "git@github.com:github/reliability-load-test.git"
+  PREPOPULATED_REPOS = %w(rails linux rust ocaml markdown-finder jquery hellogitworld enterprise2 freecodecamp pkgcloud)
+
+  def codespaces?
+    return self.const_get(:CODESPACES) if self.const_defined?(:CODESPACES)
+
+    self.const_set(:CODESPACES, ENV["CODESPACES"] == "true")
+  end
+
+  def bypass_domain_restriction?
+    return self.const_get(:BYPASS_DOMAIN_RESTRICTION) if self.const_defined?(:BYPASS_DOMAIN_RESTRICTION)
+
+    self.const_set(:BYPASS_DOMAIN_RESTRICTION, ENV["BYPASS_DOMAIN_RESTRICTION"] == "true")
+  end
+
+  def prompt(prompt_text)
+    print "#{prompt_text.chomp} > "
+    gets.strip
+  end
+
+  def prompt_yn(prompt_text)
+    loop do
+      response = prompt("#{prompt_text} [y/n]").downcase
+
+      return response.start_with?("y") if %w(y n, yes no).include? response
+    end
+  end
+
+  def prompt_domain
+    loop do
+      response = prompt("Proxima Review Lab domain (e.g. proxima-review-lab-monalisa.octoca.ts.net)").downcase
+
+      if response.end_with?("octoca.ts.net") || bypass_domain_restriction?
+        begin
+          Resolv::DNS.new.getaddress(response)
+
+          return response
+        rescue
+          if prompt_yn("Cannot resolve #{response} -- continue anyway?")
+            return response
+          end
+        end
+      end
+    end
+  end
+
+  def warning(text)
+    warn "\e[31m#{text}\e[0m"
+  end
+
+  def clone_repo(path)
+    Thread.new do
+      output = ""
+      ret = nil
+
+      Open3.popen3("git", "clone", LOADTEST_REPO, path) do |_stdin, _stdout, stderr, wait_thr|
+        output = stderr.read
+        ret = wait_thr.value
+      end
+
+      [output.strip, ret]
+    end
+  end
+
+  def main
+    if !codespaces?
+      warning "Proxima Review Lab requires tailscale!  If you experience issues, see #{CODESPACES_URL}"
+    end
+
+    workspace = if File.directory?("/workspaces")
+      "/workspaces"
+    else
+      target = ""
+
+      until File.directory?(target)
+        target = prompt "Parent directory to clone into (load test tools will be cloned underneath)"
+      end
+      target
+    end
+
+    target_dir = File.join(workspace, "reliability-load-test")
+    puts "Cloning to #{target_dir}"
+    clone_thread = clone_repo(target_dir)
+
+    domain = prompt_domain
+    user = prompt("User account name on #{domain} to use for generating load")
+    pat = prompt("PAT belonging to #{user}")
+    cookie = prompt("Session cookie belonging to #{user} (viewable under developer tools, 'user_session')")
+
+
+    clone_thread.join
+    output, status = clone_thread.value
+    if status.exitstatus == 128 && output == "fatal: destination path '#{target_dir}' already exists and is not an empty directory."
+      exit unless prompt_yn("#{target_dir} already exists.  Use this checkout?")
+    elsif !status.success?
+      puts "Unable to clone: #{output}"
+      exit
+    end
+
+    tmp_dir = File.join(target_dir, "tmp")
+    FileUtils.mkdir_p(tmp_dir)
+
+    env_path = File.join(target_dir, ".env")
+    puts "Generating .env file '#{env_path}'"
+    File.open(env_path, "w") do |file|
+      file.puts("HOSTNAME=#{domain}")
+      file.puts("CREDENTIALS_FILE_PATH=/mnt/tmp/credentials.csv")
+      file.puts("TEST_DATA_MANIFEST_FILE_PATH=/mnt/tmp/data.json")
+    end
+
+    creds_path = File.join(tmp_dir, "credentials.csv")
+    puts "Generating credentials file '#{creds_path}'"
+    File.open(creds_path, "w") do |file|
+      file.puts("#{user},#{cookie},#{pat}")
+    end
+
+    data_path = File.join(tmp_dir, "data.json")
+    puts "Generating targets file '#{data_path}'"
+    repos = PREPOPULATED_REPOS.map { |repo| "#{user}/#{repo}" }
+
+    File.open(data_path, "w") do |file|
+      data_struct = { "forkedRepositories" => repos,
+                      "pullRequests" => repos,
+                      "issues" => repos }
+      file.puts(JSON.pretty_generate(data_struct))
+    end
+
+    puts "Everything is set up and good to go!"
+    puts "From now on, run 'script/run src/script/stress/git.ts' from #{target_dir} to run load tests without performing this setup."
+  end
+end
+
+ProximaReviewLabLoadtest.main if __FILE__ == $PROGRAM_NAME

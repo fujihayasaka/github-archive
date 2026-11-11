@@ -1,0 +1,134 @@
+<%
+  billable_subscription = ->(subscription) { subscription[:billable] != false }
+  has_selected_subscription = subscriptions.any? { |subscription| subscription[:selected] && billable_subscription.call(subscription) }
+  has_subscriptions = subscriptions.any?
+  billable_subscriptions = subscriptions.select { |subscription| billable_subscription.call(subscription) }
+  unsupported_subscriptions = subscriptions.reject { |subscription| billable_subscription.call(subscription) }
+  unsupported_subscriptions_summary =
+    unsupported_subscriptions.size == 1 ? "1 unsupported subscription" : "#{unsupported_subscriptions.size} unsupported subscriptions"
+  supported_subscriptions_docs_url = "https://docs.github.com/en/billing/reference/supported-payment-methods"
+%>
+<azure-subscription-dialog>
+  <%= form_with url: billing_settings_selected_azure_subscription_path, method: "put" do |f| %>
+    <div class="Box-header">
+      <h2 class="Box-title">Connect Azure subscription</h2>
+    </div>
+    <% if fetch_failed %>
+      <div class="Box-body">
+        <%= render(Primer::Alpha::Banner.new(scheme: :danger, icon: :stop)) do %>
+          Failed to fetch subscriptions. Please try to login again or contact customer support if you still see an error.
+        <% end %>
+      </div>
+    <% else %>
+      <% if subscriptions.empty? %>
+        <div class="Box-body">
+          <%= render(Primer::Alpha::Banner.new(scheme: :default, icon: :info)) do %>
+            No subscriptions found. Please make sure you have owner permissions for the subscription you are trying to select.
+          <% end %>
+        </div>
+      <% else %>
+        <div class="Box-body border-bottom-0 pb-0">
+          <h3 class="mb-2">Select a subscription</h3>
+          <%= render(Primer::Alpha::Banner.new(scheme: :default, icon: :info, classes: "tmp-mb-3")) do %>
+            Make sure you have owner permissions for the subscription you are selecting.
+            For more information, see the
+            <%= render(Primer::Beta::Link.new(href: "https://learn.microsoft.com/azure/role-based-access-control/role-assignments-portal-subscription-admin", target: "_blank", rel: "noopener noreferrer", classes: "Link--inTextBlock")) { "Microsoft docs on Azure subscription administrator access control" } %>.
+          <% end %>
+          <% if unsupported_subscriptions.any? %>
+            <%= render(Primer::Alpha::Banner.new(scheme: :warning, icon: "alert", classes: "tmp-mb-3", test_selector: "azure-unsupported-subscriptions-banner")) do %>
+              <strong>Some subscriptions are not supported.</strong>
+              One or more of your Azure subscriptions cannot be used for billing on GitHub.
+              <%= render(Primer::Beta::Link.new(href: supported_subscriptions_docs_url, target: "_blank", rel: "noopener noreferrer", classes: "Link--inTextBlock")) { "Learn more about supported payment methods" } %>.
+            <% end %>
+          <% end %>
+        </div>
+        <div class="Box-body overflow-auto" style="max-height: 40vh;">
+          <div class="d-flex flex-column">
+            <% billable_subscriptions.each do |subscription| %>
+              <div class="position-relative flex-auto d-flex flex-items-center mb-1 <%= subscription[:selected] ? "color-bg-accent" : "color-bg-subtle" %>">
+                <%= f.radio_button :selected_subscription_id,
+                                   subscription[:subscription_id],
+                                   checked: subscription[:selected],
+                                   id: subscription[:subscription_id],
+                                   class: "position-absolute tmp-ml-3",
+                                   data: {
+                                     action: "change:azure-subscription-dialog#toggle",
+                                     targets: "azure-subscription-dialog.entries"
+                                   }
+                %>
+                <label
+                  class="radio-label width-full tmp-pb-3 tmp-pt-3 d-flex flex-column"
+                  for="<%= subscription[:subscription_id] %>"
+                  data-targets="azure-subscription-dialog.boxes">
+                  <span><%= subscription[:display_name] %></span>
+                  <span class="text-normal"><%= subscription[:subscription_id] %></span>
+                </label>
+              </div>
+            <% end %>
+            <% if unsupported_subscriptions.any? %>
+              <details class="Details-element details-reset tmp-mt-2" <%= test_selector("azure-unsupported-subscriptions-section") %>>
+                <summary class="color-fg-muted tmp-py-2 tmp-px-1 rounded-2" style="cursor: pointer;">
+                  <div class="d-flex flex-items-center">
+                    <span class="Details-content--closed d-inline-flex flex-items-center tmp-mr-1"><%= primer_octicon(:"chevron-right") %></span>
+                    <span class="Details-content--open d-inline-flex flex-items-center tmp-mr-1"><%= primer_octicon(:"chevron-down") %></span>
+                    <span class="text-bold"><%= unsupported_subscriptions_summary %></span>
+                  </div>
+                </summary>
+                <% unsupported_subscriptions.each do |subscription| %>
+                  <div
+                    class="position-relative flex-auto d-flex flex-items-center tmp-mb-1 color-bg-subtle"
+                    aria-disabled="true"
+                    style="opacity: 0.5; cursor: not-allowed;"
+                  >
+                    <%= f.radio_button :selected_subscription_id,
+                                       subscription[:subscription_id],
+                                       checked: false,
+                                       disabled: true,
+                                       id: subscription[:subscription_id],
+                                       class: "position-absolute tmp-ml-3",
+                                       data: {
+                                         action: "change:azure-subscription-dialog#toggle",
+                                         targets: "azure-subscription-dialog.entries"
+                                       }
+                    %>
+                    <label
+                      class="radio-label width-full tmp-pb-3 tmp-pt-3 d-flex flex-column"
+                      for="<%= subscription[:subscription_id] %>"
+                      style="cursor: not-allowed;"
+                      data-targets="azure-subscription-dialog.boxes">
+                      <span><%= subscription[:display_name] %></span>
+                      <span class="text-normal"><%= subscription[:subscription_id] %></span>
+                    </label>
+                  </div>
+                <% end %>
+              </details>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+    <% end %>
+    <div class="Box-footer">
+      <%= render(Primer::Box.new(hidden: !has_subscriptions, classes: "tmp-mb-4")) do %>
+        <%= render(Primer::Alpha::CheckBox.new(
+          id: 'confirm_subscription_selection',
+          name: 'confirm_subscription_selection',
+          label: 'By clicking "Connect", you are confirming that you want to be billed for metered services via the selected Azure subscription',
+          disabled: !has_selected_subscription,
+          data: {
+            action: "change:azure-subscription-dialog#confirmSelection",
+            target: "azure-subscription-dialog.confirmSelectionCheckbox"
+          },
+        )) %>
+      <% end %>
+
+      <%= f.submit "Connect",
+                  class: "btn btn-block btn-primary",
+                  disabled: true,
+                  "data-fetch-failed": fetch_failed,
+                  data: {
+                    target: "azure-subscription-dialog.submitButton"
+                  }
+      %>
+    </div>
+  <% end %>
+</azure-subscription-dialog>

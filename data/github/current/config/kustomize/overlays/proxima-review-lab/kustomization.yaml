@@ -1,0 +1,309 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base/review-lab
+
+components:
+  - ../../base/istio
+  - ../../base/metric-attribution
+  # Proxima-specific nginx config (merges into unicorn-nginx-conf configMap)
+  - ../../base/nginx-proxima-config
+  # Proxima-specific haproxy config (adds X-GitHub-Tenant header)
+  - ../../base/haproxy-proxima-config
+
+images:
+  - name: failbotg
+    newName: dxcrprod.azurecr.io/failbotg
+    newTag: master
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+# Enable service mesh signaling for proxima mode
+configMapGenerator:
+  - name: observability-config
+    behavior: merge
+    literals:
+      - SERVICE_MESH_ENABLED=true
+      - FAILBOT_HAYSTACK_URL_MESH=http://failbotg.failbotg-test-cnc-01.svc.cluster.local/api/needles
+
+patches:
+  # ---------- All Deployments: proxima progressDeadlineSeconds ----------
+  - target:
+      kind: Deployment
+    patch: |-
+      - op: replace
+        path: /spec/progressDeadlineSeconds
+        value: 1200
+
+  # ---------- Unicorn (voltron = container 0, nginx = 1, rails = 2) ----------
+  - target:
+      kind: Deployment
+      name: unicorn
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/annotations/proxy.istio.io~1config
+        value: |
+          terminationDrainDuration: 10s
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: VOLTRON_HMAC
+          valueFrom:
+            secretKeyRef:
+              key: VOLTRON_HMAC
+              name: vault-secrets
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: EXCEPTION_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              key: VOLTRON_EXCEPTION_ENDPOINT
+              name: vault-secrets
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: OTEL_EXPORTER_OTLP_TRACES_HEADERS
+          valueFrom:
+            secretKeyRef:
+              key: OTEL_EXPORTER_OTLP_TRACES_HEADERS
+              name: vault-secrets
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: OTEL_SERVICE_NAME
+          value: voltron
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: CONDUIT_URL
+          value: 'https://conduit.service.test-cnc-01.github.net/twirp'
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: MEMCACHED_SERVERS
+          value: 'cache:11211'
+      # --- Proxima-specific env vars on unicorn rails container ---
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: MULTI_TENANT_ENTERPRISE
+          value: "true"
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: API_HOST_NAME
+          value: "%namespace%-api.octoca.ts.net"
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: PUBLIC_API_HOST_NAME
+          value: "%namespace%-api.octoca.ts.net"
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: REDIS2_TIMEOUT
+          value: "0.2"
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: AZURE_REGION
+          value: "%region%"
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: COPILOT_USAGE_SERVICE_URL
+          value: "http://api-server.copilot-usage-service-%stamp%.svc.cluster.local:8080"
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: COPILOT_LIMITER_URL
+          value: "http://copilot-limiter-http.copilot-limiter-%stamp%.svc.cluster.local:8080"
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: COPILOT_MODEL_REGISTRY_URL
+          value: "http://copilot-model-registry.copilot-model-registry-%stamp%.svc.cluster.local:8080"
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: FEATURE_FLAG_DATA_URL
+          value: "https://feature-flag-data-test-cnc-01.service.test-cnc-01.github.net/twirp"
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: FEATURE_MANAGEMENT_FEATURE_FLAG_HUB_URL
+          value: "https://feature-flag-hub-test-cnc-01.service.test-cnc-01.github.net/twirp"
+
+  # ---------- Unicorn: remove DATADOME_JS_KEY vault-secret ref (name-based) ----------
+  - target:
+      kind: Deployment
+      name: unicorn
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: unicorn
+      spec:
+        template:
+          spec:
+            containers:
+              - name: unicorn
+                env:
+                  - name: DATADOME_JS_KEY
+                    $patch: delete
+  # ---------- Unicorn: re-add env vars with literal values ----------
+  - target:
+      kind: Deployment
+      name: unicorn
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: unicorn
+      spec:
+        template:
+          spec:
+            containers:
+              - name: unicorn
+                env:
+                  - name: DATADOME_JS_KEY
+                    value: ""
+                  - name: OTEL_RUBY_BSP_START_THREAD_ON_BOOT
+                    value: "true"
+                  - name: UNICORN_OTEL_RUBY_BSP_START_THREAD_ON_BOOT
+                    value: "true"
+
+  # ---------- GPGVerify: scale to 0 (secret not provisioned yet) ----------
+  - target:
+      kind: Deployment
+      name: gpgverify
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 0
+
+  # ---------- Aqueduct worker: set FAILBOT_BACKEND (missing from base) ----------
+  - target:
+      kind: Deployment
+      name: aqueduct-worker
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: FAILBOT_BACKEND
+          value: http
+
+  # ---------- Gitauth (rails = container 0) ----------
+  - target:
+      kind: Deployment
+      name: gitauth
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: GOTAUTH_URL
+          value: 'https://gotauth-%stamp%.service.%stamp%.github.net'
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: SCIENTIST_REGION
+          valueFrom:
+            configMapKeyRef:
+                key: KUBE_REGION
+                name: kube-cluster-metadata
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: MULTI_TENANT_ENTERPRISE
+          value: "true"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: FEATURE_FLAG_DATA_URL
+          value: "https://feature-flag-data-test-cnc-01.service.test-cnc-01.github.net/twirp"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: FEATURE_MANAGEMENT_FEATURE_FLAG_HUB_URL
+          value: "https://feature-flag-hub-test-cnc-01.service.test-cnc-01.github.net/twirp"
+
+  # ---------- Unicorn service: proxima load-balancer annotations ----------
+  # Also fix targetPort: the proxima nginx-config component changes nginx to
+  # listen on port 80 (instead of the base 8080), so the Service must match.
+  - target:
+      kind: Service
+      name: unicorn
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          kube-service-exporter.github.com/exported: "true"
+          haproxy.org/backend-config-snippet: |-
+            option redispatch 1
+            option httpchk
+            http-check connect
+            http-check send meth GET uri /site/sha ver HTTP/1.1 hdr host ghe.com
+      - op: replace
+        path: /spec/ports/0/targetPort
+        value: 80
+
+  # ---------- Unicorn deployment: fix nginx containerPort to match proxima nginx config ----------
+  - target:
+      kind: Deployment
+      name: unicorn
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: unicorn
+      spec:
+        template:
+          spec:
+            containers:
+              - name: nginx
+                ports:
+                  - $patch: replace
+                  - name: http
+                    containerPort: 80
+                    protocol: TCP
+                  - name: stats
+                    containerPort: 8081
+                    protocol: TCP
+
+  # ---------- SPOKESD_URL override (strategic merge, name-based) ----------
+  - target:
+      kind: Deployment
+      name: unicorn
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: unicorn
+      spec:
+        template:
+          spec:
+            containers:
+              - name: unicorn
+                env:
+                  - name: SPOKESD_URL
+                    value: 'https://spokesd.service.test-cnc-01.github.net/twirp/'
+  - target:
+      kind: Deployment
+      name: gitauth
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: gitauth
+      spec:
+        template:
+          spec:
+            containers:
+              - name: unicorn
+                env:
+                  - name: SPOKESD_URL
+                    value: 'https://spokesd.service.test-cnc-01.github.net/twirp/'
+

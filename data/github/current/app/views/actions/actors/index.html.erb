@@ -1,0 +1,40 @@
+<% if actions_workflow_filtering_enabled? %>
+<% included_actors = workflow_filter_included(workflow_run_filters, :actor) %>
+<% excluded_actors = workflow_filter_excluded(workflow_run_filters, :actor) %>
+<% sorted_actors = actors.sort_by do |a|
+  d = a.is_a?(Bot) ? a.to_query_filter : a.display_login
+  [included_actors.include?(d) ? 0 : excluded_actors.include?(d) ? 1 : 2, d == current_user&.display_login ? 0 : 1, d]
+end %>
+<%= render(Primer::Alpha::SelectPanel::ItemList.new(
+  menu_id: "actions_actors_filter",
+  select_variant: :multiple,
+  aria: { label: "actors" },
+)) do |list| %>
+  <% sorted_actors.each do |actor| %>
+    <% display_login = actor.is_a?(Bot) ? actor.to_query_filter : actor.display_login %>
+    <% is_included = included_actors.include?(display_login) %>
+    <% is_excluded = excluded_actors.include?(display_login) %>
+    <% list.with_avatar_item(
+        src: actor.primary_avatar_url,
+        content_arguments: { data: { value: display_login, excluded: is_excluded || nil } },
+        username: actor.display_login_legacy,
+        active: is_included) %>
+  <% end %>
+<% end %>
+<% else %>
+<%= render(Primer::Alpha::SelectPanel::ItemList.new(
+  menu_id: "actions_actors_filter",
+  select_variant: :single,
+  aria: { label: "actors" },
+)) do |list| %>
+  <% actors.each do |actor| %>
+    <% display_login = actor.is_a?(Bot) ? actor.to_query_filter : actor.display_login %>
+    <% selected = actor.display_login == selected_actor %>
+    <% list.with_avatar_item(
+        src: actor.primary_avatar_url,
+        href: filtered_runs_by_file_path(filters: workflow_run_filters, replace: { actor: !selected ? display_login : nil }, filename: selected_filename, lab: is_lab),
+        username: actor.display_login_legacy,
+        active: selected) %>
+  <% end %>
+<% end %>
+<% end %>

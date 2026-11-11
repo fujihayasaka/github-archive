@@ -1,0 +1,138 @@
+# typed: true
+# frozen_string_literal: true
+
+class EnterpriseRoleBypassActor < RepositoryRulesetBypassActor
+  validate :ensure_actor
+  validate :ensure_valid_role
+
+  ADMIN_NAME = "Enterprise admin"
+
+  def self.display_type
+    "EnterpriseRole"
+  end
+
+  sig { returns(T.nilable(EnterpriseRole)) }
+  def role
+    T.let(actor, T.nilable(EnterpriseRole))
+  end
+
+  sig { returns(T.nilable(String)) }
+  def actor_name
+    self.role&.name == "admin" ? ADMIN_NAME : role&.display_name
+  end
+
+  sig { returns(String) }
+  def actor_type
+    self.class.display_type
+  end
+
+  sig { returns(String) }
+  def actor_display_type
+    self.class.display_type
+  end
+
+  def ensure_actor
+    errors.add(:base, "actor_id is required for EnterpriseRole") if actor_id.nil?
+    errors.add(:actor, "must be an EnterpriseRole") unless actor_type == "EnterpriseRole"
+  end
+
+  def ensure_valid_role
+    return if @validated_associations
+    return if actor.nil?
+    unless actor.is_a?(EnterpriseRole)
+      errors.add("actor", "must be an EnterpriseRole")
+      return
+    end
+
+    if actor.owner_id.present?
+      # custom role
+      enterprise = ruleset_enterprise
+      if enterprise.present?
+        unless EnterpriseRole.custom_roles_for_enterprise(enterprise).exists?(actor_id)
+          errors.add("actor", "role must be part of the ruleset enterprise")
+        end
+      else
+        errors.add("actor", "role must be part of the ruleset enterprise")
+      end
+    else
+      errors.add("actor", "role must have an owner")
+    end
+  end
+
+  sig do
+    params(
+      source: RuleEngine::Types::RuleSource,
+      query: T.nilable(String),
+      limit: Integer
+    )
+    .returns(T::Array[EnterpriseRoleBypassActor])
+  end
+  def self.suggest_bypassers(source, query, limit: 10)
+    business = nil
+
+    if source.is_a?(Business)
+      business = source
+    elsif source.is_a?(Organization) && source.business
+      business = source.business
+    elsif source.is_a?(Repository) && source.organization&.business
+      business = source.organization&.business
+    end
+
+    return [] if business.nil? || !business.custom_enterprise_roles_supported?
+    bypass_actors = []
+
+    EnterpriseRole.visible_roles(business).each do |role_to_add|
+      if query.present?
+        if role_to_add.name.downcase.start_with?(query)
+          bypass_actors.unshift(EnterpriseRoleBypassActor.new(actor: role_to_add))
+        elsif role_to_add.name.downcase.include?(query)
+          bypass_actors.push(EnterpriseRoleBypassActor.new(actor: role_to_add))
+        end
+      else
+        bypass_actors.push(EnterpriseRoleBypassActor.new(actor: role_to_add))
+      end
+
+      break if bypass_actors.size >= limit
+    end
+
+    bypass_actors
+  end
+
+  sig do
+    params(
+      bypassers: T::Array[EnterpriseRoleBypassActor],
+      actor: RuleEngine::Types::Actor,
+      targetable: Targeting::Targetable
+    ).returns(T::Array[Symbol])
+  end
+  def self.allowed_bypass_modes(bypassers, actor, targetable)
+    organization = targetable.get_attribute(Targeting::Attribute::Organization)
+    return [] unless organization.is_a?(Organization)
+
+    enterprise = organization.business
+    return [] unless enterprise.present? && actor.is_a?(User)
+
+    allowed_modes = []
+
+    enterprise_role_bypasses = bypassers.select { |bypass| bypass.actor.present? }
+    return [] if enterprise_role_bypasses.empty?
+
+    role_ids = enterprise_role_bypasses.map(&:actor_id)
+
+    include_indirect = enterprise.present?
+    matching_role_ids = Authz.domain.user_roles.enterprise_role_ids_for_user(
+      business: enterprise,
+      enterprise_role_ids: role_ids,
+      user: actor,
+      include_indirect: include_indirect
+    )
+
+    matching_role_ids.each do |role_id|
+      enterprise_role_bypasses.find { |bypass| bypass.actor_id == role_id }.tap do |bypass|
+        allowed_modes << bypass.bypass_mode if bypass
+      end
+    end
+
+    allowed_modes.uniq
+  end
+end

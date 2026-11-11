@@ -1,0 +1,60 @@
+<section aria-labelledby="Releases">
+  <%= render Primer::Beta::Subhead.new do |component| %>
+    <% component.with_heading(tag: :h2) do %>Releases<% end %>
+  <% end %>
+  <p id="releases-policy-description">
+    Choose whether repositories will publish immutable releases. Immutable releases improve security by disallowing changes to assets and tags after the release is published.
+  </p>
+  <%= render Primer::Alpha::ActionMenu.new(
+    classes: "d-inline",
+    select_variant: :single,
+    dynamic_label: true,
+    anchor_side: :outside_bottom,
+    test_selector: "releases-policy-form",
+  ) do |menu|
+    menu.with_show_button(test_selector: "policy-selection", "aria-describedby": "releases-policy-description") do |button|
+      button.with_trailing_action_icon(icon: :"triangle-down")
+      current_selection_label
+    end
+
+    release_policy_list.each do |item|
+      menu.with_item(
+        label: item.label,
+        href: update_org_releases_policy_path(organization),
+        form_arguments: {
+          method: :put,
+          inputs: [{ name: "policy", value: item.value }],
+        },
+        active: item.checked,
+      ) do |component|
+        component.with_description.with_content(item.description)
+      end
+    end
+  end %>
+
+  <% if config.immutable_releases_enabled_for_selected? %>
+    <div class="ml-2 d-inline js-policy-repos-container" <%= test_selector("selected-repos-section") %>>
+        <%= pluralize selected_repo_count, "selected repository", plural: "selected repositories" %>
+        <%= form_tag org_releases_repositories_path(organization),
+          class: "d-inline overflow-hidden js-policy-repos-form",
+          id: REPOSITORIES_FORM_ID,
+          method: :put do %>
+        <% end %>
+        <%= render(Primer::Alpha::Dialog.new(title: "Repositories", preload: true, classes: "js-repository-items-dialog")) do |dialog| %>
+          <% dialog.with_show_button(scheme: :link, "aria-label": "Select repositories", classes: "Link--muted") do |button| %>
+            <%= render Primer::Beta::Octicon.new(:gear) %>
+          <% end %>
+          <% dialog.with_body do %>
+            <%= render Primer::Alpha::IncludeFragment.new(src: edit_org_releases_repositories_path(organization)) do %>
+              <div class="text-center" data-hide-on-error>
+                <%= render Primer::Beta::Spinner.new(aria: { label: "Loading" }) %>
+              </div>
+              <div class="text-center" data-show-on-error hidden role="alert" aria-live="assertive">
+                Something went wrong.
+              </div>
+            <% end %>
+          <% end %>
+        <% end %>
+      </div>
+    <% end %>
+</section>

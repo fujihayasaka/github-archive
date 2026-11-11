@@ -1,0 +1,96 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base/proxima
+
+replicas:
+  - name: unicorn-performance
+    count: 3
+
+patches:
+  # Override proxima ScaledObject replica counts for this environment
+  - target:
+      kind: ScaledObject
+      name: unicorn-api
+    patch: |-
+      - op: replace
+        path: /spec/minReplicaCount
+        value: 8
+      - op: replace
+        path: /spec/maxReplicaCount
+        value: 8
+  - target:
+      kind: ScaledObject
+      name: unicorn-api-graphql
+    patch: |-
+      - op: replace
+        path: /spec/minReplicaCount
+        value: 5
+      - op: replace
+        path: /spec/maxReplicaCount
+        value: 5
+  - target:
+      kind: ScaledObject
+      name: unicorn-internal-api
+    patch: |-
+      - op: replace
+        path: /spec/minReplicaCount
+        value: 4
+      - op: replace
+        path: /spec/maxReplicaCount
+        value: 4
+  # Remove replicas from deployments managed by KEDA ScaledObjects
+  - target:
+      kind: Deployment
+      name: unicorn-api
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+  - target:
+      kind: Deployment
+      name: ^unicorn$
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+  - target:
+      kind: Deployment
+      name: unicorn-internal-api
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+  - target:
+      kind: Deployment
+      name: unicorn-api
+    patch: |-
+      - op: replace
+        path: /spec/strategy/rollingUpdate/maxUnavailable
+        value: 1
+  - target:
+      kind: Namespace
+      name: base-namespace
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: github-prod-sdc-01
+      - op: replace
+        path: "/metadata/labels/github.com~1name"
+        value: github-prod-sdc-01
+  - target:
+      kind: ResourceQuota
+      name: pod-object-count
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: github-prod-sdc-01
+  # Override proxima ScaledObject replica counts for aqueduct workers
+  - target:
+      kind: ScaledObject
+      name: sharedworker
+    patch: |-
+      - op: replace
+        path: /spec/minReplicaCount
+        value: 5
+      - op: replace
+        path: /spec/maxReplicaCount
+        value: 5

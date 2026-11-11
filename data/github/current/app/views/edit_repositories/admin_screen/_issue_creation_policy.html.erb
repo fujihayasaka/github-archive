@@ -1,0 +1,44 @@
+<% issue_creation_config = IssueCreationConfig.new(repository) %>
+<% status ||= nil %>
+<%
+  status_class = case status
+                 when :success then "status-indicator-success"
+                 when :error   then "status-indicator-failed"
+                 end
+%>
+<turbo-frame id="issue-creation-policy" class="d-inline-flex flex-items-center">
+  <%= render Primer::Alpha::ActionMenu.new(select_variant: :single, dynamic_label: true, dynamic_label_prefix: "Creation allowed by") do |menu| %>
+    <% menu.with_show_button do |button| %>
+      <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+    <% end %>
+
+    <% menu.with_item(
+      label: "All users",
+      active: issue_creation_config.issue_creation_allowed_by_all?,
+      href: repository_issue_creation_policy_path(repository.owner, repository),
+      form_arguments: { method: :put, name: "issue_creation_policy", value: Configurable::IssueCreationPolicy::ALL },
+    ) do |item| %>
+      <% item.with_description.with_content("Anyone can create an issue") %>
+    <% end %>
+
+    <% menu.with_item(
+      label: "Collaborators only",
+      active: issue_creation_config.issue_creation_restricted_to_collaborators?,
+      href: repository_issue_creation_policy_path(repository.owner, repository),
+      form_arguments: { method: :put, name: "issue_creation_policy", value: Configurable::IssueCreationPolicy::COLLABORATORS_ONLY },
+    ) do |item| %>
+      <% item.with_description.with_content("Only collaborators can create issues") %>
+    <% end %>
+  <% end %>
+  <span class="hx_status-indicator status-indicator ml-2 <%= status_class %>">
+    <%= render(Primer::Beta::Spinner.new(size: :small, classes: "status-indicator-spinner")) %>
+    <%= render(Primer::Beta::Octicon.new(icon: "check")) %>
+    <%= render(Primer::Beta::Octicon.new(icon: "x")) %>
+  </span>
+</turbo-frame>
+
+<style>
+  turbo-frame#issue-creation-policy[busy] .status-indicator-spinner {
+    display: inline-block;
+  }
+</style>

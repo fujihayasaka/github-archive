@@ -1,0 +1,47 @@
+<% if scim_managed_enterprise?(this_business) %>
+  <% page_info title: "#{this_business.name} External Groups", selected_link: :external_groups %>
+
+  <div class="Box Box--condensed tmp-mb-3">
+    <div class="Box-header d-flex flex-items-center flex-justify-between">
+      <h3 class="Box-title">Actions</h3>
+    </div>
+    <div class="Box-body">
+      <%
+        has_no_members = external_group.active_members_count.zero?
+        has_no_teams = external_group.external_group_teams.empty?
+        has_no_enterprise_teams = external_group.enterprise_team_group_mappings.empty?
+        can_delete = has_no_members && has_no_teams && has_no_enterprise_teams
+      %>
+      <% if can_delete %>
+        <%
+          delete_path = if GitHub.single_business_environment?
+            stafftools_external_group_destroy_path(external_group)
+          else
+            external_group_destroy_stafftools_enterprise_path(this_business.slug, external_group)
+          end
+          confirm_msg = "Are you sure you want to delete the external group " \
+            "'#{external_group.display_name}'? This action cannot be undone."
+        %>
+        <%= form_tag delete_path, method: :delete, data: { confirm: confirm_msg } do %>
+          <%= render Primer::Beta::Button.new(
+            scheme: :danger, type: :submit, test_selector: "delete-external-group"
+          ) do %>
+            Delete external group
+          <% end %>
+        <% end %>
+      <% else %>
+        <p class="text-small color-fg-muted">
+          This external group cannot be deleted because it has active members or linked teams.
+          Remove all members and unlink all teams before deleting.
+        </p>
+      <% end %>
+    </div>
+  </div>
+
+  <%= render "stafftools/external_groups/external_group",
+    members: members,
+    teams: teams,
+    enterprise_teams: enterprise_teams,
+    enterprise_teams_total_count: enterprise_teams_total_count,
+    external_group: external_group %>
+<% end %>

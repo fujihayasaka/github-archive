@@ -1,0 +1,204 @@
+name: Validate and Deploy Custom Copilot Image
+
+on:
+  image_version:
+    names:
+    - "Copilot Coding Agent"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  validate:
+    runs-on: copilot-coding-agent-validation-runner
+    outputs:
+      image_version: ${{ steps.extract-version.outputs.image_version }}
+    steps:
+      - name: Extract image version
+        id: extract-version
+        run: |
+          IMAGE_VERSION=$(jq -r '.image_version.version // empty' "$GITHUB_EVENT_PATH")
+          if [ -z "$IMAGE_VERSION" ] && [ "${{ github.event_name }}" = "image_version" ]; then
+            echo "::error::Failed to extract image version from image_version event payload"
+            exit 1
+          fi
+          echo "image_version=$IMAGE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Extracted image version: ${IMAGE_VERSION:-<none (workflow_dispatch)>}"
+
+      - name: Validate runtime installation
+        run: |
+          echo "=== Checking runtime directory ==="
+          RUNTIME_DIR="/opt/copilot-runtime/copilot-developer-action-main"
+          if [ ! -d "$RUNTIME_DIR" ]; then
+            echo "::error::Runtime directory not found at $RUNTIME_DIR"
+            exit 1
+          fi
+          echo "Runtime directory exists"
+          ls -la "$RUNTIME_DIR/"
+
+      - name: Validate Node.js installation
+        run: |
+          echo "=== Checking Node.js ==="
+          NODE_BIN="/opt/copilot-runtime/ghcca-node/node/bin/node"
+          if [ ! -x "$NODE_BIN" ]; then
+            echo "::error::Node.js not found or not executable at $NODE_BIN"
+            exit 1
+          fi
+          NODE_VERSION=$("$NODE_BIN" --version)
+          echo "Node.js version: $NODE_VERSION"
+
+      - name: Validate blackbird-mcp-server
+        run: |
+          echo "=== Checking blackbird-mcp-server ==="
+          BLACKBIRD="/opt/copilot-runtime/copilot-developer-action-main/blackbird-mcp-server/blackbird-mcp-server"
+          if [ ! -x "$BLACKBIRD" ]; then
+            echo "::error::blackbird-mcp-server not found or not executable at $BLACKBIRD"
+            exit 1
+          fi
+          echo "blackbird-mcp-server: OK"
+
+      - name: Validate github-mcp-server
+        run: |
+          echo "=== Checking github-mcp-server ==="
+          GITHUB_MCP="/opt/copilot-runtime/copilot-developer-action-main/github-mcp-server/github-mcp-server"
+          if [ ! -x "$GITHUB_MCP" ]; then
+            echo "::error::github-mcp-server not found or not executable at $GITHUB_MCP"
+            exit 1
+          fi
+          echo "github-mcp-server: OK"
+
+      - name: Validate Autofind
+        run: |
+          echo "=== Checking Autofind ==="
+          AUTOFIND_DIR="/opt/copilot-runtime/copilot-developer-action-main/autofind"
+          if [ ! -d "$AUTOFIND_DIR" ]; then
+            echo "::error::Autofind directory not found at $AUTOFIND_DIR"
+            exit 1
+          fi
+          echo "Autofind directory exists"
+          ls -la "$AUTOFIND_DIR/"
+
+      - name: Validate Playwright MCP installation
+        run: |
+          echo "=== Checking Playwright MCP ==="
+          export PATH="/opt/copilot-runtime/ghcca-node/node/bin:$PATH"
+          if ! npm list -g @playwright/mcp 2>/dev/null; then
+            echo "::error::Playwright MCP is not globally installed — image build may have failed"
+            exit 1
+          fi
+          echo "Playwright MCP package present"
+
+      - name: Validate Playwright MCP systemd service
+        run: |
+          echo "=== Checking playwright-mcp systemd service ==="
+          if ! systemctl is-enabled playwright-mcp; then
+            echo "::error::playwright-mcp service is not enabled"
+            exit 1
+          fi
+          if ! systemctl is-active playwright-mcp; then
+            echo "::error::playwright-mcp service is not running"
+            exit 1
+          fi
+          echo "playwright-mcp service: enabled and active"
+
+      - name: Validate mkcert CA
+        run: |
+          echo "=== Checking mkcert CA ==="
+          CAROOT="/opt/copilot-runtime/mkcert-ca"
+          if ! systemctl is-enabled copilot-mkcert-ca; then
+            echo "::error::copilot-mkcert-ca service is not enabled"
+            exit 1
+          fi
+          if [ ! -f "$CAROOT/rootCA.pem" ]; then
+            echo "::error::mkcert root CA certificate not found at $CAROOT/rootCA.pem"
+            exit 1
+          fi
+          if [ ! -f "$CAROOT/rootCA-key.pem" ]; then
+            echo "::error::mkcert root CA key not found at $CAROOT/rootCA-key.pem"
+            exit 1
+          fi
+          echo "mkcert CA: OK"
+
+      - name: Validate MCP temp directories
+        run: |
+          echo "=== Checking MCP temp directories ==="
+          MCP_DIR="/opt/copilot-runtime/mcp-server"
+          if [ ! -d "$MCP_DIR" ]; then
+            echo "::error::MCP temp directory not found at $MCP_DIR"
+            exit 1
+          fi
+          echo "MCP temp directory: OK"
+
+      - name: Validate action cache
+        run: |
+          echo "=== Checking action archive cache ==="
+          if [ ! -f /opt/actionarchivecache.squashfs ]; then
+            echo "::error::squashfs image not found at /opt/actionarchivecache.squashfs"
+            exit 1
+          fi
+          if ! mountpoint -q /var/opt/actionarchivecache 2>/dev/null; then
+            echo "::warning::squashfs not mounted at /var/opt/actionarchivecache (may mount on demand)"
+          else
+            echo "squashfs mounted at /var/opt/actionarchivecache"
+          fi
+          if ! grep -q 'ACTIONS_RUNNER_SYMLINK_CACHED_ACTIONS=true' /etc/environment; then
+            echo "::error::ACTIONS_RUNNER_SYMLINK_CACHED_ACTIONS not set in /etc/environment"
+            exit 1
+          fi
+          echo "Action cache: OK"
+
+      - name: Validate pid-ns-exec
+        run: |
+          echo "=== Checking pid-ns-exec ==="
+          BIN=/usr/local/bin/pid-ns-exec
+          if [ ! -x "$BIN" ]; then
+            echo "::error::pid-ns-exec not found or not executable at $BIN"
+            exit 1
+          fi
+          owner=$(stat -c '%U:%G' "$BIN")
+          if [ "$owner" != "root:root" ]; then
+            echo "::error::pid-ns-exec ownership is $owner, expected root:root (a cap_sys_admin binary writable by non-root is a host privesc)"
+            exit 1
+          fi
+          mode=$(stat -c '%a' "$BIN")
+          if [ "$mode" != "755" ]; then
+            echo "::error::pid-ns-exec mode is $mode, expected 755 (a cap_sys_admin binary writable by group/other is a host privesc)"
+            exit 1
+          fi
+          if ! getcap "$BIN" | grep -q 'cap_sys_admin=ep'; then
+            echo "::error::pid-ns-exec is missing cap_sys_admin=ep file capability"
+            exit 1
+          fi
+          if ! "$BIN" true; then
+            echo "::error::pid-ns-exec failed to run a trivial command"
+            exit 1
+          fi
+          ns_pids=$("$BIN" sh -c 'ps -e --no-headers | wc -l')
+          host_pids=$(ps -e --no-headers | wc -l)
+          echo "host PIDs: $host_pids; ns PIDs: $ns_pids"
+          if [ "$ns_pids" -gt 5 ]; then
+            echo "::error::pid-ns-exec did not isolate process table (ns=$ns_pids)"
+            exit 1
+          fi
+          if [ "$ns_pids" -ge "$host_pids" ]; then
+            echo "::error::pid-ns-exec ns count is not less than host (ns=$ns_pids, host=$host_pids)"
+            exit 1
+          fi
+          echo "pid-ns-exec: OK"
+
+      - name: Validation summary
+        run: |
+          echo "============================================"
+          echo "  Custom Copilot Image Validation: PASSED"
+          echo "============================================"
+
+  deploy:
+    needs: validate
+    if: github.event_name == 'image_version' && needs.validate.outputs.image_version != ''
+    permissions:
+      contents: read
+    uses: ./.github/workflows/deploy-custom-copilot-image.yml
+    with:
+      image_version: ${{ needs.validate.outputs.image_version }}
+    secrets:
+      CUSTOM_IMAGE_DEPLOYMENT_APP_KEY: ${{ secrets.CUSTOM_IMAGE_DEPLOYMENT_APP_KEY }}

@@ -1,0 +1,78 @@
+<%
+  # Sandbox settings inherit restrictions from the enterprise level.
+  # If the enterprise is present and has disabled sandboxes, the org-level setting is force-disabled.
+  business = current_organization.business
+  enterprise_disabled = business.present? && business.respond_to?(:github_sandbox_disabled?) && business.github_sandbox_disabled?
+  enterprise_all_orgs = business.present? && business.respond_to?(:github_sandbox_all_orgs_mode?) && business.github_sandbox_all_orgs_mode?
+%>
+
+<div data-replace-remote-form-target>
+  <% if enterprise_disabled %>
+    <%= render(Primer::Alpha::Banner.new(scheme: :warning, mb: 2)) do %>
+    Your enterprise has disabled cloud sandbox access for this organization. The setting below will not apply until your enterprise administrator enables cloud sandbox access.
+    <% end %>
+  <% end %>
+
+  <% if enterprise_all_orgs %>
+    <%= render(Primer::Alpha::Banner.new(scheme: :default, mb: 2)) do %>
+      Your enterprise has enabled cloud sandbox access for all organizations. You can disable it for this organization below.
+    <% end %>
+  <% end %>
+
+  <%= render(Primer::Beta::Subhead.new) do |component| %>
+    <% component.with_heading(tag: :h2) do %>
+      Sandboxes
+    <% end %>
+  <% end %>
+
+  <%= render Primer::Box.new(display: :flex, direction: :column, classes: "tmp-mt-2") do %>
+    <%= render Primer::Beta::Heading.new(tag: :h3, style: "flex: 0 1 auto;", mb: 2, font_weight: :normal) do %>
+      Cloud sandbox access
+    <% end %>
+    <%= render Primer::Beta::Text.new do %>
+      Manage cloud sandbox access for your organization's members.
+    <% end %>
+
+    <%= render Primer::Beta::Text.new(color: :muted, mt: 1) do %>
+      If preview features are enabled, you agree to the <%= link_to "Pre-Release Terms", "https://docs.github.com/en/site-policy/github-terms/github-pre-release-license-terms", class: "Link--inTextBlock" %>.
+    <% end %>
+  <% end %>
+
+  <%= form_tag settings_org_sandboxes_update_path(current_organization), method: :put do %>
+    <fieldset<%= " disabled" if enterprise_disabled %>>
+      <%= render Primer::Box.new(display: :flex, direction: :column, classes: "tmp-mt-3") do %>
+        <div class="form-checkbox">
+          <label>
+            <input
+              type="radio"
+              name="github_sandbox_enabled"
+              value="<%= Configurable::GithubSandboxEnabled::DISABLED %>"
+              <%= "checked" if current_organization.github_sandbox_disabled? %>
+            >
+            <strong>Disabled</strong>
+            <p class="note">Cloud sandbox access is not available for organization members.</p>
+          </label>
+        </div>
+
+        <div class="form-checkbox">
+          <label>
+            <input
+              type="radio"
+              name="github_sandbox_enabled"
+              value="<%= Configurable::GithubSandboxEnabled::ALL_MEMBERS %>"
+              <%= "checked" if current_organization.github_sandbox_enabled? %>
+            >
+            <strong>Enabled</strong>
+            <p class="note">Members of this organization can use cloud sandboxes.</p>
+          </label>
+        </div>
+
+        <%= render Primer::Box.new(classes: "tmp-mt-3") do %>
+          <%= render Primer::Beta::Button.new(type: :submit, scheme: :primary, test_selector: "sandbox-access-save") do %>
+            Save
+          <% end %>
+        <% end %>
+      <% end %>
+    </fieldset>
+  <% end %>
+</div>

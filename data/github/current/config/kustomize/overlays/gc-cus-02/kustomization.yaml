@@ -1,0 +1,555 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: github-production
+
+images:
+  - name: dxcrprod.azurecr.io/docker-nginx
+    digest: sha256:80c11338bbd7f71d16c66866571c2b43081be7027c0b6a901a2e5c58774c94ac
+
+resources:
+  - ../../base/azure
+  - unicorn-performance/
+  - servicemeshingress-unicorn.yaml
+  - servicemeshingress-unicorn-canary.yaml
+  - servicemeshingress-unicorn-api.yaml
+  - servicemeshingress-unicorn-api-canary.yaml
+  - servicemeshingress-unicorn-api-graphql.yaml
+  - servicemeshingress-unicorn-api-lowprio.yaml
+  - servicemeshingress-unicorn-internal-api.yaml
+  - servicemeshingress-unicorn-lowprio.yaml
+  - servicemeshingress-unicorn-performance.yaml
+  - servicemeshingress-unicorn-api-performance.yaml
+  - scaledobjects/unicorn-api.yaml
+  - scaledobjects/unicorn.yaml
+  - scaledobjects/unicorn-internal-api.yaml
+  - ../../base/commonBase/unicorn/poddisruptionbudgets/
+  - ../../base/commonBase/unicorn-api/poddisruptionbudgets/
+  - ../../base/commonBase/unicorn-internal-api/poddisruptionbudgets/
+  - ../../base/commonBase/achievements-yolo-processor/
+  - ../../base/commonBase/achievements-galaxy-brain-processor/
+  - ../../base/commonBase/achievements-pull-shark-processor/
+  - ../../base/commonBase/achievements-open-sourcerer-processor/
+  - ../../base/commonBase/achievements-pair-extraordinaire-processor/
+  - ../../base/commonBase/achievements-heart-on-your-sleeve-processor/
+  - ../../base/commonBase/achievements-quickdraw-processor/
+  - ../../base/commonBase/achievements-heartbreaker-processor/
+  - ../../base/commonBase/achievements-starstruck-processor/
+  - ../../base/commonBase/achievements-public-sponsor-processor/
+  - ../../base/commonBase/secret-scanning-alert-events-processor/
+  - ../../base/commonBase/pages-deployment-status-processor/
+  - ../../base/commonBase/actions-artifact-storage-event-processor/
+  - ../../base/commonBase/community-insights-discussion-page-view-processor/
+  - ../../base/commonBase/projects-denormalization-processor/
+  - ../../base/commonBase/projects-denormalization-processor-column-changes/
+  - ../../base/commonBase/projects-denormalization-processor-content-changes-issue/
+  - ../../base/commonBase/projects-denormalization-processor-content-changes-pull-request/
+
+components:
+  - ../../base/servicemesh-dotcom
+  - ../../base/istio-perf-eng
+
+configMapGenerator:
+  - name: observability-config
+    behavior: merge
+    literals:
+      - FAILBOT_HAYSTACK_URL_MESH=http://failbotg.failbotg-production.svc.cluster.local/api/needles
+      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT_INGRESS=https://otelcol-dotcom.service.iad.github.net/v1/traces
+
+# If you need to override environment variables, resource limits, or other settings for specific deployments
+# you can use the patches here to apply those changes. Each patch file should contain the necessary patches
+# to modify the respective deployment as needed. Avoid creating patches directly in this file to keep it clean.
+patches:
+  - target:
+      kind: Namespace
+      name: github-azure
+    patch: |-
+      - op: replace
+        path: "/metadata/labels/github.com~1name"
+        value: github-production
+  - target:
+      kind: ServiceMeshConfig
+      name: config
+    patch: |-
+      - op: replace
+        path: /spec/authorization/strictTLS
+        value: true
+  - target:
+      kind: Deployment
+      labelSelector: service=unicorn
+    path: patches/deployments/unicorn.yaml
+  - target:
+      kind: Deployment
+      name: unicorn
+      labelSelector: service=unicorn
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+  - target:
+      kind: Deployment
+      labelSelector: service=unicorn-api
+    path: patches/deployments/unicorn-api.yaml
+  - target:
+      kind: Deployment
+      name: unicorn-api
+      labelSelector: service=unicorn-api
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+  - target:
+      kind: Deployment
+      name: unicorn-internal-api
+      labelSelector: service=unicorn-internal-api
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+  - target:
+      kind: Deployment
+      labelSelector: service=unicorn-api-lowprio
+    path: patches/deployments/unicorn-api-lowprio.yaml
+  - target:
+      kind: Deployment
+      labelSelector: service=unicorn-api-graphql
+    path: patches/deployments/unicorn-api-graphql.yaml
+  - target:
+      kind: Deployment
+      labelSelector: service=unicorn-lowprio
+    path: patches/deployments/unicorn-lowprio.yaml
+  - target:
+      kind: Deployment
+      labelSelector: service=unicorn-internal-api
+    path: patches/deployments/unicorn-internal-api.yaml
+  - target:
+      kind: ConfigMap
+      name: observability-config
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          moda.github.net/canary-v2: "true"
+  - target:
+      kind: ConfigMap
+      name: unicorn-api-nginx-conf
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          moda.github.net/canary-v2: "true"
+  - target:
+      kind: ConfigMap
+      name: unicorn-nginx-conf
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          moda.github.net/canary-v2: "true"
+  - target:
+      kind: Deployment
+      name: achievements-yolo-processor
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: mysql-hosts
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORDINATION_REDIS_URL
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORD_REDIS_URLS
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380,rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+  - target:
+      kind: Deployment
+      name: achievements-galaxy-brain-processor
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: mysql-hosts
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORDINATION_REDIS_URL
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORD_REDIS_URLS
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380,rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+  - target:
+      kind: Deployment
+      name: achievements-pull-shark-processor
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: mysql-hosts
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORDINATION_REDIS_URL
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORD_REDIS_URLS
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380,rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+  - target:
+      kind: Deployment
+      name: achievements-open-sourcerer-processor
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: mysql-hosts
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORDINATION_REDIS_URL
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORD_REDIS_URLS
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380,rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+  - target:
+      kind: Deployment
+      name: achievements-pair-extraordinaire-processor
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: mysql-hosts
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORDINATION_REDIS_URL
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORD_REDIS_URLS
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380,rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+  - target:
+      kind: Deployment
+      name: achievements-heart-on-your-sleeve-processor
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: mysql-hosts
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORDINATION_REDIS_URL
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORD_REDIS_URLS
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380,rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+  - target:
+      kind: Deployment
+      name: achievements-quickdraw-processor
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: mysql-hosts
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORDINATION_REDIS_URL
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORD_REDIS_URLS
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380,rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+  - target:
+      kind: Deployment
+      name: achievements-heartbreaker-processor
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: mysql-hosts
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORDINATION_REDIS_URL
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORD_REDIS_URLS
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380,rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+  - target:
+      kind: Deployment
+      name: achievements-starstruck-processor
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: mysql-hosts
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORDINATION_REDIS_URL
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORD_REDIS_URLS
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380,rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+  - target:
+      kind: Deployment
+      name: achievements-public-sponsor-processor
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: mysql-hosts
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORDINATION_REDIS_URL
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORD_REDIS_URLS
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380,rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+  - target:
+      kind: Deployment
+      name: secret-scanning-alert-events-processor
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: mysql-hosts
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORDINATION_REDIS_URL
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORD_REDIS_URLS
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380,rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+  - target:
+      kind: Deployment
+      name: pages-deployment-status-processor
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: mysql-hosts
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: mysql-hosts
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: SPOKESD_URL
+          value: "https://spokesd-production.service.gc-cus-02.github.net:10013/twirp/"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: SPOKESD_TWIRP_URL
+          value: "https://spokesd-production.service.gc-cus-02.github.net:10013/twirp/"
+  - target:
+      kind: Deployment
+      name: actions-artifact-storage-event-processor
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: mysql-hosts
+  - target:
+      kind: Deployment
+      name: community-insights-discussion-page-view-processor
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: mysql-hosts
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORDINATION_REDIS_URL
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORD_REDIS_URLS
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380,rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+  - target:
+      kind: Deployment
+      name: projects-denormalization-processor
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: mysql-hosts
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORDINATION_REDIS_URL
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORD_REDIS_URLS
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380,rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: MONOLITH_REDIS_RATE_LIMITER_URLS
+          value: "rediss://default:$(REDIS_MONOLITH_RL_PRIMARY_PASSWORD)@db-redis-monolith-rl-gc-cus-02.redis.cache.windows.net:6380;rediss://default:$(REDIS_MONOLITH_RL_PRIMARY_PASSWORD)@db-redis-monolith-rl-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: REDIS_RATE_LIMITER_URLS
+          value: "rediss://default:$(MANAGED_REDIS_API_RL_00_PRIMARY_PASSWORD)@amr-api-rl-00-gc-cus-02.centralus.redis.azure.net:10000;rediss://default:$(MANAGED_REDIS_API_RL_00_PRIMARY_PASSWORD)@amr-api-rl-00-gc-cus-02.centralus.redis.azure.net:10000,rediss://default:$(MANAGED_REDIS_API_RL_01_PRIMARY_PASSWORD)@amr-api-rl-01-gc-cus-02.centralus.redis.azure.net:10000;rediss://default:$(MANAGED_REDIS_API_RL_01_PRIMARY_PASSWORD)@amr-api-rl-01-gc-cus-02.centralus.redis.azure.net:10000,rediss://default:$(MANAGED_REDIS_API_RL_02_PRIMARY_PASSWORD)@amr-api-rl-02-gc-cus-02.centralus.redis.azure.net:10000;rediss://default:$(MANAGED_REDIS_API_RL_02_PRIMARY_PASSWORD)@amr-api-rl-02-gc-cus-02.centralus.redis.azure.net:10000,rediss://default:$(MANAGED_REDIS_API_RL_03_PRIMARY_PASSWORD)@amr-api-rl-03-gc-cus-02.centralus.redis.azure.net:10000;rediss://default:$(MANAGED_REDIS_API_RL_03_PRIMARY_PASSWORD)@amr-api-rl-03-gc-cus-02.centralus.redis.azure.net:10000,rediss://default:$(MANAGED_REDIS_API_RL_04_PRIMARY_PASSWORD)@amr-api-rl-04-gc-cus-02.centralus.redis.azure.net:10000;rediss://default:$(MANAGED_REDIS_API_RL_04_PRIMARY_PASSWORD)@amr-api-rl-04-gc-cus-02.centralus.redis.azure.net:10000"
+  - target:
+      kind: Deployment
+      name: projects-denormalization-processor-content-changes-issue
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: mysql-hosts
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORDINATION_REDIS_URL
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORD_REDIS_URLS
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380,rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: MONOLITH_REDIS_RATE_LIMITER_URLS
+          value: "rediss://default:$(REDIS_MONOLITH_RL_PRIMARY_PASSWORD)@db-redis-monolith-rl-gc-cus-02.redis.cache.windows.net:6380;rediss://default:$(REDIS_MONOLITH_RL_PRIMARY_PASSWORD)@db-redis-monolith-rl-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: REDIS_RATE_LIMITER_URLS
+          value: "rediss://default:$(MANAGED_REDIS_API_RL_00_PRIMARY_PASSWORD)@amr-api-rl-00-gc-cus-02.centralus.redis.azure.net:10000;rediss://default:$(MANAGED_REDIS_API_RL_00_PRIMARY_PASSWORD)@amr-api-rl-00-gc-cus-02.centralus.redis.azure.net:10000,rediss://default:$(MANAGED_REDIS_API_RL_01_PRIMARY_PASSWORD)@amr-api-rl-01-gc-cus-02.centralus.redis.azure.net:10000;rediss://default:$(MANAGED_REDIS_API_RL_01_PRIMARY_PASSWORD)@amr-api-rl-01-gc-cus-02.centralus.redis.azure.net:10000,rediss://default:$(MANAGED_REDIS_API_RL_02_PRIMARY_PASSWORD)@amr-api-rl-02-gc-cus-02.centralus.redis.azure.net:10000;rediss://default:$(MANAGED_REDIS_API_RL_02_PRIMARY_PASSWORD)@amr-api-rl-02-gc-cus-02.centralus.redis.azure.net:10000,rediss://default:$(MANAGED_REDIS_API_RL_03_PRIMARY_PASSWORD)@amr-api-rl-03-gc-cus-02.centralus.redis.azure.net:10000;rediss://default:$(MANAGED_REDIS_API_RL_03_PRIMARY_PASSWORD)@amr-api-rl-03-gc-cus-02.centralus.redis.azure.net:10000,rediss://default:$(MANAGED_REDIS_API_RL_04_PRIMARY_PASSWORD)@amr-api-rl-04-gc-cus-02.centralus.redis.azure.net:10000;rediss://default:$(MANAGED_REDIS_API_RL_04_PRIMARY_PASSWORD)@amr-api-rl-04-gc-cus-02.centralus.redis.azure.net:10000"
+  - target:
+      kind: Deployment
+      name: projects-denormalization-processor-content-changes-pull-request
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: mysql-hosts
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORDINATION_REDIS_URL
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORD_REDIS_URLS
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380,rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: MONOLITH_REDIS_RATE_LIMITER_URLS
+          value: "rediss://default:$(REDIS_MONOLITH_RL_PRIMARY_PASSWORD)@db-redis-monolith-rl-gc-cus-02.redis.cache.windows.net:6380;rediss://default:$(REDIS_MONOLITH_RL_PRIMARY_PASSWORD)@db-redis-monolith-rl-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: REDIS_RATE_LIMITER_URLS
+          value: "rediss://default:$(MANAGED_REDIS_API_RL_00_PRIMARY_PASSWORD)@amr-api-rl-00-gc-cus-02.centralus.redis.azure.net:10000;rediss://default:$(MANAGED_REDIS_API_RL_00_PRIMARY_PASSWORD)@amr-api-rl-00-gc-cus-02.centralus.redis.azure.net:10000,rediss://default:$(MANAGED_REDIS_API_RL_01_PRIMARY_PASSWORD)@amr-api-rl-01-gc-cus-02.centralus.redis.azure.net:10000;rediss://default:$(MANAGED_REDIS_API_RL_01_PRIMARY_PASSWORD)@amr-api-rl-01-gc-cus-02.centralus.redis.azure.net:10000,rediss://default:$(MANAGED_REDIS_API_RL_02_PRIMARY_PASSWORD)@amr-api-rl-02-gc-cus-02.centralus.redis.azure.net:10000;rediss://default:$(MANAGED_REDIS_API_RL_02_PRIMARY_PASSWORD)@amr-api-rl-02-gc-cus-02.centralus.redis.azure.net:10000,rediss://default:$(MANAGED_REDIS_API_RL_03_PRIMARY_PASSWORD)@amr-api-rl-03-gc-cus-02.centralus.redis.azure.net:10000;rediss://default:$(MANAGED_REDIS_API_RL_03_PRIMARY_PASSWORD)@amr-api-rl-03-gc-cus-02.centralus.redis.azure.net:10000,rediss://default:$(MANAGED_REDIS_API_RL_04_PRIMARY_PASSWORD)@amr-api-rl-04-gc-cus-02.centralus.redis.azure.net:10000;rediss://default:$(MANAGED_REDIS_API_RL_04_PRIMARY_PASSWORD)@amr-api-rl-04-gc-cus-02.centralus.redis.azure.net:10000"
+  - target:
+      kind: Deployment
+      name: projects-denormalization-processor-column-changes
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: mysql-hosts
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORDINATION_REDIS_URL
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: JOB_COORD_REDIS_URLS
+          value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380,rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: MONOLITH_REDIS_RATE_LIMITER_URLS
+          value: "rediss://default:$(REDIS_MONOLITH_RL_PRIMARY_PASSWORD)@db-redis-monolith-rl-gc-cus-02.redis.cache.windows.net:6380;rediss://default:$(REDIS_MONOLITH_RL_PRIMARY_PASSWORD)@db-redis-monolith-rl-gc-cus-02.redis.cache.windows.net:6380"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: REDIS_RATE_LIMITER_URLS
+          value: "rediss://default:$(MANAGED_REDIS_API_RL_00_PRIMARY_PASSWORD)@amr-api-rl-00-gc-cus-02.centralus.redis.azure.net:10000;rediss://default:$(MANAGED_REDIS_API_RL_00_PRIMARY_PASSWORD)@amr-api-rl-00-gc-cus-02.centralus.redis.azure.net:10000,rediss://default:$(MANAGED_REDIS_API_RL_01_PRIMARY_PASSWORD)@amr-api-rl-01-gc-cus-02.centralus.redis.azure.net:10000;rediss://default:$(MANAGED_REDIS_API_RL_01_PRIMARY_PASSWORD)@amr-api-rl-01-gc-cus-02.centralus.redis.azure.net:10000,rediss://default:$(MANAGED_REDIS_API_RL_02_PRIMARY_PASSWORD)@amr-api-rl-02-gc-cus-02.centralus.redis.azure.net:10000;rediss://default:$(MANAGED_REDIS_API_RL_02_PRIMARY_PASSWORD)@amr-api-rl-02-gc-cus-02.centralus.redis.azure.net:10000,rediss://default:$(MANAGED_REDIS_API_RL_03_PRIMARY_PASSWORD)@amr-api-rl-03-gc-cus-02.centralus.redis.azure.net:10000;rediss://default:$(MANAGED_REDIS_API_RL_03_PRIMARY_PASSWORD)@amr-api-rl-03-gc-cus-02.centralus.redis.azure.net:10000,rediss://default:$(MANAGED_REDIS_API_RL_04_PRIMARY_PASSWORD)@amr-api-rl-04-gc-cus-02.centralus.redis.azure.net:10000;rediss://default:$(MANAGED_REDIS_API_RL_04_PRIMARY_PASSWORD)@amr-api-rl-04-gc-cus-02.centralus.redis.azure.net:10000"
+
+replicas:
+  - name: achievements-yolo-processor
+    count: 2
+  - name: achievements-galaxy-brain-processor
+    count: 1
+  - name: achievements-pull-shark-processor
+    count: 2
+  - name: achievements-open-sourcerer-processor
+    count: 2
+  - name: achievements-pair-extraordinaire-processor
+    count: 2
+  - name: achievements-heart-on-your-sleeve-processor
+    count: 1
+  - name: achievements-quickdraw-processor
+    count: 2
+  - name: achievements-heartbreaker-processor
+    count: 1
+  - name: achievements-starstruck-processor
+    count: 2
+  - name: achievements-public-sponsor-processor
+    count: 1
+  - name: secret-scanning-alert-events-processor
+    count: 2
+  - name: pages-deployment-status-processor
+    count: 0
+  - name: actions-artifact-storage-event-processor
+    count: 0
+  - name: community-insights-discussion-page-view-processor
+    count: 2
+  - name: projects-denormalization-processor
+    count: 33
+

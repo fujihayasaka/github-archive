@@ -1,0 +1,555 @@
+<%# erblint:counter DeprecatedComponentsCounter 2 %>
+<% view = Businesses::Settings::SecurityView.new \
+  business: this_business, current_user: current_user, params: params %>
+
+<% page_info title: "Authentication security",
+             selected_link: :business_security_settings,
+             sidebar: FeatureFlag.vexi.enabled?("glc_ia_enterprise_people_sidebar", current_user, this_business, default: false) ? :people : :settings,
+             stafftools: stafftools_enterprise_path(this_business) %>
+
+<% two_factor_auth_available = !view.business_emu_configured? %>
+<% override_referrer_available = GitHub.enterprise? %>
+
+<%= render layout: "businesses/layout",
+  locals: {
+    business: this_business,
+    has_intro: true,
+    title: "Authentication security",
+    container_attributes: "itemscope itemtype='http://schema.org/Business'"
+  } do %>
+
+  <%= render(IpAllowlistEntries::Ipv6NoticeComponent.new(
+    owner: this_business,
+    dismissal_path: enterprise_notice_path(
+      this_business,
+      notice: IpAllowlistEntries::Ipv6NoticeComponent::NOTICE_NAME
+    ),
+    dismissal_method: "delete",
+  )) %>
+
+  <div data-hpc>
+    <% if this_business.owner?(current_user) %>
+      <% if business_saml_sso_enabled? && FeatureFlag.vexi.enabled?(:emu_prompt_enabled, current_user, default: false) && this_business.trial?  %>
+        <%= render "businesses/settings/security/saml_try_emu", view: view %>
+      <% end %>
+
+      <% if two_factor_auth_available %>
+        <%= render "businesses/settings/security/two_factor/requirement_setting", view: view %>
+      <% end %>
+    <% end %>
+
+    <% if business_saml_sso_enabled? && !trial_expired_or_cancelled? && !current_business.enterprise_managed_user_enabled? && view.permission_grants[:read_enterprise_sso] %>
+      <%= render "businesses/settings/security/saml_config", view: view, two_factor_auth_available: two_factor_auth_available %>
+      <%= render "businesses/settings/identity_provider/sso_lockdown_setting", view: view %>
+    <% end %>
+
+    <% if this_business.owner?(current_user) %>
+      <% if view.show_scim_configuration? %>
+        <%= render "businesses/settings/security/scim_configuration", view: view %>
+      <% end %>
+
+      <% unless trial_expired_or_cancelled? %>
+        <% if view.show_team_sync_settings? %>
+          <%= render "businesses/security_settings/team_sync/settings", view: view %>
+        <% end %>
+      <% end %>
+
+      <% if view.show_ssh_cas? %>
+        <%= render Primer::Beta::Subhead.new(spacious: true) do |component| %>
+          <% component.with_heading(tag: :h2) do %>SSH certificate authorities<% end %>
+          <% unless trial_expired_or_cancelled? %>
+            <% component.with_actions do %>
+              <%= render Primer::ButtonComponent.new(
+                  href: ssh_certificate_authorities_new_enterprise_path,
+                  tag: :a,
+                  variant: :small
+                ) do %>New certificate authority<% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+
+        <% if this_business.ssh_certificate_authorities.any? %>
+          <p>
+            This is a list of SSH certificate authorities associated with this enterprise.
+          </p>
+          <ul class="Box border-bottom-0 tmp-mb-3">
+            <%= render partial: "ssh_certificate_authorities/listing", collection: this_business.ssh_certificate_authorities, as: :ca, locals: {this_owner: this_business} %>
+          </ul>
+
+          <%= form_tag enterprise_ssh_certificate_authority_owner_settings_path(this_business), method: :patch do |f| %>
+            <div class="form-checkbox">
+              <input id="enable_ssh_cert_requirement_checkbox" type="checkbox" name="enable_ssh_cert_requirement" <%= "checked" if this_business.ssh_certificate_requirement_enabled? %> >
+
+              <label for="enable_ssh_cert_requirement_checkbox">Require SSH Certificates</label>
+
+              <p class="note color-fg-muted">
+                <% if GitHub.single_business_environment? %>
+                  Require members and collaborators to use SSH certificates when accessing
+                  this enterprise's repositories via Git. Members and collaborators will only be able
+                  to use passwords or personal access tokens for Git access if SSH access has been disabled
+                  for the repository. For more information, see
+                  <%= link_to \
+                    "Disabling Git SSH access on GitHub Enterprise Server.",
+                    "#{GitHub.enterprise_admin_help_url}/user-management/managing-repositories-in-your-enterprise/disabling-git-ssh-access-on-your-enterprise#disabling-git-ssh-access-to-a-specific-repository",
+                    class: "Link--inTextBlock" %>
+                  Access by authorized third-party integrations will not be affected.
+                <% else %>
+                  Require members and collaborators to use SSH certificates when accessing
+                  this enterprise's repositories via Git. This will disable Git access using personal access tokens.
+                  Access by authorized third-party integrations will not be affected.
+                <% end %>
+              </p>
+              <% if this_business.can_enable_ssh_certificate_user_owned_repo_access? %>
+                <p class="note color-fg-muted">
+                  This requirement does not apply to user owned repositories even if the option below is enabled.
+                </p>
+              <% end %>
+            </div>
+            <% if this_business.can_enable_ssh_certificate_user_owned_repo_access? %>
+              <div class="form-checkbox">
+                <input id="enable_user_owned_repo_access_checkbox" type="checkbox" name="enable_user_owned_repo_access" <%= "checked" if this_business.ssh_certificate_user_owned_repo_access_enabled? %> >
+
+                <label for="enable_user_owned_repo_access_checkbox">Allow SSH certificates to access user owned repositories</label>
+
+                <p class="note color-fg-muted">
+                  Since your enterprise manages its users directly, you can issue certificates that can access repositories that your users created in their account.
+                  <%= link_to \
+                  "Learn more about SSH certificates accessing user owned repositories",
+                  "#{GitHub.help_url}/admin/policies/enforcing-policies-for-your-enterprise/enforcing-policies-for-security-settings-in-your-enterprise",
+                  class: "Link--inTextBlock" %>.
+                </p>
+              </div>
+            <% end %>
+            <%= render Primer::Beta::Button.new(type: :submit) do %>Save<% end %>
+          <% end %>
+        <% else %>
+          <p>There are no SSH certificate authorities associated with this enterprise.</p>
+        <% end %>
+      <% end %>
+
+      <% if view.show_proxy_settings? %>
+        <%= render "businesses/settings/security/proxy_header_settings", view: view %>
+      <% end %>
+
+      <% unless trial_expired_or_cancelled? %>
+        <% if view.show_ip_allowlist? %>
+          <%= render Primer::Beta::Subhead.new(spacious: true) do |component| %>
+            <% component.with_heading(tag: :h2, display: :flex, align_items: :center) do %>IP allow list<% end %>
+          <% end %>
+          <p>
+            An IP allow list lets your enterprise limit access based on the IP address a person is accessing from.
+            <%= link_to \
+              "Learn more about restricting network traffic to your enterprise with an IP allow list",
+              "#{GitHub.help_url}/admin/configuring-settings/hardening-security-for-your-enterprise/restricting-network-traffic-to-your-enterprise-with-an-ip-allow-list",
+              class: "Link--inTextBlock" %>.
+          </p>
+
+          <% if this_business.eligible_for_ip_allowlist_configuration? %>
+            <%= render partial: "businesses/settings/ip_allowlist_configuration", locals: { view: view, business: this_business } %>
+          <% else %>
+            <%= render partial: "businesses/settings/github_ip_allowlist_configuration", locals: { business: this_business } %>
+          <% end %>
+        <% end %>
+
+        <% if override_referrer_available %>
+          <%= render Primer::Beta::Subhead.new(spacious: true) do |component| %>
+            <% component.with_heading(tag: :h2) do %>User Agent Referrer Policy<% end %>
+          <% end %>
+          <p>
+            Enabling same origin referrer policy will prevent the user agent from adding hostname information to request headers to external sites.
+          </p>
+
+          <%= form_tag enterprise_referrer_override_path(this_business), method: :patch do |f| %>
+            <div class="form-checkbox">
+              <label>
+                <input type="hidden" name="referrer_override" value="disabled">
+                <input type="checkbox" name="referrer_override" value="enabled"
+                      <%= 'checked' if view.referrer_override_enabled? %>>
+                Enable same origin referrer policy for all organizations.
+              </label>
+            </div>
+
+            <div class="clearfix">
+              <%= render Primer::ButtonComponent.new(type: :submit) do %>
+                Save
+              <% end %>
+            </div>
+          <% end %>
+        <% end %>
+
+        <% if view.show_authorized_credentials? %>
+          <%= render "businesses/settings/security/credentials", view: view %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <%# Credential Revocation Danger Zone %>
+    <% if view.manage_authorized_credentials? %>
+      <%= render Primer::Beta::Subhead.new(spacious: true, test_selector: "credential-revocation-danger-zone") do |subhead| %>
+        <% subhead.with_heading(tag: :h2, mt: 4, mb: 0) do %>
+          Danger zone
+        <% end %>
+      <% end %>
+
+      <p>
+        <% query = Search::Queries::AuditLogQuery.stringify(["action:org_credential_authorization.revoke", "action:oauth_access.destroy", "action:personal_access_token.destroy", "action:public_key.delete"]) %>
+        Results from revocation<%= this_business&.enterprise_managed_user_enabled? ? " and deletion " : " " %>can be found in the <%= link_to "audit log", settings_audit_log_enterprise_path(this_business, { q: query }), class: "Link--inTextBlock" %>.
+      </p>
+
+      <% single_user_revocation_enabled = FeatureFlag.vexi.enabled?(:credential_revocation_single_user, this_business, default: false) %>
+      <%= render(Primer::Beta::BorderBox.new(border_color: :danger)) do |box| %>
+        <%# Button 1: Revoke Credential Authorizations %>
+        <% box.with_row(test_selector: "revoke-credential-authorizations") do %>
+          <div class="d-flex flex-items-center">
+            <div class="flex-auto width-full">
+              <span class="text-bold color-fg-default">
+                Revoke SSO authorizations
+              </span>
+              <div class="color-fg-default mt-1 f5" <%= test_selector "revoke-credential-authorizations-description" %>>
+                Permanently revokes SSO authorizations for<%= single_user_revocation_enabled ? " selected" : "" %> user keys and tokens across all organizations in your enterprise. Fine-grained personal access tokens will lose organization access but can be reassigned. <%= this_business&.enterprise_managed_user_enabled? ? "" : "This action may not apply to all tokens and keys if SAML is not enforced for all organizations." %>
+              </div>
+            </div>
+
+            <% if single_user_revocation_enabled %>
+              <%# Revoke for dropdown menu %>
+              <%= render(Primer::Alpha::ActionMenu.new(anchor_align: :end, size: :medium)) do |menu| %>
+                <% menu.with_show_button do |button| %>
+                  <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+                  Revoke for
+                <% end %>
+                <% menu.with_item(label: "A specific user", content_arguments: { "data-show-dialog-id": "revoke-user-authorizations-dialog" }) do |item| %>
+                  <% item.with_description { "Revokes a selected user\u2019s SSO authorizations for user keys and tokens across all organizations in your enterprise" } %>
+                <% end %>
+                <% menu.with_item(label: "All users in your enterprise", content_arguments: { "data-show-dialog-id": "revoke-credential-authorizations-dialog" }) do |item| %>
+                  <% item.with_description { "Revokes all SSO authorizations for user keys and tokens across all organizations in your enterprise" } %>
+                <% end %>
+              <% end %>
+
+              <%# Dialog: Revoke for a specific user %>
+              <credential-revocation-dialog data-slug="<%= this_business.slug %>">
+              <%= render(Primer::Alpha::Dialog.new(
+                size: :medium_portrait,
+                id: "revoke-user-authorizations-dialog",
+                title: "Revoke user\u2019s authorizations",
+                test_selector: "revoke-user-authorizations-dialog",
+              )) do |dialog| %>
+                <% dialog.with_header(show_divider: true) %>
+                <%= form_tag settings_security_revoke_credentials_enterprise_path(this_business, revocation_type: "authorizations"), method: :delete, id: "revoke-user-authorizations-form", data: { action: "submit:credential-revocation-dialog#validate" } do %>
+                  <input type="hidden" name="target_user_login" id="revoke-user-auth-target-login" value="" data-target="credential-revocation-dialog.hiddenInput">
+                  <%= render(Primer::Alpha::Dialog::Body.new) do %>
+                    <p>
+                      Select a user whose SSO authorizations you would like to revoke.
+                    </p>
+
+                    <dl class="form-group required">
+                      <dt><label>User</label></dt>
+                      <dd>
+                        <%= render(Primer::Alpha::SelectPanel.new(
+                          id: "revoke-user-auth-select-panel",
+                          title: "Select a user",
+                          src: settings_security_credential_member_search_enterprise_path(this_business),
+                          fetch_strategy: :remote,
+                          select_variant: :single,
+                          dynamic_label: true,
+                          no_results_label: "No matching users.",
+                          classes: "d-block",
+                        )) do |panel| %>
+                          <% panel.with_show_button(scheme: :default, data: { target: "credential-revocation-dialog.triggerButton" }) do |button| %>
+                            <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+                            Select a user
+                          <% end %>
+                        <% end %>
+                        <p class="color-fg-danger f6 mt-1" id="revoke-user-auth-select-error" hidden data-target="credential-revocation-dialog.selectError">
+                          <%= render(Primer::Beta::Octicon.new(icon: :alert, size: :small, mr: 1)) %>Please select a user
+                        </p>
+                      </dd>
+                    </dl>
+
+                    <div id="revoke-user-auth-details-section" hidden data-target="credential-revocation-dialog.detailsSection">
+                      <p>
+                        You are about to <strong>revoke all of <span class="js-selected-display-name"></span>'s SSO authorizations for user tokens and SSH keys</strong> that have access to organizations in your enterprise. This includes:
+                      </p>
+                      <ul class="tmp-ml-4 mb-2" style="list-style-type: disc;">
+                        <li>Personal access tokens (classic)</li>
+                        <li>GitHub App and OAuth app user access tokens</li>
+                        <li>User SSH keys</li>
+                      </ul>
+                      <p>
+                        Revoking these SSO authorizations will remove access to organization-level resources in this enterprise for existing user SSH keys and tokens when SSO is enforced. This is a permanent action, and the user will not be able to reauthorize revoked tokens and keys.
+                      </p>
+                      <p>
+                        For fine-grained personal access tokens where an organization is the resource owner, the resource ownership will be removed. Users can reassign the resource owner to regain access, which may <%= link_to "require approval", "#{GitHub.help_url}/admin/enforcing-policies/enforcing-policies-for-your-enterprise/enforcing-policies-for-personal-access-tokens-in-your-enterprise#enforcing-an-approval-policy-for-fine-grained-personal-access-tokens", class: "Link--inTextBlock" %>.
+                      </p>
+
+                      <dl class="form-group required">
+                        <dt><label for="revoke-user-auth-verify">Enter "<%= this_business.slug %> credentials" to confirm</label></dt>
+                        <dd>
+                          <input class="form-control input-block"
+                            type="text"
+                            id="revoke-user-auth-verify"
+                            name="verify"
+                            data-target="credential-revocation-dialog.verifyInput">
+                          <p class="color-fg-danger f6 mt-1" id="revoke-user-auth-verify-error" hidden data-target="credential-revocation-dialog.verifyError">
+                            <%= render(Primer::Beta::Octicon.new(icon: :alert, size: :small, mr: 1)) %>Please enter the correct text to continue.
+                          </p>
+                        </dd>
+                      </dl>
+                    </div>
+                  <% end %>
+
+                  <%= render(Primer::Alpha::Dialog::Footer.new(show_divider: true)) do %>
+                    <%= render(Primer::Beta::Button.new(
+                      type: :button,
+                      data: { "close-dialog-id": "revoke-user-authorizations-dialog" }
+                    )) { "Cancel" } %>
+
+                    <%= render(Primer::Beta::Button.new(
+                      type: :submit,
+                      scheme: :danger,
+                      id: "revoke-user-auth-submit",
+                    )) { "Revoke authorizations" } %>
+                  <% end %>
+                <% end %>
+              <% end %>
+              </credential-revocation-dialog>
+            <% end %>
+
+            <%# Dialog: Revoke for all users %>
+            <%= render(Primer::Alpha::Dialog.new(
+              size: :medium_portrait,
+              id: "revoke-credential-authorizations-dialog",
+              title: "Revoke authorizations",
+              test_selector: "revoke-credential-authorizations-dialog",
+            )) do |dialog| %>
+              <% unless single_user_revocation_enabled %>
+                <% dialog.with_show_button(scheme: :danger) do %>
+                  Revoke
+                <% end %>
+              <% end %>
+              <%= form_tag settings_security_revoke_credentials_enterprise_path(this_business, revocation_type: "authorizations"), method: :delete do %>
+                <%= render(Primer::Alpha::Dialog::Body.new) do %>
+                  <p>
+                    You are about to <strong>revoke SSO authorizations for user tokens and SSH keys</strong> that have access to organizations in your enterprise. This includes:
+                  </p>
+                  <ul class="tmp-ml-4 mb-2" style="list-style-type: disc;">
+                    <li>Personal access tokens (classic)</li>
+                    <li>GitHub App and OAuth app user access tokens</li>
+                    <li>User SSH keys</li>
+                  </ul>
+                  <p>
+                    Revoking all SSO authorizations will remove access to organization-level resources in this enterprise for existing user SSH keys and tokens when SSO is enforced. This is a permanent action, and users will not be able to reauthorize revoked tokens and keys.
+                  </p>
+                  <p>
+                    For fine-grained personal access tokens where an organization is the resource owner, the resource ownership will be removed. Users can reassign the resource owner to regain access, which may <%= link_to "require approval", "#{GitHub.help_url}/admin/enforcing-policies/enforcing-policies-for-your-enterprise/enforcing-policies-for-personal-access-tokens-in-your-enterprise#enforcing-an-approval-policy-for-fine-grained-personal-access-tokens", class: "Link--inTextBlock" %>.
+                  </p>
+
+                  <dl class="form-group">
+                    <dt><label for="revoke-auth-verify">Enter "<%= this_business.slug %>" to confirm</label></dt>
+                    <dd>
+                      <input class="form-control input-block"
+                        type="text"
+                        id="revoke-auth-verify"
+                        name="verify"
+                        pattern="<%= case_insensitive_pattern(this_business.slug) %>"
+                        required
+                        autofocus>
+                    </dd>
+                  </dl>
+                <% end %>
+
+                <%= render(Primer::Alpha::Dialog::Footer.new(show_divider: true)) do %>
+                  <%= render(Primer::Beta::Button.new(
+                    type: :button,
+                    data: { "close-dialog-id": "revoke-credential-authorizations-dialog" }
+                  )) { "Cancel" } %>
+
+                  <%= render(Primer::Beta::Button.new(
+                    type: :submit,
+                    scheme: :danger,
+                    "data-disable-invalid": "",
+                    "data-disable-with": ""
+                  )) { "Revoke authorizations" } %>
+                <% end %>
+              <% end %>
+            <% end %>
+          </div>
+        <% end %>
+
+        <%# Button 2: Delete Credentials AND Authorizations (EMU only) %>
+        <% if this_business.enterprise_managed_user_enabled? %>
+          <% box.with_row(test_selector: "revoke-credentials-and-authorizations") do %>
+            <div class="d-flex flex-items-center">
+              <div class="flex-auto width-full">
+                <span class="text-bold color-fg-default">
+                  Delete tokens and keys
+                </span>
+                <div class="color-fg-default mt-1 f5" <%= test_selector "revoke-credentials-and-authorizations-description" %>>
+                  Permanently deletes <%= single_user_revocation_enabled ? "selected" : "all" %> user keys and tokens<%= single_user_revocation_enabled ? " and associated SSO authorizations in your enterprise, including those listed above" : " across the enterprise, including SSO authorizations and organization access granted by fine-grained personal access tokens" %>.
+                </div>
+              </div>
+
+              <% if single_user_revocation_enabled %>
+                <%# Delete for dropdown menu %>
+                <%= render(Primer::Alpha::ActionMenu.new(anchor_align: :end, size: :medium)) do |menu| %>
+                  <% menu.with_show_button do |button| %>
+                    <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+                    Delete for
+                  <% end %>
+                  <% menu.with_item(label: "A specific user", content_arguments: { "data-show-dialog-id": "delete-user-keys-tokens-dialog" }) do |item| %>
+                    <% item.with_description { "Deletes a selected user\u2019s user keys and tokens and associated SSO authorizations in your enterprise" } %>
+                  <% end %>
+                  <% menu.with_item(label: "All users in your enterprise", content_arguments: { "data-show-dialog-id": "revoke-credentials-and-authorizations-dialog" }) do |item| %>
+                    <% item.with_description { "Deletes all user keys and tokens and associated SSO authorizations in your enterprise" } %>
+                  <% end %>
+                <% end %>
+
+                <%# Dialog: Delete for a specific user %>
+                <credential-revocation-dialog data-slug="<%= this_business.slug %>">
+                <%= render(Primer::Alpha::Dialog.new(
+                  size: :medium_portrait,
+                  id: "delete-user-keys-tokens-dialog",
+                  title: "Delete user\u2019s keys and tokens",
+                  test_selector: "delete-user-keys-tokens-dialog",
+                )) do |dialog| %>
+                  <% dialog.with_header(show_divider: true) %>
+                  <%= form_tag settings_security_revoke_credentials_enterprise_path(this_business, revocation_type: "credentials_and_authorizations"), method: :delete, id: "delete-user-keys-tokens-form", data: { action: "submit:credential-revocation-dialog#validate" } do %>
+                    <input type="hidden" name="target_user_login" id="delete-user-target-login" value="" data-target="credential-revocation-dialog.hiddenInput">
+                    <%= render(Primer::Alpha::Dialog::Body.new) do %>
+                      <p>
+                        Select a user whose keys and tokens you would like to delete.
+                      </p>
+
+                      <dl class="form-group required">
+                        <dt><label>User</label></dt>
+                        <dd>
+                          <%= render(Primer::Alpha::SelectPanel.new(
+                            id: "delete-user-select-panel",
+                            title: "Select a user",
+                            src: settings_security_credential_member_search_enterprise_path(this_business),
+                            fetch_strategy: :remote,
+                            select_variant: :single,
+                            dynamic_label: true,
+                            no_results_label: "No matching users.",
+                            classes: "d-block",
+                          )) do |panel| %>
+                            <% panel.with_show_button(scheme: :default, data: { target: "credential-revocation-dialog.triggerButton" }) do |button| %>
+                              <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+                              Select a user
+                            <% end %>
+                          <% end %>
+                          <p class="color-fg-danger f6 mt-1" id="delete-user-select-error" hidden data-target="credential-revocation-dialog.selectError">
+                            <%= render(Primer::Beta::Octicon.new(icon: :alert, size: :small, mr: 1)) %>Please select a user
+                          </p>
+                        </dd>
+                      </dl>
+
+                      <div id="delete-user-details-section" hidden data-target="credential-revocation-dialog.detailsSection">
+                        <p>
+                          You are about to <strong>delete all of <span class="js-selected-display-name"></span>'s user keys and tokens and associated SSO authorizations</strong> in your enterprise. This includes:
+                        </p>
+                        <ul class="tmp-ml-4 mb-2" style="list-style-type: disc;">
+                          <li>Fine-grained personal access tokens</li>
+                          <li>Personal access tokens (classic)</li>
+                          <li>GitHub App and OAuth app user access tokens</li>
+                          <li>User SSH keys</li>
+                        </ul>
+                        <p>
+                          This is a permanent action. The user will need to generate new tokens, SSH keys, SSO authorizations, and organization access granted by fine-grained personal access tokens (if needed).
+                        </p>
+
+                        <dl class="form-group required">
+                          <dt><label for="delete-user-verify">Enter "<%= this_business.slug %> credentials" to confirm</label></dt>
+                          <dd>
+                            <input class="form-control input-block"
+                              type="text"
+                              id="delete-user-verify"
+                              name="verify"
+                              data-target="credential-revocation-dialog.verifyInput">
+                            <p class="color-fg-danger f6 mt-1" id="delete-user-verify-error" hidden data-target="credential-revocation-dialog.verifyError">
+                              <%= render(Primer::Beta::Octicon.new(icon: :alert, size: :small, mr: 1)) %>Please enter the correct text to continue.
+                            </p>
+                          </dd>
+                        </dl>
+                      </div>
+                    <% end %>
+
+                    <%= render(Primer::Alpha::Dialog::Footer.new(show_divider: true)) do %>
+                      <%= render(Primer::Beta::Button.new(
+                        type: :button,
+                        data: { "close-dialog-id": "delete-user-keys-tokens-dialog" }
+                      )) { "Cancel" } %>
+
+                      <%= render(Primer::Beta::Button.new(
+                        type: :submit,
+                        scheme: :danger,
+                        id: "delete-user-submit",
+                      )) { "Delete keys and tokens" } %>
+                    <% end %>
+                  <% end %>
+                <% end %>
+                </credential-revocation-dialog>
+              <% end %>
+
+              <%# Dialog: Delete for all users %>
+              <%= render(Primer::Alpha::Dialog.new(
+                size: :medium_portrait,
+                id: "revoke-credentials-and-authorizations-dialog",
+                title: "Delete keys and tokens",
+                test_selector: "revoke-credentials-and-authorizations-dialog",
+              )) do |dialog| %>
+                <% unless single_user_revocation_enabled %>
+                  <% dialog.with_show_button(scheme: :danger) do %>
+                    Delete
+                  <% end %>
+                <% end %>
+              <%= form_tag settings_security_revoke_credentials_enterprise_path(this_business, revocation_type: "credentials_and_authorizations"), method: :delete do %>
+                  <%= render(Primer::Alpha::Dialog::Body.new) do %>
+                    <p>
+                      You are about to <strong>delete all user keys and tokens and associated SSO authorizations</strong> in your enterprise. This includes:
+                    </p>
+                    <ul class="tmp-ml-4 mb-2" style="list-style-type: disc;">
+                      <li>Fine-grained personal access tokens</li>
+                      <li>Personal access tokens (classic)</li>
+                      <li>GitHub App and OAuth app user access tokens</li>
+                      <li>User SSH keys</li>
+                    </ul>
+                    <p>
+                      This is a permanent action. Users will need to generate new tokens, SSH keys, SSO authorizations, and organization access granted by fine-grained personal access tokens (if needed).
+                    </p>
+
+                    <dl class="form-group">
+                      <dt><label for="revoke-creds-verify">Enter "<%= this_business.slug %>" to confirm</label></dt>
+                      <dd>
+                        <input class="form-control input-block"
+                          type="text"
+                          id="revoke-creds-verify"
+                          name="verify"
+                          pattern="<%= case_insensitive_pattern(this_business.slug) %>"
+                          required
+                          autofocus>
+                      </dd>
+                    </dl>
+                  <% end %>
+
+                  <%= render(Primer::Alpha::Dialog::Footer.new(show_divider: true)) do %>
+                    <%= render(Primer::Beta::Button.new(
+                      type: :button,
+                      data: { "close-dialog-id": "revoke-credentials-and-authorizations-dialog" }
+                    )) { "Cancel" } %>
+
+                    <%= render(Primer::Beta::Button.new(
+                      type: :submit,
+                      scheme: :danger,
+                      "data-disable-invalid": "",
+                      "data-disable-with": ""
+                    )) { "Delete keys and tokens" } %>
+                  <% end %>
+                <% end %>
+              <% end %>
+            </div>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  </div>
+<% end %>

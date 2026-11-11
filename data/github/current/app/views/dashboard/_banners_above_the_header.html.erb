@@ -1,0 +1,81 @@
+<%# erblint:counter DeprecatedComponentsCounter 4 %>
+<% billing_manager_orgs = current_user.billing_manager_organizations %>
+<% is_billing_manager = user_is_billing_manager?(current_user, billing_manager_orgs) %>
+<% if is_billing_manager %>
+  <div class="billing-manager-banner clearfix">
+    <div class="container"><%# erblint:disable DeprecatedCustomCss %>
+      <%= primer_octicon(:"credit-card", :height => 32, classes: "billing-manager-icon") %>
+      <div class="billing-manager-banner-text">
+        <div class="billing-manager-banner-title">Manage billing for</div>
+        <% billing_manager_orgs.each do |organization| %>
+          <%= link_to settings_org_billing_path(organization), :class => "btn" do %>
+            <%= organization.safe_profile_name %>
+          <% end %>
+        <% end %>
+      </div>
+    </div>
+  </div>
+<% end %>
+
+<% if display_private_repo_limit_banner? %>
+  <div class="flash-messages">
+    <%= render Primer::Beta::Flash.new(scheme: :warning) do %>
+      <%= form_tag ignore_upgrade_path, method: :post do %>
+        <%= render(Primer::Beta::IconButton.new(
+          icon: :x,
+          type: :submit,
+          scheme: :invisible,
+          classes: "flash-close",
+          mt: -2,
+          aria: { label: "Hide this notice forever" },
+        ))%>
+      <% end %>
+      It appears you're at the private repository limit for your current plan. You can <a class="Link--inTextBlock" href="<%= plan_upgrade_url %>">upgrade now</a> for more private repositories!
+    <% end %>
+  </div>
+<% end %>
+
+<% if display_copilot_snippy_warning? %>
+  <div class="flash-messages">
+    <%= render(Primer::Beta::Flash.new(scheme: :warning, test_selector: "snippy-dashboard-flash-warning", classes: "tmp-mb-4"))  do |component| %>
+      <div class="d-flex flex-justify-between">
+        <%= render(Primer::Beta::Octicon.new(icon: :alert, mt: 1)) %>
+        <div>
+          Your GitHub Copilot setup is incomplete. Please go to your settings page and complete your setup.
+        </div>
+        <%= render(Primer::Beta::Link.new(href: "/settings/copilot", classes: "Link--inTextBlock")) do %>
+          <%= render(Primer::ButtonComponent.new(size: :small)) { "GitHub Copilot Setup" } %>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+<% end %>
+
+<% cfb_trial = copilot_business_trial %>
+
+<% if display_copilot_trial_warning? %>
+  <%= render Primer::Beta::Flash.new(icon: :copilot, test_selector: "cfi-trial-expiring-warning", classes: "tmp-mb-4") do %>
+    You have <%= pluralize(copilot_days_left_on_trial, "day") %> left on your GitHub Copilot trial.
+  <% end %>
+<% else %>
+  <% if cfb_trial && cfb_trial.days_left < 5 && cfb_trial.ends_at >= 3.days.ago %>
+    <%= render Copilot::BusinessTrialStatusBannerComponent.new(
+      business_trial: cfb_trial, show_after_expired: true, within_tile: false
+    ) %>
+  <% end %>
+<% end %>
+
+<%= render Sponsors::PotentialSponsorableBannerComponent.new %>
+
+<% if show_new_user_github_education_banner? %>
+  <%= render "dashboard/github_education_banner_new_user" %>
+<% end %>
+
+<% if logged_in? && current_user.feature_flag_enabled?(:ipm_global_transactional_message_dashboard, default: false) %>
+  <% banner_props = transactional_message_banner_props(current_user, :dashboard) %>
+  <% if banner_props %>
+    <div class="tmp-mb-3">
+      <%= render_react_partial(name: "ipm-transactional-message-banner", props: banner_props) %>
+    </div>
+  <% end %>
+<% end %>

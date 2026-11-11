@@ -1,0 +1,211 @@
+<%# erblint:counter DeprecatedComponentsCounter 2 %>
+<%# view is an instance of Oauth::AuthorizeIntegrationView %>
+
+<% page_info title: "Authorize #{view.application.name}", sticky_footer: true, class: "color-bg-default", html_class: "color-bg-default" %>
+
+<%= render Oauth::SuggestedSignInComponent.new(application: view.application, original_url: request.original_url, raw_suggestion: params[:login]) %>
+
+<div style="margin-top: auto; margin-bottom: auto;">
+<div class="tmp-pb-2 mx-auto container-sm">
+  <div class="DashedConnection tmp-mb-3 mx-auto d-none d-md-block" style="width: 300px;">
+    <div class="d-flex flex-justify-between flex-items-center tmp-py-4">
+      <div class="position-relative">
+        <%= integration_avatar(integration: view.application,  size: 64, alt: view.application.name, class: "avatar rounded-2", style: "background-color: ##{view.preferred_bgcolor}") %>
+      </div>
+      <div class="position-relative color-bg-default text-center color-border-default circle" style="width: 32px; height: 32px;">
+        <%= primer_octicon(:"shield-check", color: :muted, style: "margin-top: 9px;") %>
+      </div>
+      <div class="position-relative circle color-bg-default box-shadow-none" style="width: 64px; height: 64px">
+        <%= primer_octicon(:"mark-github", w: :full, h: :full) %>
+      </div>
+    </div>
+  </div>
+
+  <h1 class="f2 text-center text-normal">
+    <span class="d-block">
+      <% if FeatureFlag.vexi.enabled?(:use_display_login_in_authorization_page, default: false) %>
+        <%= link_to "#{view.application.name}", gh_app_path(view.application, current_user) %> by <%= link_to_unless (GitHub.enterprise? && view.application_github_owned?), view.application.display_owner.display_login, view.application.display_owner.user_path, class: "Link--inTextBlock" %>
+      <% else %>
+        <%= link_to "#{view.application.name}", gh_app_path(view.application, current_user) %> by <%= link_to_unless (GitHub.enterprise? && view.application_github_owned?), view.application_owner, view.application_owner_path, class: "Link" %>
+      <% end%>
+    </span>
+    <span class="f4 text-normal d-block">
+      <% if view.existing_authorization? && view.latest_app_permissions.any? && !view.rate_limited? %>
+        wants to change access to your GitHub account
+      <% else %>
+        wants access to your GitHub account
+      <% end %>
+    </span>
+  </h1>
+
+  <% if view.rate_limited? %>
+    <p class="tmp-mt-3 color-fg-muted text-center">
+      This application has made an unusually high number of requests to access your account. Please reauthorize the application to continue.
+    </p>
+  <% end %>
+</div>
+
+<% if view.include_device_warning? %>
+  <div class="tmp-px-3 tmp-mt-5 mx-auto" style="max-width: 530px;">
+    <%= render partial: "device_authorization/trust_this_device_warning", locals: { view: view } %>
+  </div>
+<% end %>
+
+<div class="tmp-px-3 tmp-mt-5 mx-auto" style="max-width: 530px;">
+  <div class="Box color-shadow-small">
+    <div class="Box-body tmp-p-3 tmp-p-md-4">
+
+      <h2 class="f4">
+        Authorizing allows this app to
+      </h2>
+
+      <% if view.existing_integration_version? && view.latest_app_permissions.any? && !view.rate_limited? %>
+        <div class="Box color-shadow-small tmp-my-4">
+          <% view.permissions_added.each do |permission, value| %>
+            <div class="Box-row">
+              <strong><%= view.permission_text(value) %></strong>
+              access to
+              <strong><%= view.human_name(permission) %></strong>
+
+              <%= render Primer::Beta::Label.new(scheme: :secondary, float: [nil, :none, :right]) do %>New request<% end %>
+            </div>
+          <% end %>
+
+          <% view.permissions_upgraded.each do |permission, value| %>
+            <div class="Box-row">
+              <strong><%= view.permission_text(value) %></strong>
+              access to
+              <strong><%= view.human_name(permission) %></strong>
+
+              <span class="text-small color-fg-muted float-right"><em>Was <strong><%= view.permission_text(:read).downcase %></strong></em></span>
+            </div>
+          <% end %>
+
+          <% view.permissions_downgraded.each do |permission, value| %>
+            <div class="Box-row">
+              <strong><%= view.permission_text(value) %></strong>
+              access to
+              <strong><%= view.human_name(permission) %></strong>
+
+              <span class="text-small color-fg-muted float-right"><em>Was <strong><%= view.permission_text(:write).downcase %></strong></em></span>
+            </div>
+          <% end %>
+
+          <% view.permissions_removed.each do |permission, value| %>
+            <div class="Box-row">
+              <strong><%= view.permission_text(value) %></strong>
+              access to
+              <strong><%= view.human_name(permission) %></strong>
+              <span class="text-small color-fg-muted float-right"><em>no longer required</em></span>
+            </div>
+          <% end %>
+
+          <% unless view.permissions_unchanged.empty? %>
+            <div class="Details js-details-container">
+              <button class="Box-row Box-row--gray Box-row--hover-blue text-center border-top Link--muted d-block js-details-target btn-block border-0" aria-expanded="false" aria-label="Expand and collapse" style="cursor: pointer; border-top-left-radius: 0; border-top-right-radius: 0;" type="button">
+                <span class="Details-content--shown"><%= primer_octicon(:unfold) %> Show unchanged permissions</span>
+                <span class="Details-content--hidden"><%= primer_octicon(:fold) %> Hide unchanged permissions</span>
+              </button>
+
+              <div class="Details-content--hidden">
+                <% view.permissions_unchanged.each_with_index do |(permission, value), index| %>
+                  <%= content_tag :div,
+                    class: "Box-row color-bg-subtle border-top color-fg-muted",
+                    style: (index == 0 ? "border-top-left-radius: 0; border-top-right-radius: 0;" : nil) do %>
+                    <strong><%= view.permission_text(value) %></strong>
+                    access to
+                    <strong><%= view.human_name(permission) %></strong>
+                  <% end %>
+                <% end %>
+              </div>
+            </div>
+          <% end %>
+        </div>
+      <% else %>
+        <ul class="list-style-none tmp-mt-3 tmp-pb-2 border-bottom">
+          <li class="d-flex flex-items-center tmp-mb-3">
+            <%= primer_octicon(:check, color: :success, mr: 2) %>
+            Verify your GitHub identity (<%= current_user.display_login %>)
+          </li>
+          <li class="d-flex flex-items-center tmp-mb-3">
+            <%= primer_octicon(:check, color: :success, mr: 2) %>
+            Know which resources you can access
+          </li>
+          <% if view.show_act_on_behalf_message? %>
+            <li class="d-flex tmp-mb-3">
+              <%= primer_octicon(:check, color: :success, mr: 2, mt: 1) %>
+              <span>
+                Act on your behalf
+                <%= link_to "What does this mean?", "#{GitHub.help_url}/apps/using-github-apps/authorizing-github-apps#about-github-apps-acting-on-your-behalf", target: "_blank", rel: "noopener noreferrer", class: "tmp-ml-1 text-small Link--inTextBlock" %>
+              </span>
+            </li>
+          <% end %>
+        </ul>
+
+        <% if view.permissions.any? %>
+          <p class="h5 pb-1 border-bottom">Resources on your account</p>
+
+          <% view.permissions.each do |resource, access_level| %>
+            <div class="tmp-mb-4 position-relative lh-default" style="padding-left: 45px;">
+              <%= primer_octicon(view.octicon_for_permission(resource), height: 32, position: :absolute, ml: 1, mt: 1, color: :muted, top: 0, left: 0, style: "max-width:38px;") %>
+              <strong><%= view.human_name(resource) %> <span class="color-fg-muted text-normal">(<%= access_level %>)</span></strong>
+              <small class="d-block color-fg-muted"><%= view.description(resource) %></small>
+            </div>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <ul class="list-style-none tmp-mt-4 text-small color-fg-muted">
+        <li class="d-flex flex-items-center tmp-mb-3">
+          <% if view.application_github_owned? %>
+            <span class="d-flex flex-justify-center">
+              <%= primer_octicon(:"mark-github") %>
+            </span>
+            <span class="tmp-ml-2">Owned &amp; operated by GitHub</span>
+          <% else %>
+            <span class="d-flex flex-justify-center">
+              <%= primer_octicon(:"circle-slash") %>
+            </span>
+            <span class="tmp-ml-2"><%= link_to "#{view.application.name}", gh_app_path(view.application, current_user), class: "Link--inTextBlock" %> is not owned or operated by GitHub</span>
+          <% end %>
+        </li>
+        <li class="d-flex flex-items-center tmp-mb-3">
+          <span class="d-flex flex-justify-center">
+            <%= primer_octicon(:clock) %>
+          </span>
+          <span class="tmp-ml-2">Created <%= view.application_creation_time_in_words %> ago</span>
+        </li>
+        <li class="d-flex flex-items-center tmp-mb-0">
+          <span class="d-flex flex-justify-center">
+            <%= primer_octicon(:organization) %>
+          </span>
+          <span class="tmp-ml-2"><%= view.application_user_range %> GitHub users</span>
+        </li>
+      </ul>
+    </div>
+  </div>
+  <div class="col-sm-12 tmp-mt-4 tmp-mb-3">
+    <%= form_tag view.form_submission_path do %>
+      <% view.oauth_params.each do |param_key, value| %>
+        <%= hidden_field_tag param_key, value %>
+      <% end %>
+      <% if view.application.present? %>
+        <%= hidden_field_tag :integration_version_number, view.application.latest_version.number %>
+      <% end %>
+
+      <div class="js-authorization-buttons col-sm-12 mx-auto">
+        <%= render Primer::ButtonComponent.new(scheme: :primary, type: :submit, name: :authorize, value: 1, w: :full, classes: "js-oauth-authorize-btn ws-normal tmp-mb-2", disabled: disable_oauth_authorize_button?(view.application)) do %>
+            Authorize
+        <% end %>
+        <%= render(Primer::ButtonComponent.new(type: :submit, name: :authorize, value: 0, w: :full, mr: 2, classes: "ws-normal")) { "Cancel" } %>
+      </div>
+    <% end %>
+  </div>
+
+  <% unless view.device_authorization? %>
+    <div class="col-sm-12 mt-2">
+      <p class="text-small color-fg-muted mb-0 mt-2 mt-md-0 text-center">Authorizing will redirect to <br><strong class="color-fg-default"><%= view.application_redirect_origin %></strong></p>
+    </div>
+  <% end %>
+</div>
+</div>

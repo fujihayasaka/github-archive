@@ -1,0 +1,97 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Herb improperly excludes the vendor/ directory from analysis, but some of those files are used in production and should be checked. See https://github.com/marcoroth/herb/pull/1508 for more details.
+# Checks all ERB files in vendor/ for Herb parse and compile errors.
+# Exits 0 if all files pass (or are excluded), 1 if any fail.
+#
+# Usage:
+#   bundle exec ruby script/herb-analyze-vendor
+
+require "herb"
+require "prism"
+require "yaml"
+
+herb_config = YAML.safe_load_file(File.expand_path("../.herb.yml", __dir__))
+engine_validators = (herb_config.dig("engine", "validators") || {}).transform_keys(&:to_sym)
+ENGINE_OPTIONS = { validation_mode: :none, validators: engine_validators }.freeze
+
+# Patterns for vendor files that are known to have Herb-incompatible templates and are not used in production, so can be safely excluded from analysis.
+# Use globs with * for version segments so excludes survive version bumps.
+EXCLUDED_PATTERNS = [
+  "vendor/gems/*/ruby/*/gems/actionpack-*/lib/action_dispatch/middleware/templates/**/*.erb",
+  "vendor/gems/*/ruby/*/gems/capybara-*/lib/capybara/spec/**/*.erb",
+  "vendor/gems/*/ruby/*/gems/debug-*/misc/**/*.erb",
+  "vendor/gems/*/ruby/*/gems/gettext-*/test/**/*.rhtml",
+  "vendor/gems/*/ruby/*/gems/graphql-[0-9]*/**/*.erb",
+  "vendor/gems/*/ruby/*/gems/graphql-pro-*/**/*.erb",
+  "vendor/gems/*/ruby/*/gems/herb-*/**/*.erb",
+  "vendor/gems/*/ruby/*/gems/letter_opener-*/**/*.erb",
+  "vendor/gems/*/ruby/*/gems/open4-*/**/*.erb",
+  "vendor/gems/*/ruby/*/gems/primer_view_components-*/previews/**/*.erb",
+  "vendor/gems/*/ruby/*/gems/railties-*/lib/rails/generators/erb/authentication/**/*.erb",
+  "vendor/gems/*/ruby/*/gems/rbtrace-*/ext/src/msgpack-*/erb/*.erb",
+  "vendor/gems/*/ruby/*/gems/yard-*/templates/**/*.erb",
+  "vendor/ruby/src/**/*.erb",
+  "vendor/ruby/*/lib/ruby/gems/*/gems/debug-*/misc/**/*.erb",
+].freeze
+
+def excluded?(path)
+  EXCLUDED_PATTERNS.any? { |pattern| File.fnmatch?(pattern, path, File::FNM_PATHNAME) }
+end
+
+erb_files = Dir.glob("vendor/**/*.{erb,rhtml}")
+total = erb_files.size
+excluded = 0
+checked = 0
+failures = []
+
+erb_files.each do |path|
+  if excluded?(path)
+    excluded += 1
+    next
+  end
+
+  checked += 1
+  source = File.read(path)
+  errors = []
+
+  # Check for parse errors
+  parse_result = Herb.parse(source)
+  parse_result.errors.each do |err|
+    errors << "  #{err.type}: #{err.message}"
+  end
+
+  # Check for compile errors (invalid Ruby output) only if parsing succeeded
+  if parse_result.errors.empty?
+    begin
+      engine = Herb::Engine.new(source, **ENGINE_OPTIONS)
+      wrapped_src = "def __herb_template__\n#{engine.src}\nend"
+      ruby_result = Prism.parse(wrapped_src)
+      ruby_result.errors.each do |err|
+        errors << "  InvalidRubyError: #{err.message}"
+      end
+    rescue => e
+      errors << "  CompileError: #{e.message}"
+    end
+  end
+
+  unless errors.empty?
+    failures << { path: path, errors: errors }
+  end
+end
+
+puts "Herb vendor analysis: #{total} files found, #{checked} checked, #{excluded} excluded"
+
+if failures.empty?
+  puts "All #{checked} vendor ERB files passed."
+  exit 0
+else
+  puts "#{failures.size} file(s) failed:\n\n"
+  failures.each do |f|
+    puts f[:path]
+    f[:errors].each { |e| puts e }
+    puts
+  end
+  exit 1
+end

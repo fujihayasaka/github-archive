@@ -1,0 +1,164 @@
+<%
+nudge_html_element   = "a"
+nudge_location       = "settings_organizations"
+
+nudges_to_render.each do |nudge|
+  nudge_type = nudge.nudge_type
+  nudge_id = nudge.nudge_id
+  nudge_group = nudge.nudge_group
+  destination_key = nudge.destination_key
+  use_dismiss_and_redirect = false
+  secondary_cta = nil
+  description_suffix = nil
+%>
+  <% case nudge_type %>
+  <% when :raf_cb %>
+    <%
+    nudge_category = "cb_settings_organizations_new_tasks_nudge_1"
+
+    users_requesting_cb = MemberFeatureRequest.total_for_feature(@organization, MemberFeatureRequest::Feature::CopilotForBusiness)
+
+    title = "#{users_requesting_cb} #{users_requesting_cb == 1 ? 'user is' : 'users are'} waiting for access to Copilot."
+    description = "Your members have requested access to Copilot. Review their requests and assign seats to offer them access."
+    icon_path = image_path("modules/dashboard/promos/general/copilot-menu-no-indicator-1746823169.svg")
+    icon_alt = "Copilot logo"
+    cta_title = "Review access requests"
+    cta_action = "review_access_requests"
+    %>
+  <% when :win_cb_users_back_credit_offer_to_accept %>
+    <%
+    nudge_category = "digital_offer_nudge_cb_organizations_winback_to_accept_dec_2025_1"
+
+    title = "$200 Copilot Business credit available"
+    expires_display = nudge.formatted_expires_date || "Dec\u202f13, 2025"
+    expires_next_day_display = nudge.formatted_expires_next_day || "Dec 14"
+    description = "Your org can apply a $200 credit toward Copilot Business. Offer expires #{expires_display}."
+    icon_path = image_path("modules/dashboard/promos/general/copilot-menu-no-indicator-1746823169.svg")
+    icon_alt = "Copilot logo"
+    cta_title = "Apply credit"
+    cta_action = "apply_credit"
+    secondary_cta = link_to("Terms apply", "#", class: "Link--inTextBlock") # TODO: Replace # in a follow up PR before enabling this feature flag
+    use_dismiss_and_redirect = true
+    %>
+  <% when :win_cb_users_back_credit %>
+    <%
+    nudge_category = "digital_offer_nudge_cb_organizations_winback_approved_dec_2025_1"
+
+    title = "Your $200 credit is ready"
+    expires_display = nudge.formatted_expires_date || "Dec\u202f13, 2025"
+    expires_next_day_display = nudge.formatted_expires_next_day || "Dec 14"
+    description = "Credits cover Copilot Business seat costs through #{expires_display}. Costs incurred over the credit amount or from #{expires_next_day_display} onward will be billed."
+    icon_path = image_path("modules/dashboard/promos/general/copilot-menu-no-indicator-1746823169.svg")
+    icon_alt = "Copilot logo"
+    secondary_cta = link_to("Terms apply", "#", class: "Link--inTextBlock") # TODO: Replace # in a follow up PR before enabling this feature flag
+    cta_title = "Enable Copilot Business"
+    cta_action = "activate_copilot_business"
+    %>
+  <% when :win_cb_users_back_credit_assign_seats %>
+    <%
+    nudge_category = "digital_offer_nudge_cb_organizations_winback_assign_seats_dec_2025_1"
+
+    title = "Your $200 credit is ready"
+    expires_display = nudge.formatted_expires_date || "Dec\u202f13, 2025"
+    expires_next_day_display = nudge.formatted_expires_next_day || "Dec 14"
+    description = "Credits cover Copilot Business seat costs through #{expires_display}. Costs incurred over the credit amount or from #{expires_next_day_display} onward will be billed."
+    icon_path = image_path("modules/dashboard/promos/general/copilot-menu-no-indicator-1746823169.svg")
+    secondary_cta = link_to("Terms apply", "#", class: "Link--inTextBlock") # TODO: Replace # in a follow up PR before enabling this feature flag
+    icon_alt = "Copilot logo"
+    cta_title = "Assign seats"
+    cta_action = "assign_seats"
+    %>
+  <% when :copilot_cli_enablement %>
+    <%
+    nudge_category = "accelerate_ipm_settings_organizations_copilot_cli_nudge_1"
+    title = "Enable Copilot CLI for your developers"
+    description = "Give developers AI in the terminal using existing Copilot licenses. Inherits your organization’s policies, guardrails, and governance settings."
+    icon_path = image_path("modules/dashboard/promos/general/copilot-menu-no-indicator-1746823169.svg")
+    icon_alt = "Copilot logo"
+    cta_title = "Enable Copilot CLI"
+    cta_action = "enable_copilot_cli"
+  end
+  %>
+
+  <%= content_tag(
+    :span,
+    data: {
+      **analytics_visible_attributes(category: nudge_category, group: nudge_group, organization: organization.id, plan: organization.plan.name),
+    },
+    **test_selector_data_hash(nudge_category)
+  ) do %>
+  <% end %>
+
+  <div class="ipm-nudge-box settings Box-header">
+
+    <div class="ipm-nudge-icon-wrapper" aria-hidden="true">
+      <img class="ipm-nudge-icon" src="<%= icon_path %>" alt="<%= icon_alt %>" width="32" height="32">
+    </div>
+
+    <div class="ipm-nudge-content">
+      <h3><%= title %></h3>
+      <p>
+        <%=
+          if description_suffix.present? && secondary_cta
+            safe_join([description, secondary_cta, description_suffix], "")
+          elsif secondary_cta
+            safe_join([description, safe_join([secondary_cta, "."], "")], " ")
+          else
+            description
+          end
+        %>
+      </p>
+    </div>
+
+    <% endpoint = use_dismiss_and_redirect ? "dismiss-and-redirect" : "click-and-redirect" %>
+    <%= link_to(cta_title, "/in-product-messaging/#{endpoint}?destination_key=#{destination_key}&organization_id=#{organization.id}&notice=#{nudge_id}&group=#{nudge_group}&organization_login=#{organization.display_login}",
+      data: {
+        "test-selector": "settings-organizations-#{organization.id}-#{nudge_type}-nudge",
+        **analytics_click_attributes(
+          category: nudge_category,
+          tag: nudge_html_element,
+          action: cta_action,
+          organization: organization.id,
+          plan: organization.plan.name,
+          location: nudge_location,
+          group: nudge_group,
+        ),
+      },
+      class: "ipm-nudge-cta btn btn-sm btn-primary",
+    ) %>
+
+    <% if should_show_dismiss_button?(nudge) %>
+      <%= form_tag(
+        organization_dismiss_notice_path(
+          notice: nudge_id,
+          organization_id: organization.id,
+          group: nudge_group
+        ),
+
+        data: {
+          "test-selector": "settings-organizations-#{organization.id}-#{nudge_type}-dismiss",
+          **analytics_visible_attributes(category: nudge_category, organization: organization.id, plan: organization.plan.name, group: nudge_group)
+        }
+      ) do %>
+
+        <div class="ipm-nudge-dismiss">
+          <%= render(Primer::Beta::IconButton.new(
+            type: :submit,
+            icon: :x,
+            scheme: :invisible,
+            aria: { label: "Dismiss" },
+            color: :on_emphasis,
+            data: analytics_click_attributes(
+              category: nudge_category,
+              tag: nudge_html_element,
+              action: "dismiss",
+              organization: organization.id,
+              plan: organization.plan.name,
+              location: nudge_location,
+              group: nudge_group,
+            ))) %>
+        </div>
+      <% end %>
+    <% end %>
+  </div>
+<% end %>

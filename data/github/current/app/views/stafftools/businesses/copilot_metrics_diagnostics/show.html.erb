@@ -1,0 +1,197 @@
+<% page_info title: "Copilot Metrics Diagnostics" %>
+<%= render Primer::Beta::Subhead.new do |component| %>
+  <% component.with_heading(tag: :h2) do %>
+    Copilot Metrics Diagnostics
+  <% end %>
+<% end %>
+
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+   <% component.with_header do |h| %>
+     <% h.with_title(tag: :h3) do %>
+       Date Selector
+     <% end %>
+   <% end %>
+   <% component.with_body do %>
+     <%= form_tag stafftools_copilot_metrics_diagnostics_path(this_business), method: :get, class: "d-flex flex-items-end gap-3" do %>
+       <div class="form-group mb-0">
+         <div class="form-group-header">
+           <label for="date">Select date</label>
+         </div>
+         <div class="form-group-body">
+           <input
+             type="date"
+             id="date"
+             name="date"
+             value="<%= selected_date.to_s %>"
+             min="<%= min_date.to_s %>"
+             max="<%= max_date.to_s %>"
+             class="form-control"
+           >
+         </div>
+       </div>
+       <%= render(Primer::Beta::Button.new(type: :submit, scheme: :primary)) do %>
+         Load
+       <% end %>
+     <% end %>
+   <% end %>
+ <% end %>
+
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed, classes: "tmp-mt-3")) do |component| %>
+  <% component.with_header do |h| %>
+    <% h.with_title(tag: :h3) do %>
+      Report Existence — <%= selected_date.to_s %>
+    <% end %>
+  <% end %>
+  <% component.with_body do %>
+    <ul class="list-style-none">
+      <% report_statuses.each do |report_type, status| %>
+        <li class="d-flex flex-items-center gap-2 mb-2" <%= test_selector("report-status-#{report_type}") %>>
+          <% case status %>
+          <% when :exists %>
+            <%= render Primer::Beta::Label.new(scheme: :success) do %>✔ exists<% end %>
+          <% when :missing %>
+            <%= render Primer::Beta::Label.new(scheme: :danger) do %>✘ missing<% end %>
+          <% else %>
+            <%= render Primer::Beta::Label.new(scheme: :attention) do %>⚠ error<% end %>
+          <% end %>
+          <code><%= report_type %></code>
+        </li>
+      <% end %>
+    </ul>
+  <% end %>
+<% end %>
+
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed, classes: "tmp-mt-3")) do |component| %>
+  <% component.with_header do |h| %>
+    <% h.with_title(tag: :h3) do %>
+      Report Links — <%= selected_date.to_s %>
+    <% end %>
+  <% end %>
+  <% component.with_body do %>
+    <% report_links.each do |report_type, links| %>
+      <div class="tmp-mb-3" <%= test_selector("report-links-#{report_type}") %>>
+        <h4 class="h5 tmp-mb-2">
+          <code><%= report_type %></code>
+          <span class="color-fg-muted text-normal">(<%= links.size %>)</span>
+        </h4>
+        <% if links.any? %>
+          <ul class="list-style-none">
+            <% links.group_by { |link| link["name"] }.each do |name, group| %>
+              <% if group.size == 1 %>
+                <li class="tmp-mb-1 d-flex flex-items-center gap-2">
+                  <span class="d-inline-block text-center color-fg-muted" style="width: 16px;">•</span>
+                  <%= link_to group.first["url"], target: "_blank", rel: "noopener noreferrer" do %>
+                    <code><%= name %></code>
+                  <% end %>
+                </li>
+              <% else %>
+                <li class="tmp-mb-1" <%= test_selector("report-link-group-#{report_type}-#{name}") %>>
+                  <details>
+                    <summary style="cursor: pointer; list-style: none;">
+                      <div class="d-flex flex-items-center gap-2">
+                        <span class="d-inline-flex flex-items-center flex-justify-center" style="width: 16px;">
+                          <%= primer_octicon(:"chevron-right", aria: { hidden: "true" }) %>
+                        </span>
+                        <code><%= name %></code>
+                        <%= render Primer::Beta::Label.new(scheme: :attention, test_selector: "report-link-duplicate-#{report_type}-#{name}") do %>
+                          ⚠ <%= group.size - 1 %> duplicate<%= "s" if group.size - 1 != 1 %>
+                        <% end %>
+                      </div>
+                    </summary>
+                    <ul class="list-style-none tmp-mt-1" style="padding-left: 24px;">
+                      <% group.each do |link| %>
+                        <li class="tmp-mb-1">
+                          <%= link_to link["url"], link["url"], target: "_blank", rel: "noopener noreferrer", class: "text-mono text-small" %>
+                        </li>
+                      <% end %>
+                    </ul>
+                  </details>
+                </li>
+              <% end %>
+            <% end %>
+          </ul>
+        <% else %>
+          <p class="color-fg-muted tmp-mb-0">No links available.</p>
+        <% end %>
+      </div>
+    <% end %>
+  <% end %>
+<% end %>
+
+<%= render Primer::Beta::Subhead.new(spacious: true) do |component| %>
+  <% component.with_heading(tag: :h3) do %>
+    Data
+  <% end %>
+<% end %>
+
+<%= render Primer::Beta::BorderBox.new do |component| %>
+  <% component.with_row do %>
+    <div class="d-flex flex-items-center flex-justify-between">
+      <div>
+        <strong>Live ETL Partition</strong>
+        <p class="text-small color-fg-muted mt-1">
+          The ETL system uses a blue/green partition strategy. The live partition serves production data,
+          while the opposite partition is used for backfills.
+        </p>
+      </div>
+      <%= render Primer::Beta::Label.new(
+        scheme: live_etl_id == "green" ? :success : :accent,
+        size: :large,
+        test_selector: "live-etl-id-label",
+      ) do %>
+        <%= live_etl_id %>
+      <% end %>
+    </div>
+  <% end %>
+
+  <% component.with_row do %>
+    <div <%= test_selector("membership-verification") %>>
+      <div class="d-flex flex-items-center flex-justify-between">
+        <div>
+          <strong>Enterprise Membership Verification</strong>
+          <p class="text-small color-fg-muted mt-1">
+            Checks if all users in the users-28-day report are members of this enterprise.
+            Note: Outside collaborators are not currently validated due to query cost constraints on large enterprises.
+          </p>
+        </div>
+        <% case membership_verification[:status] %>
+        <% when :ok %>
+          <% if membership_verification[:non_members].empty? %>
+            <%= render Primer::Beta::Label.new(scheme: :success, size: :large) do %>
+              All users members of enterprise
+            <% end %>
+          <% else %>
+            <%= render Primer::Beta::Label.new(scheme: :danger, size: :large) do %>
+              <%= membership_verification[:non_members].size %> non-member<%= membership_verification[:non_members].size == 1 ? "" : "s" %>
+            <% end %>
+          <% end %>
+        <% when :no_report %>
+          <%= render Primer::Beta::Label.new(scheme: :secondary, size: :large) do %>
+            No report available
+          <% end %>
+        <% when :error %>
+          <%= render Primer::Beta::Label.new(scheme: :danger, size: :large) do %>
+            Error
+          <% end %>
+        <% end %>
+      </div>
+      <% if membership_verification[:status] == :ok && membership_verification[:non_members].any? %>
+        <div class="mt-2">
+          <p class="text-small color-fg-danger">
+            <strong>Non-member users:</strong>
+          </p>
+          <ul class="text-small mt-1">
+            <% membership_verification[:non_members].each do |login| %>
+              <li><code><%= login %></code></li>
+            <% end %>
+          </ul>
+        </div>
+      <% end %>
+      <% if membership_verification[:status] == :error %>
+        <p class="text-small color-fg-danger mt-1">
+          <%= membership_verification[:error_message] %>
+        </p>
+      <% end %>
+    </div>
+  <% end %>
+<% end %>

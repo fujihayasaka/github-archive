@@ -1,0 +1,29 @@
+# typed: true
+# frozen_string_literal: true
+
+module Memex
+  class EditFormComponent < ApplicationComponent
+    attr_reader :memex, :item, :readonly
+
+    def initialize(memex:, item:, viewer_can_write:)
+      @memex = memex
+      @item = item
+      @readonly = !viewer_can_write || item.archived?
+    end
+
+    def columns
+      return @columns if defined?(@columns)
+
+      @columns = memex.columns.select(&:user_defined?)
+      @columns.reject!(&:issue_field?) if item.pull_request?
+
+      @column_values = item
+        .column_values(columns: @columns)
+        .filter { |v| v[:value] }
+        .map { |v| [v[:memexProjectColumnId], v[:value]] }
+        .to_h
+
+      @columns
+    end
+  end
+end

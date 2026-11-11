@@ -1,0 +1,580 @@
+openapi: 3.0.3
+info:
+  title: sweagentd Agent API
+  version: 0.1.0
+  description: |
+    Minimal OpenAPI description for the runtime-facing Agent API. This document
+    intentionally scopes to job retrieval and job progress management endpoints
+    that are currently exposed under the `/agent` prefix.
+servers:
+  - url: https://api.githubcopilot.com/agent/swe
+    description: Example production host
+tags:
+  - name: Jobs
+    description: Retrieve metadata about a single agent job.
+  - name: Progress
+    description: Record and read per-job progress updates.
+security:
+  - agentAccessToken: []
+paths:
+  /agent/jobs/{jobID}:
+    get:
+      tags:
+        - Jobs
+      operationId: GetJob
+      summary: Retrieve a single job
+      description: |
+        Returns the job definition that the Copilot agent should execute. The
+        caller must authenticate with the GitHub App installation token used to
+        launch the job **and** provide the `X-GitHub-Job-Nonce` header that was
+        issued when the job was created.
+      security:
+        - agentAccessToken: []
+      parameters:
+        - $ref: "#/components/parameters/JobID"
+        - $ref: "#/components/parameters/JobNonce"
+      responses:
+        "200":
+          description: Job details ready for the runtime
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400":
+          description: Missing or malformed `jobID`
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidJobID:
+                  value: invalid job_id
+                jobIDRequired:
+                  value: job_id is required
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /agent/jobs/{jobID}/progress:
+    get:
+      tags:
+        - Progress
+      operationId: ListJobProgress
+      summary: List progress entries for a job
+      description: |
+        Retrieves progress entries for a job. Supports filtering by `namespace`
+        and optionally including historical progress from the previous job in
+        the same assignment using `history=true`.
+
+        `page`, `pageSize`, and `sort` are reserved for the upcoming
+        simple page/limit implementation described in the design doc.
+      security:
+        - agentAccessToken: []
+      parameters:
+        - $ref: "#/components/parameters/JobID"
+        - $ref: "#/components/parameters/JobNonce"
+        - name: namespace
+          in: query
+          description: |
+            Filter progress entries by namespace. Supports multiple values via
+            repeated parameters (?namespace=ns1&namespace=ns2) or comma-separated
+            values (?namespace=ns1,ns2).
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: history
+          in: query
+          description: |
+            When true, includes progress entries from the most recent previous
+            job for the same assignment. Accepts "true", "1", or "yes" (case-insensitive).
+          required: false
+          schema:
+            type: boolean
+            default: false
+        - name: page
+          in: query
+          description: 1-based page number (reserved for future paging support)
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          description: Page size (reserved for future paging support, max 100)
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: sort
+          in: query
+          description: Field to sort by (reserved for future paging support). Use "-" prefix for descending order.
+          required: false
+          schema:
+            type: string
+            enum:
+              - createdAt
+              - -createdAt
+            default: -createdAt
+      responses:
+        "200":
+          description: Progress entries matching the filters
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ProgressList"
+                  - $ref: "#/components/schemas/PaginatedProgressList"
+        "400":
+          description: Missing `jobID` or invalid query parameter
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidJobID:
+                  value: invalid job_id
+                jobIDRequired:
+                  value: job_id is required
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    post:
+      tags:
+        - Progress
+      operationId: CreateJobProgress
+      summary: Create one or more progress entries
+      description: |
+        Creates one or more progress entries for a job. Accepts either a single
+        progress object or an array of progress objects in the request body. Each
+        entry must include `namespace`, `kind`, and a JSON string payload in `content`.
+
+        When an array is provided, all items are validated before any are created
+        (all-or-nothing semantics). If any item fails validation, the entire
+        request fails and nothing is created.
+      security:
+        - agentAccessToken: []
+      parameters:
+        - $ref: "#/components/parameters/JobID"
+        - $ref: "#/components/parameters/JobNonce"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/ProgressCreate"
+                - type: array
+                  items:
+                    $ref: "#/components/schemas/ProgressCreate"
+            examples:
+              single:
+                summary: Single progress event using copilot error
+                value:
+                  namespace: copilot
+                  kind: error
+                  version: 0
+                  content: '{"message":"Failed to parse configuration file","code":"parse_error","severity":"error"}'
+              batch:
+                summary: Batched progress events using custom namespace
+                value:
+                  - namespace: claude.code
+                    kind: native
+                    version: 0
+                    content: '{"messages":[{"role":"user","content":"Hello"}],"model":"claude-3-opus-20240229"}'
+                  - namespace: claude.code
+                    kind: native
+                    version: 0
+                    content: '{"messages":[{"role":"assistant","content":"Hi there!"}],"model":"claude-3-opus-20240229"}'
+      responses:
+        "201":
+          description: Progress entries created successfully
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Progress"
+                  - type: array
+                    items:
+                      $ref: "#/components/schemas/Progress"
+        "400":
+          description: Missing or malformed `jobID` or validation failure (missing fields or malformed JSON payload)
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidJobID:
+                  value: invalid job_id
+                jobIDRequired:
+                  value: job_id is required
+                invalidRequest:
+                  value: invalid request body
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+components:
+  securitySchemes:
+    agentAccessToken:
+      type: http
+      scheme: bearer
+      description: GitHub App user-to-server token scoped to the repository hosting the job.
+
+  parameters:
+    JobID:
+      name: jobID
+      in: path
+      required: true
+      description: |
+        The unique identifier for the job. Expected format is `{ownerID}-{repoID}-{uuid}`
+        (e.g., 123456-654321-919774c3-fa83-4644-baf7-f02bb73821c2).
+      schema:
+        type: string
+        pattern: '^\d+-\d+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    JobNonce:
+      name: X-GitHub-Job-Nonce
+      in: header
+      required: true
+      description: |
+        A nonce value used to validate that the request comes from the correct
+        workflow run. This is provided when the job is created.
+      schema:
+        type: string
+
+  schemas:
+    Job:
+      type: object
+      description: The agent configuration and work unit that the agent will execute
+      required:
+        - id
+        - problem_statement
+      properties:
+        id:
+          type: string
+          description: Unique identifier of the job
+        problem_statement:
+          $ref: "#/components/schemas/ProblemStatement"
+        custom_agent:
+          $ref: "#/components/schemas/CustomAgent"
+        available_custom_agents:
+          type: array
+          description: List of custom agents available for the job
+          items:
+            $ref: "#/components/schemas/CustomAgent"
+        organization_custom_instructions:
+          type: string
+          description: Optional organization-wide instructions for the agent
+        agentic_app:
+          type: object
+          description: Per-app data from the agentic app registry
+          properties:
+            metadata:
+              type: object
+              description: App-specific key-value pairs (e.g., capi_integration_id)
+              additionalProperties:
+                type: string
+
+    ProblemStatement:
+      type: object
+      description: The problem statement for the job
+      required:
+        - content
+      properties:
+        content:
+          type: string
+          description: The problem statement or task description for the agent
+
+    CustomAgent:
+      type: object
+      description: Configuration for a custom agent
+      required:
+        - name
+        - repo_owner_id
+        - repo_owner
+        - repo_id
+        - repo_name
+        - display_name
+        - description
+        - tools
+        - version
+        - infer
+        - disable_model_invocation
+      properties:
+        name:
+          type: string
+          description: The unique name of the custom agent
+        repo_owner_id:
+          type: integer
+          description: The GitHub ID of the repository owner
+          format: int64
+        repo_owner:
+          type: string
+          description: The name of the repository owner
+        repo_id:
+          type: integer
+          description: The GitHub ID of the repository
+          format: int64
+        repo_name:
+          type: string
+          description: The name of the repository
+        display_name:
+          type: string
+          description: Human-readable display name for the agent
+        description:
+          type: string
+          description: Description of what the agent does
+        prompt:
+          type: string
+          description: The system prompt for the agent
+        tools:
+          type: array
+          description: List of tools available to the agent
+          items:
+            type: string
+        version:
+          type: string
+          description: Version of the agent configuration
+        mcp_servers:
+          type: object
+          description: MCP server configurations
+          additionalProperties:
+            $ref: "#/components/schemas/McpServer"
+        infer:
+          type: boolean
+          description: Whether inference is enabled for the agent. Deprecated - use disable_model_invocation instead.
+          deprecated: true
+        disable_model_invocation:
+          type: boolean
+          description: Whether model invocation (being selected as a tool) is disabled for the agent. Defaults to false (model invocation enabled).
+        model:
+          type: string
+          description: The model to use for inference
+        handoffs:
+          type: array
+          description: Optional list of suggested next actions or prompts to transition between custom agents. Handoff buttons appear as interactive suggestions after a chat response completes.
+          items:
+            $ref: "#/components/schemas/CustomAgentHandoff"
+
+    CustomAgentHandoff:
+      type: object
+      description: Handoff configuration for an agent
+      required:
+        - label
+        - agent
+        - prompt
+      properties:
+        label:
+          type: string
+          description: The display label for the handoff action
+        agent:
+          type: string
+          description: The target agent identifier to switch to
+        prompt:
+          type: string
+          description: The prompt to send when handing off to the new agent
+        send:
+          type: boolean
+          description: Optional flag to auto-submit the handoff prompt
+
+    McpServer:
+      type: object
+      description: Model Context Protocol server configuration
+      properties:
+        type:
+          type: string
+          description: Server type such as `local`, `stdio`, `http`, or `sse`
+        tools:
+          type: array
+          items:
+            type: string
+        command:
+          type: string
+          description: Command to run the MCP server. Required for local/stdio servers
+        args:
+          type: array
+          description: Arguments for the MCP server command
+          items:
+            type: string
+        env:
+          type: object
+          description: Environment variables for the MCP server
+          additionalProperties:
+            type: string
+        url:
+          type: string
+          format: uri
+          description: Required for remote servers (`http`/`sse`)
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+
+    Progress:
+      type: object
+      description: |
+        Represents a progress update from an agent for a job. This can be a log,
+        status update, error, native SDK output, or any other information about
+        the job's progress.
+
+        The namespace, version, and kind properties together define the schema
+        of the content payload, enabling polymorphic progress update types.
+      required:
+        - id
+        - namespace
+        - kind
+        - version
+        - content
+        - created_at
+      properties:
+        id:
+          type: string
+          description: Unique identifier of the progress entry
+        namespace:
+          type: string
+          description: |
+            Namespace of the progress update. First-party namespaces (e.g., "copilot")
+            map to well-known payload schemas. Third-party integrators can define
+            custom namespaces for their own progress update types.
+        kind:
+          type: string
+          description: |
+            The kind of progress update within the namespace (e.g., "error", "log", "native").
+        version:
+          type: integer
+          format: int64
+          description: Version of the progress update payload schema
+        content:
+          type: string
+          description: JSON-encoded payload captured as a UTF-8 string
+        created_at:
+          type: integer
+          format: int64
+          description: Unix timestamp when the progress entry was created
+
+    ProgressList:
+      type: array
+      description: Simple list of progress updates (current implementation)
+      items:
+        $ref: "#/components/schemas/Progress"
+
+    PaginatedProgressList:
+      type: object
+      description: Paginated list of progress updates (future implementation)
+      required:
+        - items
+        - page
+        - pageSize
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Progress"
+        page:
+          type: integer
+          description: Current page number (1-based)
+          minimum: 1
+        pageSize:
+          type: integer
+          description: Number of items per page
+          minimum: 1
+          maximum: 100
+        totalCount:
+          type: integer
+          description: Total number of progress updates
+        totalPages:
+          type: integer
+          description: Total number of pages
+        hasNext:
+          type: boolean
+          description: Whether there is a next page
+        hasPrev:
+          type: boolean
+          description: Whether there is a previous page
+        sort:
+          type: string
+          description: Sort order applied
+        filters:
+          type: object
+          description: Filters applied to the query
+          properties:
+            namespace:
+              type: array
+              items:
+                type: string
+
+    ProgressCreate:
+      type: object
+      description: Request body for creating a new progress entry for a job
+      required:
+        - namespace
+        - kind
+        - content
+      properties:
+        namespace:
+          type: string
+          description: |
+            Namespace of the progress update. First-party namespaces (e.g., "copilot")
+            map to well-known payload schemas. Third-party integrators can define
+            custom namespaces for their own progress update types.
+        kind:
+          type: string
+          description: |
+            The kind of progress update within the namespace (e.g., "error", "log", "native").
+        version:
+          type: integer
+          format: int64
+          default: 0
+          description: Version of the progress update payload schema
+        content:
+          type: string
+          description: JSON string payload that will be stored verbatim
+
+  responses:
+    Unauthorized:
+      description: Authorization failed or nonce mismatch.
+      content:
+        text/plain:
+          schema:
+            type: string
+          examples:
+            default:
+              value: Unauthorized
+
+    NotFound:
+      description: Job not found or agent not enabled.
+      content:
+        text/plain:
+          schema:
+            type: string
+          examples:
+            default:
+              value: Not Found
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        text/plain:
+          schema:
+            type: string
+          examples:
+            default:
+              value: Internal Server Error

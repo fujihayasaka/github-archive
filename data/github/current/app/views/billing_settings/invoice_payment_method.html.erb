@@ -1,0 +1,82 @@
+<% page_info responsive: false, title: "Payment details", selected_link: selected_link, sidebar: :billing_and_licensing %>
+
+<% content = capture do %>
+  <div class="d-flex border-bottom flex-items-center tmp-py-3">
+    <div class="col-6 tmp-pr-4">
+        <h4 class="lh-condensed">
+          Amount due
+        </h4>
+        <p class="mb-0 lh-condensed">
+          <span class="h2 d-block">
+            $<%= number_with_precision invoice.balance, precision: 2  %>
+          </span>
+        </p>
+    </div>
+    <div class="col-6 tmp-pl-4">
+      <div class="d-flex flex-justify-end flex-items-center">
+        <p class="mb-0 lh-condensed">
+          <span class="d-block">
+            <a href="<%= target_show_invoice_path(target, invoice.number.downcase) %>" target="_blank" rel="noopener noreferrer"><%= primer_octicon(:download, mr: 1) %>Download PDF of invoice</a>
+          </span>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <%
+    # TODO: this is copied from Payments::CreditCardFormComponent but that one requires
+    # a ManualPayment which right now is specific to RBI customers and pulls invoices via API call
+    # We could make that better and allow specifying the invoices to pay but for now let's localize changes
+  %>
+  <%= render(Primer::Box.new(classes: "tmp-pb-4 tmp-pt-3 tmp-mb-4")) do |component| %>
+    <div class="js-payment-verification-spinner d-flex flex-justify-center flex-items-center width-full" hidden>
+      <%= render(Primer::Beta::Spinner.new(size: :large)) %>
+    </div>
+
+    <div class="js-payment-still-processing d-flex flex-justify-center flex-items-center width-full" hidden>
+      <%= render(Primer::Alpha::Banner.new) { "Your payment has been authorized and is still processing. You should see it reflected on your account shortly!" } %>
+    </div>
+
+    <div class="js-payment-verification-success d-flex flex-justify-center flex-items-center width-full" hidden>
+      <%= primer_octicon(:check, height: 64, color: :success, "aria-label": "Payment verified. Please continue.") %>
+    </div>
+
+    <div class="js-payment-method-section-wrapper ml-2 mr-2" <%= test_selector("credit-card-form")%>>
+      <%= render Billing::Settings::CreditCardFormComponent.new(
+        target: target,
+        new_name_address_design: true,
+        show_payment_method: true,
+        signature_view_context: Billing::Zuora::HostedPaymentsPage::SALES_SERVE_INVOICE_PAYMENT_VIEW_CONTEXT,
+        zuora_redirect_to: target_billing_path(target),
+        manual_payment: true,
+        invoices: [invoice.number],
+        allow_editing: false,
+      ) %>
+    </div>
+  <% end %>
+<% end %>
+
+<% if target.is_a?(Business) %>
+  <%= render layout: "businesses/layout", locals: {
+    business: target,
+    title: "Pay invoice",
+    back_to_link_path: target_billing_path(target),
+    back_to_link_text: "billing overview",
+  } do %>
+    <%= content %>
+  <% end %>
+<% else %>
+  <%= render layout: "orgs/settings/layout", locals: { organization: target } do %>
+    <%= render Primer::Beta::Subhead.new do |component| %>
+      <% component.with_heading(tag: :h2) do %>
+        <%= link_to "Billing", target_billing_path(target), "data-pjax" => true %>
+           / Pay invoice
+      <% end %>
+    <% end %>
+    <%= content %>
+  <% end %>
+<% end %>
+
+<% content_for :scripts do %><%# erblint:disable NoContentForScripts %>
+  <%= javascript_bundle "billing" %>
+<% end %>

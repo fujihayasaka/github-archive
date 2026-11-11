@@ -1,0 +1,2 @@
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[26846],{887405(s,i,t){t.r(i);var e=t(331635),a=t(651135);class u extends HTMLElement{dismissBanner(){this.bannerDismissal.toggleAttribute("hidden")}}(0,e.Cg)([a.aC],u.prototype,"bannerDismissal",void 0),(0,e.Cg)([(0,a.p_)("dependabot-updates-paused")],u)}}]);
+//# sourceMappingURL=chunk-26846-6afc1bfb2a33bc0f-8661868d8b15b245.js.map

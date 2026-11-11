@@ -1,0 +1,2 @@
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[15058],{265961(t,u,i){i.r(u);var e=i(331635),a=i(651135);class l extends HTMLElement{connectedCallback(){this.button.click()}}(0,e.Cg)([a.aC],l.prototype,"button",void 0),(0,e.Cg)([(0,a.p_)("feature-preview-auto-enroll")],l)}}]);
+//# sourceMappingURL=chunk-15058-98726ff28dc8963a-82c958382913be60.js.map

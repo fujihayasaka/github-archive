@@ -1,0 +1,68 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unicorn-gitauth-api
+  annotations:
+    heaven.githubapp.com/deploy-requirement: "true"
+    moda.github.net/allow-missing-ready-pods: "1"
+    moda.github.net/canary-v2: "true"
+    moda.github.net/canary-label: "role"
+    moda.github.net/canary-replicas: "1"
+
+spec:
+  replicas: 7
+  strategy:
+    rollingUpdate:
+      maxSurge: 50%
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        scheduling-size: "large"
+    spec:
+      containers:
+        - name: nginx
+          volumeMounts:
+            - mountPath: /etc/nginx/
+              name: nginx-conf
+            - mountPath: /assets
+              name: assets
+        - name: unicorn
+          env:
+            - name: HOOKSHOT_STAGING_URL
+              value: 'https://hookshot-stg-http.service.iad.github.net'
+            - name: GH_HOSTNAME
+              value: github.com
+            - name: GH_UNICORN_WORKER_COUNT
+              value: "9"
+            - name: SERVICE_MESH_ENABLED
+              value: "true"
+            - name: GOTAUTH_URL
+              value: 'https://gotauth-production.service.iad.github.net'
+            - name: MONOLITH_REDIS_RATE_LIMITER_TIMEOUT
+              value: "0.2"
+            - name: UNICORN_CHECK_CLIENT_CONNECTION_ENABLED
+              value: "1"
+          resources:
+            limits:
+              memory: 32Gi
+            requests:
+              cpu: 6
+              memory: 20Gi
+      initContainers:
+          - command:
+              - cp
+              - --recursive
+              - --no-preserve=mode
+              - /build/public
+              - /assets
+            image: github
+            imagePullPolicy: IfNotPresent
+            name: unicorn-assets
+            resources:
+              requests:
+                  cpu: 100m
+            volumeMounts:
+              - mountPath: /assets
+                name: assets

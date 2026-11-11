@@ -1,0 +1,120 @@
+<cve-review-list data-cve-reviews-bulk-assign-url="<%= cve_reviews_bulk_assignment_path %>">
+  <multi-select data-action="multiSelectChanged:cve-review-list#onSelectionChanged" data-attribute-for-key="data-ghsa-id">
+    <%= render(Primer::Beta::BorderBox.new) do |border_box| %>
+      <% border_box.with_header(display: :flex) do %>
+        <div class="flex-0 pr-2">
+          <input type="checkbox" data-action="change:multi-select#multiSelectAllClick" data-target="multi-select.allSelectionCell">
+        </div>
+        <div class="review-table-state">State</div>
+        <div class="flex-3 pr-1">Title</div>
+        <div class="flex-2 pr-1">Package</div>
+        <div class="flex-1 pr-1">Severity</div>
+        <div class="flex-1 pr-1">Affected versions</div>
+        <div class="flex-1 pr-1">Patched versions</div>
+        <% if sort.present? %>
+          <a class="flex-1 no-underline color-fg-inherit table-date" href="<%= url_for(request.query_parameters.merge(sort: change_sort_param(sort))) %>">
+            Date <%= render(IconComponent.new(icon: sort_icon(sort))) %>
+          </a>
+        <% else %>
+          <div class="flex-1 table-date">Date</div>
+        <% end %>
+        <div class="flex-1 pr-1" data-targets="multi-select.hiddenWhenMultiSelecting">Assignee</div>
+        <div class="flex-1 pr-1" data-targets="multi-select.visibleWhenMultiSelecting" hidden>
+          Assignee
+          <details class="dropdown details-reset details-overlay d-inline pl-1">
+            <summary class="btn btn-sm btn-octicon border rounded-1 m-0 p-0" aria-haspopup="true">
+              <%= render Primer::Beta::Octicon.new(icon: "chevron-down", size: :xsmall, color: :muted) %>
+            </summary>
+            <details-menu class="SelectMenu right-0" role="menu">
+              <div class="SelectMenu-modal">
+                <header class="SelectMenu-header">
+                  <span class="SelectMenu-title">Bulk assign to</span>
+                </header>
+                <div class="SelectMenu-list">
+                  <button type="button" class="SelectMenu-item width-full text-left" data-action="click:cve-review-list#bulkAssignClicked" data-curator="">
+                    <%= render(Primer::Beta::Octicon.new(icon: "x-circle", mr: 2, color: :danger)) %>
+                    Unassign
+                  </button>
+                  <div class="SelectMenu-divider">Curators</div>
+                  <% curators.each do |curator| %>
+                    <button type="button" class="SelectMenu-item width-full text-left" data-action="click:cve-review-list#bulkAssignClicked" data-curator="<%= curator %>">
+                      <%= render(Primer::Beta::Octicon.new(icon: "person", mr: 2)) %>
+                      <%= curator %>
+                    </button>
+                  <% end %>
+                </div>
+              </div>
+            </details-menu>
+          </details>
+        </div>
+      <% end %>
+
+      <% cve_reviews.each do |cve_review| %>
+        <% cve_request = current_cve_request(cve_review) %>
+        <% border_box.with_row(display: :flex, test_selector: "cve-review-row") do %>
+          <div class="pr-2 d-flex flex-0 flex-content-center">
+            <input type="checkbox" data-ghsa-id="<%= cve_review.ghsa_id %>" data-action="change:multi-select#multiSelectClick" data-targets="multi-select.selectionCells">
+          </div>
+          <div class="review-table-state">
+            <%= render(Primer::Beta::Link.new(href: cve_reviews_path(request.query_parameters.merge(state: cve_review.curation_state, page: nil)))) do %>
+              <%= render ReviewStateIconComponent.new(review: cve_review) %>
+            <% end %>
+          </div>
+          <%= render(Primer::Truncate.new(classes: "flex-3 pr-1")) do %>
+            <%= render(Primer::Beta::Link.new(
+              href: cve_review_path(cve_review),
+              font_weight: :bold,
+              scheme: :primary,
+              underline: false,
+              pr: 2,
+            )) { cve_review.title || cve_request.title } %>
+          <% end %>
+          <%= render(Primer::Truncate.new(classes: "flex-2 pr-1")) do %>
+            <% if package_for(cve_request).present? %>
+              <%= render(IconComponent.new(icon: "package", mr: 1)) %>
+              <%= package_for(cve_request) %>
+            <% else %>
+              <span class="color-fg-muted text-italic">None</span>
+            <% end %>
+          <% end %>
+          <div class="flex-1 pr-1">
+            <%= render(CVEReviews::SeverityIconComponent.new(severity: cve_request.severity)) %>
+          </div>
+          <%= render(Primer::Truncate.new(classes: "flex-1 pr-1")) do %>
+            <% if affected_versions_for(cve_request).present? %>
+              <%= affected_versions_for(cve_request) %>
+            <% else %>
+              <span class="color-fg-muted text-italic">None</span>
+            <% end %>
+          <% end %>
+          <%= render(Primer::Truncate.new(classes: "flex-1 pr-1")) do %>
+            <% if patches_for(cve_request).present? %>
+              <%= patches_for(cve_request) %>
+            <% else %>
+              <span class="color-fg-muted text-italic">None</span>
+            <% end %>
+          <% end %>
+          <div class="table-date flex-1">
+            <%= render(Primer::Beta::RelativeTime.new(datetime: cve_request.created_at, tense: :past)) %>
+          </div>
+          <div class="flex-1 pr-1 d-flex flex-items-center flex-justify-center" data-ghsa-id="<%= cve_review.ghsa_id %>" data-assigned-curator="<%= cve_review.assignee %>">
+            <span class="js-cve-review-assignee">
+              <% if cve_review.assignee.present? %>
+                <a href="<%= cve_reviews_path(request.query_parameters.merge(assignee: cve_review.assignee, page: nil)) %>" title="Filter by <%= cve_review.assignee %>" onclick="event.stopPropagation()">
+                  <%= render(Primer::Beta::Avatar.new(src: "https://github.com/#{cve_review.assignee}.png", alt: cve_review.assignee, size: 20)) %>
+                </a>
+              <% else %>
+                <span class="avatar avatar-small cve-avatar-empty-placeholder"></span>
+              <% end %>
+            </span>
+          </div>
+
+        <% end %>
+      <% end %>
+
+      <% if cve_reviews.empty? %>
+        <% border_box.with_footer(display: :flex, justify_content: :center, test_selector: "no-cve-reviews") { "No CVE reviews to show" } %>
+      <% end %>
+    <% end %>
+  </multi-select>
+</cve-review-list>

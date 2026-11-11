@@ -1,0 +1,1 @@
+function e(e){let t=e.toLocaleLowerCase();return t===`copilot-swe-agent`||t===`copilot`}export{e as t};

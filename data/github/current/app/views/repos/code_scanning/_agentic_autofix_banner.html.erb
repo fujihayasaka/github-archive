@@ -1,0 +1,36 @@
+<%
+  agentic_state = if view.show_create_agentic_fix?
+    "unassigned"
+  elsif view.agentic_autofix_pending?
+    "pending"
+  elsif !view.copilot_pull_request.nil?
+    "completed"
+  end
+%>
+<% if agentic_state %>
+  <%= render_react_partial name: "code-scanning-agentic-autofix-banner", props: {
+    state: agentic_state,
+    autofixDocsUrl: view.suggested_fix_autofix_docs_url,
+    autofixToolName: view.copilot_autofix_for_tool_name,
+    alertNumber: view.result.number,
+    repository: { owner: current_repository.owner.display_login, name: current_repository.name },
+    aliveChannel: live_update_view_channel(GitHub::WebSocket::Channels.code_scanning_alert(current_repository, alert_number: view.result.number)),
+    copilotPullRequest: view.copilot_pull_request ? {
+      number: view.copilot_pull_request.number,
+      createdAt: view.copilot_pull_request.created_at.iso8601,
+    } : nil,
+  } %>
+<% end %>
+
+<h2 class="sr-only">Code snippet</h2>
+<%= render partial: "repos/scanning/location", locals: {
+  full_path: view.alert_instance.location.file_path,
+  path_link: view.code_snippet_path_link,
+  snippet_helper: view.snippet_helper(view.alert_instance.location, view.alert_instance.commit_oid),
+  tool_display_name: view.tool_display_name,
+  alert_title: result_title(view.result),
+  code_paths_url: view.has_code_paths? ? view.code_paths_url : nil,
+  classifications: view.classifications,
+  line_number: view.alert_instance.location.start_line,
+  alert_rule_severity: view.result.rule_severity,
+} %>

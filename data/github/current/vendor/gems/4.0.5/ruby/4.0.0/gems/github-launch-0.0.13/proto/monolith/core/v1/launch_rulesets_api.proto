@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package actions.core.v1;
+
+option go_package = "core/v1";
+option ruby_package = "MonolithTwirp::Actions::Core::V1";
+
+service RulesetsAPI {
+  // EvaluateActionsRuleset evaluates actions rulesets for a given repository,
+  // event and actor and returns whether the workflow run is allowed, along with
+  // violation details for both enforce and evaluate modes.
+  rpc EvaluateActionsRuleset(EvaluateActionsRulesetRequest) returns (EvaluateActionsRulesetResponse);
+}
+
+message EvaluateActionsRulesetRequest {
+  // repository_id is the database ID of the repository to evaluate rulesets for.
+  int64 repository_id = 1;
+
+  // actor_id is the database ID of the user triggering the workflow.
+  int64 actor_id = 2;
+
+  // event_name is the webhook event type/name that triggered the workflow (e.g. "push", "pull_request").
+  // Note: This corresponds to the `event_type` field used in other protos in this package and is
+  // named `event_name` here for compatibility with the monolith endpoint.
+  string event_name = 3;
+
+  // integration_installation_id is the database ID of the GitHub App installation.
+  // If not applicable, this field MUST be 0 and a value of 0 MUST be interpreted as
+  // "no installation" / not applicable.
+  int64 integration_installation_id = 4;
+}
+
+message EvaluateActionsRulesetResponse {
+  // allowed indicates whether the workflow run is permitted by the rulesets.
+  bool allowed = 1;
+
+  // message is a combined human-readable summary of all violations.
+  string message = 2;
+
+  // violations is the list of individual rule violations.
+  repeated RuleViolation violations = 3;
+}
+
+message RuleViolation {
+  // rule_type is the type of rule that was violated (e.g. "restrict_action_events").
+  string rule_type = 1;
+
+  // message is a human-readable description of the violation.
+  string message = 2;
+
+  // ruleset_id is the database ID of the ruleset that produced this violation.
+  int64 ruleset_id = 3;
+
+  // ruleset_name is the human-readable name of the ruleset.
+  string ruleset_name = 4;
+
+  // is_evaluate_mode indicates whether this ruleset is in evaluate (audit-only) mode.
+  bool is_evaluate_mode = 5;
+}

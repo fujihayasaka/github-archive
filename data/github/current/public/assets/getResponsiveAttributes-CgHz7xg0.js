@@ -1,0 +1,1 @@
+function e(e,n){if(n!=null)return Object.fromEntries(typeof n==`object`?Object.entries(n).map(([n,r])=>t(`data-${e}-${n}`,r)):[t(`data-${e}`,n)])}function t(e,t){return[e,t]}export{e as t};

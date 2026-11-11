@@ -1,0 +1,296 @@
+#!/bin/bash
+
+# This script fetches the matching git SHA from the github/github-ui repo and writes it to
+# config/github-ui-version. It is resilient to errors and will try multiple strategies for
+# determining the base SHA/date and the UI SHA.
+#
+# For most branches it tracks github-ui's main branch, picking the earliest commit newer than the
+# base commit's date. Enterprise release lines are special: when running on an
+# `enterprise-X.Y-release` (or `enterprise-X.Y-backport-*`) branch, it pins to the tip of the
+# matching `enterprise-X.Y-release` branch in github-ui instead of main.
+# Once we have the UI SHA, it downloads the ui-manifest.json file from the CDN or Blob storage and places it in public/assets.
+
+set -euo pipefail
+source script/ui-manifest-functions.sh
+source script/ci/common_functions.sh
+
+BASE_SHA=""
+BASE_DATE=""
+BASE_METHOD=""
+UI_BRANCH=""
+
+# --- Utility Functions ---
+
+log() {
+  echo "[sync-github-ui-version] $1"
+}
+
+# --- Base Commit Strategies ---
+
+detect_base_from_head() {
+  BASE_SHA=$(git rev-parse HEAD 2>/dev/null) || return 1
+  BASE_DATE=$(git show -s --format=%ci "$BASE_SHA" 2>/dev/null) || return 1
+  BASE_METHOD="head"
+  return 0
+}
+
+detect_base_from_current_commit_on_master() {
+  local current_ref=${GITHUB_REF:-$(git branch --show-current)}
+  # Strip refs/heads/ if present (for GitHub Actions)
+  local current_branch="${current_ref#refs/heads/}"
+
+  # Use the current commit as the base if already on master
+  if [ "$current_branch" != "master" ]; then return 1; fi
+
+  detect_base_from_head || return 1
+  BASE_METHOD="current_commit_on_master"
+  return 0
+}
+
+detect_base_from_api() {
+  # Use the GitHub API in CI to find the merge base with master in cases where we don't have master locally
+  # On mirror we need a different token and host
+  if [ -n "${GITHUB_SERVER_URL:-}" ] && [ "$GITHUB_SERVER_URL" = "${MIRROR_SERVER_URL:-}" ]; then
+    # If we're on the resiliency mirror, use the BP_GITHUB_MIRROR_TOKEN and override the GH_HOST
+    if [ -z "${BP_GITHUB_MIRROR_TOKEN:-}" ]; then
+      log "WARNING: BP_GITHUB_MIRROR_TOKEN is required for mirror but not set, skipping API strategy"
+      return 1
+    fi
+    export GH_ENTERPRISE_TOKEN="$BP_GITHUB_MIRROR_TOKEN"
+    # Extract hostname from MIRROR_SERVER_URL (remove https:// prefix)
+    export GH_HOST="${MIRROR_SERVER_URL#https://}"
+  else
+    # Otherwise use the GITHUB_TOKEN or BP_GITHUB_TOKEN
+    local token="${GITHUB_TOKEN:-${BP_GITHUB_TOKEN:-}}"
+    if [ -z "$token" ]; then
+      log "WARNING: GITHUB_TOKEN or BP_GITHUB_TOKEN is required for API but not set, skipping API strategy"
+      return 1
+    fi
+    export GH_TOKEN="$token"
+  fi
+
+  # Fetch the merge base commit using the GitHub API
+  local commit_sha=${GITHUB_SHA:-$(git rev-parse HEAD)}
+  local merge_base_commit=$(gh api "repos/github/github/compare/master...$commit_sha" | jq -r '.merge_base_commit') || return 1
+
+  # Verify we got a valid merge base commit
+  if [ -z "$merge_base_commit" ] || [ "$merge_base_commit" = "null" ]; then
+    log "ERROR: Could not determine merge base commit via API."
+    return 1
+  fi
+
+  BASE_SHA=$(echo "$merge_base_commit" | jq -r '.sha') || return 1
+  BASE_DATE=$(echo "$merge_base_commit" | jq -r '.commit.committer.date') || return 1
+  BASE_METHOD="api"
+  return 0
+}
+
+detect_base_from_merge_base() {
+  # When we are in CI, we use a shallow clone so merge-base won't be accurate
+  if [ -n "${GITHUB_ACTIONS:-}" ]; then
+    return 1
+  fi
+
+  BASE_SHA=$(git merge-base HEAD origin/master 2>/dev/null) || return 1
+  BASE_DATE=$(git show -s --format=%ci "$BASE_SHA" 2>/dev/null) || return 1
+  BASE_METHOD="merge_base"
+  return 0
+}
+
+detect_base_from_master() {
+  BASE_SHA=$(git rev-parse master 2>/dev/null) || return 1
+  BASE_DATE=$(git show -s --format=%ci "$BASE_SHA" 2>/dev/null) || return 1
+  BASE_METHOD="master"
+  return 0
+}
+
+detect_base() {
+  if detect_base_from_current_commit_on_master; then return 0; fi
+  if detect_base_from_merge_base; then return 0; fi
+  if detect_base_from_api; then return 0; fi
+  if detect_base_from_master; then return 0; fi
+
+  # If all strategies fail, use HEAD as a fallback
+  log "WARNING: Could not determine base SHA/date, using HEAD as fallback."
+  detect_base_from_head || return 1
+  BASE_METHOD="fallback_head"
+  return 0
+}
+
+# --- UI SHA Strategies ---
+
+# Map the current github/github branch to the github-ui branch we should track.
+# Enterprise release/backport branches (enterprise-X.Y-release, enterprise-X.Y-backport-*) map to
+# the matching enterprise-X.Y-release branch in github-ui. Prints the branch name and returns 0 when
+# on an enterprise branch, otherwise returns 1.
+detect_enterprise_ui_branch() {
+  # Check the PR base/head refs first (set in CI for pull requests), then the pushed ref, then the
+  # local branch name.
+  local candidate
+  for candidate in "${GITHUB_BASE_REF:-}" "${GITHUB_HEAD_REF:-}" "${GITHUB_REF:-}" "$(git branch --show-current 2>/dev/null || true)"; do
+    candidate="${candidate#refs/heads/}"
+    if [[ "$candidate" =~ ^enterprise-([0-9]+\.[0-9]+) ]]; then
+      echo "enterprise-${BASH_REMATCH[1]}-release"
+      return 0
+    fi
+  done
+  return 1
+}
+
+detect_github_ui_sha_since_base_date() {
+  # Try to find the earliest commit on main newer than the base date
+  local sha=$(git log refs/remotes/origin/main --first-parent --since="$BASE_DATE" --reverse --format="%H" --no-show-signature | head -n 1 || true)
+  if [ -n "$sha" ]; then
+    GITHUB_UI_SHA="$sha"
+    UI_SHA_METHOD="since_base_date"
+    return 0
+  fi
+  return 1
+}
+
+detect_github_ui_sha_latest() {
+  # Fallback: use the latest commit on main
+  local sha=$(git rev-parse origin/main 2>/dev/null) || return 1
+  GITHUB_UI_SHA="$sha"
+  UI_SHA_METHOD="latest"
+  return 0
+}
+
+detect_github_ui_sha_tip() {
+  # Use the tip of the given branch (used for enterprise release lines)
+  local branch="$1"
+  local sha
+  sha=$(git rev-parse "refs/remotes/origin/$branch" 2>/dev/null) || return 1
+  if [ -z "$sha" ]; then return 1; fi
+  GITHUB_UI_SHA="$sha"
+  UI_SHA_METHOD="enterprise_release_tip"
+  return 0
+}
+
+detect_github_ui_sha() {
+  # Grab the git URL for github-ui. use gh-clone-url to ensure it works in all environments including mirror
+  giturl="$(./script/gh-clone-url github/github-ui)" || {
+    log "ERROR: Failed to get clone URL for github-ui"
+    return 1
+  }
+
+  # Create a temporary directory for the git operations with github-ui
+  TMP_DIR=$(mktemp -d)
+  trap 'rm -rf "$TMP_DIR"' EXIT
+  pushd "$TMP_DIR" > /dev/null
+
+  # Set up a git environment for fetching github-ui
+  git init --quiet
+  git remote add origin "$giturl"
+  git config extensions.partialClone origin
+
+  # The branch in github-ui we track. Defaults to main; enterprise branches set this to the
+  # matching enterprise-X.Y-release branch.
+  local ui_branch="${UI_BRANCH:-main}"
+  local result=1
+
+  if [ "$ui_branch" != "main" ]; then
+    # Enterprise: pin to the tip of the matching enterprise-X.Y-release branch in github-ui.
+    if ! git fetch --depth=1 --filter=tree:0 --no-tags --quiet origin "$ui_branch" 2>/dev/null; then
+      log "ERROR: Failed to fetch branch $ui_branch from github-ui repository"
+      popd > /dev/null
+      return 1
+    fi
+
+    if detect_github_ui_sha_tip "$ui_branch"; then
+      result=0
+    else
+      log "ERROR: Could not determine tip of github-ui branch $ui_branch."
+    fi
+  else
+    # Default: track main, picking a commit contemporaneous with the base commit's date.
+    # Try to fetch commit history since base date, fallback to latest if needed
+    if ! git fetch --shallow-since="$BASE_DATE" --filter=tree:0 --no-tags --quiet origin main 2>/dev/null; then
+      if ! git fetch --depth=1 --filter=tree:0 --no-tags --quiet origin main 2>/dev/null; then
+        log "ERROR: Failed to fetch from github-ui repository"
+        popd > /dev/null
+        return 1
+      fi
+    fi
+
+    if detect_github_ui_sha_since_base_date; then
+      result=0
+    elif detect_github_ui_sha_latest; then
+      result=0
+    else
+      log "ERROR: Could not determine GITHUB_UI_SHA from github-ui repository."
+    fi
+  fi
+
+  popd > /dev/null
+  return $result
+}
+
+# --- Main Script ---
+ORIG_PATH="$PATH"
+WORKSPACE_ROOT="$PWD"
+set_path_for_git "$WORKSPACE_ROOT"
+
+# Skip ui version sync for enterprise builds
+if [ -n "${ENTERPRISE:-}" ]; then
+  log "Skipping github-ui version sync for enterprise build."
+  exit 0
+fi
+
+# Check for emergency override first (from Vault via EMERGENCY_GITHUB_UI_SHA)
+# This takes highest precedence for incident response.
+#
+# To set during an emergency:
+#   1. Add secret to github-ui vault:
+#      vault-secret --application github-ui --environment ci \
+#        --key EMERGENCY_GITHUB_UI_SHA --value '<sha-from-last-known-good-ui-commit>'
+#
+#   2. Trigger federation in #secrets-federation chatops channel:
+#      .secrets-federation federate app=github-ui environment=ci key=EMERGENCY_GITHUB_UI_SHA
+#
+# To disable the override (set to empty string):
+#   vault-secret --application github-ui --environment ci \
+#     --key EMERGENCY_GITHUB_UI_SHA --value ''
+#
+# Notes: Empty string is treated as disabled/off. Do not remove the env var from Vault
+#        as CI jobs will fail if the secret is missing.
+if [ -n "${EMERGENCY_GITHUB_UI_SHA:-}" ] && [ "${EMERGENCY_GITHUB_UI_SHA}" != "" ]; then
+  GITHUB_UI_SHA="$EMERGENCY_GITHUB_UI_SHA"
+  log "🚨 EMERGENCY OVERRIDE: Using EMERGENCY_GITHUB_UI_SHA from Vault: $GITHUB_UI_SHA"
+  UI_SHA_METHOD="emergency_override"
+elif [ -n "${GITHUB_UI_SHA:-}" ]; then
+  log "Using GITHUB_UI_SHA from environment: $GITHUB_UI_SHA"
+  UI_SHA_METHOD="env"
+elif UI_BRANCH=$(detect_enterprise_ui_branch); then
+  # Enterprise release/backport branches track the matching enterprise-X.Y-release branch in
+  # github-ui rather than main.
+  BASE_METHOD="enterprise_branch"
+  log "Detected enterprise branch; pinning github-ui to branch: $UI_BRANCH"
+
+  # Resolve the UI SHA from the enterprise branch. Fall back to main if it can't be resolved
+  # (e.g. github-ui has not cut the release branch yet).
+  if ! detect_github_ui_sha; then
+    log "WARNING: Could not resolve $UI_BRANCH from github-ui; falling back to main."
+    UI_BRANCH="main"
+    detect_base
+    detect_github_ui_sha
+  fi
+else
+  UI_BRANCH="main"
+
+  # Get the BASE_SHA and BASE_DATE
+  detect_base
+
+  # Get the GITHUB_UI_SHA
+  detect_github_ui_sha
+fi
+
+# Download the ui-manifest.json. We need it on disk for the Rails tests and dev server
+download_ui_manifest $GITHUB_UI_SHA
+download_ui_manifest $GITHUB_UI_SHA-dev
+
+# Store the github-ui sha in config/github-ui-version
+echo "$GITHUB_UI_SHA" > config/github-ui-version
+log "github-ui-version synced: UI_SHA=$GITHUB_UI_SHA UI_SHA_METHOD=$UI_SHA_METHOD BASE_SHA=$BASE_SHA BASE_DATE=\"$BASE_DATE\" BASE_METHOD=$BASE_METHOD"
+
+export PATH="$ORIG_PATH"

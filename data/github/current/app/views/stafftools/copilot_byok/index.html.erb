@@ -1,0 +1,394 @@
+<%
+  page_info(title: "Copilot BYOK", description: "View Copilot BYOK (Bring Your Own Key) status for users, organizations, and enterprises")
+%>
+<%= render layout: "stafftools/stafftools" do %>
+  <div class="site-admin-subhead ruleless">
+    <h2 class="site-admin-subhead-heading">Copilot BYOK Lookup</h2>
+    <p class="color-fg-muted">
+      Search by user login, organization login, or enterprise slug to view BYOK custom model status.
+    </p>
+  </div>
+
+  <%= render Stafftools::SimpleSearchFormComponent.new(
+    form_url: stafftools_copilot_byok_index_path,
+    query_label: "User login, org login, or enterprise slug",
+    query_placeholder: "e.g. monalisa, github, my-enterprise",
+  ) %>
+
+  <% if query.present? && results.blank? %>
+    <%= render Primer::Alpha::Banner.new(scheme: :warning, icon: :alert, classes: "tmp-mt-3") do %>
+      No user, organization, or enterprise found for "<%= query %>".
+    <% end %>
+  <% end %>
+
+  <% if results.present? %>
+    <%# ===== USER RESULTS ===== %>
+    <% if results[:user] %>
+      <% user_info = results[:user] %>
+      <%= render(Primer::Beta::BorderBox.new(classes: "tmp-mt-4 tmp-mb-4")) do |box| %>
+        <% box.with_header do %>
+          <h3 class="f4">
+            <%= render(Primer::Beta::Octicon.new(:person)) %>
+            User: <%= render(Primer::Beta::Link.new(href: stafftools_user_path(user_info[:user]), classes: "Link--inTextBlock")) { user_info[:user].login } %>
+          </h3>
+        <% end %>
+
+        <% if user_info[:org_byok_statuses].any? %>
+          <% user_info[:org_byok_statuses].each do |org_status| %>
+            <% box.with_row do %>
+              <div class="d-flex flex-justify-between flex-items-center">
+                <div>
+                  <strong>Org: <%= render(Primer::Beta::Link.new(href: stafftools_user_path(org_status[:org]), classes: "Link--inTextBlock")) { org_status[:org].login } %></strong>
+                  <p class="color-fg-muted mb-0 text-small">Effective BYOK custom models status for this org</p>
+                </div>
+                <% if org_status[:enabled] %>
+                  <%= render(Primer::Beta::Label.new(scheme: :success)) { "Enabled" } %>
+                <% else %>
+                  <%= render(Primer::Beta::Label.new(scheme: :secondary)) { "Disabled" } %>
+                <% end %>
+              </div>
+            <% end %>
+          <% end %>
+        <% else %>
+          <% box.with_row do %>
+            <span class="color-fg-muted">User has no Copilot organizations.</span>
+          <% end %>
+        <% end %>
+
+        <% if user_info[:custom_models].any? %>
+          <% box.with_row do %>
+            <h4 class="f5 mb-2">Accessible Custom Models (<%= user_info[:custom_models].size %>)</h4>
+            <div class="overflow-x-auto">
+            <table class="width-full">
+              <thead>
+                <tr class="no-wrap">
+                  <th class="text-left p-2" scope="col">Model Name</th>
+                  <th class="text-left p-2" scope="col">Slug</th>
+                  <th class="text-left p-2" scope="col">Provider</th>
+                  <th class="text-left p-2" scope="col">Owner</th>
+                  <th class="text-left p-2" scope="col">Owner Type</th>
+                  <th class="text-left p-2" scope="col">Enabled</th>
+                  <th class="text-left p-2" scope="col">Endpoint Type</th>
+                  <th class="text-left p-2" scope="col">Tool Calling</th>
+                  <th class="text-left p-2" scope="col">Vision</th>
+                  <th class="text-left p-2" scope="col">Thinking</th>
+                  <th class="text-left p-2" scope="col">Streaming</th>
+                  <th class="text-left p-2 no-wrap" scope="col">Max Input Tokens</th>
+                  <th class="text-left p-2 no-wrap" scope="col">Max Output Tokens</th>
+                  <th class="text-left p-2 no-wrap" scope="col">Max Context Window</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% user_info[:custom_models].each do |model| %>
+                  <% cap = model.capability %>
+                  <tr>
+                    <td class="p-2"><%= model.name %></td>
+                    <td class="p-2"><code><%= model.slug %></code></td>
+                    <td class="p-2"><%= model.custom_key&.provider %></td>
+                    <td class="p-2">
+                      <% owner = model.owner %>
+                      <% if owner.is_a?(Organization) %>
+                        <%= render(Primer::Beta::Link.new(href: stafftools_user_path(owner), classes: "Link--inTextBlock")) { owner.login } %>
+                      <% elsif owner.is_a?(Business) %>
+                        <%= render(Primer::Beta::Link.new(href: stafftools_enterprise_path(owner), classes: "Link--inTextBlock")) { owner.slug } %>
+                      <% end %>
+                    </td>
+                    <td class="p-2">
+                      <% if model.organization_owned? %>
+                        <%= render(Primer::Beta::Label.new(scheme: :accent)) { "Organization" } %>
+                      <% else %>
+                        <%= render(Primer::Beta::Label.new(scheme: :done)) { "Enterprise" } %>
+                      <% end %>
+                    </td>
+                    <td class="p-2">
+                      <% if model.copilot_chat_enabled? %>
+                        <%= render(Primer::Beta::Label.new(scheme: :success)) { "Yes" } %>
+                      <% else %>
+                        <%= render(Primer::Beta::Label.new(scheme: :secondary)) { "No" } %>
+                      <% end %>
+                    </td>
+                    <td class="p-2"><code><%= cap&.endpoint_type || "—" %></code></td>
+                    <td class="p-2"><%= cap&.tool_calling ? "✓" : "✗" %></td>
+                    <td class="p-2"><%= cap&.vision ? "✓" : "✗" %></td>
+                    <td class="p-2"><%= cap&.thinking ? "✓" : "✗" %></td>
+                    <td class="p-2"><%= cap&.streaming ? "✓" : "✗" %></td>
+                    <td class="p-2"><%= cap&.max_input_tokens&.to_formatted_s(:delimited) || "—" %></td>
+                    <td class="p-2"><%= cap&.max_output_tokens&.to_formatted_s(:delimited) || "—" %></td>
+                    <td class="p-2"><%= cap&.max_context_window&.to_formatted_s(:delimited) || "—" %></td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+            </div>
+          <% end %>
+        <% else %>
+          <% box.with_row do %>
+            <span class="color-fg-muted">No BYOK custom models accessible to this user.</span>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <%# ===== ORGANIZATION RESULTS ===== %>
+    <% if results[:organization] %>
+      <% org_info = results[:organization] %>
+      <%= render(Primer::Beta::BorderBox.new(classes: "tmp-mt-4 tmp-mb-4")) do |box| %>
+        <% box.with_header do %>
+          <h3 class="f4">
+            <%= render(Primer::Beta::Octicon.new(:organization)) %>
+            Organization: <%= render(Primer::Beta::Link.new(href: stafftools_user_path(org_info[:org]), classes: "Link--inTextBlock")) { org_info[:org].login } %>
+          </h3>
+        <% end %>
+
+        <% box.with_row do %>
+          <div class="d-flex flex-justify-between flex-items-center">
+            <div>
+              <strong>BYOK Custom Models</strong>
+              <p class="color-fg-muted mb-0 text-small">Whether BYOK custom models are enabled for this organization</p>
+            </div>
+            <% if org_info[:enabled] %>
+              <%= render(Primer::Beta::Label.new(scheme: :success)) { "Enabled" } %>
+            <% else %>
+              <%= render(Primer::Beta::Label.new(scheme: :secondary)) { "Disabled" } %>
+            <% end %>
+          </div>
+        <% end %>
+
+        <% if org_info[:business] %>
+          <% box.with_row do %>
+            <div class="d-flex flex-justify-between flex-items-center">
+              <div>
+                <strong>Enterprise: <%= render(Primer::Beta::Link.new(href: stafftools_enterprise_path(org_info[:business]), classes: "Link--inTextBlock")) { org_info[:business].slug } %></strong>
+                <p class="color-fg-muted mb-0 text-small">Enterprise-level BYOK status</p>
+              </div>
+              <% if org_info[:business_enabled] %>
+                <%= render(Primer::Beta::Label.new(scheme: :success)) { "Enabled" } %>
+              <% else %>
+                <%= render(Primer::Beta::Label.new(scheme: :secondary)) { "Disabled" } %>
+              <% end %>
+            </div>
+          <% end %>
+        <% end %>
+
+        <% box.with_row do %>
+          <strong>Custom Keys (<%= org_info[:custom_keys].size %>)</strong>
+          <% if org_info[:custom_keys].any? %>
+            <table class="width-full mt-2">
+              <thead>
+                <tr class="no-wrap">
+                  <th class="text-left p-2" scope="col">ID</th>
+                  <th class="text-left p-2" scope="col">Name</th>
+                  <th class="text-left p-2" scope="col">Provider</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% org_info[:custom_keys].each do |key| %>
+                  <tr>
+                    <td class="p-2"><%= key.id %></td>
+                    <td class="p-2"><%= key.name %></td>
+                    <td class="p-2"><%= key.provider %></td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          <% else %>
+            <p class="color-fg-muted mb-0 text-small">No custom keys configured.</p>
+          <% end %>
+        <% end %>
+
+        <% box.with_row do %>
+          <strong>Custom Models (<%= org_info[:custom_models].size %>)</strong>
+          <% if org_info[:custom_models].any? %>
+            <div class="overflow-x-auto">
+            <table class="width-full mt-2">
+              <thead>
+                <tr class="no-wrap">
+                  <th class="text-left p-2" scope="col">Model Name</th>
+                  <th class="text-left p-2" scope="col">Slug</th>
+                  <th class="text-left p-2" scope="col">Provider</th>
+                  <th class="text-left p-2" scope="col">Owner</th>
+                  <th class="text-left p-2" scope="col">Owner Type</th>
+                  <th class="text-left p-2" scope="col">Enabled</th>
+                  <th class="text-left p-2" scope="col">Endpoint Type</th>
+                  <th class="text-left p-2" scope="col">Tool Calling</th>
+                  <th class="text-left p-2" scope="col">Vision</th>
+                  <th class="text-left p-2" scope="col">Thinking</th>
+                  <th class="text-left p-2" scope="col">Streaming</th>
+                  <th class="text-left p-2 no-wrap" scope="col">Max Input Tokens</th>
+                  <th class="text-left p-2 no-wrap" scope="col">Max Output Tokens</th>
+                  <th class="text-left p-2 no-wrap" scope="col">Max Context Window</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% org_info[:custom_models].each do |model| %>
+                  <% cap = model.capability %>
+                  <tr>
+                    <td class="p-2"><%= model.name %></td>
+                    <td class="p-2"><code><%= model.slug %></code></td>
+                    <td class="p-2"><%= model.custom_key&.provider %></td>
+                    <td class="p-2">
+                      <% owner = model.owner %>
+                      <% if owner.is_a?(Organization) %>
+                        <%= owner.login %>
+                      <% elsif owner.is_a?(Business) %>
+                        <%= owner.slug %>
+                      <% end %>
+                    </td>
+                    <td class="p-2">
+                      <% if model.organization_owned? %>
+                        <%= render(Primer::Beta::Label.new(scheme: :accent)) { "Organization" } %>
+                      <% else %>
+                        <%= render(Primer::Beta::Label.new(scheme: :done)) { "Enterprise" } %>
+                      <% end %>
+                    </td>
+                    <td class="p-2">
+                      <% if model.copilot_chat_enabled? %>
+                        <%= render(Primer::Beta::Label.new(scheme: :success)) { "Yes" } %>
+                      <% else %>
+                        <%= render(Primer::Beta::Label.new(scheme: :secondary)) { "No" } %>
+                      <% end %>
+                    </td>
+                    <td class="p-2"><code><%= cap&.endpoint_type || "—" %></code></td>
+                    <td class="p-2"><%= cap&.tool_calling ? "✓" : "✗" %></td>
+                    <td class="p-2"><%= cap&.vision ? "✓" : "✗" %></td>
+                    <td class="p-2"><%= cap&.thinking ? "✓" : "✗" %></td>
+                    <td class="p-2"><%= cap&.streaming ? "✓" : "✗" %></td>
+                    <td class="p-2"><%= cap&.max_input_tokens&.to_formatted_s(:delimited) || "—" %></td>
+                    <td class="p-2"><%= cap&.max_output_tokens&.to_formatted_s(:delimited) || "—" %></td>
+                    <td class="p-2"><%= cap&.max_context_window&.to_formatted_s(:delimited) || "—" %></td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+            </div>
+          <% else %>
+            <p class="color-fg-muted mb-0 text-small">No custom models.</p>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <%# ===== ENTERPRISE RESULTS ===== %>
+    <% if results[:enterprise] %>
+      <% ent_info = results[:enterprise] %>
+      <%= render(Primer::Beta::BorderBox.new(classes: "tmp-mt-4 tmp-mb-4")) do |box| %>
+        <% box.with_header do %>
+          <h3 class="f4">
+            <%= render(Primer::Beta::Octicon.new(:globe)) %>
+            Enterprise: <%= render(Primer::Beta::Link.new(href: stafftools_enterprise_path(ent_info[:business]), classes: "Link--inTextBlock")) { ent_info[:business].slug } %>
+          </h3>
+        <% end %>
+
+        <% box.with_row do %>
+          <div class="d-flex flex-justify-between flex-items-center">
+            <div>
+              <strong>BYOK Custom Models</strong>
+              <p class="color-fg-muted mb-0 text-small">Whether BYOK custom models are enabled for this enterprise</p>
+            </div>
+            <% if ent_info[:enabled] %>
+              <%= render(Primer::Beta::Label.new(scheme: :success)) { "Enabled" } %>
+            <% else %>
+              <%= render(Primer::Beta::Label.new(scheme: :secondary)) { "Disabled" } %>
+            <% end %>
+          </div>
+        <% end %>
+
+        <% box.with_row do %>
+          <strong>Custom Keys (<%= ent_info[:custom_keys].size %>)</strong>
+          <% if ent_info[:custom_keys].any? %>
+            <table class="width-full mt-2">
+              <thead>
+                <tr class="no-wrap">
+                  <th class="text-left p-2" scope="col">ID</th>
+                  <th class="text-left p-2" scope="col">Name</th>
+                  <th class="text-left p-2" scope="col">Provider</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% ent_info[:custom_keys].each do |key| %>
+                  <tr>
+                    <td class="p-2"><%= key.id %></td>
+                    <td class="p-2"><%= key.name %></td>
+                    <td class="p-2"><%= key.provider %></td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          <% else %>
+            <p class="color-fg-muted mb-0 text-small">No custom keys configured.</p>
+          <% end %>
+        <% end %>
+
+        <% box.with_row do %>
+          <strong>Custom Models (<%= ent_info[:custom_models].size %>)</strong>
+          <% if ent_info[:custom_models].any? %>
+            <div class="overflow-x-auto">
+            <table class="width-full mt-2">
+              <thead>
+                <tr class="no-wrap">
+                  <th class="text-left p-2" scope="col">Model Name</th>
+                  <th class="text-left p-2" scope="col">Slug</th>
+                  <th class="text-left p-2" scope="col">Provider</th>
+                  <th class="text-left p-2" scope="col">Owner</th>
+                  <th class="text-left p-2" scope="col">Owner Type</th>
+                  <th class="text-left p-2" scope="col">Enabled</th>
+                  <th class="text-left p-2" scope="col">Endpoint Type</th>
+                  <th class="text-left p-2" scope="col">Tool Calling</th>
+                  <th class="text-left p-2" scope="col">Vision</th>
+                  <th class="text-left p-2" scope="col">Thinking</th>
+                  <th class="text-left p-2" scope="col">Streaming</th>
+                  <th class="text-left p-2 no-wrap" scope="col">Max Input Tokens</th>
+                  <th class="text-left p-2 no-wrap" scope="col">Max Output Tokens</th>
+                  <th class="text-left p-2 no-wrap" scope="col">Max Context Window</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% ent_info[:custom_models].each do |model| %>
+                  <% cap = model.capability %>
+                  <tr>
+                    <td class="p-2"><%= model.name %></td>
+                    <td class="p-2"><code><%= model.slug %></code></td>
+                    <td class="p-2"><%= model.custom_key&.provider %></td>
+                    <td class="p-2">
+                      <% owner = model.owner %>
+                      <% if owner.is_a?(Organization) %>
+                        <%= owner.login %>
+                      <% elsif owner.is_a?(Business) %>
+                        <%= owner.slug %>
+                      <% end %>
+                    </td>
+                    <td class="p-2">
+                      <% if model.organization_owned? %>
+                        <%= render(Primer::Beta::Label.new(scheme: :accent)) { "Organization" } %>
+                      <% else %>
+                        <%= render(Primer::Beta::Label.new(scheme: :done)) { "Enterprise" } %>
+                      <% end %>
+                    </td>
+                    <td class="p-2">
+                      <% if model.copilot_chat_enabled? %>
+                        <%= render(Primer::Beta::Label.new(scheme: :success)) { "Yes" } %>
+                      <% else %>
+                        <%= render(Primer::Beta::Label.new(scheme: :secondary)) { "No" } %>
+                      <% end %>
+                    </td>
+                    <td class="p-2"><code><%= cap&.endpoint_type || "—" %></code></td>
+                    <td class="p-2"><%= cap&.tool_calling ? "✓" : "✗" %></td>
+                    <td class="p-2"><%= cap&.vision ? "✓" : "✗" %></td>
+                    <td class="p-2"><%= cap&.thinking ? "✓" : "✗" %></td>
+                    <td class="p-2"><%= cap&.streaming ? "✓" : "✗" %></td>
+                    <td class="p-2"><%= cap&.max_input_tokens&.to_formatted_s(:delimited) || "—" %></td>
+                    <td class="p-2"><%= cap&.max_output_tokens&.to_formatted_s(:delimited) || "—" %></td>
+                    <td class="p-2"><%= cap&.max_context_window&.to_formatted_s(:delimited) || "—" %></td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+            </div>
+          <% else %>
+            <p class="color-fg-muted mb-0 text-small">No custom models.</p>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

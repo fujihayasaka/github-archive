@@ -1,0 +1,2 @@
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[96910],{142141(s,u,i){var e=i(331635),h=i(651135);class t extends HTMLElement{checkDisabledCheckbox(s){return s.preventDefault()}}(0,e.Cg)([(0,h.p_)("security-analysis-ghas")],t)}}]);
+//# sourceMappingURL=chunk-96910-71f206d29a638537-6cf3ff3c04f4866d.js.map

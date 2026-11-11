@@ -1,0 +1,81 @@
+<% page_info \
+     :title => "#{this_user.login} - #{this_team.name} team members",
+     :selected_link => :org_teams %>
+
+<div class="site-admin-unboxed">
+  <div class="site-admin-subhead ruleless">
+    <h2 class="site-admin-subhead-heading">
+      <%= link_to "Teams", stafftools_user_teams_path(this_user) %>
+      /
+      <%= link_to this_team.name, gh_stafftools_team_path(this_team) %>
+      / Members
+      <% if current_page_of_members.any? %>
+        <%= render Primer::Beta::ClipboardCopy.new(float: :right, classes: "btn btn-sm zeroclipboard-button", value: members_as_copyable_text(all_members), "aria-label": "Copy member list to clipboard") %>
+      <% end %>
+    </h2>
+  </div>
+
+  <% if can_clean_up_orphaned_child_team_members %>
+    <%= render(Primer::Alpha::Banner.new(scheme: :warning, mt: 2, mb: 2, test_selector: "orphaned-child-team-members-flash")) do %>
+      <p>
+        <strong><%= pluralize(orphaned_indirect_count, "orphaned child team member record") %></strong>
+        on this team appear to be stale <code>indirect</code> ability rows left behind by a previous
+        re-parenting bug
+        (<a class="Link--inTextBlock" href="https://github.com/github/github/pull/432887">#432887</a>)
+        &mdash; they point at a parent ability whose team is no longer a descendant of this team and
+        surface here as "child team member". Cleanup leaves direct memberships and inherited
+        memberships from current child teams untouched.
+      </p>
+      <%= button_to "Clean up orphaned child team members",
+            stafftools_user_team_orphaned_child_members_cleanup_path(this_user, this_team),
+            method: :post,
+            class: "btn btn-danger",
+            data: {
+              "test-selector": "clean-up-orphaned-child-team-members-button",
+              confirm: "Queue cleanup of #{pluralize(orphaned_indirect_count, "orphaned child team member record")} for #{this_team.name}?",
+            } %>
+    <% end %>
+  <% end %>
+
+  <% if current_page_of_members.any? %>
+    <table class="site-admin-table">
+      <% current_page_of_members.each do |member| %>
+        <tr>
+          <td>
+            <%= avatar_for member, 20, class: :avatar %>
+            <%= link_to member, stafftools_user_path(member) %>
+          </td>
+          <td>
+            <%= member.display_name %>
+          </td>
+
+          <td class="column-width-sm">
+            <% if team_maintainers.include? member %>
+              <%= render Primer::Beta::Label.new(scheme: :secondary, title: "Label: team maintainer") do %>
+                team maintainer
+              <% end %>
+            <% elsif org_admins.include? member %>
+              <%= render Primer::Beta::Label.new(scheme: :secondary, title: "Label: owner") do %>
+                owner
+              <% end %>
+            <% end %>
+          </td>
+
+          <td class="column-width-sm">
+            <% unless direct_members.include? member %>
+              <%= render Primer::Beta::Label.new(scheme: :secondary, title: "Label: child team member") do %>
+                child team member
+              <% end %>
+            <% end %>
+          </td>
+        </tr>
+      <% end %>
+    </table>
+
+    <div class="paginate-container">
+      <%= will_paginate current_page_of_members %>
+    </div>
+  <% else %>
+    <p class="site-admin-blankstate">No members</p>
+  <% end %>
+</div>

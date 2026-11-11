@@ -1,0 +1,1 @@
+var e={footerlinks:`styles-module_B5cKpW_footerlinks`,footerlinksListItem:`styles-module_B5cKpW_footerlinksListItem`,spacefiller:`styles-module_B5cKpW_spacefiller`,table:`styles-module_B5cKpW_table`,tableCell:`styles-module_B5cKpW_tableCell`,tableHeaderCell:`styles-module_B5cKpW_tableHeaderCell`};export{e as t};

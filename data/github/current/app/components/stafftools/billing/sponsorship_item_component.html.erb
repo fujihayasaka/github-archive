@@ -1,0 +1,127 @@
+<tr class="<%= row_classes %>" <%= test_selector("sponsorship-item-#{sub_item&.id || sponsorship_id}") %>>
+  <td <%= test_selector("sponsorable") %>>
+    <% if sponsorable.ghost? %>
+      @<%= sponsorable %>
+    <% else %>
+      <a href="<%= sponsorable_path(sponsorable) %>">@<%= sponsorable %></a>
+    <% end %>
+  </td>
+  <td <%= test_selector("tier-price") %>><%= tier_price %></td>
+  <td <%= test_selector("item-#{item.id}-frequency") %>>
+    <% if tier&.one_time? %>
+      <%= tier.frequency_adjective %>
+    <% else %>
+      <%= sub_item&.plan_duration || sponsor.plan_duration %>ly
+    <% end %>
+    <% if pending_change %>
+      <p class="f6 text-italic" <%= test_selector("pending-sponsorship-change-notice") %>>
+        <%= pending_change.description %>
+      </p>
+    <% end %>
+  </td>
+
+  <td>
+    <% if sponsorship %>
+      <%= form_tag stafftools_sponsors_sponsorship_path(sponsorship_id), method: :put do %>
+        <%= render Primer::Beta::Button.new(
+          size: :small,
+          type: :submit,
+          scheme: :danger,
+          mb: 1,
+          test_selector: "flip-sponsorship-privacy-#{sponsorship_id}",
+          "data-confirm": "Are you sure you want to change the privacy of this sponsorship to #{opposite_privacy_level}?",
+        ).with_content("Make #{opposite_privacy_level}") %>
+      <% end %>
+    <% end %>
+
+    <% if sponsorship&.active? %>
+      <% if pending_change %>
+        <%= form_tag stafftools_sponsors_sponsorship_pending_change_path(sponsorship), method: :delete do %>
+          <%= render Primer::Beta::Button.new(
+            size: :small,
+            type: :submit,
+            scheme: :danger,
+            mb: 1,
+            test_selector: "undo-pending-change-#{sponsorship_id}",
+            "data-confirm": "Are you sure you want to undo this #{pending_change}?",
+          ).with_content("Undo #{pending_change}") %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <% if show_cancellation_form? %>
+      <%= form_tag cancellation_path, method: :delete do %>
+        <%= render(Primer::Alpha::Dialog.new(
+          title: "Cancel sponsorship",
+          id: "cancel-sponsorship-dialog-#{item.id}",
+        )) do |d| %>
+          <% d.with_show_button(
+            size: :small,
+            scheme: :danger,
+            test_selector: "cancel-#{item.id}"
+          ) do %>
+            Cancel
+          <% end %>
+          <% d.with_body do %>
+            <p <%= test_selector("cancellation-confirmation") %>>
+              Are you sure you want to cancel <%= sponsor %>'s <%= tier %> sponsorship<% unless sponsorable.ghost? %> of <%= sponsorable %><% end %>?
+            </p>
+          <% end %>
+          <% d.with_footer do %>
+            <%= render(Primer::Beta::Button.new("data-close-dialog-id": "cancel-sponsorship-dialog-#{item.id}")) { "No, keep it" } %>
+            <%= render(Primer::Beta::Button.new(
+              type: :submit,
+              scheme: :danger,
+              "data-disable-invalid": "",
+              "data-disable-with": "Cancelling sponsorship...",
+              test_selector: "cancel-confirmation"
+            )) { "Yes, cancel it" } %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+    <% if sponsorship.present? && !sponsorship.active? %>
+      <%= form_tag stafftools_sponsors_sponsorship_restoration_path(sponsorship) do %>
+        <%= render(Primer::Alpha::Dialog.new(
+          title: "Restore this sponsorship?",
+          id: "restore-sponsorship-dialog-#{sponsorship_id}",
+        )) do |d| %>
+          <% d.with_show_button(
+            size: :small,
+            scheme: :danger,
+            test_selector: "restore-#{sponsorship_id}"
+          ) do %>
+            Restore
+          <% end %>
+          <% d.with_body do %>
+            <p>
+              <strong><%= sponsor %>'s</strong> <%= tier %> sponsorship of <strong><%= sponsorable %></strong> will be marked as active.
+            </p>
+            <p>
+              <%= sponsor %> will <strong>not</strong> be charged.
+            </p>
+            <% if sponsorship.expires_at && sponsorship.one_time_payment? %>
+              <p <%= test_selector("one-time-expires-at-note") %>>
+                The sponsorship's expiration date
+                <% if sponsorship.expired? %>
+                  will be extended to <%= formatted_one_time_expiration_date_for(sponsorship) %>.
+                <% else %>
+                  of <%= formatted_one_time_expiration_date_for(sponsorship) %> will not be changed.
+                <% end %>
+              </p>
+            <% end %>
+          <% end %>
+          <% d.with_footer do %>
+            <%= render(Primer::Beta::Button.new("data-close-dialog-id": "restore-sponsorship-dialog-#{sponsorship_id}")) { "Cancel" } %>
+            <%= render(Primer::Beta::Button.new(
+              type: :submit,
+              scheme: :danger,
+              "data-disable-invalid": "",
+              "data-disable-with": "Restoring sponsorship..."
+            )) { "Yes, restore it" } %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  </td>
+</tr>

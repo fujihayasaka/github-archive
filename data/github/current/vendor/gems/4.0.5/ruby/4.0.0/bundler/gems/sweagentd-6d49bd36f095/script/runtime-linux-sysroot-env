@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+format="github-env"
+if [[ "${1:-}" == "--shell" ]]; then
+    format="shell"
+    shift
+fi
+
+arch="${1:-$(node -e 'process.stdout.write(process.arch)')}"
+
+case "$arch" in
+    x64)
+        rust_target_env="X86_64_UNKNOWN_LINUX_GNU"
+        cflags_env="CFLAGS_x86_64_unknown_linux_gnu"
+        linker="x86_64-linux-gnu-gcc"
+        ;;
+    arm64)
+        rust_target_env="AARCH64_UNKNOWN_LINUX_GNU"
+        cflags_env="CFLAGS_aarch64_unknown_linux_gnu"
+        linker="aarch64-linux-gnu-gcc"
+        ;;
+    *)
+        echo "Unsupported runner architecture: $arch" >&2
+        exit 1
+        ;;
+esac
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+repo_dir="$(cd "$script_dir/.." &> /dev/null && pwd)"
+runtime_dir="${RUNTIME_DIR:-$repo_dir/runtime}"
+
+sysroot="$(
+    cd "$runtime_dir"
+    node script/linux/install-sysroot.cjs "$arch" | sed -n 's/^SYSROOT_PATH=//p' | tail -n1
+)"
+
+if [[ -z "$sysroot" ]]; then
+    echo "Failed to resolve Linux sysroot path for $arch" >&2
+    exit 1
+fi
+
+bin="$(dirname "$(dirname "$sysroot")")/bin"
+
+quote_for_shell() {
+    printf "'"
+    printf '%s' "$1" | sed "s/'/'\\\\''/g"
+    printf "'"
+}
+
+emit() {
+    local key="$1"
+    local value="$2"
+
+    case "$format" in
+        github-env)
+            printf '%s=%s\n' "$key" "$value"
+            ;;
+        shell)
+            printf 'export %s=%s\n' "$key" "$(quote_for_shell "$value")"
+            ;;
+        *)
+            echo "Unsupported output format: $format" >&2
+            exit 1
+            ;;
+    esac
+}
+
+emit "LINUX_SYSROOT" "$sysroot"
+emit "CARGO_TARGET_${rust_target_env}_LINKER" "$bin/$linker"
+emit "$cflags_env" "--sysroot=$sysroot"
+emit "CARGO_TARGET_${rust_target_env}_RUSTFLAGS" "-C link-arg=--sysroot=$sysroot"

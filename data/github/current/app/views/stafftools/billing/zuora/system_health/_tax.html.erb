@@ -1,0 +1,83 @@
+<%
+  tax_total = tax_records.size
+  tax_failures = tax_records.count { |r| (r["status"] || r[:status] || "").to_s.downcase != "success" }
+  tax_avg_vendor = tax_total > 0 ? (tax_records.sum { |r| (r["vendor_duration"] || r[:vendor_duration] || 0).to_i } / tax_total) : 0
+  tax_avg_total = tax_total > 0 ? (tax_records.sum { |r| (r["total_duration"] || r[:total_duration] || 0).to_i } / tax_total) : 0
+  if error
+    tax_status = "yellow"
+    tax_label = "Unknown"
+    tax_scheme = :attention
+  else
+    tax_status = tax_failures > 0 ? "red" : "green"
+    tax_label = tax_failures > 0 ? "Unhealthy" : "Healthy"
+    tax_scheme = tax_failures > 0 ? :danger : :success
+  end
+  tax_vendor = tax_records.first ? (tax_records.first["vendor_name"] || tax_records.first[:vendor_name] || "N/A") : "N/A"
+%>
+
+<div class="health-card" style="flex: 1; min-width: 300px;">
+  <% if error %>
+    <%= render(Primer::Alpha::Banner.new(icon: :alert, scheme: :danger, mb: 2)) { error } %>
+  <% end %>
+  <div class="health-card-header">
+    <span class="f4 text-bold">
+      <span class="status-dot <%= tax_status %>"></span>Tax Calculations
+    </span>
+    <%= render(Primer::Beta::Label.new(scheme: tax_scheme)) { tax_label } %>
+  </div>
+  <div class="metric-row"><span class="metric-label">Vendor</span><span class="metric-value"><%= tax_vendor %></span></div>
+  <div class="metric-row"><span class="metric-label">Total calculations</span><span class="metric-value"><%= number_with_delimiter(tax_total) %></span></div>
+  <div class="metric-row"><span class="metric-label">Failures</span><span class="metric-value" style="<%= "color: var(--fgColor-success);" if tax_failures == 0 %><%= "color: var(--fgColor-danger);" if tax_failures > 0 %>"><%= tax_failures %></span></div>
+  <div class="metric-row"><span class="metric-label">Avg vendor latency</span><span class="metric-value"><%= tax_avg_vendor %>ms</span></div>
+  <div class="metric-row"><span class="metric-label">Avg total latency</span><span class="metric-value"><%= tax_avg_total %>ms</span></div>
+</div>
+
+<%# ═══ Tax Details (collapsible) ═══ %>
+<% if tax_records.any? %>
+  <details class="tmp-mb-3 col-12" style="flex-basis: 100%;">
+    <%= render Primer::Beta::Button.new(tag: :summary, scheme: :link, font_weight: :bold) do %>
+      ▸ Tax Calculation Records (<%= tax_records.size %>)
+    <% end %>
+    <div class="Box mt-2">
+      <table class="stafftools-table detail-table">
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Document</th>
+            <th>Event</th>
+            <th>Vendor</th>
+            <th style="text-align:right;">Vendor Latency</th>
+            <th style="text-align:right;">Total Latency</th>
+            <th>Status</th>
+            <th>Error</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% tax_records.each do |rec| %>
+            <%
+              t_ts = rec["timestamp"] || rec[:timestamp] || ""
+              t_doc = rec["document_number"] || rec[:document_number] || ""
+              t_event = rec["event_type"] || rec[:event_type] || ""
+              t_vendor = rec["vendor_name"] || rec[:vendor_name] || ""
+              t_vdur = (rec["vendor_duration"] || rec[:vendor_duration] || 0).to_i
+              t_tdur = (rec["total_duration"] || rec[:total_duration] || 0).to_i
+              t_status = rec["status"] || rec[:status] || ""
+              t_error = rec["error_message"] || rec[:error_message] || ""
+              t_scheme = t_status.to_s.downcase == "success" ? :success : :danger
+            %>
+            <tr>
+              <td><%= t_ts %></td>
+              <td><code><%= t_doc %></code></td>
+              <td><%= t_event %></td>
+              <td><%= t_vendor %></td>
+              <td style="text-align:right;<%= " color: var(--fgColor-attention); font-weight: 600;" if t_vdur > 1000 %>"><%= number_with_delimiter(t_vdur) %>ms</td>
+              <td style="text-align:right;<%= " color: var(--fgColor-attention); font-weight: 600;" if t_tdur > 1000 %>"><%= number_with_delimiter(t_tdur) %>ms</td>
+              <td><%= render(Primer::Beta::Label.new(scheme: t_scheme)) { t_status } %></td>
+              <td><%= t_error.present? ? h(t_error) : "—" %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </details>
+<% end %>

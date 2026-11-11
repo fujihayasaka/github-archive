@@ -1,0 +1,56 @@
+# Worker-specific patches for <%= pool_name %>
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aqueduct-worker
+spec:
+  template:
+    spec:
+      containers:
+        - name: aqueduct
+          args:
+            - bin/resqued
+            - --pidfile
+            - /resqued-pidfile/resqued.pid
+            - config/resqued/github-environment.rb
+            - <%= worker_pool_rb_file %>
+<%
+  if options[:environment] == 'production' then
+%>
+          resources:
+            requests:
+              cpu: 3
+              memory: 14Gi
+            limits:
+              cpu: 10
+              memory: 18Gi
+<%
+  else
+%>
+          resources:
+            requests:
+              cpu: 1
+              memory: 10Gi
+            limits:
+              cpu: 5
+              memory: 14Gi
+<%
+  end
+%>
+          env:
+            - name: DOGSTATSD_ADDITIONAL_TAGS
+              value: "kube_deployment:<%= pool_name %>"
+            - name: GITHUB_CONFIG_ROLE
+              value: "<%= pool_name %>"
+            - name: OTEL_SERVICE_NAME
+              value: "<%= github_pool_name %>"
+<%
+  if options[:environment] == 'proxima' then
+%>
+            - name: FRENO_DISABLED
+              value: "1"
+            - name: FRENO_THROTTLE
+              value: "0"
+<%
+  end
+%>

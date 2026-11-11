@@ -1,0 +1,191 @@
+<%# Row with "Select" button that opens the SelectPanel for choosing organizations %>
+<%= render(Primer::Box.new(display: :flex, justify_content: :space_around, flex: :auto, align_items: [:flex_start, nil, :center], direction: [:column, nil, :row])) do %>
+  <%= render(Primer::Box.new(display: :inline_flex, justify_content: :space_between, flex: 1, direction: :column, mb: [3, nil, 0])) do %>
+    <%= render(Primer::Beta::Text.new(tag: :span, font_weight: :bold)) { "Manage Organizations" } %>
+    <%= render(Primer::Beta::Text.new(tag: :span, color: :muted, font_size: :small)) do %>
+      <% if enabled_count == 0 %>
+        No organizations selected
+      <% else %>
+        <%= enabled_count %> of <%= all_organizations.size %> organizations selected
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if @can_write %>
+    <%= render(Primer::Alpha::ActionMenu.new) do |menu| %>
+      <% menu.with_show_button(scheme: :default) do |button| %>
+        <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+        Manage organizations
+      <% end %>
+      <% menu.with_item(label: "Select organizations", tag: :button, content_arguments: { "data-show-dialog-id": "copilot-coding-agent-dialog" }) %>
+      <% menu.with_item(label: "Add by custom property", tag: :button, content_arguments: { "data-show-dialog-id": "copilot-coding-agent-custom-property-dialog" }) %>
+    <% end %>
+
+    <%= render(Primer::Alpha::Dialog.new(
+      id: "copilot-coding-agent-custom-property-dialog",
+      title: "Add organizations by custom property",
+      subtitle: "Find organizations that match a property value and add them to the selected list. This is a one-time action - organizations won't be added or removed automatically if the property changes later.",
+      size: :large
+    )) do |cp_dialog| %>
+      <% cp_dialog.with_body do %>
+        <%= form_with url: submit_path, method: :put, id: "custom-property-form", html: { class: "js-custom-property-form" } do %>
+          <div class="js-custom-property-org-ids"></div>
+          <style>
+            copilot-custom-property-picker .Button-content {
+              justify-content: flex-start;
+            }
+          </style>
+          <copilot-custom-property-picker data-search-url="<%= search_orgs_by_custom_property_path %>" data-submit-url="<%= submit_path %>">
+            <div class="d-flex flex-items-end gap-2">
+              <%= render(Primer::Alpha::SelectPanel.new(
+                title: "Select a property",
+                select_variant: :single,
+                fetch_strategy: :local,
+                show_filter: true,
+                dynamic_label: true,
+                classes: "col-6 js-custom-property"
+              )) do |panel| %>
+                <% panel.with_show_button(scheme: :default, classes: "col-12") do |button| %>
+                  <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+                  Select a property
+                <% end %>
+                <% custom_property_definitions.each do |definition| %>
+                  <% panel.with_item(
+                    label: definition.property_name,
+                    content_arguments: {
+                      classes: "js-custom-property-item",
+                      data: {
+                        value: definition.property_name,
+                        property_type: definition.value_type,
+                      }
+                    }
+                  ) do |item| %>
+                    <% item.with_description { definition.description } if definition.description.present? %>
+                  <% end %>
+                <% end %>
+              <% end %>
+
+              <% custom_property_definitions.each do |definition| %>
+                <div class="js-custom-property-value d-flex flex-items-center gap-2 col-6" data-property-name="<%= definition.property_name %>" hidden>
+                  <%= render(Primer::Beta::Text.new(tag: :span, classes: "d-flex flex-items-center")) { "is" } %>
+                  <% if selectable_property?(definition) %>
+                    <%= render(Primer::Alpha::SelectPanel.new(
+                      title: "Select a value",
+                      select_variant: :single,
+                      fetch_strategy: :local,
+                      show_filter: false,
+                      dynamic_label: true,
+                      classes: "col-12 js-custom-property-value-select-panel"
+                    )) do |value_panel| %>
+                      <% value_panel.with_show_button(scheme: :default, classes: "col-12") do |button| %>
+                        <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+                        Select a value
+                      <% end %>
+                      <% property_value_options(definition).each do |val| %>
+                        <% value_panel.with_item(label: val, content_arguments: { data: { value: val }, classes: "js-custom-property-value-item" }) %>
+                      <% end %>
+                    <% end %>
+                  <% else %>
+                    <div class="col-12">
+                      <%= render(Primer::Alpha::TextField.new(
+                        name: "custom_property_value",
+                        label: "Value",
+                        placeholder: "Enter a value",
+                        visually_hide_label: true,
+                        full_width: false,
+                        classes: "js-custom-property-value-input",
+                      )) %>
+                    </div>
+                  <% end %>
+                </div>
+              <% end %>
+            </div>
+
+            <div class="js-custom-property-results tmp-mt-3" hidden>
+              <div class="js-custom-property-results-loading text-center tmp-py-3" hidden>
+                <%= render(Primer::Beta::Spinner.new(size: :medium)) %>
+              </div>
+              <div class="js-custom-property-results-list" hidden>
+                <p class="js-custom-property-results-count d-flex flex-justify-between text-small mb-2"><span class="js-custom-property-results-match-count"></span><span class="js-custom-property-results-already-selected-count color-fg-muted"></span></p>
+                <ul class="js-custom-property-results-items list-style-none border rounded-2">
+                </ul>
+              </div>
+              <div class="js-custom-property-results-empty color-fg-muted text-center tmp-py-3" hidden>
+                No matching organizations found.
+              </div>
+            </div>
+          </copilot-custom-property-picker>
+        <% end %>
+      <% end %>
+      <% cp_dialog.with_footer(show_divider: true) do %>
+        <%= render(Primer::Beta::Button.new(data: { "close-dialog-id": "copilot-coding-agent-custom-property-dialog" })) { "Close" } %>
+        <%= render(Primer::Beta::Button.new(type: :submit, form: "custom-property-form", scheme: :primary, classes: "js-add-organizations-btn", disabled: true)) { "Add organizations" } %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <%= render(Primer::Alpha::Dialog.new(
+    id: "copilot-coding-agent-dialog",
+    title: "Copilot Cloud Agent",
+    subtitle: "Select which organizations can use Copilot Cloud Agent to autonomously resolve issues and open pull requests.",
+    size: :large
+  )) do |dialog| %>
+    <% dialog.with_header(show_divider: true) do |header| %>
+      <% header.with_filter(mb: 1) do %>
+        <filter-input aria-owns="select-organizations-list" class="mt-1">
+          <%= render(Primer::Alpha::TextField.new(
+            name: "filter_organizations",
+            label: "Filter organizations",
+            placeholder: "Filter organizations",
+            visually_hide_label: true,
+            leading_visual: { icon: :search },
+            full_width: true,
+            show_clear_button: true,
+          )) %>
+        </filter-input>
+      <% end %>
+    <% end %>
+    <% if !@can_write %>
+      <% dialog.with_show_button(scheme: :default) { "View organizations" } %>
+    <% end %>
+    <% dialog.with_body do %>
+      <%= form_with url: submit_path, method: :put, id: "select-organizations-form", html: { class: "js-copilot-policy-select-orgs-form" } do %>
+        <div id="select-organizations-list" class="d-flex flex-column overflow-y-auto">
+          <ul data-filter-list class="list-style-none border rounded-2">
+            <% all_organizations.each_with_index do |row, index| %>
+              <li class="d-flex flex-items-center width-full py-1 px-2<%= ' border-top' if index > 0 %>">
+                <input
+                  type="checkbox"
+                  value="<%= row[:organization].id %>"
+                  id="org-<%= row[:organization].id %>"
+                  <%= "checked" if row[:enabled] %>
+                  <%= "disabled" unless @can_write %>
+                  class="mx-2 js-copilot-policy-org-checkbox"
+                  aria-label="<%= row[:organization].display_login %>"
+                  <%= "data-initially-checked" if row[:enabled] %>
+                >
+                <label class="d-flex flex-items-center width-full color-fg-default pr-1" for="org-<%= row[:organization].id %>">
+                  <%= render(Primer::Beta::Avatar.new(src: row[:organization].primary_avatar_url(24), alt: "", shape: :square, size: 24, mr: 2)) %>
+                  <strong class="css-truncate-target width-fit flex-auto" data-filter-item-text>
+                    <%= row[:organization].display_login %>
+                  </strong>
+                </label>
+              </li>
+            <% end %>
+          </ul>
+          <div class="color-fg-muted m-1" data-filter-empty-state hidden>
+            No organizations found.
+          </div>
+        </div>
+      <% end %>
+    <% end %>
+    <% dialog.with_footer(show_divider: true) do %>
+      <% if @can_write %>
+        <%= render(Primer::Beta::Button.new(data: { "close-dialog-id": "copilot-coding-agent-dialog" })) { "Cancel" } %>
+        <%= render(Primer::Beta::Button.new(type: :submit, form: "select-organizations-form", scheme: :primary, data: { disable_with: "Save" })) { "Save" } %>
+      <% else %>
+        <%= render(Primer::Beta::Button.new(data: { "close-dialog-id": "copilot-coding-agent-dialog" })) { "Close" } %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

@@ -1,0 +1,183 @@
+<%# erblint:counter DeprecatedComponentsCounter 4 %>
+<% page_info title: "Features", selected_link: :features %>
+
+<% content_for :pagehead_path do %>
+  / <a href="<%= devtools_feature_flags_path %>">Feature Flags</a>
+<% end %>
+
+<% if GitHub.devtools_feature_flags_ui_enabled? %>
+  <%= render(Primer::Box.new(display: :flex, align_content: :center, flex_items: :center, justify_content: :space_between, classes: "tmp-mb-3")) do %>
+    <div style="flex-basis:60%">
+      <%= form_with url: devtools_feature_flags_path, method: :get, class: "d-flex flex-1" do |f| %>
+        <%= f.text_field :q, value: q, placeholder: "query by name, state", class: "col-12" %>
+        <%= render Primer::ButtonComponent.new(type: :submit, ml: 2) do %>Search<% end %>
+      <% end %>
+    </div>
+    <%= render(Primer::ButtonComponent.new(tag: :a, href: new_devtools_feature_flag_path, scheme: :primary, ml: 2)) { "New feature" } %>
+  <% end %>
+
+  <div id="features" data-hpc>
+    <% if features.any? %>
+      <%= render(Primer::Beta::BorderBox.new( classes: "tmp-mb-3")) do |component| %>
+        <% component.with_header(font_weight: :bold) do %>
+          <%= render Primer::Box.new(display: :flex, justify_content: :space_between, align_items: :center) do %>
+            <%= render Primer::Box.new do %>Features<% end %>
+
+            <%= render Primer::Box.new(display: :flex, align_items: :center) do %>
+              <%
+                # Parse current sort from query params
+                current_query = params[:q].to_s
+                name_sort_match = current_query.match(/sort:name-(asc|desc)/)
+                state_sort_match = current_query.match(/sort:state-(asc|desc)/)
+                last_updated_sort_match = current_query.match(/sort:last_updated-(asc|desc)/)
+
+                current_name_direction = name_sort_match ? name_sort_match[1] : nil
+                current_state_direction = state_sort_match ? state_sort_match[1] : nil
+                current_last_updated_direction = last_updated_sort_match ? last_updated_sort_match[1] : nil
+
+                # Determine next direction (toggle logic)
+                next_name_direction = current_name_direction == "asc" ? "desc" : "asc"
+                next_state_direction = current_state_direction == "asc" ? "desc" : "asc"
+                next_last_updated_direction = current_last_updated_direction == "asc" ? "desc" : "asc"
+
+                # Remove any existing sort for the field from query
+                base_query = current_query.gsub(/sort:(name|state|last_updated)-(asc|desc)\s*/, "").strip
+
+                # Build new query strings
+                name_query = "#{base_query} sort:name-#{next_name_direction}".strip
+                state_query = "#{base_query} sort:state-#{next_state_direction}".strip
+                last_updated_query = "#{base_query} sort:last_updated-#{next_last_updated_direction}".strip
+              %>
+              <%= render(Primer::Alpha::ActionMenu.new) do |menu| %>
+                <% menu.with_show_button do |button| %>
+                  Sort
+                  <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+                <% end %>
+
+                <% menu.with_item(
+                  href: devtools_feature_flags_path(q: name_query),
+                ) do %>
+                  Name
+                  <% if current_name_direction == "asc" %>
+                    <%= render Primer::Beta::Octicon.new(icon: :"arrow-up", size: :small) %>
+                  <% elsif current_name_direction == "desc" %>
+                    <%= render Primer::Beta::Octicon.new(icon: :"arrow-down", size: :small) %>
+                  <% end %>
+                <% end %>
+
+                <% menu.with_item(
+                  href: devtools_feature_flags_path(q: state_query),
+                ) do %>
+                  State
+                  <% if current_state_direction == "asc" %>
+                    <%= render Primer::Beta::Octicon.new(icon: :"arrow-up", size: :small) %>
+                  <% elsif current_state_direction == "desc" %>
+                    <%= render Primer::Beta::Octicon.new(icon: :"arrow-down", size: :small) %>
+                  <% end %>
+                <% end %>
+
+                <% menu.with_item(
+                  href: devtools_feature_flags_path(q: last_updated_query),
+                ) do %>
+                  Last Updated
+                  <% if current_last_updated_direction == "asc" %>
+                    <%= render Primer::Beta::Octicon.new(icon: :"arrow-up", size: :small) %>
+                  <% elsif current_last_updated_direction == "desc" %>
+                    <%= render Primer::Beta::Octicon.new(icon: :"arrow-down", size: :small) %>
+                  <% end %>
+                <% end %>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+
+        <% features.each do |feature| %>
+          <% component.with_row(test_selector: dom_id(feature), py: 2, display: :flex, justify_content: :space_between, align_items: :center) do %>
+            <div class="d-flex flex-column">
+              <div>
+                <%= render(Primer::Beta::Link.new(href: devtools_feature_flag_path(feature.name), scheme: :primary, font_weight: :bold, font_size: 4)) do %>
+                  <%= feature.name %>
+                <% end %>
+              </div>
+            </div>
+            <div class="color-fg-muted">
+              <%= render(Devtools::GateLabelComponent.new(feature: feature)) %>
+              <% if feature.last_updated_at %>
+                <%= render(Primer::Beta::Link.new(href: devtools_feature_flags_path(q: "#{params[:q]} starts:\"#{feature.last_updated_at.to_formatted_s(:db)}\""), scheme: :primary, muted: true)) do %>
+                  <%= render(Primer::Beta::Octicon.new(:clock)) %> <%= render(Primer::Beta::RelativeTime.new(datetime: feature.last_updated_at, tense: :past)) %>
+                <% end %>
+              <% end %>
+            </div>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <div class="tmp-mb-3 text-center">
+        <%= will_paginate features %>
+      </div>
+    <% elsif features.empty? && q.present? %>
+      <div <%= test_selector("no-feature-flag-results") %>>
+        <%= render Primer::Beta::Blankslate.new do |c| %>
+          <% c.with_visual_icon(icon: :"circle-slash") %>
+          <% c.with_heading(tag: :h2).with_content("No feature flag matches") %>
+          <% c.with_description do  %>
+            No flags match: <code><%= q %></code>. <a class="Link--inTextBlock" href="<%= devtools_feature_flags_path %>">View all features</a>.
+          <% end %>
+        <% end %>
+      </div>
+    <% else %>
+      <%= render Primer::BlankslateComponent.new(
+        icon: "squirrel",
+        title: "Welcome to Features!",
+        large: true,
+        spacious: true,
+      ) do %>
+        <p>Feature flags help manage code rollout. <a class="Link--inTextBlock" href="https://thehub.github.com/epd/engineering/products-and-services/dotcom/features/feature-flags/local-development/">Read the docs</a> or <a class="Link--inTextBlock" href="<%= new_devtools_feature_flag_path %>">add a new feature</a>.</p>
+
+        <code class="d-block">
+          $ bin/toggle-feature-flag enable security_dashboard
+        </code>
+      <% end %>
+    <% end %>
+  </div>
+
+  <%= render(Primer::Beta::BorderBox.new( classes: "tmp-mb-3")) do |c| %>
+    <% c.with_header(font_weight: :bold) { "Additional Tools" } %>
+    <% c.with_row do %>
+      <p class="my-0">
+        <%= primer_octicon(:question) %> Want more info on how the search/filter works on this page?
+      </p>
+      <p class="my-0">
+        <%= render Primer::Beta::Details.new do |c| %>
+          <% c.with_summary(button: false) do %>
+            Expand to learn more
+          <% end %>
+          <% c.with_body do %>
+            You may search by name or description. You may also filter with the following qualifiers.
+            <ul class="ml-0 tmp-pl-4">
+              <li>
+                <code>name:</code> example
+                <%= render(Primer::Beta::Link.new(href: devtools_feature_flags_path(q: "my_feature"), classes: "Link--inTextBlock")) do %>
+                  <code>my_feature</code>
+                <% end %> &mdash; shows flags with names matching the provided text.
+              </li>
+              <li>
+                <code>sort:</code> example
+                <%= render(Primer::Beta::Link.new(href: devtools_feature_flags_path(q: "sort:name-asc"), classes: "Link--inTextBlock")) do %>
+                  <code>sort:name-asc</code>
+                <% end %> &mdash; orders flags by the attribute and direction provided. Supported sort keys: name, state, last_updated.
+              </li>
+            </ul>
+          <% end %>
+        <% end %>
+      </p>
+    <% end %>
+  <% end %>
+<% else %>
+  <%= render Primer::Beta::Flash.new(scheme: :default, display: :flex, classes: "tmp-mb-3") do |component| %>
+    <%= primer_octicon(:stop, mr: 2, mt: 1) %>
+    <div>
+      <p>The feature flag UI as part of devtools is only meant to be used in development.</p>
+    </div>
+  <% end %>
+<% end %>

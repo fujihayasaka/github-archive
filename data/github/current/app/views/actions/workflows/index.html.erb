@@ -1,0 +1,43 @@
+<% if actions_workflow_filtering_enabled? %>
+<% included_workflows = workflow_filter_included(workflow_run_filters, :workflow) %>
+<% excluded_workflows = workflow_filter_excluded(workflow_run_filters, :workflow) %>
+<% sorted_workflows = workflows.sort_by do |w|
+  [included_workflows.include?(w) ? 0 : excluded_workflows.include?(w) ? 1 : 2, pinned_workflows.include?(w) ? 0 : 1, w]
+end %>
+<%= render(Primer::Alpha::SelectPanel::ItemList.new(
+  menu_id: "actions_workflow_filter",
+  select_variant: :multiple,
+  aria: { label: "workflows" },
+)) do |list| %>
+  <% sorted_workflows.each do |workflow| %>
+    <% is_included = included_workflows.include?(workflow) %>
+    <% is_excluded = excluded_workflows.include?(workflow) %>
+    <% list.with_item(
+        label: workflow,
+        content_arguments: { data: { value: workflow, excluded: is_excluded || nil } },
+        active: is_included) do |item| %>
+      <% if pinned_workflows.include?(workflow) %>
+        <% item.with_trailing_visual_icon(icon: :pin, color: :muted) %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>
+<% else %>
+<%= render(Primer::Alpha::SelectPanel::ItemList.new(
+  menu_id: "actions_workflow_filter",
+  select_variant: :single,
+  aria: { label: "workflows" },
+)) do |list| %>
+  <% workflows.sort_by { |w| [w == workflow_run_filters[:workflow] ? 0 : 1, pinned_workflows.include?(w) ? 0 : 1, w] }.each do |workflow| %>
+    <% selected = workflow_run_filters[:workflow] == workflow %>
+    <% list.with_item(
+        href: filtered_runs_by_file_path(filters: workflow_run_filters, replace: { workflow: !selected ? workflow : nil }),
+        label: workflow,
+        active: selected) do |item| %>
+      <% if pinned_workflows.include?(workflow) %>
+        <% item.with_trailing_visual_icon(icon: :pin, color: :muted) %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>
+<% end %>

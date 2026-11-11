@@ -1,0 +1,103 @@
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+  <% component.with_header do |h| %>
+    <% h.with_title(tag: :h2) do %>
+      AI Credits Usage
+    <% end %>
+  <% end %>
+
+  <% if budget_info.present? %>
+    <% component.with_row do %>
+      <div class="d-flex flex-justify-between">
+        <div class="pr-2">
+          <div class="d-flex flex-items-start flex-items-center">
+            <span class="mr-2 text-bold">Entitlement:</span>
+            <span id="pooled_entitlements_entitlement" class="pr-1"><%= render(Primer::Beta::Label.new(scheme: :default)) { "#{budget_info[:entitlement] || 0} AIC" } %></span>
+          </div>
+        </div>
+      </div>
+    <% end %>
+
+    <% component.with_row do %>
+      <div class="d-flex flex-justify-between">
+        <div class="pr-2">
+          <div class="d-flex flex-items-start flex-items-center">
+            <span class="mr-2 text-bold">Overages Enabled:</span>
+            <span id="pooled_entitlements_enabled" class="pr-1"><%= budget_info[:overage_permitted] ? render(Primer::Beta::Octicon.new(icon: :check, color: :success, "aria-label": "Enabled")) : render(Primer::Beta::Octicon.new(icon: :x, color: :danger, "aria-label": "Disabled")) %></span>
+          </div>
+        </div>
+      </div>
+    <% end %>
+
+    <% if budget_info[:unlimited] %>
+      <% component.with_row do %>
+        <div class="d-flex flex-justify-between">
+          <div class="pr-2">
+            <div class="d-flex flex-items-start flex-items-center">
+              <span class="mr-2 text-bold">Monthly Limit:</span>
+              <span id="pooled_entitlements_monthly_limit" class="pr-1"><%= render(Primer::Beta::Label.new(scheme: :default)) { "No usage limit" } %></span>
+            </div>
+          </div>
+        </div>
+      <% end %>
+
+    <% else %>
+      <% component.with_row do %>
+        <div class="d-flex flex-column" style="width: 100%;">
+          <span class="text-bold mb-1" <%= tag.attributes(data: { test_selector: "monthly_limit_label" }) %>><%= "Monthly Limit".titleize %></span>
+          <% pct_used = 100 - budget_info[:percent_remaining].to_f %>
+          <% overage_permitted = budget_info[:overage_permitted] %>
+          <% bar_color = (pct_used == 100 && !overage_permitted) ? "color-bg-danger-emphasis" : "color-bg-success-emphasis"  %>
+          <div class="d-flex flex-items-center mb-1" style="width: 100%;">
+            <div class="rounded-2 overflow-hidden mr-2" style="flex: 1; height: 8px; background: var(--bgColor-neutral-muted, var(--color-neutral-muted));">
+              <div class="<%= bar_color %> rounded-2" style="width: <%= [pct_used, 100].min %>%; height: 100%;" <%= tag.attributes(data: { test_selector: "monthly_limit_usage_bar" }) %>></div>
+            </div>
+            <span class="f6 text-bold" style="min-width: 45px; text-align: right;" <%= tag.attributes(data: { test_selector: "monthly_limit_usage" }) %>><%= format("%.1f%%", pct_used) %></span>
+          </div>
+          <span class="color-fg-muted f6" <%= tag.attributes(data: { test_selector: "monthly_limit_reset_at" }) %>>
+            <% reset_date = copilot_user.quota_reset_date %>
+            <% days_until_reset = (reset_date - Date.current).to_i %>
+            Resets in <%= pluralize(days_until_reset, 'day') %> on <%= reset_date.strftime("%B %-d, %Y") %>
+          </span>
+        </div>
+        <% if pct_used == 100 && !overage_permitted %>
+          <%= render Primer::Alpha::Banner.new(scheme: :danger, icon: :alert) do %>
+            Usage blocked until monthly limit resets.
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+  <% else %>
+    <% component.with_row do %>
+      <div class="d-flex flex-justify-between">
+        <div class="pr-2">
+          <div class="d-flex flex-items-start flex-items-center">
+            <span class="mr-2 text-bold">Monthly Limit:</span>
+            <span id="pooled_entitlements_monthly_limit" class="pr-1"><%= render(Primer::Beta::Label.new(scheme: :danger)) { "Data not available" } %></span>
+          </div>
+        </div>
+      </div>
+    <% end %>
+
+  <% end %>
+<% end %>
+
+<hr>
+
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+  <% component.with_header do |h| %>
+    <% h.with_title(tag: :h2) do %>
+      Entitlements Snapshot
+    <% end %>
+  <% end %>
+
+  <% component.with_row do %>
+    <%= render Primer::Box.new(
+      bg: :subtle,
+      border: true,
+      border_radius: 2,
+      classes: "tmp-p-3") do %>
+      <pre style="margin: 0; white-space: pre-wrap; font-family: monospace;"><%= JSON.pretty_generate(budget_info) %></pre>
+    <% end %>
+  <% end %>
+<% end %>

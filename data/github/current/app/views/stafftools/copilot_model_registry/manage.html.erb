@@ -1,0 +1,295 @@
+<%# erblint:counter ButtonComponentMigrationCounter 1 %>
+<%# erblint:counter CounterMigrationCounter 1 %>
+<%
+  page_info(title: "Copilot Model Registry - Manage", description: "Browse and manage Copilot model configurations")
+  show_deleted = local_assigns[:show_deleted] || false
+  vendor_counts = all_models.group_by { |m| m[:vendor].to_s }.transform_values(&:size)
+  state_counts = all_models.group_by { |m| m[:state].to_s }.transform_values(&:size)
+  draft_count = state_counts["draft"] || 0
+  published_count = state_counts["active"] || 0
+  is_all = active_filter_type.blank?
+%>
+<%= render layout: "stafftools/stafftools" do %>
+
+  <div class="site-admin-subhead ruleless">
+    <div class="d-flex flex-items-start flex-justify-between tmp-mb-3" style="gap: 16px;">
+      <div class="flex-auto" style="min-width: 0;">
+        <h2 class="site-admin-subhead-heading">📦 Model Registry Manager</h2>
+        <p class="color-fg-muted">Browse and manage model configurations. Click a model to view and edit its full YAML.</p>
+      </div>
+      <div class="d-flex flex-shrink-0" style="gap: 8px;">
+        <details class="details-reset details-overlay d-inline-block position-relative">
+          <summary class="btn btn-sm btn-primary text-nowrap">
+            <%= render(Primer::Beta::Octicon.new(:plus, size: :small, mr: 1)) %>
+            New Model
+            <span class="dropdown-caret ml-1"></span>
+          </summary>
+          <ul class="dropdown-menu dropdown-menu-se mt-1" style="width: 200px;">
+            <li><%= link_to "Empty Template", new_yaml_stafftools_copilot_model_registry_index_path(template: "blank"), class: "dropdown-item" %></li>
+            <li class="dropdown-divider" role="none"></li>
+            <li><%= link_to "OpenAI", new_yaml_stafftools_copilot_model_registry_index_path(template: "openai"), class: "dropdown-item" %></li>
+            <li><%= link_to "Anthropic", new_yaml_stafftools_copilot_model_registry_index_path(template: "anthropic"), class: "dropdown-item" %></li>
+            <li><%= link_to "Google", new_yaml_stafftools_copilot_model_registry_index_path(template: "google"), class: "dropdown-item" %></li>
+            <li><%= link_to "xAI", new_yaml_stafftools_copilot_model_registry_index_path(template: "xai"), class: "dropdown-item" %></li>
+          </ul>
+        </details>
+        <%= render(Primer::Beta::Button.new(tag: :a, href: pending_changes_stafftools_copilot_model_registry_index_path, size: :small)) do %>
+          <%= render(Primer::Beta::Octicon.new(:"git-pull-request", size: :small, mr: 1)) %>
+          Pending Changes
+          <% if pending_changes_map.any? %>
+            <span class="Counter Counter--primary ml-1"><%= pending_changes_map.size %></span>
+          <% end %>
+        <% end %>
+        <%= render(Primer::Beta::Button.new(tag: :a, href: cache_view_stafftools_copilot_model_registry_index_path, size: :small)) do %>
+          <%= render(Primer::Beta::Octicon.new(:"list-unordered", size: :small, mr: 1)) %>
+          Cache View
+        <% end %>
+      </div>
+    </div>
+
+    <%# Warning banner %>
+    <%= render Primer::Alpha::Banner.new(
+      icon: :alert,
+      scheme: :warning,
+      classes: "tmp-mb-3") do %>
+      <strong>🪿 Work in Progress 🪿:</strong> This management interface is under active development. Some features may not be fully functional yet.
+      For the legacy cache view, use the Cache View button above.
+    <% end %>
+
+    <%# Filter Pills %>
+    <div class="d-flex flex-wrap tmp-mb-4" style="gap: 8px;">
+      <%= link_to stafftools_copilot_model_registry_index_path,
+        class: "btn btn-sm #{'selected' if is_all}",
+        style: "border-radius: 20px;" do %>
+        All: <%= all_models.size %>
+      <% end %>
+
+      <span class="color-fg-muted d-flex flex-items-center mx-1">|</span>
+
+      <% vendor_counts.each do |vendor, count| %>
+        <% next if vendor.blank? %>
+        <%= link_to stafftools_copilot_model_registry_index_path(filter_type: "vendor", filter_value: vendor, show_deleted: show_deleted || nil),
+          class: "btn btn-sm #{'selected' if active_filter_type == 'vendor' && active_filter_value == vendor}",
+          style: "border-radius: 20px;" do %>
+          <%= vendor %>: <%= count %>
+        <% end %>
+      <% end %>
+
+      <span class="color-fg-muted d-flex flex-items-center mx-1">|</span>
+
+      <%= link_to stafftools_copilot_model_registry_index_path(show_deleted: show_deleted ? nil : "true"),
+        class: "btn btn-sm #{'selected' if show_deleted}",
+        style: "border-radius: 20px;" do %>
+        <%= render(Primer::Beta::Octicon.new(:trash, size: :small, mr: 1)) %>
+        Show Deleted
+      <% end %>
+
+      <span class="color-fg-muted d-flex flex-items-center mx-1">|</span>
+
+      <%= link_to stafftools_copilot_model_registry_index_path(filter_type: "state", filter_value: "draft", show_deleted: show_deleted || nil),
+        class: "btn btn-sm #{'selected' if active_filter_type == 'state' && active_filter_value == 'draft'}",
+        style: "border-radius: 20px;" do %>
+        Draft: <%= draft_count %>
+      <% end %>
+
+      <%= link_to stafftools_copilot_model_registry_index_path(filter_type: "state", filter_value: "active", show_deleted: show_deleted || nil),
+        class: "btn btn-sm #{'selected' if active_filter_type == 'state' && active_filter_value == 'active'}",
+        style: "border-radius: 20px;" do %>
+        Published: <%= published_count %>
+      <% end %>
+    </div>
+
+    <%# Model Cards Grid %>
+    <div id="model-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 16px;">
+      <% models.sort_by { |m| m[:name].to_s }.each do |model| %>
+        <%
+          is_deleted = model[:state] == "deleted"
+          is_draft = model[:state] == "draft"
+          vendor_color = case model[:vendor]&.downcase
+            when /openai/ then "#10a37f"
+            when /anthropic/ then "#d97706"
+            when /google/, /gemini/ then "#4285f4"
+            else "#6e7781"
+          end
+        %>
+        <div class="Box model-card" data-vendor="<%= model[:vendor] %>"
+          style="border-left: 4px solid <%= is_deleted ? '#6e7781' : vendor_color %>; display: flex; flex-direction: column;<%= ' opacity: 0.65;' if is_deleted %><%= ' opacity: 0.85;' if is_draft %>">
+          <%
+            pending_change = pending_changes_map[model[:reference_id].to_s]
+          %>
+          <div class="Box-header d-flex flex-items-center flex-justify-between">
+            <div>
+              <strong class="h4"><%= model[:name].presence || model[:reference_id] %></strong>
+              <div class="text-small color-fg-muted mt-1">
+                <%= model[:vendor] %>
+                <% if model[:version].present? %>
+                  &middot; <code class="text-small"><%= model[:version] %></code>
+                <% end %>
+              </div>
+            </div>
+            <div class="d-flex flex-wrap" style="gap: 4px;">
+              <% if pending_change %>
+                <%= render(Primer::Beta::Label.new(scheme: :attention)) { "Pending Review" } %>
+              <% end %>
+              <% if is_deleted %>
+                <%= render(Primer::Beta::Label.new(scheme: :danger)) { "deleted" } %>
+              <% elsif is_draft %>
+                <%= render(Primer::Beta::Label.new(scheme: :attention)) { "draft" } %>
+              <% elsif model[:model_availability].present? %>
+                <% avail_scheme = case model[:model_availability]; when "ga" then :success; when "partial-ga" then :accent; else :secondary; end %>
+                <%= render(Primer::Beta::Label.new(scheme: avail_scheme)) { model[:model_availability] } %>
+              <% end %>
+            </div>
+          </div>
+
+          <div class="Box-body flex-auto">
+            <div class="mb-2">
+              <span class="text-small color-fg-muted">Reference ID:</span>
+              <code class="text-small"><%= model[:reference_id] %></code>
+            </div>
+
+            <% unless is_deleted %>
+              <turbo-frame id="endpoint-health-summary-<%= model[:reference_id] %>" src="<%= endpoint_health_stafftools_copilot_model_registry_path(model[:reference_id]) %>" loading="lazy">
+                <div class="tmp-mb-2 text-small color-fg-muted">
+                  <%= render(Primer::Beta::Octicon.new(:pulse, size: :small, mr: 1)) %>
+                  <span>Checking endpoints...</span>
+                </div>
+              </turbo-frame>
+            <% end %>
+
+            <% if model[:updated_by].present? %>
+              <div class="mb-2 text-small color-fg-muted">
+                <%= render(Primer::Beta::Octicon.new(:person, size: :small, mr: 1)) %>
+                Last edited by <strong><%= model[:updated_by] %></strong>
+                <% if model[:updated_at] %>
+                  &middot; <relative-time datetime="<%= model[:updated_at].utc.iso8601 %>"><%= model[:updated_at].utc.iso8601 %></relative-time>
+                <% end %>
+              </div>
+            <% end %>
+          </div>
+
+          <div class="Box-footer d-flex flex-justify-between" style="gap: 8px;">
+            <% if is_deleted %>
+              <%= button_to restore_yaml_stafftools_copilot_model_registry_path(model[:reference_id]),
+                method: :patch,
+                class: "btn btn-sm",
+                data: { confirm: "Restore '#{model[:reference_id]}'?" } do %>
+                <%= render(Primer::Beta::Octicon.new(:history, size: :small, mr: 1)) %>
+                Restore
+              <% end %>
+              <div></div>
+            <% else %>
+              <%= button_to delete_yaml_stafftools_copilot_model_registry_path(model[:reference_id]),
+                method: :delete,
+                class: "btn btn-sm btn-danger",
+                data: { confirm: "Are you sure you want to delete '#{model[:reference_id]}'?" } do %>
+                <%= render(Primer::Beta::Octicon.new(:trash, size: :small, mr: 1)) %>
+                Delete
+              <% end %>
+              <div class="d-flex" style="gap: 8px;">
+                <% if pending_change %>
+                  <%= render(Primer::Beta::Button.new(tag: :a, href: review_stafftools_copilot_model_registry_path(pending_change[:id]), size: :small, scheme: :primary)) do %>
+                    <%= render(Primer::Beta::Octicon.new(:eye, size: :small, mr: 1)) %>
+                    Review
+                  <% end %>
+                <% end %>
+                <% if is_draft && !pending_change %>
+                  <%= button_to publish_yaml_stafftools_copilot_model_registry_path(model[:reference_id]),
+                    method: :patch,
+                    class: "btn btn-sm btn-primary",
+                    data: { confirm: "Publish '#{model[:reference_id]}'?" } do %>
+                    <%= render(Primer::Beta::Octicon.new(:rocket, size: :small, mr: 1)) %>
+                    Publish
+                  <% end %>
+                <% end %>
+                <%= render(Primer::Beta::Button.new(tag: :a, href: stafftools_copilot_model_registry_path(model[:reference_id]), size: :small)) do %>
+                  <%= render(Primer::Beta::Octicon.new(:rocket, size: :small, mr: 1)) %>
+                  SIMSHIP
+                <% end %>
+                <%= render(Primer::Beta::Button.new(tag: :a, href: editor_stafftools_copilot_model_registry_path(model[:reference_id]), size: :small)) do %>
+                  <%= render(Primer::Beta::Octicon.new(:pencil, size: :small, mr: 1)) %>
+                  Edit YAML
+                <% end %>
+              </div>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+    </div>
+
+    <% if models.empty? %>
+      <%= render(Primer::Alpha::Banner.new(icon: :info, scheme: :warning, classes: "tmp-mt-3")) do %>
+        No models returned from the model registry. The Twirp service may be unavailable.
+      <% end %>
+    <% end %>
+  </div>
+
+  <%# Process Guide %>
+  <div class="Box tmp-mt-4 tmp-mb-4">
+    <div class="Box-header">
+      <h3 class="Box-title"><%= render(Primer::Beta::Octicon.new(:book, size: :small, mr: 1)) %> Model Registry Workflow</h3>
+    </div>
+    <div class="Box-body markdown-body text-small">
+      <h4>Creating a new model</h4>
+      <ol>
+        <li>Click <strong>New Model</strong> and select a provider template (or blank)</li>
+        <li>Fill in the YAML configuration in the editor</li>
+        <li>Click <strong>Validate</strong> to check for errors</li>
+        <li>Click <strong>Save</strong> — this creates the model in <strong>draft</strong> state</li>
+      </ol>
+
+      <h4>Publishing a draft</h4>
+      <ol>
+        <li>Find the draft model on this page (labeled <strong>draft</strong>)</li>
+        <li>Click <strong>Publish</strong> — this makes the model available to CAPI and dotcom</li>
+        <li>If the model has pending changes awaiting review, publish is blocked until they're resolved</li>
+      </ol>
+
+      <h4>Editing a published model</h4>
+      <ol>
+        <li>Click <strong>Edit YAML</strong> on the model</li>
+        <li>Make your changes and click <strong>Save</strong></li>
+        <li>If the review workflow is enabled, changes are submitted as a <strong>pending change</strong> for review</li>
+        <li>A reviewer (someone other than the submitter) reviews the diff and approves or rejects</li>
+        <li>Approved changes are applied automatically</li>
+      </ol>
+
+      <h4>Review process</h4>
+      <ul>
+        <li><strong>Self-review is not allowed</strong> — a different person must approve your changes</li>
+        <li>Reviewers can add comments and request AI-generated feedback</li>
+        <li>Approval applies the change and updates the model immediately</li>
+        <li>Rejected changes are marked as rejected but the model is unchanged</li>
+      </ul>
+
+      <h4>SIMSHIP</h4>
+      <p>Click <strong>SIMSHIP</strong> to view the model's full configuration as it would appear to CAPI consumers, including endpoints, feature flags, and billing settings.</p>
+    </div>
+  </div>
+
+  <%# Danger Zone %>
+  <div class="Box Box--danger tmp-mt-6">
+    <div class="Box-header">
+      <h3 class="Box-title">⚠️ Danger Zone</h3>
+    </div>
+    <div class="Box-body">
+      <%= render Primer::Alpha::Banner.new(
+        icon: :stop,
+        scheme: :danger,
+        classes: "tmp-mb-3") do %>
+        <strong>PERMANENT DESTRUCTION:</strong> This will <strong>irreversibly delete ALL YAML models and their entire history</strong> from the database.
+        This is a hard delete — there is no undo, no soft-delete, no recovery. All model configurations, drafts, published models, and audit history will be wiped.
+        Only use this if you are absolutely certain you want to start from a completely clean slate.
+      <% end %>
+      <div class="d-flex flex-justify-end">
+        <%= button_to delete_all_yaml_stafftools_copilot_model_registry_index_path,
+          method: :delete,
+          class: "btn btn-danger",
+          data: { confirm: "🚨 ARE YOU SURE? This will PERMANENTLY DELETE all YAML models and their entire history. This action CANNOT be undone. Type 'delete' in the next prompt to confirm." } do %>
+          <%= render(Primer::Beta::Octicon.new(:alert, size: :small, mr: 1)) %>
+          Delete All YAML Models & History
+        <% end %>
+      </div>
+    </div>
+  </div>
+<% end %>

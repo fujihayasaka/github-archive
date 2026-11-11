@@ -1,0 +1,718 @@
+#!/usr/bin/env safe-ruby
+# typed: true
+# frozen_string_literal: true
+
+require_relative "../config/environment"
+require_relative "./seeds/objects"
+require "fileutils"
+require "base64"
+require "open3"
+require "json"
+require "io/console"
+
+# All Copilot Code Review codespace prerequisites (seed app, sweagentd/CAPI
+# env, feature flags, fixture data, PR-reviewer app install, and the runtime
+# image + autofind wrapper) live here so the general Copilot SWE Agent setup
+# script stays free of CCR-specific logic.
+class CopilotCodeReviewSetup
+  def seed_github_app_only
+    integration = T.must(Apps::Privileged::CopilotSWEAgent.seed_database!)
+    puts "\n✅ Copilot SWE Agent app is available: #{integration.id}\n"
+    integration
+  end
+
+  def ensure_fixture_copilot_setup(repo:, user:)
+    organization = repo.organization
+    return unless organization
+
+    puts "\n➡️ Ensuring Copilot enterprise/org setup for #{organization.login}\n"
+    copilot_org = Copilot::Organization.new(organization)
+    copilot_business = copilot_org.copilot_business
+
+    copilot_business.enable_copilot_for_all_organizations!(user)
+    copilot_business.copilot_plan_enterprise!
+    copilot_org.seat_management_allow_all!(user)
+
+    Copilot::Policies::Models::Daisy.update_business(copilot_business, "enabled")
+    Copilot::Policies::Models::Lotus.update_business(copilot_business, "enabled")
+
+    copilot_business.swe_agent_enabled!
+    copilot_business.mcp_enabled!
+    Seeds::Objects::FeatureFlag.enable(feature_flag: :copilot_for_business_free, actor: organization.business)
+  end
+
+  def setup_code_review_prereqs
+    integration = seed_github_app_only
+    Apps::Privileged::Registry.instance.reload_caches!
+    configure_code_review_sweagentd_env(github_app_id: integration.id)
+    configure_code_review_capi_env
+
+    puts "\n➡️ Enabling agent-specific token minting\n"
+    Seeds::Objects::FeatureFlag.ensure_feature_flag_exists("agenthq_mint_token")
+    Seeds::Objects::FeatureFlag.enable(feature_flag: "agenthq_mint_token")
+
+    puts "\n➡️ Enabling local Copilot Code Review/SWEAgent flags\n"
+    [
+      %w[enable copilot_code_review_use_sweagentd],
+      %w[enable ccr_enable_ts_cca_cli_tools],
+      # CCR resolves its default review model to gpt-5.2 (medium reasoning).
+      # gpt-5.2 is a static CAPI model served even with the bundled registry
+      # snapshot, via its OpenAI "cantaloupe" endpoint. That endpoint needs no
+      # feature flag in local dev (the per-endpoint circuit-breaker flag is not
+      # enforced on the dev serving path) — only its secret,
+      # AZURE_ENDPOINT_SECRET_COPILOT_PRODUCTION_OPENAI, which
+      # configure_code_review_capi_env resolves from 1Password.
+      %w[enable copilot-code-reviews-use-gpt52-medium-by-default],
+      %w[enable copilot-code-reviews-sweagentd-disable-copilot-setup-steps],
+    ].each do |action, flag|
+      system("bin/toggle-feature-flag", action, flag) || abort("Failed to #{action} #{flag}")
+    end
+
+    repo = Repository.with_name_with_owner("copilot-enterprise-org/copilot-enterprise-repo")
+    unless repo
+      puts "\n➡️ Creating Copilot code review fixture data\n"
+      system("bin/seed", "copilot4prs") || abort("Failed to seed copilot4prs fixture data")
+      repo = Repository.with_name_with_owner("copilot-enterprise-org/copilot-enterprise-repo")
+    end
+    abort("Could not find copilot-enterprise-org/copilot-enterprise-repo") unless repo
+    repo = T.must(repo)
+
+    author = T.must(User.find_by_login("monalisa"))
+    ensure_fixture_copilot_setup(repo: repo, user: author)
+
+    actor = User.find_by_login("ghost") || author
+    if (organization = repo.organization)
+      organization.update_copilot_swe_agent_access("all_repos", actor: actor)
+      FeatureFlag.vexi_management.add_feature_flag_actors(:copilot_swe_agent, [organization])
+    end
+    author.update_copilot_swe_agent_access("all_repos", actor: actor)
+
+    puts "\n➡️ Installing Copilot PR reviewer app on #{repo.nwo}\n"
+    Apps::Privileged::CopilotPullRequestReviewer.seed_database!
+    Apps::Privileged::Registry.instance.reload_caches!
+    code_review_integration = T.must(Apps::Privileged.integration(:copilot_pull_request_reviewer))
+    app_owner = T.must(repo.organization || repo.owner)
+    installation = code_review_integration.installations_on(app_owner).first
+    if installation
+      unless installation.repository_ids.include?(repo.id)
+        result = IntegrationInstallation::RepositoryEditor.perform(installation, action: :add, repositories: [repo], editor: author, entry_point: :test_case)
+        abort("Failed to add #{repo.nwo} to Copilot PR reviewer app installation: #{result.error}") unless result.success?
+      end
+    else
+      code_review_integration.install_on(app_owner, repositories: [repo], installer: author, entry_point: :test_case)
+    end
+
+    # Ensure the sweagentd runtime image exists and carries the local-dev
+    # autofind wrapper so Copilot Code Review can actually run reviews. The base
+    # image is normally built by the devcontainer prebuild, so this is usually
+    # just the fast, idempotent wrapper overlay.
+    puts "\n➡️ Preparing the Copilot Code Review runtime image\n"
+    build_code_review_runtime_image
+
+    # Return the fixture repo so the caller can reuse it instead of repeating the
+    # find-or-seed lookup below.
+    repo
+  end
+
+  def configure_code_review_sweagentd_env(github_app_id:)
+    sweagentd_dir = "/workspaces/sweagentd"
+    env_file_path = File.join(sweagentd_dir, ".env")
+    env_example_path = File.join(sweagentd_dir, ".env.example")
+
+    unless Dir.exist?(sweagentd_dir)
+      puts "\n⚠️ Skipping SweAgentD env setup: #{sweagentd_dir} does not exist.\n"
+      return
+    end
+
+    if !File.exist?(env_file_path) && File.exist?(env_example_path)
+      FileUtils.cp(env_example_path, env_file_path)
+    end
+
+    env_values = File.exist?(env_file_path) ? File.readlines(env_file_path, chomp: true) : []
+    updates = {
+      "AGENT_LAUNCHER" => "docker",
+      "AUTOFIND_LOCAL_CHECKOUT" => "true",
+      "CAPI_HMAC_KEY" => "copilot_platform_api_hmac_very_secret",
+      "COPILOT_API_URL" => "http://localhost:2206",
+      "COPILOT_CODE_REVIEW_CAPI_INTEGRATION_ID_OVERRIDE" => "copilot-pr-reviews-dev",
+      "COPILOT_INTEGRATION_ID" => "copilot-pr-reviews-dev",
+      "DOCKER_AGENT_CONTAINER_IMAGE" => "sweagentd-runtime:latest",
+      "DOCKER_DEV_MOUNT_RUNTIME" => "/workspaces/sweagentd/runtime",
+      "GITHUB_API_BASE_URL_OVERRIDE" => "http://api.github.localhost/",
+      "GITHUB_APP_ID" => github_app_id.to_s,
+      "GITHUB_SERVER_URL_OVERRIDE" => "http://github.localhost/",
+      # The sweagentd worker's Copilot Mission Control (CMC) automations Twirp
+      # client refuses to start without both of these ("copilot mission control
+      # twirp url is required"), which takes the whole sweagentd process group
+      # down with it. MC REST listens on :2210 and runs with DEV_AUTH_BYPASS in
+      # local dev, so the HMAC key is only a non-empty dev placeholder (the env
+      # var name is historical -- it maps to the CMC Twirp HMAC key).
+      "APP_HMAC_KEY_COPILOT_API" => "local-dev-hmac-key",
+      "COPILOT_MISSION_CONTROL_TWIRP_URL" => "http://localhost:2210",
+    }
+
+    updated_keys = {}
+    env_values.map! do |line|
+      key = line.split("=", 2).first
+      if updates.key?(key)
+        updated_keys[key] = true
+        "#{key}=#{updates.fetch(key)}"
+      else
+        line
+      end
+    end
+
+    updates.each do |key, value|
+      next if updated_keys[key]
+      env_values << "#{key}=#{value}"
+    end
+
+    File.write(env_file_path, "#{env_values.join("\n")}\n")
+    puts "\n✅ Configured SweAgentD env for local Copilot Code Review at #{env_file_path}\n"
+  end
+
+  # Puts local CAPI into code-review mode. CAPI's local noop authnd resolves a
+  # token's application id from a hard-coded value (cmd/http/main.go
+  # newAuthndClient): it returns the Copilot Code Review app id (836) only when
+  # USE_CODE_REVIEW_APP=true, otherwise it returns the default Copilot Chat app
+  # id (835). Without this, sweagentd's CCR session-creation token authenticates
+  # as 835 and CAPI rejects it with "token not authorized for this integration"
+  # (the copilot-pr-reviews-dev integration only allows 836), which blocks the
+  # whole agentic flow. NOTE: this is a mutually-exclusive local mode; Copilot
+  # Chat (which expects 835) won't work against the same CAPI while it's set.
+  def configure_code_review_capi_env
+    capi_dir = "/workspaces/copilot-api"
+    env_file_path = File.join(capi_dir, ".env")
+    env_example_path = File.join(capi_dir, ".env.example")
+
+    # On a fresh codespace the dotcom bootstrap normally writes copilot-api/.env,
+    # but if it didn't run (e.g. the codespace landed on the wrong branch), seed
+    # it from .env.example so CAPI gets a complete, code-review-ready config
+    # instead of silently going unconfigured. Mirrors the SweAgentD env handling.
+    if !File.exist?(env_file_path) && File.exist?(env_example_path)
+      FileUtils.cp(env_example_path, env_file_path)
+      puts "\n✅ Seeded #{env_file_path} from .env.example (bootstrap had not created it)\n"
+    end
+
+    unless File.exist?(env_file_path)
+      puts "\n⚠️ Skipping CAPI code-review env setup: neither #{env_file_path} nor .env.example exists.\n"
+      return
+    end
+
+    # A partial CAPI .env is the root of a cascade of confusing local-CCR
+    # failures, so backfill anything missing from .env.example first:
+    #   - CLIENT_SECRETS_GITHUB_DEV   missing -> "client github_dev has no secrets"
+    #   - MODEL_REGISTRY_USE_SNAPSHOT missing -> runtime "No model available"
+    #   - op:// model-backend secrets missing -> model calls fail
+    backfill_env_from_example(env_file_path, env_example_path) if File.exist?(env_example_path)
+
+    # CCR-specific values. USE_CODE_REVIEW_APP=true makes CAPI's local noop
+    # authnd resolve the CCR app id (836) instead of Copilot Chat's (835).
+    # MODEL_REGISTRY_USE_SNAPSHOT=true loads the embedded registry snapshot
+    # instead of a live model registry that isn't running locally (which would
+    # leave the catalog empty -> "No model available"). CAPI then merges its
+    # static models (which include gpt-5.2) on top of the snapshot.
+    upsert_env_keys(env_file_path, {
+      "USE_CODE_REVIEW_APP" => "true",
+      "MODEL_REGISTRY_USE_SNAPSHOT" => "true",
+    })
+    puts "\n✅ Configured CAPI .env for local Copilot Code Review (#{env_file_path})\n"
+
+    # CAPI runs under overmind via `op run`, which has no 1Password session in
+    # the overmind daemon's environment; any op:// refs left in .env make it
+    # crash-loop on startup ("error initializing client: You are not currently
+    # signed in"). Resolve them in place so `op run` has nothing to look up.
+    resolve_capi_op_refs(env_file_path) if File.read(env_file_path).include?("op://")
+
+    # Restart CAPI so the new mode takes effect, then wait for it to come back.
+    if system("command -v overmind > /dev/null 2>&1")
+      puts "\n➡️ Restarting copilot-api to apply code-review config\n"
+      system("overmind restart copilot-api")
+      wait_for_capi_ready
+    else
+      puts "\n⚠️ overmind not found; restart copilot-api manually so the code-review config takes effect.\n"
+    end
+  end
+
+  # Append any KEY=... lines from the example file whose key isn't already
+  # present in the target env file. Existing values (incl. local overrides)
+  # are preserved.
+  def backfill_env_from_example(env_path, example_path)
+    existing_keys = []
+    File.readlines(env_path, chomp: true).each do |line|
+      next if line.strip.empty? || line.strip.start_with?("#")
+
+      existing_keys << line.split("=", 2).first
+    end
+    added = []
+    File.readlines(example_path, chomp: true).each do |line|
+      next if line.strip.empty? || line.strip.start_with?("#")
+
+      key = line.split("=", 2).first
+      next if key.nil? || key.include?(" ") || existing_keys.include?(key)
+
+      added << line
+      existing_keys << key
+    end
+    return if added.empty?
+
+    File.open(env_path, "a") { |f| f.puts(added) }
+    puts "\n✅ Backfilled #{added.size} key(s) into #{env_path} from .env.example\n"
+  end
+
+  # Upsert each key => value into the env file (replace in place, else append).
+  def upsert_env_keys(env_path, pairs)
+    remaining = pairs.dup
+    lines = File.readlines(env_path, chomp: true).map do |line|
+      key = line.split("=", 2).first
+      if remaining.key?(key)
+        "#{key}=#{remaining.delete(key)}"
+      else
+        line
+      end
+    end
+    remaining.each { |key, value| lines << "#{key}=#{value}" }
+    File.write(env_path, "#{lines.join("\n")}\n")
+  end
+
+  # Resolve op:// references in the env file to literal values via `op inject`,
+  # signing in to 1Password first. Best-effort: warns and leaves the refs in
+  # place if 1Password isn't available.
+  def resolve_capi_op_refs(env_path)
+    unless setup_onep
+      puts "\n⚠️ Could not sign in to 1Password; CAPI .env still has op:// refs and CAPI may crash-loop under overmind until they're resolved.\n"
+      return
+    end
+
+    resolved_path = "#{env_path}.resolved"
+    if system("op inject -i #{env_path} -o #{resolved_path} -f")
+      File.rename(resolved_path, env_path)
+      puts "\n✅ Resolved op:// secrets in #{env_path}\n"
+    else
+      File.delete(resolved_path) if File.exist?(resolved_path)
+      puts "\n⚠️ `op inject` failed; CAPI .env still has op:// refs.\n"
+    end
+  end
+
+  def wait_for_capi_ready
+    60.times do
+      return if system("curl -fsS -m 2 http://localhost:2206/_ping > /dev/null 2>&1")
+
+      sleep 1
+    end
+    puts "\n⚠️ copilot-api did not become healthy on :2206 within 60s; check its logs.\n"
+  end
+
+  CODE_REVIEW_RUNTIME_IMAGE = "sweagentd-runtime:latest"
+
+  # Local-dev autofind wrapper. In production the Actions workflow checks out
+  # the repo and starts the octokit proxy before autofind runs; locally we wrap
+  # the runtime's autofind.js to do that orchestration (repo checkout, octokit
+  # proxy, AUTOFIND_LOCAL_DOCKER_TEST/DISABLE_SESSION) and then hand off to the
+  # real autofind (renamed to autofind-real.js).
+  AUTOFIND_LOCAL_WRAPPER_JS = <<~'AUTOFIND_WRAPPER_JS'
+    import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+    import { execFileSync, fork } from "node:child_process";
+
+    function run(cmd, args, opts = {}) {
+      try {
+        execFileSync(cmd, args, { stdio: "pipe", ...opts });
+      } catch (err) {
+        const stderr = err.stderr ? err.stderr.toString() : "";
+        const stdout = err.stdout ? err.stdout.toString() : "";
+        throw new Error(`${cmd} ${args.join(" ")} failed\n${stdout}${stderr}`);
+      }
+    }
+
+    function localAPIURL() {
+      const server = (process.env.GITHUB_SERVER_URL || "http://github.localhost/").replace(/\/$/, "");
+      if (server === "http://github.localhost") return "http://api.github.localhost";
+      return server.replace("://github.", "://api.github.");
+    }
+
+    async function startProxy() {
+      if (process.env.AUTOFIND_OCTOKIT_PROXY_URL && process.env.AUTOFIND_OCTOKIT_PROXY_SECRET) return;
+      if (!process.env.GITHUB_API_URL) process.env.GITHUB_API_URL = localAPIURL();
+      const child = fork(new URL("./autofind-real.js", import.meta.url), [], {
+        detached: true,
+        env: { ...process.env, AUTOFIND_OCTOKIT_PROXY_CHILD: "1" },
+        execArgv: process.execArgv,
+        stdio: ["ignore", "ignore", "ignore", "ipc"],
+      });
+      const proxy = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          child.kill("SIGTERM");
+          reject(new Error("Timed out waiting for autofind octokit proxy"));
+        }, 10000);
+        child.on("message", (msg) => {
+          if (msg?.type === "octokit-proxy-ready" && msg.proxy?.proxyUrl && msg.proxy?.secret) {
+            clearTimeout(timeout);
+            child.disconnect();
+            child.unref();
+            resolve(msg.proxy);
+          } else if (msg?.type === "octokit-proxy-error") {
+            clearTimeout(timeout);
+            reject(new Error(String(msg.error || "octokit proxy startup failed")));
+          }
+        });
+        child.on("error", (err) => { clearTimeout(timeout); reject(err); });
+        child.on("exit", (code, signal) => { clearTimeout(timeout); reject(new Error(`octokit proxy exited before ready code=${code} signal=${signal}`)); });
+      });
+      process.env.AUTOFIND_OCTOKIT_PROXY_URL = proxy.proxyUrl;
+      process.env.AUTOFIND_OCTOKIT_PROXY_SECRET = proxy.secret;
+    }
+
+    const token = process.env.GITHUB_COPILOT_GITHUB_TOKEN || process.env.GITHUB_COPILOT_API_TOKEN || process.env.GITHUB_TOKEN;
+    if (token && !process.env.GITHUB_COPILOT_GITHUB_TOKEN) process.env.GITHUB_COPILOT_GITHUB_TOKEN = token;
+    if (token && !process.env.GITHUB_COPILOT_API_TOKEN) process.env.GITHUB_COPILOT_API_TOKEN = token;
+    if (!process.env.GITHUB_API_URL) process.env.GITHUB_API_URL = localAPIURL();
+    process.env.AUTOFIND_LOCAL_DOCKER_TEST = "true";
+    process.env.DISABLE_SESSION = "true";
+    process.env.CAPI_LOG_PATH = "/tmp/autofind-capi-sidecar.json";
+    process.env.AUTOFIND_COPILOT_CLI_PATH ||= "/usr/src/app/dist-autofind-ts/ts/copilot-cli/node_modules/@github/copilot/index.js";
+
+    if (!process.env.AUTOFIND_REPO_DIR && !process.env.GITHUB_WORKSPACE) {
+      const repo = process.env.GITHUB_REPOSITORY;
+      if (!repo) throw new Error("GITHUB_REPOSITORY is not set");
+      if (!token) throw new Error("No GitHub token available for repository checkout");
+      const target = "/tmp/autofind-repo";
+      const server = (process.env.GITHUB_SERVER_URL || "http://github.localhost/").replace(/\/$/, "");
+      if (!existsSync(target)) {
+        mkdirSync("/tmp", { recursive: true });
+        const askpass = "/tmp/autofind-git-askpass.sh";
+        writeFileSync(askpass, `#!/bin/sh\ncase "$1" in\n  *Username*) echo x-access-token ;;\n  *) echo "$GITHUB_AUTOFIND_CHECKOUT_TOKEN" ;;\nesac\n`);
+        chmodSync(askpass, 0o700);
+        const env = { ...process.env, GIT_ASKPASS: askpass, GITHUB_AUTOFIND_CHECKOUT_TOKEN: token, GIT_TERMINAL_PROMPT: "0" };
+        run("git", ["clone", "--no-checkout", `${server}/${repo}.git`, target], { env });
+        if (process.env.COPILOT_AGENT_BRANCH_NAME) {
+          run("git", ["-C", target, "fetch", "origin", process.env.COPILOT_AGENT_BRANCH_NAME], { env });
+          run("git", ["-C", target, "checkout", "FETCH_HEAD"], { env });
+        } else {
+          run("git", ["-C", target, "checkout"], { env });
+        }
+      }
+      process.env.AUTOFIND_REPO_DIR = target;
+      process.env.GITHUB_WORKSPACE = target;
+    }
+
+    await startProxy();
+    await import("./autofind-real.js");
+  AUTOFIND_WRAPPER_JS
+
+  # Build the Copilot Code Review runtime image end to end: the Node24 base from
+  # sweagentd/runtime (if not already present), then the local-dev autofind
+  # wrapper overlaid on top. Both steps download autofind/gpgsign/ebpf assets and
+  # need a real GitHub token — runtime/.env.local ships those blank, so the
+  # Codespaces-provided token is used.
+  def build_code_review_runtime_image
+    unless system("docker info > /dev/null 2>&1")
+      puts "\n⚠️ Docker daemon not available; skipping runtime image build.\n"
+      return
+    end
+
+    token = codespaces_github_token
+    if token.nil? || token.empty?
+      puts "\n⚠️ No GitHub token available; skipping runtime image build. Build it later with `cd /workspaces/sweagentd/runtime && npm run docker:build` plus the autofind wrapper.\n"
+      return
+    end
+
+    build_env = {
+      "AUTOFIND_DOWNLOAD_GITHUB_TOKEN" => token,
+      "GPGSIGN_DOWNLOAD_GITHUB_TOKEN" => token,
+      "EBPF_DOWNLOAD_GITHUB_TOKEN" => token,
+    }
+
+    if system("docker image inspect #{CODE_REVIEW_RUNTIME_IMAGE} > /dev/null 2>&1")
+      puts "\n✅ #{CODE_REVIEW_RUNTIME_IMAGE} base image already exists\n"
+    else
+      puts "\n➡️ Building #{CODE_REVIEW_RUNTIME_IMAGE} base image from sweagentd/runtime (this can take several minutes)\n"
+      unless system(build_env, "cd /workspaces/sweagentd/runtime && npm run docker:build")
+        puts "\n❌ Base runtime image build failed; not applying the autofind wrapper.\n"
+        return
+      end
+    end
+
+    apply_autofind_local_wrapper(build_env)
+  end
+
+  # Overlay the local-dev autofind wrapper onto the runtime image. Idempotent:
+  # skipped when the image already carries the wrapper (autofind-real.js present).
+  def apply_autofind_local_wrapper(build_env)
+    if system("docker run --rm --entrypoint sh #{CODE_REVIEW_RUNTIME_IMAGE} -lc 'test -f /usr/src/app/dist-autofind-ts/ts/autofind-real.js' > /dev/null 2>&1")
+      puts "\n✅ autofind local-dev wrapper already applied to #{CODE_REVIEW_RUNTIME_IMAGE}\n"
+      return
+    end
+
+    patch_dir = "/tmp/ccr-runtime-autofind-patch"
+    dist_dir = File.join(patch_dir, "dist-autofind-ts")
+    ts_dir = File.join(dist_dir, "ts")
+    FileUtils.rm_rf(patch_dir)
+    FileUtils.mkdir_p(dist_dir)
+
+    puts "\n➡️ Downloading autofind and applying the local-dev wrapper\n"
+    download_env = build_env.merge("AUTOFIND_DOWNLOAD_TS" => "true")
+    unless system(download_env, "cd /workspaces/sweagentd/runtime && script/autofind-build #{dist_dir} false")
+      puts "\n❌ autofind download failed; runtime image left without the local-dev wrapper.\n"
+      return
+    end
+
+    FileUtils.mv(File.join(ts_dir, "autofind.js"), File.join(ts_dir, "autofind-real.js"))
+    File.write(File.join(ts_dir, "autofind.js"), AUTOFIND_LOCAL_WRAPPER_JS)
+    File.write(File.join(patch_dir, "Dockerfile"), <<~DOCKERFILE)
+      FROM #{CODE_REVIEW_RUNTIME_IMAGE}
+      COPY dist-autofind-ts /usr/src/app/dist-autofind-ts
+      RUN chmod -R u+rwX,go+rX /usr/src/app/dist-autofind-ts
+    DOCKERFILE
+
+    if system("docker build -t #{CODE_REVIEW_RUNTIME_IMAGE} #{patch_dir}")
+      puts "\n✅ Applied autofind local-dev wrapper to #{CODE_REVIEW_RUNTIME_IMAGE}\n"
+    else
+      puts "\n❌ Failed to build the autofind wrapper overlay image.\n"
+    end
+  end
+
+  # The codespace's real GitHub token. runtime/.env.local ships the autofind /
+  # gpgsign / ebpf download tokens blank, so the image build relies on the
+  # Codespaces-provided secret (base64-encoded in .env-secrets); ENV is a fallback.
+  def codespaces_github_token
+    secrets_path = "/workspaces/.codespaces/shared/.env-secrets"
+    if File.exist?(secrets_path)
+      line = File.readlines(secrets_path, chomp: true).find { |l| l.start_with?("GITHUB_TOKEN=") }
+      if line
+        decoded = decode_codespaces_secret(line.split("=", 2)[1].to_s)
+        return decoded unless decoded.empty?
+      end
+    end
+    env_token = ENV["GITHUB_TOKEN"].to_s.strip
+    env_token.empty? ? nil : env_token
+  end
+
+  # Values in .env-secrets are base64-encoded; decode, but fall back to the raw
+  # value if it isn't valid base64 (handles already-plain values).
+  def decode_codespaces_secret(value)
+    decoded = Base64.strict_decode64(value).strip
+    return decoded if !decoded.empty? && decoded.valid_encoding? && decoded.match?(/\A[[:print:]]+\z/)
+
+    value.strip
+  rescue ArgumentError
+    value.strip
+  end
+
+  def setup_onep
+    # Check for the required environment variables, and prompt if we don't have them
+    unless ENV["GITHUB_USER"]
+      print("\nEnter your GitHub Username (for 1Password sign-in): ")
+      # A username isn't sensitive, so don't suppress echo -- let the operator
+      # see and verify what they type (unlike the secret key/password below).
+      ENV["GITHUB_USER"] = STDIN.gets&.chomp
+    end
+    github_user = ENV["GITHUB_USER"].to_s
+
+    unless ENV["ONEP_SECRET_KEY"]
+      print("\nEnter your 1Password Secret Key: ")
+      ENV["ONEP_SECRET_KEY"] = STDIN.noecho(&:gets)&.chomp
+    end
+    onep_secret_key = ENV["ONEP_SECRET_KEY"].to_s
+
+    unless ENV["ONEP_PASSWORD"]
+      print("\nEnter your 1Password Master Password: ")
+      ENV["ONEP_PASSWORD"] = STDIN.noecho(&:gets)&.chomp
+    end
+    onep_password = ENV["ONEP_PASSWORD"].to_s
+
+    if onep_secret_key.empty? || onep_password.empty? || github_user.empty?
+      warn "Could not sign in to 1Password: missing environment variables."
+      return false
+    end
+
+    print "\n1Password secrets detected. installing 1Password CLI..."
+    system("script/install_1password_cli")
+
+    print "\nSigning in to 1Password..."
+
+    # Check if the account is already added
+    account_exists = false
+    Open3.popen3("op", "account", "list", "--format", "json") do |_stdin, stdout, _stderr, wait_thr|
+      output = stdout.read
+      wait_thr.value # Wait for completion
+      accounts = JSON.parse(output)
+      if accounts.any? { |acc| acc["address"] == "github.1password.com" }
+        puts "\n1Password account already added."
+        account_exists = true
+      end
+    end
+
+    # Add the account if needed
+    unless account_exists
+      print "\nAdding 1Password account..."
+      Open3.popen3("op", "account", "add",
+                  "--address", "github.1password.com",
+                  "--email", "#{github_user}@github.com",
+                  "--secret-key", onep_secret_key) do |stdin, _stdout, _stderr, wait_thr|
+        stdin.write(onep_password)
+        stdin.close
+        wait_thr.value # Wait for completion
+      end
+    end
+
+    # Then sign in with the password
+    session_success = false
+    Open3.popen3("op", "signin", "--account", "github.1password.com") do |stdin, stdout, _stderr, wait_thr|
+      stdin.write(onep_password)
+      stdin.close
+      # Capture the session token from stdout
+      session_output = stdout.read
+      if session_output.include?("export OP_SESSION")
+        # Extract and set the session token
+        match = session_output.match(/export (OP_SESSION_[^=]+)=([^;\s]+)/)
+        if match
+          session_env_var = match[1]
+          session_token = match[2]
+          ENV[session_env_var] = session_token.gsub(/["']/, "")
+          session_success = true
+        else
+          warn "Could not extract OP_SESSION token from 1Password CLI output."
+        end
+      else
+        warn "No OP_SESSION found in 1Password CLI output."
+      end
+      wait_thr.value
+    end
+
+    session_success
+  rescue JSON::ParserError, Errno::ENOENT, Errno::EPIPE, Errno::EACCES => e
+    # setup_onep is best-effort: any failure resolving 1Password (the op CLI
+    # missing, or returning non-JSON when misconfigured) should degrade to the
+    # "could not sign in" path rather than crashing the whole setup script.
+    warn "Could not sign in to 1Password: #{e.class}: #{e.message}"
+    false
+  end
+end
+
+# Entry point for local Copilot Code Review setup. After checking preconditions
+# (a copilot-api checkout and a running Rails server), it configures everything a
+# Codespace needs to run CCR end to end: the SweAgentD and CAPI .env files, the
+# local feature flags, 1Password secret resolution, the sweagentd-runtime image
+# plus its local-dev autofind wrapper, and the fixture repo/guideline/PRs -- then
+# requests a Copilot review on each fixture PR.
+
+# Bail early if preconditions aren't met
+# Precondition 1: copilot-api directory exists
+COPILOT_API_CHECK = <<-COPILOT_API_CHECK
+if [ -d /workspaces/copilot-api ] ; then
+  # copilot api is good to go
+  :
+else
+  echo "The copilot-api directory does not exist in this codespace. \nRun script/setup-codespaces-copilot-api -c, then try running this script again."
+  exit 1
+fi
+COPILOT_API_CHECK
+
+copilot_api_ready = system(COPILOT_API_CHECK)
+return unless copilot_api_ready
+
+# Precondition 2: Rails server is running
+RAILS_SERVER_CHECK = <<-RAILS_SERVER_CHECK
+if lsof -Pi :8152 -sTCP:LISTEN -t >/dev/null ; then
+  # server running, check if code review mode is enabled
+  if [ -z $COPILOT_CODE_REVIEW ]; then
+    # server running in correct mode, continue
+    :
+  else
+    echo "Your Rails server is not running in "code review" mode. Please stop it, restart with script/server, then run this setup script again."
+  fi
+else
+  echo "Your Rails server is not running. Please start it with script/server and run this setup script again."
+  exit 1
+fi
+RAILS_SERVER_CHECK
+
+rails_server_running = system(RAILS_SERVER_CHECK)
+return unless rails_server_running
+
+puts "\nEnabling copilot chat..."
+system("bin/enable-copilot-chat")
+
+puts "\nSetting up Copilot SWE Agent prerequisites for local code review..."
+# setup_code_review_prereqs already finds-or-seeds the fixture repo (and aborts
+# if it can't be created), so reuse the repo it returns rather than repeating
+# the same find-or-seed lookup here.
+repo = T.must(CopilotCodeReviewSetup.new.setup_code_review_prereqs)
+
+author = T.must(User.find_by_login("monalisa"))
+
+sample_code = {
+  test_description_length: {
+    filename: "test/sample_test.rb",
+    contents: <<~TEST,
+    # frozen_string_literal: true
+
+    class SampleTest < GitHub::IntegrationTest
+      test "very long description - emits Hydro event for opening Copilot chat from banner" do
+        @user.enable_feature(:copilot_reviews)
+
+        as @user
+        request_env["HTTP_REFERER"] = referer_url
+        post "/github-copilot/monalisa/smile/pulls/review-banner/sha123/sha456", xhr: true
+
+        assert_response :ok
+        expected_context = Hydro::EntitySerializer.request_context(GitHub.context.to_hash)
+        assert_equal referer_url, expected_context[:referrer]
+      end
+    end
+    TEST
+  },
+  spelling: {
+    filename: "math.rb",
+    contents: <<~MATH,
+    class Math
+      # Public: divids given numbbers
+      def diviide(a, b)
+        a / b
+      end
+    end
+    MATH
+  }
+}
+
+puts "\nCreating pull request with sample changes for Copilot Code Review..."
+ref_name = "branch-#{SecureRandom.hex}"
+
+GH::Context.enabled do
+  Seeds::Objects::Commit.create(
+    repo: repo,
+    message: "Add files that make Copilot sad",
+    committer: author,
+    branch_name: ref_name,
+    files: {
+      sample_code[:test_description_length][:filename] => sample_code[:test_description_length][:contents],
+      sample_code[:spelling][:filename] => sample_code[:spelling][:contents],
+    }
+  )
+
+  ::PullRequest.create_for!(
+    repo,
+    user: author,
+    title: "Pull request with changes that will generate CCR comments",
+    body: "This pull request has changes that should trigger Copilot code review comments.",
+    head: ref_name,
+    base: repo.default_branch,
+    draft: false,
+  )
+
+  ccr_bot = Apps::Privileged.integration(:copilot_pull_request_reviewer).bot
+  pull_requests = PullRequest.all.to_a
+
+  # Request copilot code review on existing PRs
+  pull_requests.each do |pull|
+    puts "Requesting copilot code review on #{pull.permalink(include_host: false)}..."
+    pull.request_review_from(reviewers: [ccr_bot], actor: pull.user)
+  end
+end
+
+puts "\n🎉 Done!"
+
+# copilot-api runs under the dotcom overmind. The script restarts it above when
+# overmind is available; otherwise, apply the config manually.
+puts "\ncopilot-api .env is configured for code-review mode."
+puts "If copilot-api was not restarted above, apply it with: overmind restart copilot-api"

@@ -1,0 +1,124 @@
+<%# Shared servers section for allowlist dialogs.
+    Server rows use the same HTML structure as createServerRow() in templates.ts
+    so that server-rendered and JS-rendered rows are visually identical.
+    Locals:
+      servers            - Array of server hashes (default [])
+      search_field_id    - unique HTML id for the search field (String, optional)
+      entries_by_server  - Hash mapping server public_id => Array of entry hashes (optional) %>
+<%# IMPORTANT: Server row HTML must stay in sync with createServerRow() in the
+    companion github-ui PR (github/github-ui#17102) for SSR/CSR parity. %>
+<% servers = local_assigns.fetch(:servers, []) %>
+<% entries_by_server = local_assigns.fetch(:entries_by_server, {}) %>
+<%= render(Primer::Box.new) do %>
+  <div class="d-flex flex-items-center tmp-mb-3 gap-2">
+    <div class="flex-1">
+      <% search_opts = {
+        name: "server_search",
+        label: "Find server",
+        visually_hide_label: true,
+        placeholder: "Find server",
+        leading_visual: { icon: :search },
+        full_width: true,
+      } %>
+      <% search_opts[:id] = search_field_id if local_assigns.key?(:search_field_id) %>
+      <%= render(Primer::Alpha::TextField.new(**search_opts)) %>
+    </div>
+    <%= render(Primer::Alpha::ActionMenu.new) do |menu| %>
+      <% menu.with_show_button(scheme: :default) do |button| %>
+        <% button.with_leading_visual_icon(icon: :"sort-desc") %>
+        Last added
+        <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+      <% end %>
+      <% menu.with_item(label: "Last added", checked: true) %>
+      <% menu.with_item(label: "Name A-Z") %>
+      <% menu.with_item(label: "Name Z-A") %>
+    <% end %>
+  </div>
+
+  <%= render(Primer::Beta::BorderBox.new(test_selector: "allowlist-servers-list", data: { "mcp-target": "servers-list" })) do |box| %>
+    <% box.with_header(py: 2, px: 3) do %>
+      <div class="d-flex flex-justify-between flex-items-center width-full">
+        <%= render(Primer::Beta::Text.new(tag: :span, font_weight: :semibold)) do %>
+          <%= servers.any? ? "Servers (#{servers.length})" : "Servers" %>
+        <% end %>
+        <%= render(Primer::Beta::Button.new(
+          scheme: :invisible,
+          size: :small,
+          data: { allowlist_action: "showAddServerPage" },
+        )) do |button| %>
+          <% button.with_leading_visual_icon(icon: :plus) %>
+          Add server
+        <% end %>
+      </div>
+    <% end %>
+    <% if servers.any? %>
+      <%# Rows match the createServerRow() JS template exactly —
+          flex/padding classes go directly on the Box-row to avoid
+          double-padding from an extra wrapper div. %>
+      <% servers.each_with_index do |server, index| %>
+        <% box.with_row(test_selector: "server-row", py: 2, classes: "d-flex flex-justify-between flex-items-center tmp-px-3") do %>
+          <% server_entries = entries_by_server[server["public_id"]] || [] %>
+          <% selected_entries = server_entries.select { |e| e["selected"] == true } %>
+          <div class="d-flex flex-items-center gap-2" style="min-width: 0;">
+            <svg class="octicon octicon-server color-fg-muted flex-shrink-0" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+              <path fill-rule="evenodd" d="M1.75 1A1.75 1.75 0 000 2.75v3.5C0 7.216.784 8 1.75 8h12.5A1.75 1.75 0 0016 6.25v-3.5A1.75 1.75 0 0014.25 1H1.75zm0 1.5a.25.25 0 00-.25.25v3.5c0 .138.112.25.25.25h12.5a.25.25 0 00.25-.25v-3.5a.25.25 0 00-.25-.25H1.75zM1.75 9A1.75 1.75 0 000 10.75v3.5c0 .966.784 1.75 1.75 1.75h12.5A1.75 1.75 0 0016 14.25v-3.5A1.75 1.75 0 0014.25 9H1.75zm0 1.5a.25.25 0 00-.25.25v3.5c0 .138.112.25.25.25h12.5a.25.25 0 00.25-.25v-3.5a.25.25 0 00-.25-.25H1.75z"></path>
+              <circle cx="3.5" cy="5" r="1"></circle>
+              <circle cx="3.5" cy="12.5" r="1"></circle>
+            </svg>
+            <div style="min-width: 0; overflow-wrap: anywhere;">
+              <span style="font-weight: 600;"><%= server["name"] %></span>
+              <% if server["url"].present? %>
+                <div class="color-fg-muted" style="font-size: 12px;"><%= server["url"] %></div>
+              <% end %>
+              <% if server_entries.any? %>
+                <div class="color-fg-muted" style="font-size: 12px;">✓ <%= selected_entries.length %> of <%= server_entries.length %> connection methods selected</div>
+              <% end %>
+            </div>
+            <input type="hidden" name="allowlist[servers][<%= index %>][public_id]" value="<%= server["public_id"] %>">
+            <input type="hidden" name="allowlist[servers][<%= index %>][name]" value="<%= server["name"] %>">
+            <input type="hidden" name="allowlist[servers][<%= index %>][url]" value="<%= server["url"] %>">
+            <% if server_entries.any? %>
+              <input type="hidden" name="allowlist[servers][<%= index %>][entries_loaded]" value="1">
+            <% end %>
+            <% selected_entries.each do |entry| %>
+              <% entry_value = { type: entry["type"], display_name: entry["display_name"] }
+                 if entry["type"] == "remote" && entry["remote_url"].present?
+                   entry_value[:remote_url] = entry["remote_url"]
+                   entry_value[:remote_transport_type] = entry["remote_transport_type"] if entry["remote_transport_type"].present?
+                 elsif entry["type"] == "remote" && entry["id"].to_i > 0
+                   entry_value[:transport_id] = entry["id"]
+                 elsif entry["type"] == "package" && entry["id"].to_i > 0
+                   entry_value[:package_id] = entry["id"]
+                 end %>
+              <input type="hidden" name="allowlist[servers][<%= index %>][entries][]" value="<%= entry_value.to_json %>">
+            <% end %>
+          </div>
+          <button type="button" class="btn-octicon btn-octicon-danger js-remove-server-from-allowlist" data-server-index="<%= index %>" aria-label="Remove <%= server["name"] %>">
+            <svg class="octicon octicon-trash" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+              <path fill-rule="evenodd" d="M11 1.75V3h2.25a.75.75 0 010 1.5H2.75a.75.75 0 010-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75zM6.5 1.75a.25.25 0 01.25-.25h2.5a.25.25 0 01.25.25V3h-3V1.75zM4.496 6.675a.75.75 0 10-1.492.15l.66 6.6A1.75 1.75 0 005.405 15h5.19c.9 0 1.652-.681 1.741-1.576l.66-6.6a.75.75 0 00-1.492-.149l-.66 6.6a.25.25 0 01-.249.225h-5.19a.25.25 0 01-.249-.225l-.66-6.6z"></path>
+            </svg>
+          </button>
+        <% end %>
+      <% end %>
+    <% else %>
+      <% box.with_row(py: 4, px: 3) do %>
+        <div class="d-flex flex-column flex-items-center text-center width-full">
+          <%= render(Primer::Beta::Octicon.new(icon: :mcp, size: :medium, color: :muted, mb: 2)) %>
+          <%= render(Primer::Beta::Text.new(tag: :p, font_weight: :semibold, mb: 1)) { "No servers added" } %>
+          <%= render(Primer::Beta::Text.new(tag: :p, color: :muted, font_size: :small)) do %>
+            Add MCP servers to this allowlist to control which servers can be used.
+          <% end %>
+          <%= render(Primer::Beta::Button.new(
+            scheme: :invisible,
+            size: :small,
+            data: { allowlist_action: "showAddServerPage" },
+            test_selector: "empty-state-add-server-button",
+          )) do |button| %>
+            <% button.with_leading_visual_icon(icon: :plus) %>
+            Add server
+          <% end %>
+        </div>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

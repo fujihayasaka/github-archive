@@ -1,0 +1,22 @@
+# typed: true
+# frozen_string_literal: true
+
+# Allows IP addresses (e.g., 127.0.0.1) to be used as Actors
+module GitHub
+  class FlipperIpAddress
+    include GitHub::VexiActor
+
+    def initialize(ip_address)
+      @ip_address = ip_address
+    end
+
+    def ==(other)
+      self.class == other.class && vexi_id == other.vexi_id
+    end
+    alias_method :eql?, :==
+
+    def vexi_id
+      "IP:#{@ip_address}"
+    end
+  end
+end

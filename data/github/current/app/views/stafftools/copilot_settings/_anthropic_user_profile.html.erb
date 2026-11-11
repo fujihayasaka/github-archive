@@ -1,0 +1,64 @@
+<%
+  anthropic_profile = Copilot::AnthropicUserProfile.for_owner(anthropic_owner)
+  anthropic_request_name = anthropic_owner.display_login
+  anthropic_request_external_id_source = if anthropic_owner.business?
+    anthropic_owner.display_login.presence
+  else
+    anthropic_owner.analytics_tracking_id.presence
+  end
+  anthropic_request_external_id = anthropic_request_external_id_source.present? ? Digest::SHA256.hexdigest(anthropic_request_external_id_source) : nil
+%>
+
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed, classes: "tmp-mb-4")) do |component| %>
+  <% component.with_header do |h| %>
+    <% h.with_title(tag: :h2) do %>
+      Anthropic User ID
+    <% end %>
+  <% end %>
+  <% component.with_row do %>
+    <div class="d-flex flex-justify-between flex-items-center">
+      <div class="pr-2">
+        <div class="d-flex flex-items-start flex-items-center">
+          <label for="<%= anthropic_input_id %>" class="mr-2" <%= test_selector("copilot-detail-anthropic-user-id") %>>
+            Anthropic User ID
+          </label>
+        </div>
+      </div>
+      <div class="d-flex flex-justify-end position-relative" <%= test_selector("copilot-detail-anthropic-user-id-value") %>>
+        <div class="note text-right">
+          <% if anthropic_profile&.anthropic_id.present? %>
+            <div>
+              <span id="<%= anthropic_input_id %>" class="pr-1"><%= anthropic_profile.anthropic_id %></span>
+              <%= render(Primer::Beta::ClipboardCopy.new(for: anthropic_input_id, "aria-label": "Copy text to the system clipboard")) %>
+            </div>
+            <div class="color-fg-muted">
+              Status: <%= anthropic_profile.status %>
+            </div>
+          <% else %>
+            <span class="color-fg-muted">no user ID requested</span>
+          <% end %>
+        </div>
+      </div>
+    </div>
+  <% end %>
+  <% component.with_row do %>
+    <div class="d-flex flex-justify-end">
+      <% if anthropic_profile&.anthropic_id.present? %>
+        <%= form_tag stafftools_anthropic_user_id_path, method: :post do %>
+          <%= hidden_field_tag :refresh, "1" %>
+          <%= hidden_field_tag :owner_id, anthropic_owner.id %>
+          <%= hidden_field_tag :owner_type, anthropic_owner.class.name %>
+          <%= render(Primer::Beta::Button.new(type: :submit, size: :small)) { "check for updates" } %>
+        <% end %>
+      <% else %>
+        <%= form_tag stafftools_anthropic_user_id_path, method: :post do %>
+          <%= hidden_field_tag :owner_id, anthropic_owner.id %>
+          <%= hidden_field_tag :owner_type, anthropic_owner.class.name %>
+          <%= hidden_field_tag :name, anthropic_request_name %>
+          <%= hidden_field_tag :external_id, anthropic_request_external_id %>
+          <%= render(Primer::Beta::Button.new(type: :submit, size: :small, scheme: :primary, disabled: anthropic_request_name.blank? || anthropic_request_external_id.blank?)) { "request user ID" } %>
+        <% end %>
+      <% end %>
+    </div>
+  <% end %>
+<% end %>

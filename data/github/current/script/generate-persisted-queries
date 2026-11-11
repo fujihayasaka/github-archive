@@ -1,0 +1,62 @@
+#!/usr/bin/env safe-ruby
+# typed: true
+# frozen_string_literal: true
+
+# Generates persisted query manifests from colocated .graphql files.
+#
+# Globs all `app/controllers/**/queries/**/*.graphql`, parses each file,
+# extracts the operation name, normalizes the query text, computes a SHA-256
+# hash, and looks up the service owner from SERVICEOWNERS.
+#
+# Outputs two JSON manifests to `config/persisted_queries/`:
+#   - query_manifest.json:       { hash => { name, query, owner, source_file } }
+#   - name_to_hash_manifest.json: { operation_name => hash }
+#
+# Usage:
+#   script/generate-persisted-queries
+
+require "json"
+require "fileutils"
+require "graphql"
+require_relative "../lib/github/persisted_queries/generator"
+
+SCRIPT_ROOT = File.expand_path("..", __dir__)
+GLOB_PATTERN = File.join(SCRIPT_ROOT, "app/controllers/**/queries/**/*.graphql")
+OUTPUT_DIR = File.join(SCRIPT_ROOT, "config/persisted_queries")
+
+FileUtils.mkdir_p(OUTPUT_DIR)
+
+require_relative "../lib/github/serviceowners"
+serviceowners = GitHub::Serviceowners.new
+
+schema = GraphQL::Schema.from_definition(
+  File.read(File.join(SCRIPT_ROOT, "config", "schema.internal.graphql"))
+)
+
+generator = GitHub::PersistedQueries::Generator.new(
+  glob_pattern: GLOB_PATTERN,
+  root_path: SCRIPT_ROOT,
+  serviceowners: serviceowners,
+  schema: schema,
+)
+
+query_manifest = generator.generate
+
+unless generator.errors.empty?
+  $stderr.puts "Errors found in .graphql files:"
+  generator.errors.each { |e| $stderr.puts "  #{e}" }
+  exit 1
+end
+
+name_to_hash = GitHub::PersistedQueries::Generator.name_to_hash(query_manifest)
+
+# Write manifests
+query_manifest_path = File.join(OUTPUT_DIR, "query_manifest.json")
+name_to_hash_path = File.join(OUTPUT_DIR, "name_to_hash_manifest.json")
+
+File.write(query_manifest_path, JSON.pretty_generate(query_manifest) + "\n")
+File.write(name_to_hash_path, JSON.pretty_generate(name_to_hash) + "\n")
+
+puts "Generated #{query_manifest.size} persisted queries."
+puts "  #{query_manifest_path}"
+puts "  #{name_to_hash_path}"

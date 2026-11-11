@@ -1,0 +1,59 @@
+# This file is used to track queries that violate package boundaries. There are two reasons for violations:
+#
+# - Cross domain: A query uses tables from multiple domains.
+# - Domain access: A query bypassed a domain's interface and accessed its private tables directly.
+#
+# The format of this file is as follows:
+#
+# <query_digest>:
+#   query: <query>
+#   violations:
+#     - [location: <file:line>] # never committed but only generated with the --locations flag
+#       reason: <cross_domain|domain_access>
+#
+# To add a new violation, you can run the test causing the violation with the following environment variables:
+#
+#   TEST_ALL_FEATURES=1 PERFORM_STATEMENT_CHECKING=1 DOMAIN_QUERY_VIOLATIONS=1 bin/rails test <path_to_test_file>:<line_number>
+#
+# This will update the query violation file(s) with the new violation(s). To remove a violation, you can simply
+# remove the entry from the file.
+#
+# If there are many violations to add or update, or you'd like to refresh all recorded violations, you can
+# run the following command to pull all violations from the latest completed CI build on your branch:
+#
+#     script/domain-isolation-query-violations [--locations] [--audit] [--reason <cross_domain|domain_access>]
+#
+# This will replace all query violation files with the latest violations. Use the `--locations` flag to
+# include file locations in the output, don't commit that though! Use the `--audit` flag to include
+# violations from tables with visibility level `audit`. Use the `--reason` flag to filter violations
+# by reason in case you're only interested in locations for a specific reason.
+
+---
+33aa95b97874b8ff324470ef9a0f4cc3753130be20ea1d27b70bf4810b10166c:
+  query: INSERT INTO coupon_batches (prefix, quantity, generation_params, tracking_issue,
+    actor_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  tables:
+  - coupon_batches
+  violations:
+  - reason: domain_access
+4cd0bc17d923f3356615faecdd21b4e628cfec2daa1d2fb7ab5381996f19f0fc:
+  query: SELECT coupon_batches.* FROM coupon_batches WHERE coupon_batches.id = ? LIMIT
+    ?
+  tables:
+  - coupon_batches
+  violations:
+  - reason: domain_access
+697b08c8b8f77b7ae4b35b4db093661103c454f20d211c660617a8adc376a6f4:
+  query: SELECT coupon_batches.* FROM coupon_batches ORDER BY coupon_batches.created_at
+    DESC LIMIT ? OFFSET ?
+  tables:
+  - coupon_batches
+  violations:
+  - reason: domain_access
+c80f73590cf2d643eb411616e62444c598fc31fe63326f84e0047186c509641f:
+  query: SELECT coupon_product_targets.* FROM coupon_product_targets WHERE coupon_product_targets.coupon_id
+    = ? LIMIT ?
+  tables:
+  - coupon_product_targets
+  violations:
+  - reason: domain_access

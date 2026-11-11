@@ -1,0 +1,154 @@
+<%# erblint:counter DeprecatedComponentsCounter 3 %>
+<%
+  days = ["Day"] + 1.upto(31).map { |n| [n, n] }
+  months = ["Month"] + 1.upto(12).map { |n| [n, n] }
+
+  current_year = Time.current.year
+  years = ["Year"] + current_year.upto(current_year + 2).map { |n| [n, n] }
+%>
+<div class="boxed-group-inner"><%# erblint:disable DeprecatedCustomCss %>
+  <div class="js-details-container Details">
+    <div style="float: right;">
+      <%= form_tag stafftools_user_copilot_settings_path(copilot_user.user_object.display_login), method: should_show_remove? ? :delete : :post do %>
+        <%
+          dialog_title = if should_show_remove?
+            "Remove complimentary access"
+          else
+            "Grant complimentary access"
+          end
+        %>
+        <%= render(Primer::Alpha::Dialog.new(
+          title: dialog_title,
+          size: :xlarge,
+          dialog_id: "copilot-free-access",
+          align: :left,
+        )) do |dialog| %>
+          <% if should_show_remove? %>
+            <% dialog.with_show_button(scheme: :danger, test_selector: "remove_free_access_button") do %>
+              Remove Complimentary Copilot Access
+            <% end %>
+
+            <% dialog.with_body do %>
+              <fieldset>
+                <% if free_user.type.coupon_based %>
+                  <%= render(Primer::Beta::Flash.new(scheme: :warning)) do %>
+                    <p class="text-bold">NOTE: This user's complimentary access is based on a coupon.</p>
+
+                  <% end %>
+                <% end %>
+                <% if has_active_edu_subscription? %>
+                  <%= render(Primer::Beta::Flash.new(scheme: :warning)) do %>
+                    <p class="text-bold">NOTE: This user also has an active EDU subscription.</p>
+                    <p>The EDU subscription will also be cancelled when complimentary access is removed.</p>
+                  <% end %>
+                <% end %>
+                <%= render(Primer::Alpha::Banner.new(scheme: :danger)) do %>
+                  <p class="text-bold">NOTE:</p>
+                  <p> This action will remove the FreeUser record.</p>
+                  <p>If the checkbox below is checked, we will add the user to the <a class="Link--inTextBlock" href="https://devportal.githubapp.com/feature-flags/copilot_free_user_blocked/targeting-rules/actors-view?stamp=dotcom"><code>copilot_free_user_blocked</code></a> feature flag, which will block the user from redeeming complimentary Copilot access in the future.</p>
+                <% end %>
+                <div class="my-2">
+                  <label class="text-bold" for="copilot-remove-access-textarea">Reason for removing access</label>
+                  <textarea class="form-control input-block" id="copilot-remove-access-textarea" name="remove_access_reason_explanation" required></textarea>
+                </div>
+
+                <div class="my-2">
+                  <%= check_box_tag "block_from_feature_flag", "1", false, id: "copilot-block-from-feature-flag" %>
+                  <label for="copilot-block-from-feature-flag">Block user from re-qualifying for complimentary Copilot access?</label>
+                </div>
+              </fieldset>
+            <% end %>
+
+            <% dialog.with_footer(show_divider: true) do %>
+              <%= render(Primer::Beta::Button.new(id: "remove_btn", scheme: :danger, type: :submit)) do |c| %>
+                Remove
+              <% end %>
+            <% end %>
+          <% else %>
+            <% dialog.with_show_button(scheme: :danger, test_selector: "grant_free_access_button") do %>
+              <%= free_user.present? ? "Update Complimentary Access" : "Grant Complimentary Access" %>
+            <% end %>
+
+            <% dialog.with_header(show_divider: true) do %>
+              <%= render(Primer::Beta::Heading.new(tag: :h4)) { "Grant Complimentary Access To #{copilot_user.display_login}" } %>
+            <% end %>
+
+            <% dialog.with_body(style: "overflow-y: auto; max-height: 70vh") do %>
+              <p class="text-bold">Reason for granting complimentary access:</p>
+              <fieldset>
+                <div class="my-2">
+                  <%= radio_button_tag "complimentary_access_reason", "y_combinator", false, required: true, class: "mr-1 mb-1 js-free-access-reason", id: "reason_y_combinator" %>
+                  <%= label_tag "reason_y_combinator", "YCombinator (Copilot Pro for One Year)", class: "f5 text-normal" %>
+                </div>
+                <div class="my-2">
+                  <%= radio_button_tag "complimentary_access_reason", "complimentary_access", false, required: true, class: "mr-1 mb-1 js-free-access-reason", id: "reason_complimentary_access" %>
+                  <%= label_tag "reason_complimentary_access", "Complimentary Access", class: "f5 text-normal" %>
+                </div>
+                <div id="y_combinator_details" hidden>
+                  <hr role="separator">
+                  <%= render(Primer::Beta::Flash.new) do %>
+                    <p class="text-bold">YCombinator users get a year of complimentary access to Copilot Pro from when they sign up.</p>
+                    <p>This user's access will end on <%= 1.year.from_now.to_date %>.</p>
+                  <% end %>
+                </div>
+                <div id="complimentary_access_details" class="mr-1 mb-1" hidden>
+                  <hr role="separator">
+                  <p class="text-bold">Access level</p>
+                  <fieldset>
+                    <div class="my-2">
+                      <%= radio_button_tag "complimentary_access_level", "pro", true, required: true, class: "mr-1 mb-1 js-complimentary-access-level", id: "complimentary_access_level_pro" %>
+                      <%= label_tag "complimentary_access_level_pro", "Pro", class: "f5 text-normal" %>
+                    </div>
+                    <div class="my-2">
+                      <%= radio_button_tag "complimentary_access_level", "pro_plus", false, required: true, class: "mr-1 mb-1 js-complimentary-access-level", id: "complimentary_access_level_pro_plus" %>
+                      <%= label_tag "complimentary_access_level_pro_plus", "Pro+", class: "f5 text-normal" %>
+                    </div>
+                  </fieldset>
+                  <hr role="separator">
+                  <p class="text-bold">Duration of complimentary access</p>
+                  <fieldset>
+                    <div class="my-2">
+                      <%= radio_button_tag "complimentary_access_duration", "unlimited", false, required: true, class: "mr-1 mb-1 js-complimentary-access-duration", id: "complimentary_access_duration_unlimited" %>
+                      <%= label_tag "duration_unlimited", "Unlimited - this user's complimentary access will never expire", class: "f5 text-normal" %>
+                    </div>
+                    <div class="my-2">
+                      <%= radio_button_tag "complimentary_access_duration", "specified", false, required: true, class: "mr-1 mb-1 js-complimentary-access-duration", id: "complimentary_access_duration_specified" %>
+                      <%= label_tag "duration_specified", class: "f5 text-normal" do %>
+                        Ends On <%= select_tag "complimentary_access_duration_month", options_for_select(months), class: "form-control input-sm", required: true %><%= select_tag "complimentary_access_duration_day", options_for_select(days), class: "form-control input-sm", required: true %><%= select_tag "complimentary_access_duration_year", options_for_select(years), class: "form-control input-sm", required: true %>
+                      <% end %>
+                    </div>
+                    <hr role="separator">
+                    <div class="my-2">
+                      <label class="text-bold" for="copilot-complimentary-access-textarea">Reason for this complimentary access</label>
+                      <textarea class="form-control input-block" id="copilot-complimentary-access-textarea" name="complimentary_access_reason_explanation"></textarea>
+                    </div>
+                    <div class="my-2">
+                      <%= check_box_tag "enroll_immediately", "1", true, id: "copilot-enroll-immediately" %>
+                      <label for="copilot-enroll-immediately">Enroll this user immediately? Not checking this means the user will need to visit <a class="Link--inTextBlock" href="https://github.com/github-copilot/free_signup">https://github.com/github-copilot/free_signup</a> to claim their free access</label>
+                    </div>
+                  </fieldset>
+                </div>
+                <% if has_active_subscription? %>
+                  <hr>
+                  <%= render(Primer::Alpha::Banner.new(scheme: :warning)) do %>
+                    Note: This user has an active<%= has_trial_subscription? ? " trial " : " " %>subscription which will be cancelled.
+                  <% end %>
+                <% end %>
+              </fieldset>
+            <% end %>
+
+            <% dialog.with_footer(show_divider: true) do %>
+              <%= render(Primer::Beta::Button.new(id: "submit_btn", scheme: :danger, type: :submit)) do |c| %>
+                Grant
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    </div>
+    <h4>Copilot Complimentary Access</h4>
+    <p>
+      Manage complimentary access to Copilot for a user.
+    </p>
+  </div>
+</div>

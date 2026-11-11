@@ -1,0 +1,44 @@
+<%= render(Primer::Alpha::SelectPanel::ItemList.new(
+  menu_id: menu_id || "resource-owner-select-panel",
+  select_variant: :single,
+  aria: { label: "resource owners" },
+)) do |list| %>
+  <% actors.each do |actor| %>
+    <%
+      src = if current_user.feature_flag_enabled?(:fgpat_form_deep_link, default: false)
+        user_access_token_select_access_path(
+          id: current_access&.id,
+          **request.query_parameters.merge(target_name: actor.display_login)
+        )
+      else
+        user_access_token_select_access_path(
+          id: current_access&.id,
+          target_name: actor.display_login
+        )
+      end
+
+      fg_limit = fine_grained_lifetime_limit_for(actor)
+    %>
+    <% list.with_item(
+      active: current_target == actor,
+      label: actor.display_login,
+      aria: { selected: current_target == actor },
+      content_arguments: {
+        data: { value: actor.display_login },
+        aria: { selected: current_target == actor },
+      },
+      data: {
+        "actor-is-organization": actor.is_a?(Organization),
+        "fg-limit": fg_limit,
+        "fg-limit-label": lifetime_limit_label(fg_limit, show_expiration_date: true),
+        "fg-limit-target": fine_grained_target_and_type_with_limit(actor),
+        "fg-limit-exempt": fine_grained_lifetime_limit_exempted_for?(actor, current_user),
+        "src": src,
+      }
+    ) do |item| %>
+      <% item.with_leading_visual_content do %>
+        <%= render(GitHub::AvatarComponent.new(id: "resource-owner-select-panel-item-icon", actor: actor, mr: 1)) %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

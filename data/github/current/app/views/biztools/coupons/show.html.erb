@@ -1,0 +1,173 @@
+<% page_info title: "Coupon #{coupon}", selected_link: :admin_coupons %>
+
+<%= render layout: "biztools/biztools" do %>
+  <%# State toggle buttons %>
+  <div class="tmp-mb-4">
+    <%= render(Primer::Alpha::SegmentedControl.new("aria-label": "Coupon redemption state filter")) do |component| %>
+      <% component.with_item(tag: :a, href: "?state=active", label: "Active", selected: view.active_state?) %>
+      <% component.with_item(tag: :a, href: "?state=expired", label: "Expired", selected: view.expired_state?) %>
+    <% end %>
+  </div>
+
+  <%# Main coupon info box %>
+  <%= render(Primer::Beta::BorderBox.new) do |box| %>
+    <% box.with_header do %>
+      <div class="d-flex flex-items-center flex-justify-between width-full">
+        <div>
+          <%= render(Primer::Beta::Link.new(href: biztools_coupons_path)) { "Coupons" } %>
+          <span class="color-fg-muted px-1">/</span>
+          <% if coupon.group.present? %>
+            <%= render(Primer::Beta::Link.new(href: biztools_coupon_groups_path(coupon.group))) { coupon.group } %>
+            <span class="color-fg-muted px-1">/</span>
+          <% end %>
+          <span class="text-bold"><%= coupon.to_s %></span>
+        </div>
+        <div>
+          <%= render(Primer::Beta::Button.new(tag: :a, size: :small, href: report_biztools_coupon_path(this_coupon))) do %>
+            <%= primer_octicon(:download, mr: 1) %> Download CSV
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
+    <% box.with_row do %>
+      <div class="d-flex flex-items-center flex-justify-between mb-2">
+        <h2 class="h3 mb-0"><%= view.human_details %></h2>
+        <%= render(Primer::Beta::Button.new(size: :small, tag: :a, href: edit_biztools_coupon_path(coupon))) do %>
+          <%= primer_octicon(:pencil, mr: 1) %> Edit
+        <% end %>
+      </div>
+
+      <div class="mt-2">
+        <%= render(Biztools::Coupons::ZuoraSyncStatusComponent.new(coupon: coupon)) %>
+      </div>
+    <% end %>
+
+    <% box.with_row do %>
+      <% if coupon.staff_actor_only? %>
+        <div class="mt-2">
+          <%= render(Primer::Beta::Label.new(scheme: :secondary)) do %>
+            <%= primer_octicon(:lock, mr: 1) %> Applicable by staff only
+          <% end %>
+        </div>
+      <% end %>
+
+      <% if coupon.note.present? %>
+        <p class="color-fg-muted mt-2 mb-0"><%= view.coupon_note %></p>
+      <% end %>
+
+      <div class="tmp-mt-3">
+        <h3 class="f5 text-bold mb-1">Product Target</h3>
+        <% if view.has_product_target? %>
+          <p class="color-fg-muted mb-0">
+            Applies to: <span class="text-bold"><%= view.product_target_name %></span>
+          </p>
+        <% else %>
+          <p class="color-fg-muted mb-0">
+            Applies to: <span class="text-bold"><%= view.product_applicability_text %></span>
+          </p>
+        <% end %>
+      </div>
+    <% end %>
+
+    <% box.with_row do %>
+      <h3 class="f5 text-bold mb-2">Apply to User Account</h3>
+      <%= form_tag apply_biztools_coupons_path, method: :post, id: "js-apply-coupon-to-account-form", class: "d-inline-flex flex-items-center gap-2" do %>
+        <%= render(Primer::Alpha::TextField.new(name: "user_id", label: "User ID", visually_hide_label: true, placeholder: "Username or ID", required: true)) %>
+        <input type="hidden" name="code" value="<%= coupon.code %>">
+        <%= render(Primer::Beta::Button.new(type: :submit, scheme: :primary)) { "Apply" } %>
+      <% end %>
+    <% end %>
+
+    <% box.with_row do %>
+      <h3 class="f5 text-bold mb-2">Apply to Enterprise Account</h3>
+      <%= form_tag apply_biztools_coupons_path, method: :post, id: "js-apply-coupon-to-enterprise-account-form", class: "d-inline-flex flex-items-center gap-2" do %>
+        <%= render(Primer::Alpha::TextField.new(name: "slug", label: "Enterprise slug", visually_hide_label: true, placeholder: "Enterprise slug", required: true)) %>
+        <input type="hidden" name="code" value="<%= coupon.code %>">
+        <%= render(Primer::Beta::Button.new(type: :submit, scheme: :primary)) { "Apply" } %>
+      <% end %>
+    <% end %>
+
+    <% box.with_row do %>
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div>
+          <span class="text-bold"><%= pluralize(coupon.limit, 'redemption') %></span>
+          <span class="color-fg-muted">left — redeemed by</span>
+          <span class="text-bold"><%= pluralize(view.redeemed_count, 'account') %></span>
+        </div>
+        <div>
+          <span class="color-fg-muted">Redeemable through</span>
+          <span class="text-bold"><%= coupon.expires_at.to_date %></span>
+        </div>
+      </div>
+    <% end %>
+
+    <%# Redemptions list %>
+    <% if coupon_redemptions.empty? %>
+      <% box.with_row do %>
+        <%= render(Primer::Beta::Blankslate.new) do |blankslate| %>
+          <% blankslate.with_visual_icon(icon: :tag) %>
+          <% blankslate.with_heading(tag: :h3) { "No #{view.state} coupon redemptions found" } %>
+        <% end %>
+      <% end %>
+    <% else %>
+      <% coupon_redemptions.find_each do |coupon_redemption| %>
+        <% billable_entity = coupon_redemption.billable_entity %>
+        <% box.with_row do %>
+          <% if billable_entity %>
+            <div class="d-flex flex-items-center flex-justify-between">
+              <div class="d-flex flex-items-center gap-2">
+                <%= avatar_for billable_entity, 24 %>
+                <div>
+                  <% if site_admin? %>
+                    <%= render(Primer::Beta::Link.new(href: view.stafftools_entity_path(billable_entity))) { billable_entity.to_s } %>
+                  <% else %>
+                    <span class="text-bold"><%= billable_entity.to_s %></span>
+                  <% end %>
+                  <%= render(Primer::Beta::Label.new(scheme: :secondary, ml: 1)) { billable_entity.plan.to_s.humanize } %>
+                </div>
+              </div>
+
+              <div class="d-flex flex-items-center gap-2">
+                <% if coupon_redemption.expired? %>
+                  <%= render(Primer::Beta::Label.new(scheme: :danger)) { "Expired" } %>
+                <% else %>
+                  <span class="color-fg-muted">
+                    Expires <span class="text-bold"><%= view.expires(billable_entity) %></span>
+                  </span>
+                  <%= button_to "Revoke", view.revoke_coupon_path(billable_entity),
+                    class: "btn btn-sm btn-danger", method: :delete, 'data-confirm': "Are you sure?" %>
+                <% end %>
+              </div>
+            </div>
+          <% else %>
+            <span class="color-fg-muted">
+              <%= coupon_redemption.billable_entity_type %> (#<%= coupon_redemption.billable_entity_id %>) does not exist anymore.
+            </span>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <%# Pagination %>
+  <div class="paginate-container tmp-mt-3">
+    <%= will_paginate coupon_redemptions %>
+  </div>
+
+  <%# Trade screening warning dialog %>
+  <%= render(Primer::Alpha::Dialog.new(id: "not-screened-warning-dialog", title: "This account is not trade screened!")) do |dialog| %>
+    <% dialog.with_header(show_divider: true, text_align: :left) { "" } %>
+    <% dialog.with_body do %>
+      <div class="tmp-py-3">
+        <%= render Primer::Alpha::Banner.new(scheme: :warning, icon: "alert") do %>
+          <p><%= trade_controls_coupon_application_not_screened_notice %></p>
+        <% end %>
+      </div>
+    <% end %>
+    <% dialog.with_footer(show_divider: true) do %>
+      <%= render(Primer::Beta::Button.new(id: "proceed-without-screening", scheme: :danger)) { "Proceed without screening" } %>
+      <%= render(Primer::Beta::Button.new(id: "cancel", scheme: :default)) { "Cancel" } %>
+    <% end %>
+  <% end %>
+<% end %>

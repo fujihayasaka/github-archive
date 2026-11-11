@@ -1,0 +1,88 @@
+<%
+
+  fast_dev_loop = ENV["FAST_DEV_LOOP"] == "1"
+
+  socket = [
+    ENV["GH_MYSQL_SOCKET"] || "",
+    "/var/run/mysql5/mysqld.sock",
+    "/tmp/mysql.sock"
+  ].detect { |f| File.exist? f }
+
+  # We aren't using socket communication in the fast dev loop, we're talking over docker
+  socket = !fast_dev_loop && socket
+  port = ENV["GH_MYSQL_PORT"] || fast_dev_loop ? "3307" : "3306"
+%>
+
+# Guess what? These are only defaults for NON PRODUCTION environments.
+# Go look at the production config section if you want to make changes to production.
+defaults: &defaults
+  adapter: mysql2
+  username: root
+  pool: 10
+  # Keep connections open forever.
+  # See: https://api.rubyonrails.org/v5.2.2.1/classes/ActiveRecord/ConnectionAdapters/ConnectionPool.html
+  idle_timeout: 0
+<% if socket %>
+  host: localhost
+  socket: <%= socket %>
+<% elsif fast_dev_loop %>
+  host: 127.0.0.1
+  port: <%= port %>
+  password: password
+<% else %>
+  host: db
+  port: <%= port %>
+<% end %>
+
+  # we specify these values in a similar value as gh/gh to make sure we don't generate bad collation in structure.sql during dev.
+  variables:
+    character_set_results: utf8mb4
+    character_set_client: utf8mb4
+    character_set_connection: utf8mb4
+    collation_connection: utf8mb4_unicode_520_ci
+
+development:
+  primary:
+    <<: *defaults
+    database: advisory-db_development
+  readreplica:
+    <<: *defaults
+    database: advisory-db_development
+    replica: true
+
+test:
+  primary:
+    <<: *defaults
+    database: advisory-db_test
+    encoding: utf8mb4
+    collation: utf8mb4_unicode_520_ci
+  readreplica: 
+    <<: *defaults
+    database: advisory-db_test
+    encoding: utf8mb4
+    collation: utf8mb4_unicode_520_ci
+    replica: true
+
+<% if ENV["MYSQL_DB"] %>
+production-defaults: &production-defaults
+  encoding: utf8mb4
+  collation: utf8mb4_unicode_520_ci
+  adapter: mysql2
+
+production: 
+  primary:
+    <<: *production-defaults
+    database: <%= ENV["MYSQL_DB"] %>
+    username: <%= ENV["MYSQL_USER"] %>
+    password: <%= ENV["MYSQL_PASS"] %>
+    host: <%= ENV["MYSQL_HOST"] %>
+    port: <%= ENV["MYSQL_PORT"] %>
+  readreplica:
+    <<: *production-defaults
+    database: <%= ENV["MYSQL_DB_READREPLICA"] %>
+    username: <%= ENV["MYSQL_USER_READREPLICA"] %>
+    password: <%= ENV["MYSQL_PASS_READREPLICA"] %>
+    host: <%= ENV["MYSQL_HOST_READREPLICA"] %>
+    port: <%= ENV["MYSQL_PORT_READREPLICA"] %>
+    replica: true
+<% end %>

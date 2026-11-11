@@ -1,0 +1,407 @@
+#!/bin/bash
+#
+# Setup duplicate issue detection for local development.
+# Enables feature flags, creates ES index, and sample issues with embeddings.
+#
+# Prerequisites:
+#   - Elasticsearch on port 9400
+#   - Inference endpoint configured (use --setup-es or run script/elasticsearch/dev-setup)
+#   - bin/seed completed
+#
+# Usage:
+#   script/setup-duplicate-issues              # assumes ES + inference already configured
+#   script/setup-duplicate-issues --setup-es    # run ES dev-setup first (Kibana, license, inference)
+#
+# Options:
+#   -e, --setup-es   Run script/elasticsearch/dev-setup before starting.
+#                    Output is captured to tmp/es-dev-setup.log to reduce noise.
+#   -h, --help       Show this help message and exit.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ES_URL="${ES_URL:-http://localhost:9400}"
+REPO_NWO="github/private-server"
+SETUP_ES=false
+
+usage() {
+  sed -n '/^# Usage:/,/^[^#]/{ /^#/s/^# \?//p }' "$0"
+}
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -e|--setup-es)
+      SETUP_ES=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -*)
+      echo "Unknown option: $1"
+      usage
+      exit 1
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+echo "=== Setting up Duplicate Issue Detection ==="
+
+# Step 0: Optionally run ES dev-setup (Kibana, license, inference endpoint)
+if $SETUP_ES; then
+  ES_SETUP_LOG="tmp/es-dev-setup.log"
+  printf "\nStep 0: Running Elasticsearch dev-setup (this may take several minutes)...\n"
+  echo "  Output captured to: $ES_SETUP_LOG"
+  if ( script/elasticsearch/dev-setup ) &> "$ES_SETUP_LOG"; then
+    echo "  OK"
+  else
+    echo "  ERROR: ES dev-setup failed. Last 20 lines of log:"
+    echo ""
+    tail -20 "$ES_SETUP_LOG" | sed 's/^/  /'
+    echo ""
+    echo "  See full log: $ES_SETUP_LOG"
+    exit 1
+  fi
+fi
+
+# Step 1: Check Elasticsearch
+printf "\nStep 1: Checking Elasticsearch...\n"
+if ! curl -s "$ES_URL/_cluster/health" > /dev/null 2>&1; then
+  echo "ERROR: Elasticsearch not running at $ES_URL"
+  exit 1
+fi
+echo "  OK"
+
+# Step 2: Check inference endpoint
+printf "\nStep 2: Checking inference endpoint...\n"
+runner_output=$(bin/rails runner 'puts GitHub.es_issues_prs_inference_id' 2>&1) || {
+  echo "ERROR: Failed to fetch inference ID via bin/rails runner:"
+  echo "$runner_output"
+  exit 1
+}
+INFERENCE_ID=$(printf '%s\n' "$runner_output" | tail -n 1)
+if [ -z "$INFERENCE_ID" ]; then
+  INFERENCE_ID="test-endpoint"
+fi
+
+# Check if the configured endpoint exists
+if curl -s "$ES_URL/_inference/text_embedding/$INFERENCE_ID" | grep -q '"inference_id"'; then
+  echo "  Found: $INFERENCE_ID"
+else
+  # Check if any text_embedding endpoint exists
+  AVAILABLE_ENDPOINTS=$(curl -s "$ES_URL/_inference" | jq -r '.endpoints[] | select(.task_type == "text_embedding") | .inference_id' 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+
+  echo "  ERROR: Inference endpoint '$INFERENCE_ID' not found."
+  echo ""
+  echo "  To set up the inference endpoint, either:"
+  echo "    1. Re-run with --setup-es:  script/setup-duplicate-issues --setup-es"
+  echo "    2. Run manually:            script/elasticsearch/dev-setup"
+  echo ""
+  if [ -n "$AVAILABLE_ENDPOINTS" ]; then
+    echo "  Available text_embedding endpoints: $AVAILABLE_ENDPOINTS"
+    echo "  (You may need to configure GitHub.es_issues_prs_inference_id to use one of these)"
+    echo ""
+  fi
+  echo "  Note: Inference endpoints require a valid Elasticsearch license."
+  echo "  If dev-setup fails with license errors, check the ELASTICSEARCH_LICENSE env var."
+  exit 1
+fi
+
+# Step 3: Enable feature flags
+printf "\nStep 3: Enabling feature flags...\n"
+bin/toggle-feature-flag enable semantic_similarity_duplicate_issue_detection
+bin/toggle-feature-flag enable semantic_duplicate_issue_detection
+bin/toggle-feature-flag enable copilot_semantic_indexing_source_fields
+bin/toggle-feature-flag disable copilot_semantic_indexing_source_fields_disabled  # double-negative
+
+# Step 4: Create issues index (384 dims for local model vs 1536 in prod)
+printf "\nStep 4: Setting up issues index...\n"
+curl -s -X DELETE "$ES_URL/issues-1" > /dev/null 2>&1 || true
+
+index_response=$(curl -s -X PUT "$ES_URL/issues-1" -H "Content-Type: application/json" -d '{
+  "settings": { "number_of_shards": 1, "number_of_replicas": 0 },
+  "mappings": {
+    "properties": {
+      "id": { "type": "long" },
+      "issue_id": { "type": "long" },
+      "number": { "type": "integer" },
+      "repo_id": { "type": "long" },
+      "state": { "type": "keyword" },
+      "title": { "type": "text" },
+      "body": { "type": "text" },
+      "created_at": { "type": "date" },
+      "updated_at": { "type": "date" },
+      "public": { "type": "boolean" },
+      "author_id": { "type": "long" },
+      "title_dense_vector": { "type": "dense_vector", "dims": 384, "index": true, "similarity": "cosine" },
+      "body_dense_vector": { "type": "dense_vector", "dims": 384, "index": true, "similarity": "cosine" }
+    }
+  }
+}')
+if ! echo "$index_response" | grep -q '"acknowledged":true'; then
+  echo "ERROR: Failed to create index: $index_response"
+  exit 1
+fi
+
+alias_response=$(curl -s -X POST "$ES_URL/_aliases" -H "Content-Type: application/json" -d '{
+  "actions": [
+    { "remove": { "index": "*", "alias": "issues", "must_exist": false } },
+    { "remove": { "index": "*", "alias": "issues-search", "must_exist": false } },
+    { "add": { "index": "issues-1", "alias": "issues" } },
+    { "add": { "index": "issues-1", "alias": "issues-search" } }
+  ]
+}')
+if ! echo "$alias_response" | grep -q '"acknowledged":true'; then
+  echo "ERROR: Failed to create aliases: $alias_response"
+  exit 1
+fi
+echo "  OK"
+
+# Step 5: Create and index sample issues
+printf "\nStep 5: Creating sample issues...\n"
+
+export REPO_NWO
+export BUG_REPORT_TEMPLATE
+read -r -d '' BUG_REPORT_TEMPLATE <<'TEMPLATE' || true
+---
+name: Bug report (form)
+description: File a bug report for testing duplicate detection
+title: "[Bug]: "
+labels: ["bug", "triage", "form"]
+assignees:
+  - monalisa
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report!
+  - type: input
+    id: contact
+    attributes:
+      label: Contact Details
+      description: How can we get in touch with you if we need more info?
+      placeholder: ex. email@example.com
+    validations:
+      required: false
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Also tell us, what did you expect to happen?
+      placeholder: Tell us what you see!
+      value: "A bug happened!"
+    validations:
+      required: false
+  - type: dropdown
+    id: version
+    attributes:
+      label: Version
+      description: What version of our software are you running?
+      options:
+        - 1.0.2 (Default)
+        - 1.0.3 (Edge)
+    validations:
+      required: false
+  - type: dropdown
+    id: browsers
+    attributes:
+      label: What browsers are you seeing the problem on?
+      multiple: true
+      options:
+        - Firefox
+        - Chrome
+        - Safari
+        - Microsoft Edge
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Please copy and paste any relevant log output. This will be automatically formatted into code, so no need for backticks.
+      render: shell
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Code of Conduct
+      description: By submitting this issue, you agree to follow our [Code of Conduct](#)
+      options:
+        - label: I agree to follow this project's Code of Conduct
+          required: false
+TEMPLATE
+
+export FEATURE_REQUEST_TEMPLATE
+read -r -d '' FEATURE_REQUEST_TEMPLATE <<'TEMPLATE' || true
+---
+name: Feature request
+about: Suggest an idea for this project
+title: "[Feature]: "
+labels: ["enhancement"]
+assignees: []
+---
+
+## Feature request
+
+<!-- Provide a summary of the behavior. -->
+
+### Motivation
+
+<!--
+  If you'd like to propose something new in this repo, big or small, let's talk! The best way to get started, especially if your proposal is in its early stages, is to open an issue using this template. Please tell us more:
+  - What would you like to do with this feature?
+  - Have you seen this pattern anywhere else? If so, please provide context or references to similar behavior in other libraries.
+-->
+TEMPLATE
+
+bin/rails runner - <<'RUBY'
+require "uri"
+require "net/http"
+require "json"
+
+ES_URL = ENV.fetch("ES_URL", "http://localhost:9400")
+REPO_NWO = ENV.fetch("REPO_NWO", "github/private-server")
+
+def es_request(method, path, body = nil)
+  uri = URI("#{ES_URL}#{path}")
+  http = Net::HTTP.new(uri.host, uri.port)
+  req = case method
+    when :post then Net::HTTP::Post.new(uri)
+    when :put then Net::HTTP::Put.new(uri)
+    else raise ArgumentError, "Unsupported HTTP method: #{method}"
+  end
+  if body
+    req["Content-Type"] = "application/json"
+    req.body = body.to_json
+  end
+  http.request(req)
+end
+
+def get_embedding(text)
+  return nil if text.blank?
+  resp = es_request(:post, "/_inference/text_embedding/#{GitHub.es_issues_prs_inference_id}", { input: text[0...5000] })
+  return nil unless resp.is_a?(Net::HTTPSuccess)
+  JSON.parse(resp.body).dig("text_embedding", 0, "embedding")
+rescue => e
+  puts "  Warning: embedding failed - #{e.message}"
+  nil
+end
+
+repo = Repository.nwo(REPO_NWO)
+abort "  ERROR: #{REPO_NWO} not found. Run bin/seed first." unless repo
+
+author = User.find_by(login: "monalisa") || repo.owner_user_or_first_admin
+abort "  ERROR: No user found to create issues. Run bin/seed first." unless author
+
+ISSUES = [
+  ["Login page returns 500 error when submitting form", "When I try to log in to my account, the page crashes with a 500 internal server error. This happens consistently every time I submit the login form with my valid credentials. I have tried clearing my browser cache and cookies, using different browsers including Chrome, Firefox, and Safari, and even attempting to log in from a different device on a different network. The issue persists regardless of these troubleshooting steps. The error page shows a generic server error message with no specific details about what went wrong. I checked the browser console and network tab but could not find any additional clues."],
+  ["Authentication fails with server error", "Users are reporting that they cannot authenticate to the application. When attempting to sign in, the server returns an HTTP 500 error instead of processing the login request successfully. This issue affects multiple users across different geographic regions and appears to be widespread rather than isolated to specific accounts. Our support team has received dozens of tickets about this problem in the past hour. Users have tried resetting their passwords and clearing browser data, but nothing resolves the issue. This is blocking critical workflows for our enterprise customers who rely on this application for their daily operations and need immediate resolution."],
+  ["Improve documentation for API endpoints", "The current API documentation is incomplete and lacks the detail needed for developers to effectively integrate with our services. We need comprehensive examples for all REST endpoints including authentication flows, error handling patterns, and rate limiting information. The documentation should include request and response schemas with detailed field descriptions, sample curl commands for each endpoint, and SDK usage examples in popular programming languages. Additionally, we should add troubleshooting guides for common integration issues, a changelog section documenting API version differences, and interactive examples that developers can run directly from the documentation page to understand the expected behavior."],
+  ["API docs need better examples", "The developer documentation for our REST API needs significant improvement in the form of practical code samples across multiple programming languages. Currently, the documentation only shows basic request formats without demonstrating real-world usage patterns. We need examples in JavaScript, Python, Ruby, Go, and Java that show how to handle authentication, pagination, error responses, and webhook verification. Each example should include comments explaining the code and best practices for production use. Additionally, the examples should cover edge cases and demonstrate proper retry logic for handling rate limits and transient failures that developers commonly encounter when building integrations."],
+  ["Performance issue with large file uploads", "When uploading files larger than 100MB, the upload process becomes extremely slow and frequently times out before completion. This is causing significant productivity issues for users who need to share large media files, datasets, or backup archives. The upload progress bar often stalls at random percentages, and users receive timeout errors after waiting for extended periods. We have tested this across multiple network connections with varying bandwidth speeds and the problem persists. Server logs show the connection being terminated before the file transfer completes. We need to investigate chunked upload support, increase timeout thresholds, and optimize the upload pipeline."],
+  ["Add dark mode support to the UI", "Many users have requested a dark mode option for the application interface to reduce eye strain during extended usage sessions, especially in low-light environments. A dark color scheme would improve accessibility for users with light sensitivity and align with modern design trends that most popular applications now support. The implementation should include a toggle in user preferences that persists across sessions, automatic switching based on system preferences, and carefully chosen contrast ratios that maintain readability while reducing brightness. We should also consider a high-contrast mode for users with visual impairments and ensure all UI components adapt properly to the new theme."]
+]
+
+issues = ISSUES.map do |title, body|
+  existing = repo.issues.find_by(title: title)
+  if existing
+    puts "  exists: ##{existing.number}"
+    existing
+  else
+    issue = repo.issues.create!(user: author, title: title, body: body, state: "open")
+    puts "  created: ##{issue.number}"
+    issue
+  end
+end
+
+puts "  Indexing..."
+issues.each do |issue|
+  doc = {
+    id: issue.id, issue_id: issue.id, number: issue.number, repo_id: issue.repository_id,
+    state: issue.state, title: issue.title, body: issue.body, public: issue.repository.public?,
+    author_id: issue.user_id, created_at: issue.created_at.iso8601, updated_at: issue.updated_at.iso8601,
+    title_dense_vector: get_embedding(issue.title), body_dense_vector: get_embedding(issue.body)
+  }.compact
+  resp = es_request(:put, "/issues-1/_doc/#{issue.id}?routing=#{issue.repository_id}", doc)
+  puts resp.is_a?(Net::HTTPSuccess) ? "  indexed: ##{issue.number}" : "  FAILED: ##{issue.number}"
+end
+
+# Step 5b: Create issue template form
+puts "\n  Creating issue template form..."
+template_content = ENV.fetch("BUG_REPORT_TEMPLATE")
+template_path = ".github/ISSUE_TEMPLATE/bug-report-form.yml"
+begin
+  commit = repo.commits.create(
+    { message: "Add bug report form template for duplicate detection testing", author: author },
+    repo.ref_to_sha("refs/heads/#{repo.default_branch}"),
+    sign: false,
+    target_ref_name: "refs/heads/#{repo.default_branch}"
+  ) do |files|
+    files.add(template_path, template_content)
+  end
+
+  if commit && !commit.diff.empty?
+    repo.refs["refs/heads/#{repo.default_branch}"].update(commit, author, reflog_data: { operation: "setup-duplicate-issues" })
+    puts "  created: #{template_path}"
+  else
+    puts "  exists: #{template_path} (or no changes needed)"
+  end
+rescue => e
+  puts "  skipped: #{e.message}"
+end
+
+# Step 5c: Create markdown issue template with HTML comments
+puts "\n  Creating markdown issue template..."
+md_template_content = ENV.fetch("FEATURE_REQUEST_TEMPLATE")
+md_template_path = ".github/ISSUE_TEMPLATE/feature-request.md"
+begin
+  md_commit = repo.commits.create(
+    { message: "Add feature request markdown template for duplicate detection testing", author: author },
+    repo.ref_to_sha("refs/heads/#{repo.default_branch}"),
+    sign: false,
+    target_ref_name: "refs/heads/#{repo.default_branch}"
+  ) do |files|
+    files.add(md_template_path, md_template_content)
+  end
+
+  if md_commit && !md_commit.diff.empty?
+    repo.refs["refs/heads/#{repo.default_branch}"].update(md_commit, author, reflog_data: { operation: "setup-duplicate-issues" })
+    puts "  created: #{md_template_path}"
+  else
+    puts "  exists: #{md_template_path} (or no changes needed)"
+  end
+rescue => e
+  puts "  skipped: #{e.message}"
+end
+RUBY
+
+# Step 6: Verify
+printf "\nStep 6: Verifying...\n"
+curl -s -X POST "$ES_URL/issues-1/_refresh" > /dev/null
+doc_count=$(curl -s "$ES_URL/issues-1/_count" | grep -o '"count":[0-9]*' | cut -d: -f2)
+echo "  $doc_count documents indexed"
+
+printf "\n=== Setup Complete! ===\n\n"
+echo "Test duplicate detection at: http://github.localhost/$REPO_NWO/issues/new"
+echo ""
+echo "Sample issues have been created with 500-character bodies for better embedding quality."
+echo ""
+echo "Try creating an issue with similar content to trigger duplicate detection:"
+echo ""
+echo "Example 1 (should match login/auth issues):"
+echo "  Title: Sign in failing with HTTP error"
+cat << 'EOF'
+  Body:  I am unable to sign in to my account due to a server error. Every time I enter my username and password and click the login button, the page displays an HTTP 500 internal server error instead of logging me in. I have attempted various troubleshooting steps including clearing my browser cache, trying different web browsers like Chrome and Firefox, and even using a different computer on a separate network connection. None of these attempts have resolved the problem. The error appears immediately after form submission and provides no useful diagnostic information. This is blocking my work.
+EOF
+echo ""
+echo "Example 2 (should match API documentation issues):"
+echo "  Title: REST API needs code samples"
+cat << 'EOF'
+  Body:  The current REST API documentation is missing practical code examples that developers need to successfully integrate with the platform. While the endpoints are documented with request and response formats, there are no working code samples in common programming languages like JavaScript, Python, or Ruby. Developers are struggling to understand how to properly authenticate, handle pagination, and process error responses. We need comprehensive examples showing real-world usage patterns, including how to handle rate limiting, retry failed requests, and verify webhook signatures. This would greatly improve the developer experience and reduce support burden.
+EOF
+echo ""
+echo "The UI should suggest similar existing issues as you type."
+echo "View sample issues: http://github.localhost/$REPO_NWO/issues"
+echo ""
+echo "Consider testing with issue forms and issue templates, in addition to blank issues."

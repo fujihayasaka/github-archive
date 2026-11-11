@@ -1,0 +1,70 @@
+# typed: true
+# frozen_string_literal: true
+
+class Licensing::SendVssStatusMessageJob < ApplicationJob
+  queue_as :licensing
+  retry_on_dirty_exit
+
+  retry_on Faraday::Error, GitHub::AzureServiceBus::HttpClient::FailedRequestError, wait: :polynomially_longer, attempts: 20
+
+  locked_by key: -> (job) { job.locking_key }, timeout: 5.minutes
+
+  AZURE_SERVICE_BUS_TOKEN_AUDIENCE = "https://servicebus.azure.net/"
+  LOCK_KEY_PREFIX = "licensing/send_vss_status_message_job"
+  QUIET_PERIOD_SECONDS = 30
+  STATUS_QUEUE = "assignment-status"
+
+  before_enqueue do
+    throw(:abort) unless GitHub.billing_enabled?
+  end
+
+  def perform(assignment:, event_type: nil)
+    GitHub.dogstats.increment("send_vss_status_message_job", tags: ["perform:perform"])
+    if assignment.updated_at > QUIET_PERIOD_SECONDS.seconds.ago
+      GitHub.dogstats.increment("send_vss_status_message_job", tags: ["perform:delayed"])
+      clear_lock
+      self.class.
+        set(wait_until: assignment.updated_at + QUIET_PERIOD_SECONDS.seconds).
+        perform_later(assignment: assignment, event_type: event_type)
+      return
+    else
+      GitHub.dogstats.increment("send_vss_status_message_job", tags: ["perform:not_delayed"])
+    end
+
+    event_type_to_send = Licensing::BundledLicenseAssignmentStatusCalculator.calculate_highest_priority(assignment, requested_status: event_type)
+    message = Licensing::Vss::StatusMessage.new(
+      event_type: event_type_to_send,
+      assignment: assignment
+    ).serialize_message
+
+    if event_type_to_send != :none
+      service_bus_client.send_message(message)
+      assignment.instrument("status_message_sent", status_sent: event_type_to_send)
+      GitHub.dogstats.increment("send_vss_status_message_job", tags: ["perform:performed"])
+    end
+  end
+
+  def locking_key
+    "#{LOCK_KEY_PREFIX}:#{arguments.first[:assignment].id}"
+  end
+
+  private
+
+  def service_bus_client
+    azure_environment = GitHub::Azure::AzureEnvironmentSelector.get_environment
+    token_provider_settings = GitHub::Azure::ActiveDirectoryServiceSettings.get_settings(azure_environment)
+    token_provider_settings.token_audience = AZURE_SERVICE_BUS_TOKEN_AUDIENCE
+    token_provider = GitHub::Azure::ApplicationTokenProvider.new(
+      GitHub.licensing_azure_spn_tenant_id,
+      GitHub.licensing_azure_spn_client_id,
+      GitHub.licensing_azure_spn_client_secret,
+      token_provider_settings
+    )
+
+    @service_bus_client ||= GitHub::AzureServiceBus::QueueClient.new(
+      queue_name: STATUS_QUEUE,
+      namespace: GitHub.vss_service_bus_namespace,
+      token_provider: token_provider
+    )
+  end
+end

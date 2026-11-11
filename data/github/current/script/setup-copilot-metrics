@@ -1,0 +1,297 @@
+#!/usr/bin/env safe-ruby
+# frozen_string_literal: true
+
+# Script to enable Copilot metrics in development
+#
+# This script automates the setup of Copilot metrics/insights in a development environment.
+# It performs the following actions:
+#   1. Enables Copilot for the specified business (default: github-inc), if a business is used
+#   2. Enables Copilot for the specified organization (default: github)
+#   3. Assigns a Copilot seat to the specified user (default: monalisa)
+#   4. Enables Copilot metrics/insights policies (telemetry aggregation and insights)
+#
+# The business is optional: this script also supports a standalone organization that is
+# not associated with any business. To set up a standalone org, choose to customize and
+# leave the business prompt blank (or type 'none').
+#
+# Usage:
+#   script/setup-copilot-metrics
+#
+# Press Enter to use defaults (business: github-inc, org: github, user: monalisa),
+# or type 'c' to customize the business ID, org login, and user ID.
+
+require_relative "#{Rails.root}/config/environment"
+require_relative "#{Rails.root}/script/seeds/objects"
+
+unless Rails.env.development?
+  raise "This is a dev-only script"
+end
+
+class SetupCopilotMetrics
+  DEFAULT_BUSINESS_SLUG = "github-inc"
+  DEFAULT_USER_LOGIN = "monalisa"
+  DEFAULT_ORG_LOGIN = "github"
+
+  def self.call
+    setup = new
+    setup.run
+  end
+
+  def run
+    puts "\n#{colorize('Setup Copilot Metrics', :green)}"
+    puts "=" * 50
+
+    puts "\nThis script will:"
+    puts "  1. Enable Copilot for a business (optional — skipped for a standalone org)"
+    puts "  2. Enable Copilot for an organization"
+    puts "  3. Assign a Copilot seat to a user"
+    puts "  4. Enable Copilot metrics/insights policies"
+
+    puts "\nDefaults: business=#{DEFAULT_BUSINESS_SLUG}, org=#{DEFAULT_ORG_LOGIN}, user=#{DEFAULT_USER_LOGIN}"
+    print "\nPress Enter to use defaults, or type 'c' to customize: "
+    response = ($stdin.gets || "").chomp.downcase
+
+    if response == "c"
+      business_input = prompt_for_value("Business (slug or ID, blank or 'none' for standalone org)", DEFAULT_BUSINESS_SLUG, allow_blank: true)
+      org_input = prompt_for_value("Organization (login or ID)", DEFAULT_ORG_LOGIN)
+      user_input = prompt_for_value("User (login or ID)", DEFAULT_USER_LOGIN)
+    else
+      business_input = DEFAULT_BUSINESS_SLUG
+      org_input = DEFAULT_ORG_LOGIN
+      user_input = DEFAULT_USER_LOGIN
+    end
+
+    # A blank business (or "none") means a standalone organization not associated with a business
+    standalone = business_input.empty? || business_input.casecmp?("none")
+
+    # Fetch the business by slug or ID (skipped for standalone orgs)
+    @business = nil
+    unless standalone
+      @business = if business_input.match?(/\A\d+\z/)
+        ::Business.find_by(id: business_input.to_i)
+      else
+        ::Business.find_by(slug: business_input)
+      end
+      unless @business
+        puts colorize("Error: Business '#{business_input}' not found", :red)
+        exit 1
+      end
+    end
+
+    # Fetch the user by login or ID
+    @user = if user_input.match?(/\A\d+\z/)
+      ::User.find_by(id: user_input.to_i)
+    else
+      ::User.find_by_login(user_input)
+    end
+    unless @user
+      puts colorize("Error: User '#{user_input}' not found", :red)
+      exit 1
+    end
+
+    # Fetch the organization by login or ID
+    org_scope = @business ? @business.organizations : ::Organization
+    @organization = if org_input.match?(/\A\d+\z/)
+      org_scope.find_by(id: org_input.to_i)
+    else
+      org_scope.find_by_login(org_input)
+    end
+    unless @organization
+      location = @business ? "business '#{@business.slug}'" : "standalone organizations"
+      puts colorize("Error: Organization '#{org_input}' not found in #{location}", :red)
+      exit 1
+    end
+
+    if @business.nil? && @organization.business.present?
+      puts colorize("Error: Organization '#{@organization.login}' belongs to business '#{@organization.business.slug}'. Re-run and specify that business.", :red)
+      exit 1
+    end
+
+    puts "\n#{colorize('Starting setup...', :green)}\n"
+
+    # Step 1: Enable Copilot for the business (skipped for standalone orgs)
+    if @business
+      enable_copilot_for_business
+    else
+      puts "#{colorize('ℹ', :cyan)} Standalone organization (no business) — skipping business setup"
+    end
+
+    # Step 2: Enable Copilot for the organization
+    enable_copilot_for_organization
+
+    # Step 3: Assign Copilot seat to the user
+    assign_copilot_seat
+
+    # Step 4: Enable metrics policies
+    enable_metrics_policies
+
+    puts "\n#{colorize('✓ Copilot metrics setup complete!', :green)}"
+    puts "\nYou can now view Copilot metrics and insights pages in development."
+  end
+
+  private
+
+  def enable_copilot_for_business
+    puts "#{colorize('→', :blue)} Enabling Copilot for business '#{@business.slug}'..."
+
+    copilot_business = Copilot::Business.new(@business)
+
+    # Ensure business is billable in dev by enabling the free billing feature flag
+    unless copilot_business.copilot_billable?
+      Seeds::Objects::FeatureFlag.enable(feature_flag: :copilot_for_business_free, actor: @business)
+      puts "  #{colorize('✓', :green)} Enabled copilot_for_business_free feature flag (billing workaround)"
+    end
+
+    # Enable Copilot for all organizations in the business.
+    # Note: enable_copilot! only works for standalone (licensing) businesses.
+    # For enterprise businesses, use enable_copilot_for_all_organizations! instead.
+    if copilot_business.copilot_enabled?
+      puts "  #{colorize('ℹ', :cyan)} Copilot already enabled for business"
+    else
+      copilot_business.enable_copilot_for_all_organizations!
+      puts "  #{colorize('✓', :green)} Copilot enabled for business (all organizations)"
+    end
+
+    # Enable telemetry aggregation (metrics collection)
+    if copilot_business.telemetry_aggregation_enabled?
+      puts "  #{colorize('ℹ', :cyan)} Telemetry aggregation already enabled for business"
+    else
+      copilot_business.telemetry_aggregation_enabled!
+      puts "  #{colorize('✓', :green)} Telemetry aggregation enabled for business"
+    end
+
+    # Enable insights policy
+    if copilot_business.insights_enabled?
+      puts "  #{colorize('ℹ', :cyan)} Insights already enabled for business"
+    else
+      copilot_business.insights_enabled!
+      puts "  #{colorize('✓', :green)} Insights enabled for business"
+    end
+  end
+
+  def enable_copilot_for_organization
+    puts "\n#{colorize('→', :blue)} Enabling Copilot for organization '#{@organization.login}'..."
+
+    copilot_org = Copilot::Organization.new(@organization)
+
+    # For a standalone org (no business), the org itself is the billable entity.
+    # Enable the free billing feature flag on the org so it is billable in dev.
+    if @business.nil? && !copilot_org.copilot_billable?
+      Seeds::Objects::FeatureFlag.enable(feature_flag: :copilot_for_business_free, actor: @organization)
+      puts "  #{colorize('✓', :green)} Enabled copilot_for_business_free feature flag for organization (billing workaround)"
+    end
+
+    # Enable Copilot if not already enabled
+    if copilot_org.copilot_enabled?
+      puts "  #{colorize('ℹ', :cyan)} Copilot already enabled for organization"
+    else
+      # Pass nil as actor since this is a dev script
+      copilot_org.enable_copilot!(nil)
+      puts "  #{colorize('✓', :green)} Copilot enabled for organization"
+    end
+
+    # Enable telemetry aggregation for org
+    if copilot_org.telemetry_aggregation_enabled?
+      puts "  #{colorize('ℹ', :cyan)} Telemetry aggregation already enabled for organization"
+    else
+      copilot_org.telemetry_aggregation_enabled!
+      puts "  #{colorize('✓', :green)} Telemetry aggregation enabled for organization"
+    end
+
+    # Enable insights for org — use force: true to bypass inheritance check
+    if copilot_org.insights_enabled?
+      puts "  #{colorize('ℹ', :cyan)} Insights already enabled for organization"
+    else
+      copilot_org.insights_enabled!(force: true)
+      puts "  #{colorize('✓', :green)} Insights enabled for organization"
+    end
+  end
+
+  def assign_copilot_seat
+    puts "\n#{colorize('→', :blue)} Assigning Copilot seat to user '#{@user.login}'..."
+
+    copilot_org = Copilot::Organization.new(@organization)
+
+    # Ensure seat management allows assignments
+    if copilot_org.seat_management_setting == "disabled"
+      copilot_org.seat_management_selected_teams_and_users!
+      puts "  #{colorize('✓', :green)} Seat management set to selected teams and users"
+    end
+
+    # Ensure user is a member of the organization (required for seat assignment)
+    unless @organization.member?(@user)
+      @organization.add_member(@user)
+      puts "  #{colorize('✓', :green)} Added user as member of organization"
+    end
+
+    # Check if user already has a seat
+    if copilot_org.has_seat_for?(@user)
+      puts "  #{colorize('ℹ', :cyan)} User already has a Copilot seat"
+      return
+    end
+
+    # Assign seat to the user through the organization
+    assigning_user = @organization.admins.first
+    unless assigning_user
+      puts "  #{colorize('!', :red)} No organization admin found to assign seat"
+      return
+    end
+
+    result = copilot_org.assign([@user], assigning_user)
+    if result.ok?
+      if copilot_org.has_seat_for?(@user)
+        puts "  #{colorize('✓', :green)} Copilot seat assigned to user"
+      else
+        puts "  #{colorize('!', :yellow)} Assignment returned ok but seat not found — user may need to accept org invite"
+      end
+    else
+      puts "  #{colorize('!', :red)} Failed to assign seat: #{result.error}"
+    end
+  end
+
+  def enable_metrics_policies
+    puts "\n#{colorize('→', :blue)} Verifying metrics policies..."
+
+    copilot_business = @business ? Copilot::Business.new(@business) : nil
+    copilot_org = Copilot::Organization.new(@organization)
+
+    # The telemetry_aggregation and insights policies should already be enabled
+    # from previous steps, so just confirm they're set
+
+    business_telemetry_ok = copilot_business.nil? || copilot_business.telemetry_aggregation_enabled?
+    if business_telemetry_ok && copilot_org.telemetry_aggregation_enabled?
+      puts "  #{colorize('✓', :green)} Metrics collection policies enabled"
+    else
+      puts "  #{colorize('!', :yellow)} Warning: Metrics policies may not be fully enabled"
+    end
+
+    business_insights_ok = copilot_business.nil? || copilot_business.insights_enabled?
+    if business_insights_ok && copilot_org.insights_enabled?
+      puts "  #{colorize('✓', :green)} Insights policies enabled"
+    else
+      puts "  #{colorize('!', :yellow)} Warning: Insights policies may not be fully enabled"
+    end
+  end
+
+  def prompt_for_value(message, default, allow_blank: false)
+    suffix = allow_blank ? "" : " [#{default}]"
+    print "  #{message}#{suffix}: "
+    response = ($stdin.gets || "").chomp
+    return response if allow_blank
+    response.empty? ? default.to_s : response
+  end
+
+  def colorize(text, color)
+    color_codes = {
+      red: "\e[31m",
+      green: "\e[32m",
+      yellow: "\e[33m",
+      blue: "\e[34m",
+      cyan: "\e[36m",
+      reset: "\e[0m"
+    }
+    "#{color_codes[color]}#{text}#{color_codes[:reset]}"
+  end
+end
+
+SetupCopilotMetrics.call

@@ -1,0 +1,2 @@
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[23343],{513394(s,i,a){a.r(i);var e=a(331635),t=a(651135);class u extends HTMLElement{openDialog(){this.statusDialog.showModal()}}(0,e.Cg)([t.aC],u.prototype,"statusDialog",void 0),u=(0,e.Cg)([(0,t.p_)("user-drawer-side-panel")],u),a.d(i,{UserDrawerSidePanelElement:()=>u})}}]);
+//# sourceMappingURL=chunk-23343-1795562b35383ce3-48342e1cec7fe91e.js.map

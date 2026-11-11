@@ -1,0 +1,59 @@
+name: "Test Copilot Coding Agent Sandbox"
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_nwo:
+        description: "Sandbox-opted repository owner/name to test"
+        required: false
+        type: string
+  schedule:
+    # Run separately from the real integration workflow so sandbox failures do
+    # not block or alert on the existing production canaries.
+    - cron: "7 * * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  define-sandbox-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      sandbox_matrix: ${{ steps.set-matrix.outputs.sandbox_matrix }}
+    steps:
+      - id: set-matrix
+        shell: bash
+        env:
+          REPO_NWO: ${{ inputs.repo_nwo || vars.CCA_SANDBOX_TESTING_REPO_NWO || 'github/cca-automated-testing-sandbox' }}
+        run: |
+          # Only `dotcom` is currently exercised against the sandbox, so the
+          # token is referenced directly below instead of via dynamic
+          # `secrets[...]` indexing, which avoids exposing every org/repo
+          # secret to the runner (see CodeQL "Excessive Secrets Exposure").
+          sandbox_matrix='[
+            {"name":"dotcom","capi_base_url":"https://api.githubcopilot.com","github_api_url":"https://api.github.com","github_server_url":"https://github.com","repo_nwo":"'"${REPO_NWO}"'"}
+          ]'
+          {
+            echo 'sandbox_matrix<<EOF'
+            echo "$sandbox_matrix"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+  sandbox-job-api-test:
+    needs: define-sandbox-matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        stamp: ${{ fromJSON(needs.define-sandbox-matrix.outputs.sandbox_matrix) }}
+    uses: ./.github/workflows/integration_test_job_api.yml
+    secrets:
+      token: ${{ secrets.CCA_TESTING_TOKEN }}
+    with:
+      repo_nwo: ${{ matrix.stamp.repo_nwo }}
+      reporting_id: sandbox-job-api-${{ matrix.stamp.name }}
+      capi_base_url: ${{ matrix.stamp.capi_base_url }}
+      github_api_url: ${{ matrix.stamp.github_api_url }}
+      github_server_url: ${{ matrix.stamp.github_server_url }}
+      stamp: ${{ matrix.stamp.name }}
+      stagger_delay_seconds: 0
+      notify_datadog: false

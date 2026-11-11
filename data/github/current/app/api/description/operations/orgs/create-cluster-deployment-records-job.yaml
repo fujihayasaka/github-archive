@@ -1,0 +1,190 @@
+---
+summary: 'Create a cluster deployment records job'
+description: |-
+    Create a background job to set deployment records for a given cluster.
+    Performs validation and permission checks synchronously, returning rejected
+    deployments immediately, then enqueues a background job for the actual
+    deployment updates. Use the companion GET endpoint to poll for job status.
+tags:
+  - orgs
+operationId: orgs/create-cluster-deployment-records-job
+
+externalDocs:
+  description: API method documentation
+  url: '${externalDocsUrl}/rest/orgs/artifact-metadata#create-a-cluster-deployment-records-job'
+
+x-github-internal:
+  path: /orgs/{org}/artifacts/metadata/deployment-record/cluster/{cluster}/jobs
+  http-method: post
+  published: false
+  owner: '@github/package-security'
+
+x-github-releases:
+  - api.github.com
+  - ghec
+
+parameters:
+  - $ref: '../../components/parameters/org.yaml'
+  - name: cluster
+    in: path
+    description: The cluster name.
+    required: true
+    schema:
+      type: string
+      minLength: 1
+      maxLength: 128
+      pattern: '^[a-zA-Z0-9._-]+$'
+
+requestBody:
+  required: true
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          logical_environment:
+            type: string
+            description: The stage of the deployment.
+            minLength: 1
+            maxLength: 128
+          physical_environment:
+            type: string
+            description: The physical region of the deployment.
+            maxLength: 128
+          deployments:
+            type: array
+            description: The list of deployments to record.
+            maxItems: 3000
+            items:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: The name of the artifact.
+                  minLength: 1
+                  maxLength: 256
+                digest:
+                  type: string
+                  description: The hex encoded digest of the artifact.
+                  minLength: 71
+                  maxLength: 71
+                  pattern: '^sha256:[a-f0-9]{64}$'
+                version:
+                  type: string
+                  description: The artifact version.
+                  maxLength: 100
+                  x-multi-segment: true
+                  example: 1.2.3
+                status:
+                  type: string
+                  description: The deployment status of the artifact.
+                  default: deployed
+                  enum:
+                    - deployed
+                    - decommissioned
+                deployment_name:
+                  type: string
+                  description: |
+                    The unique identifier for the deployment represented by the new record.
+                  minLength: 1
+                  maxLength: 256
+                github_repository:
+                  type: string
+                  description: |-
+                    The name of the GitHub repository associated with the artifact.
+                  maxLength: 100
+                  pattern: '^[A-Za-z0-9.\-_]+$'
+                  example: my-github-repo
+                tags:
+                  type: object
+                  description: Key-value pairs to tag the deployment record.
+                  additionalProperties:
+                    type: string
+                runtime_risks:
+                  type: array
+                  description: A list of runtime risks associated with the deployment.
+                  maxItems: 4
+                  uniqueItems: true
+                  items:
+                    type: string
+                    enum:
+                      - critical-resource
+                      - internet-exposed
+                      - lateral-movement
+                      - sensitive-data
+              required:
+                - name
+                - deployment_name
+                - digest
+        required:
+          - logical_environment
+          - deployments
+      examples:
+        default:
+          value:
+            logical_environment: prod
+            physical_environment: pacific-east
+            deployments:
+              - name: awesome-image
+                digest: sha256:1bb1e949e55dcefc6353e7b36c8897d2a107d8e8dca49d4e3c0ea8493fc0bc72
+                version: 2.1.0
+                status: deployed
+                deployment_name: deployment-pod
+                tags:
+                  owning-team: platform
+                runtime_risks:
+                  - sensitive-data
+
+responses:
+  '202':
+    description: |
+      Job created successfully. Authorized deployments will be processed in the background.
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            job_id:
+              description: The ID of the created job.
+              type: integer
+            errors:
+              description: Deployments that were rejected during authorization.
+              type: array
+              items:
+                type: object
+          required:
+            - job_id
+        examples:
+          default:
+            value:
+              job_id: 123
+  '400':
+    description: Bad Request
+    content:
+      application/json:
+        schema:
+          $ref: '../../components/schemas/basic-error.yaml'
+  '403':
+    description: Forbidden
+    content:
+      application/json:
+        schema:
+          $ref: '../../components/schemas/basic-error.yaml'
+  '404':
+    description: Resource not found
+    content:
+      application/json:
+        schema:
+          $ref: '../../components/schemas/basic-error.yaml'
+  '409':
+    description: A job is already in progress for this cluster.
+    content:
+      application/json:
+        schema:
+          $ref: '../../components/schemas/basic-error.yaml'
+
+x-github:
+  githubCloudOnly: false
+  enabledForGitHubApps: true
+  category: orgs
+  subcategory: artifact-metadata

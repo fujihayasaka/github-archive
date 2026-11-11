@@ -1,0 +1,127 @@
+<h3>Reindex</h3>
+<% job_enabled = ReindexUserRecordsJob.enabled_for_user?(this_user.id) %>
+
+<% if job_enabled %>
+  <% job = ReindexUserRecordsJob.stats(this_user.id) %>
+  <% past_tense = {
+    start: "started",
+    pause: "paused",
+    resume: "resumed",
+    reset: "reset",
+    update_workers: "updated workers",
+    complete: "completed",
+  } %>
+
+  <% if job.last_action.present? && job.last_action_at.present? %>
+    <p>
+      Last <%= past_tense[job.last_action] || job.last_action.to_s.humanize.downcase %> at <%= job.last_action_at %>.
+    </p>
+  <% end %>
+
+  <% if job.started_at.blank? %>
+    <p>Full reindex not started.</p>
+    <p>
+      Starting a full reindex will immediately recalculate the user's primary language, and refresh the user's search record.
+      Additionally the following related records will be reindexed in asynchronous background jobs which can be monitored on this page:
+      <ul style="margin: 0.5rem 0 0.5rem 1.5rem; padding: 0; list-style-type: disc;">
+      <% ReindexUserRecordsJob::JOB_CONFIGS.values.each do |config| %>
+        <li><%= config[:slug] %></li>
+      <% end %>
+      </ul>
+      This may take a while to complete, but can be paused and resumed as needed.
+    </p>
+    <%= form_tag stafftools_user_search_record_reindex_request_path, method: :post do %>
+      <%= render Primer::Beta::Button.new(type: :submit, test_selector: "stafftools-user-search-record-reindex-button") do %>
+        Start full reindex
+      <% end %>
+    <% end %>
+
+  <% elsif job.paused? || job.active? %>
+    <p>
+      Started <%= job.started_at %>. Overall completion: <%= job.overall_completion_percentage.round(1) %>%.
+      Elapsed time: <%= job.readable_elapsed %>.
+      <% if job.active? && job.eta.present? %> ETA: <%= job.eta %>.<% end %>
+    </p>
+
+    <p style="margin: 0 0 12px;">
+      <%= render Primer::Beta::Link.new(href: request.fullpath, underline: true) do %>Refresh<% end %> for updated progress. This page does not reload automatically.
+    </p>
+
+    <div style="display: flex; justify-content: flex-end; margin-bottom: 12px;">
+      <% if job.paused? %>
+        <div style="text-align: right;">
+          <%= form_tag stafftools_user_search_record_reindex_request_path, method: :patch do %>
+            <%= hidden_field_tag :reindex_action, "reset" %>
+            <%= render Primer::Beta::Button.new(type: :submit, scheme: :danger) do %>Reset<% end %>
+          <% end %>
+          <p style="margin: 8px 0 0;">Clear all job state. Pending changes will be lost. Completed changes will persist.</p>
+        </div>
+      <% else %>
+        <div style="text-align: right;">
+          <%= form_tag stafftools_user_search_record_reindex_request_path, method: :patch do %>
+            <%= hidden_field_tag :reindex_action, "pause" %>
+            <%= render Primer::Beta::Button.new(type: :submit) do %>Pause<% end %>
+          <% end %>
+          <p style="margin: 8px 0 0;">Job can be resumed later.</p>
+        </div>
+      <% end %>
+    </div>
+
+    <% if job.worker_adjustment_available? %>
+    <p style="margin: 0 0 12px; font-style: italic;">This repair is taking a while. If this is urgent, you may adjust worker counts for slow-running jobs. Max per sub-job: 10 workers.</p>
+    <% end %>
+
+    <%= form_tag stafftools_user_search_record_reindex_request_path, method: :patch, id: "update-workers-form" do %>
+      <%= hidden_field_tag :reindex_action, job.paused? ? "resume" : "update_workers" %>
+      <ul style="margin: 0; padding-left: 0;">
+        <% job.jobs.each do |j| %>
+          <% worker_count = j[:workers].to_i.positive? ? j[:workers].to_i : 1 %>
+          <li style="list-style: none; margin-bottom: 8px;">
+            <div style="display: grid; grid-template-columns: minmax(280px, 1fr) 64px 320px 70px 90px; column-gap: 8px; align-items: center;">
+              <strong><%= j[:slug] %></strong>
+              <% if j[:progress].present? %>
+                <span style="text-align: right;"><%= j[:progress] %>%</span>
+                <div style="background: #eee; height: 16px; border-radius: 4px; overflow: hidden;">
+                  <div style="background: #2da44e; width: <%= j[:progress] %>%; height: 100%;"></div>
+                </div>
+                <% if j[:progress] < 100 && job.worker_adjustment_available? %>
+                  <%= label_tag "workers[#{j[:facet]}]", "Workers", style: "text-align: right;" %>
+                  <%= number_field_tag "workers[#{j[:facet]}]", worker_count, min: 1, max: 10, style: "width: 84px;" %>
+                <% end %>
+              <% else %>
+                <span style="grid-column: 2 / -1;">Progress unavailable for non-Elastomer sub-jobs</span>
+              <% end %>
+            </div>
+          </li>
+        <% end %>
+      </ul>
+    <% end %>
+
+    <% if job.worker_adjustment_available? %>
+    <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
+      <%= render Primer::Beta::Button.new(type: :submit, form: "update-workers-form") do %>
+        <%= job.paused? ? "Update workers and resume" : "Update workers" %>
+      <% end %>
+    </div>
+    <% end %>
+  <% else %>
+    <p>
+      Elapsed time: <%= job.readable_elapsed %>.
+    </p>
+    <%= form_tag stafftools_user_search_record_reindex_request_path, method: :patch do %>
+      <%= hidden_field_tag :reindex_action, "reset" %>
+      <%= render Primer::Beta::Button.new(type: :submit, scheme: :danger) do %>Reset<% end %>
+    <% end %>
+  <% end %>
+<% else %>
+  <%= form_tag stafftools_user_search_record_reindex_request_path do %>
+    <%= render Primer::Beta::Button.new(
+      type: :submit,
+      float: :right,
+      test_selector: "stafftools-user-search-record-reindex-button",
+    ) do %>
+      Reindex user
+    <% end %>
+  <% end %>
+  <p>Recalculate user's primary language, and reindex user for global search.</p>
+<% end %>

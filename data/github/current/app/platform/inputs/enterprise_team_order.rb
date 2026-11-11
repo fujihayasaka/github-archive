@@ -1,0 +1,15 @@
+# typed: true
+# frozen_string_literal: true
+
+module Platform
+  module Inputs
+    class EnterpriseTeamOrder < Platform::Inputs::Base
+      docs_category :enterprise_admin
+      description "Ordering options for enterprise team connections."
+      docs_category :enterprise_admin
+
+      argument :field, Enums::EnterpriseTeamOrderField, "The field to order enterprise teams by.", required: true
+      argument :direction, Enums::OrderDirection, "The ordering direction.", required: true
+    end
+  end
+end

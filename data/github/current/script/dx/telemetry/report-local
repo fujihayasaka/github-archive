@@ -1,0 +1,101 @@
+#!/bin/bash
+# Lightweight metrics reporter for local devcontainers — no Datadog required.
+#
+# Posts structured JSON as issue comments to github/local-devcontainer-usage.
+# Each user gets one issue (created on first use); subsequent metrics are comments.
+#
+# Usage:
+#   script/dx/telemetry/report-local <metric_name> <value> [tags...]
+#
+# Arguments:
+#   metric_name  Metric name (e.g. "dx.monolith.bootstrap.time")
+#   value        Numeric value to report
+#   tags...      Additional tags in "key:value" format
+#
+# Environment:
+#   GITHUB_USER   Used to identify the per-user issue. Defaults to `gh` whoami.
+#   GITHUB_TOKEN  Required for API access. Skips silently if unset.
+#
+# Examples:
+#   script/dx/telemetry/report-local "dx.monolith.bootstrap.time" 34500
+#   script/dx/telemetry/report-local "dx.monolith.server.start.time" 120 "result:success"
+
+# Fail fast internally, but never fail the caller.
+set -euo pipefail
+trap 'exit 0' ERR
+
+REPO="github/local-devcontainer-usage"
+CACHE_FILE="/workspaces/github/tmp/local-metrics-issue-number"
+
+metric="$1"
+value="$2"
+[[ -z "$metric" || -z "$value" ]] && exit 0
+shift 2
+
+# Need a token to talk to the API
+[[ -z "${GITHUB_TOKEN:-}" ]] && exit 0
+
+# Resolve user
+user="${GITHUB_USER:-}"
+if [[ -z "$user" ]]; then
+  user=$(gh api user --jq .login 2>/dev/null) || exit 0
+fi
+[[ -z "$user" ]] && exit 0
+
+timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+# Build tags array
+tags_json=$(jq -n '$ARGS.positional' --args -- "$@")
+
+# Build the comment body as a JSON code block for easy parsing
+body=$(jq -n \
+  --arg metric "$metric" \
+  --argjson value "$value" \
+  --arg timestamp "$timestamp" \
+  --arg user "$user" \
+  --arg devcontainer "local-macos-arm64" \
+  --argjson tags "$tags_json" \
+  '{metric: $metric, value: $value, timestamp: $timestamp, user: $user, devcontainer: $devcontainer, tags: $tags}')
+
+comment_body=$(printf '```json\n%s\n```' "$body")
+
+# Find or create the per-user issue
+issue_number=""
+
+# Check cache first
+if [[ -f "$CACHE_FILE" ]]; then
+  issue_number=$(cat "$CACHE_FILE" 2>/dev/null)
+  # Verify it still exists
+  if [[ -n "$issue_number" ]]; then
+    status=$(gh api "repos/${REPO}/issues/${issue_number}" --jq .state 2>/dev/null)
+    if [[ "$status" != "open" ]]; then
+      issue_number=""
+      rm -f "$CACHE_FILE"
+    fi
+  fi
+fi
+
+# Search for existing issue
+if [[ -z "$issue_number" ]]; then
+  issue_number=$(gh api "repos/${REPO}/issues?state=open&creator=${user}&per_page=100" \
+    --jq '.[] | select(.title == "Local devcontainer metrics") | .number' 2>/dev/null | head -1)
+fi
+
+# Create issue if none found
+if [[ -z "$issue_number" ]]; then
+  issue_number=$(gh api "repos/${REPO}/issues" \
+    -f title="Local devcontainer metrics" \
+    -f body="Automated metrics collection for local devcontainer usage by \`@${user}\`." \
+    --jq .number 2>/dev/null)
+fi
+
+[[ -z "$issue_number" ]] && exit 0
+
+# Cache for next time
+mkdir -p "$(dirname "$CACHE_FILE")"
+echo "$issue_number" > "$CACHE_FILE"
+
+# Post the comment
+gh api "repos/${REPO}/issues/${issue_number}/comments" \
+  -f body="$comment_body" \
+  --silent 2>/dev/null || true

@@ -1,0 +1,58 @@
+<% page_info(
+  canonical_url: request.original_url,
+  container_xl: true,
+  page_type: "marketing",
+) %>
+
+<% content_for :preloads do %>
+  <% if !logged_in? %>
+    <%= javascript_preload_tag('global-banner-disable.js') %>
+  <% end %>
+
+  <link rel="preload" href="<%= static_asset_path(mktg_default_font_path) %>" as="font" type="font/woff2" crossorigin>
+<% end %>
+
+<% content_for :head do %>
+  <meta name="is_logged_out_page" content="true">
+
+  <%= render "site/alternative_links" if @show_alternative_links %>
+<% end %>
+
+<% content_for :content do %>
+  <main class="font-mktg <%= 'preview-indicator-label' if @contentful_preview %>" <%= marketing_page_color_mode_attributes %>>
+    <%= yield %>
+  </main>
+<% end %>
+
+<% unless GitHub.single_or_multi_tenant_enterprise? %>
+  <% unless rendering_error_page? && logged_in? %>
+    <% content_for :site_footer do %>
+      <% if FeatureFlag.vexi.enabled?(:site_marketing_footer_react, current_user, default: false) %>
+        <%= render_react_partial name: "marketing-footer", props: AppShell::MarketingFooterPayload.new(
+          current_user: current_user,
+          cookie_consent_enabled: @cookie_consent_enabled,
+          color_mode: marketing_footer_color_mode,
+          current_locale: @locale,
+          can_toggle_site_admin_and_employee_status: can_toggle_site_admin_and_employee_status?,
+          is_admin_mode_on: site_admin? || employee?,
+          show_ui_opt_out: ui_service_opt_out_enabled?,
+          is_ui_opted_out: ui_opted_out?,
+        ).payload %>
+      <% else %>
+        <%= render "site/footer_marketing", cookie_consent_enabled: @cookie_consent_enabled, locale: @locale %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% content_for :site_analytics do %>
+    <% if @cookie_consent_enabled && @microsoft_analytics_enabled %>
+      <microsoft-analytics>
+        <% if content_for?(:microsoft_analytics_addition) %>
+          <%= yield :microsoft_analytics_addition %>
+        <% end %>
+      </microsoft-analytics>
+    <% end %>
+  <% end %>
+<% end %>
+
+<%= render template: "layouts/application" %>

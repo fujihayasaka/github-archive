@@ -1,0 +1,2 @@
+performance.mark("js-parse-end:webgl-globe-da29eabc5bd78c51.js");
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[22011],{944198(u,i,h){h(383138)}},function(u){u.O(0,[50815],function(){return u(u.s=944198)}),u.O()}]);

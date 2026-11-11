@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# Script to analyze feature flag ages by examining git history
+# This script extracts feature flags from internal/featureflags/client.go
+# and determines when each flag was introduced
+
+set -euo pipefail
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+FEATURE_FLAGS_FILE="internal/featureflags/client.go"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+echo "🔍 Analyzing feature flag ages..."
+echo ""
+
+# Check if the file exists
+if [[ ! -f "${REPO_ROOT}/${FEATURE_FLAGS_FILE}" ]]; then
+  echo -e "${RED}Error: ${FEATURE_FLAGS_FILE} not found${NC}" >&2
+  exit 1
+fi
+
+# Extract feature flag constant names and their string values from the const block
+# The format is: ConstantName = "flag_string_name"
+# We need both the constant name and the flag string value
+# Store as "const_name|flag_value" pairs in a regular array (bash 3.2 compatible)
+declare -a flag_pairs=()
+while IFS= read -r line; do
+  # Match lines like: CopilotSWEAgentXYZ = "copilot_swe_agent_xyz" // comment
+  if [[ $line =~ ^[[:space:]]*([A-Z][a-zA-Z0-9]*)[[:space:]]*=[[:space:]]*\"([^\"]+)\" ]]; then
+    const_name="${BASH_REMATCH[1]}"
+    flag_value="${BASH_REMATCH[2]}"
+    flag_pairs+=("${const_name}|${flag_value}")
+  fi
+done < <(sed -n '/^const (/,/^)/p' "${REPO_ROOT}/${FEATURE_FLAGS_FILE}")
+
+if [[ ${#flag_pairs[@]} -eq 0 ]]; then
+  echo -e "${RED}Error: No feature flags found in ${FEATURE_FLAGS_FILE}${NC}" >&2
+  exit 1
+fi
+
+echo "Found ${#flag_pairs[@]} feature flags"
+echo ""
+
+# Calculate date 3 months ago for comparison
+THREE_MONTHS_AGO=$(date -v-3m +%s 2>/dev/null || date -d '3 months ago' +%s 2>/dev/null || echo "")
+
+# Array to store results
+declare -a results=()
+declare -a stale_flags=()
+
+# Analyze each feature flag
+for pair in "${flag_pairs[@]}"; do
+  # Split the pair back into const_name and flag_value
+  IFS='|' read -r const_name flag_value <<< "$pair"
+  
+  # Find the first commit that introduced this constant name
+  # We search for the constant name in the feature flags file
+  first_commit=$(git log --all --format="%H" --diff-filter=A --follow -S "$const_name" -- "$FEATURE_FLAGS_FILE" | tail -1)
+  
+  # If not found via -S, try finding when the line was added
+  if [[ -z "$first_commit" ]]; then
+    first_commit=$(git log --all --format="%H" --follow -- "$FEATURE_FLAGS_FILE" | while read commit; do
+      if git show "$commit:$FEATURE_FLAGS_FILE" 2>/dev/null | grep -q "$const_name"; then
+        echo "$commit"
+      fi
+    done | tail -1)
+  fi
+  
+  if [[ -n "$first_commit" ]]; then
+    # Get commit details
+    commit_date=$(git show -s --format=%ci "$first_commit")
+    commit_date_short=$(git show -s --format=%cs "$first_commit")
+    commit_author=$(git show -s --format=%an "$first_commit")
+    commit_subject=$(git show -s --format=%s "$first_commit")
+    commit_timestamp=$(git show -s --format=%ct "$first_commit")
+    
+    # Calculate age in days and months
+    current_timestamp=$(date +%s)
+    age_seconds=$((current_timestamp - commit_timestamp))
+    age_days=$((age_seconds / 86400))
+    age_months=$((age_days / 30))
+    
+    # Determine if stale (older than 3 months)
+    is_stale="NO"
+    if [[ -n "$THREE_MONTHS_AGO" ]] && [[ $commit_timestamp -lt $THREE_MONTHS_AGO ]]; then
+      is_stale="YES"
+      stale_flags+=("$const_name")
+    fi
+    
+    # Store result
+    result="- **${const_name}** (\`${flag_value}\`): Introduced ${commit_date_short} by ${commit_author} (${age_months} months ago) - Commit: ${first_commit:0:8} - ${is_stale}"
+    results+=("$result")
+    
+  else
+    result="- **${const_name}** (\`${flag_value}\`): Unable to determine introduction date"
+    results+=("$result")
+  fi
+done
+
+# Sort results alphabetically by flag name
+IFS=$'\n' sorted_results=($(sort <<<"${results[*]}"))
+unset IFS
+
+# Output results
+echo "## Feature Flag Age Analysis"
+echo ""
+echo "Analysis Date: $(date -u +%Y-%m-%d)"
+echo "Total Feature Flags: ${#flag_pairs[@]}"
+echo "Stale Flags (>3 months): ${#stale_flags[@]}"
+echo ""
+echo "### All Feature Flags (sorted alphabetically)"
+echo ""
+
+for result in "${sorted_results[@]}"; do
+  echo "$result"
+done
+
+# Output stale flags summary
+if [[ ${#stale_flags[@]} -gt 0 ]]; then
+  echo ""
+  echo "### Stale Feature Flags (>3 months old)"
+  echo ""
+  for flag in "${stale_flags[@]}"; do
+    echo "- ${flag}"
+  done
+fi
+
+echo ""
+echo -e "${GREEN}✓ Analysis complete${NC}"

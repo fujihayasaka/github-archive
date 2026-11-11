@@ -1,0 +1,44 @@
+<% if actions_workflow_filtering_enabled? %>
+<% included_branches = workflow_filter_included(workflow_run_filters, :branch) %>
+<% excluded_branches = workflow_filter_excluded(workflow_run_filters, :branch) %>
+<% sorted_branches = branches.sort_by do |b|
+  [included_branches.include?(b[:name]) ? 0 : excluded_branches.include?(b[:name]) ? 1 : 2, b[:default] ? 0 : 1, b[:name]]
+end %>
+<%= render(Primer::Alpha::SelectPanel::ItemList.new(
+  menu_id: "actions_branch_filter",
+  select_variant: :multiple,
+  aria: { label: "branches" },
+)) do |list| %>
+  <% sorted_branches.each do |branch| %>
+    <% is_included = included_branches.include?(branch[:name]) %>
+    <% is_excluded = excluded_branches.include?(branch[:name]) %>
+    <% list.with_item(
+      label: branch[:name],
+      content_arguments: { data: { value: branch[:name], excluded: is_excluded || nil } },
+      active: is_included) do |item| %>
+      <% if branch[:default] %>
+        <% item.with_trailing_visual_label.with_content("Default") %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>
+<% else %>
+<%= render(Primer::Alpha::SelectPanel::ItemList.new(
+  menu_id: "actions_branch_filter",
+  select_variant: :single,
+  aria: { label: "branches" },
+)) do |list| %>
+  <% branches.each do |branch| %>
+    <% selected = workflow_run_filters[:branch] == branch[:name] %>
+    <% list.with_item(
+      label: branch[:name],
+      data: { value: branch[:name] },
+      href: filtered_runs_by_file_path(filters: workflow_run_filters, replace: { branch: !selected ? branch[:name] : nil }, filename: selected_filename, lab: is_lab),
+      active: selected) do |item| %>
+      <% if branch[:default] %>
+        <% item.with_trailing_visual_label.with_content("Default") %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>
+<% end %>

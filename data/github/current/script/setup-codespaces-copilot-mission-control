@@ -1,0 +1,87 @@
+#!/bin/bash
+set -e
+
+# This script sets up the github/copilot-mission-control repository for a github/github codespace.
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+ORANGE='\033[0;33m'
+NC='\033[0m' # No Color
+
+# Function to print help message
+help() {
+   echo "Sets up the github/copilot-mission-control repository for a github/github codespace."
+   echo
+   echo "Usage: setup-codespaces-copilot-mission-control [-b branch] [-d|h] "
+   echo "Options:"
+   echo "-d     Before starting, delete the existing copilot-mission-control directory in the codespace."
+   echo "-w     Add the copilot-mission-control repo as a workspace in VS Code."
+   echo "-b     Specify a branch to clone (default: main)."
+   echo "-h     Print this help message."
+   echo
+}
+
+BRANCH=main
+
+# Get the options
+while getopts ":hdwb:" opt; do
+   case $opt in
+      h) # display help message
+         help
+         exit;;
+      d) # Delete the repository if it exists
+         DELETE_REPO=true;;
+      w) # Add the repository as a workspace in VS Code
+         ADD_TO_WORKSPACE=true;;
+      b) # If a branch was provided, re-set the variable
+         BRANCH=$OPTARG;;
+     :)
+      echo -e "${RED}Error: Option -$OPTARG requires an argument."
+      exit 1;;
+     \?) # Invalid option
+         echo -e "${RED}Error: Invalid option -$OPTARG"
+         exit 1;;
+   esac
+done
+
+# If the copilot-mission-control repo already exists (e.g., from a prebuild) and
+# the delete argument hasn't been specified, skip the clone. If binaries are
+# present (go build -o is atomic — presence confirms successful compilation),
+# also skip the build.
+if [[ -d "/workspaces/copilot-mission-control/.git" && -z "$DELETE_REPO" ]]; then
+  if [[ -x "/workspaces/copilot-mission-control/bin/rest" && \
+        -x "/workspaces/copilot-mission-control/bin/streaming" && \
+        -x "/workspaces/copilot-mission-control/bin/twirp" ]]; then
+    echo -e "${GREEN}✅ copilot-mission-control already cloned and built (prebuild). Skipping.${NC}"
+  else
+    echo -e "${GREEN}copilot-mission-control cloned but not fully built. Building...${NC}"
+    ( cd /workspaces/copilot-mission-control ; make build; )
+  fi
+elif [[ -d "/workspaces/copilot-mission-control" && ! -d "/workspaces/copilot-mission-control/.git" && -z "$DELETE_REPO" ]]; then
+  echo -e "${RED}The copilot-mission-control directory exists but is not a git repository.${NC}\nYou can rerun the setup script with the -d argument to force the deletion and re-clone."
+  exit 1
+else
+  if [ "$DELETE_REPO" = true ]; then
+    echo -e "\n${GREEN}➡️ Deleting the existing copilot-mission-control repo...\n${NC}"
+    rm -rf /workspaces/copilot-mission-control
+  fi
+
+  # Do a shallow clone of copilot-mission-control to the same dir as the github/github repo.
+  # If a branch was supplied, use that branch for the clone.
+  echo -e "\n${GREEN}➡️ Cloning copilot-mission-control repo...\n${NC}"
+  git clone https://github.com/github/copilot-mission-control /workspaces/copilot-mission-control --branch $BRANCH
+
+  # Bootstrap copilot-mission-control
+  echo -e "\n${GREEN}➡️ Bootstrapping copilot-mission-control...\n${NC}"
+  ( cd /workspaces/copilot-mission-control ; make build; )
+fi
+
+# Add the copilot-mission-control repo as a workspace in VS Code
+if [ "$ADD_TO_WORKSPACE" = true ]; then
+   echo -e "\n${GREEN}➡️ Adding copilot-mission-control to VS Code workspace...\n${NC}"
+   code --add /workspaces/copilot-mission-control
+fi
+
+echo -e ""
+echo -e "${GREEN}🎉🎉 FINISHED! The copilot-mission-control repo has been set up! 🎉🎉${NC}"
+echo -e ""

@@ -1,0 +1,126 @@
+<%
+  trial_heading = case with_param
+    when "code-security" then "Trial Code Security"
+    when "secret-protection" then "Trial Secret Protection"
+    else "Trial GitHub Advanced Security"
+  end
+
+  page_info(
+    title: "#{trial_heading} — #{business.display_login}",
+    full_height: true,
+  )
+%>
+
+<%# Hide the signup layout's mobile gradient header since this page doesn't use the left panel %>
+<style>.signups-rebrand__container-mobile-head { display: none !important; }</style>
+<div class="d-flex flex-justify-center tmp-p-4 tmp-p-lg-6">
+<div class="width-full" style="max-width: 540px;">
+  <div class="tmp-mb-3">
+    <%= render(Primer::Beta::Link.new(
+      href: get_started_with_path(with: with_param),
+      muted: true,
+      underline: false
+    )) do %>
+      <%= render(Primer::Beta::Octicon.new(icon: :"arrow-left", mr: 1)) %>
+      Back
+    <% end %>
+  </div>
+
+  <div class="d-flex flex-items-center tmp-mb-3">
+    <%= render GitHub::AvatarComponent.new(actor: business, size: 24, mr: 2) %>
+    <span class="f5 color-fg-muted text-bold"><%= business.display_login %></span>
+  </div>
+
+  <h1 class="h1 tmp-mb-3"><%= trial_heading %></h1>
+
+  <div class="color-fg-muted f5 tmp-mb-4">
+    <% if with_param == "code-security" %>
+      <p class="tmp-mb-3">
+        Try Code Security for free across every organization in this enterprise. Secret Protection is included to explore during your trial.
+      </p>
+      <p>
+        Your <%= trial_days %>-day trial runs until you purchase Code Security or it expires.
+      </p>
+    <% elsif with_param == "secret-protection" %>
+      <p class="tmp-mb-3">
+        Try Secret Protection for free across every organization in this enterprise. Code Security is included to explore during your trial.
+      </p>
+      <p>
+        Your <%= trial_days %>-day trial runs until you purchase Secret Protection or it expires.
+      </p>
+    <% else %>
+      <p class="tmp-mb-3">
+        Try Advanced Security for free across every organization in this enterprise, including Secret Protection and Code Security.
+      </p>
+      <p>
+        Your <%= trial_days %>-day trial runs until you purchase Advanced Security or it expires.
+      </p>
+    <% end %>
+  </div>
+
+  <%= form_with url: trial_post_path, method: :post, id: "start-trial-form" do |f| %>
+    <%= hidden_field_tag :error_return_to, error_return_to %>
+
+    <% if orgs.any? %>
+      <div class="tmp-mb-4">
+        <p class="f5 text-bold tmp-mb-2">You'll be redirected to the following organization to get started with your trial:</p>
+        <%= render(Primer::Alpha::ActionMenu.new(
+          select_variant: :single,
+          dynamic_label: true,
+          form_arguments: { builder: f, name: "org" }
+        )) do |menu| %>
+          <% menu.with_show_button(scheme: :default, block: true) do |button| %>
+            <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+            <%= pre_selected_org&.display_login || "Select an organization" %>
+          <% end %>
+          <% orgs.each do |org| %>
+            <% menu.with_avatar_item(
+              src: avatar_url_for(org),
+              username: org.display_login,
+              label: org.display_login,
+              value: org.display_login,
+              active: pre_selected_org && org.id == pre_selected_org.id,
+            ) %>
+          <% end %>
+        <% end %>
+      </div>
+    <% else %>
+      <%= hidden_field_tag :return_to, no_orgs_return_to %>
+      <p class="f5 text-bold tmp-mb-4">After starting your trial, you'll be redirected to your enterprise's security settings.</p>
+    <% end %>
+
+    <div class="d-flex flex-column">
+      <%= render(Primer::Beta::Button.new(
+        type: :submit,
+        scheme: :primary,
+        block: true,
+        test_selector: "start-trial-button",
+        data: analytics_click_attributes(
+          category: "get_started_advanced_security_trial",
+          action: "click_start_trial",
+          label: "ref_cta:start_trial;ref_loc:get_started_trial_page;enterprise:#{business.slug}"
+        )
+      )) do %>
+        Start trial
+      <% end %>
+
+      <% if show_skip_to_enable %>
+        <%= render(Primer::Beta::Button.new(
+          tag: :a,
+          href: settings_security_analysis_enterprise_path(business),
+          scheme: :invisible,
+          block: true,
+          test_selector: "skip-to-enable-button",
+          data: analytics_click_attributes(
+            category: "get_started_advanced_security_trial",
+            action: "click_skip_to_enable",
+            label: "ref_cta:skip_to_enable;ref_loc:get_started_trial_page;enterprise:#{business.slug}"
+          )
+        )) do %>
+          Skip to enable
+        <% end %>
+      <% end %>
+    </div>
+  <% end %>
+</div>
+</div>

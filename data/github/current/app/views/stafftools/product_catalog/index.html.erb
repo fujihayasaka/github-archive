@@ -1,0 +1,180 @@
+<% page_info \
+  title: "Product Catalog",
+  container_xl: true
+%>
+
+<%= render layout: "stafftools/stafftools" do %>
+  <%= render Primer::Beta::Subhead.new do |component| %>
+    <% component.with_heading(tag: :h2) do %>Product Catalog<% end %>
+    <% component.with_description do %>
+      Manage ProductUUID records that represent products synced to Zuora and Billing Platform
+    <% end %>
+  <% end %>
+
+  <div class="tmp-mb-3 d-flex flex-items-center">
+    <div class="mr-2">
+      <%= render Primer::Alpha::Dropdown.new(with_caret: true) do |component| %>
+        <% component.with_button { "Type: #{type_filter_options.find { |o| o[:value] == type_filter }&.dig(:label) || 'All'}" } %>
+        <% component.with_menu do |menu| %>
+          <% type_filter_options.each do |option| %>
+            <% menu.with_item(tag: :a, selected: type_filter == option[:value], href: stafftools_product_catalog_index_path(type_filter: option[:value], metered_filter: metered_filter)) { option[:label] } %>
+          <% end %>
+        <% end %>
+      <% end %>
+    </div>
+
+    <div>
+      <%= render Primer::Alpha::Dropdown.new(with_caret: true) do |component| %>
+        <% component.with_button { "Billing: #{metered_filter_options.find { |o| o[:value] == metered_filter }&.dig(:label) || 'All'}" } %>
+        <% component.with_menu do |menu| %>
+          <% metered_filter_options.each do |option| %>
+            <% menu.with_item(tag: :a, selected: metered_filter == option[:value], href: stafftools_product_catalog_index_path(type_filter: type_filter, metered_filter: option[:value])) { option[:label] } %>
+          <% end %>
+        <% end %>
+      <% end %>
+    </div>
+  </div>
+
+  <% if product_uuids.any? %>
+    <%
+      # Group by product_type and metered status, then by product_key
+      grouped_products = product_uuids
+        .group_by { |p| [p.product_type, p.metered?] }
+        .sort_by { |(type, metered), _| [type, metered ? 0 : 1] }
+    %>
+
+    <% grouped_products.each do |(product_type, is_metered), type_products| %>
+      <%= render Primer::Beta::BorderBox.new(classes: "tmp-mb-3") do |component| %>
+        <% component.with_header(classes: "d-flex flex-items-center") do %>
+          <div class="flex-1">
+            <h3 class="f4 mb-0">
+              <% if product_type == "github.coupon" %>
+                <%= render Primer::Beta::Octicon.new(:tag) %>
+              <% elsif is_metered %>
+                <%= render Primer::Beta::Octicon.new(:meter) %>
+              <% elsif Billing::ProductUUID::SPONSORS_PRODUCT_TYPES.include?(product_type) %>
+                <%= render Primer::Beta::Octicon.new(:heart) %>
+              <% elsif product_type == Billing::ProductUUID::MARKETPLACE_PRODUCT_TYPE %>
+                <%= render Primer::Beta::Octicon.new(:package) %>
+              <% else %>
+                <%= render Primer::Beta::Octicon.new(:database) %>
+              <% end %>
+              <code class="ml-2"><%= product_type %></code>
+              <span class="ml-2">
+                <% if product_type == "github.coupon" %>
+                  <%= render Primer::Beta::Label.new(scheme: :sponsors) do %>
+                    Coupon
+                  <% end %>
+                <% elsif is_metered %>
+                  <%= render Primer::Beta::Label.new(scheme: :accent) do %>
+                    Metered
+                  <% end %>
+                <% else %>
+                  <%= render Primer::Beta::Label.new(scheme: :info) do %>
+                    Non-Metered
+                  <% end %>
+                <% end %>
+              </span>
+            </h3>
+          </div>
+          <div class="color-fg-muted text-small">
+            <%= type_products.group_by(&:product_key).size %> product<%= type_products.group_by(&:product_key).size == 1 ? '' : 's' %>
+          </div>
+        <% end %>
+
+        <% type_products.group_by(&:product_key).sort_by { |key, _| key }.each do |product_key, key_products| %>
+          <% first_product = key_products.first %>
+          <%
+            # Determine Zuora sync status
+            has_product_id = first_product.zuora_product_id.present?
+            has_rate_plan_id = first_product.zuora_product_rate_plan_id.present?
+            has_charge_ids = first_product.zuora_product_rate_plan_charge_ids.present? && first_product.zuora_product_rate_plan_charge_ids.any?
+
+            zuora_refs_count = [has_product_id, has_rate_plan_id, has_charge_ids].count(true)
+
+            if zuora_refs_count == 3
+              zuora_status = :full
+              zuora_label = "Zuora Synced"
+              zuora_icon = "check-circle"
+              zuora_color = :success
+            elsif zuora_refs_count > 0
+              zuora_status = :partial
+              zuora_label = "Zuora Partial"
+              zuora_icon = "alert"
+              zuora_color = :attention
+            else
+              zuora_status = :none
+              zuora_label = "No Zuora"
+              zuora_icon = :"x-circle"
+              zuora_color = :danger
+            end
+          %>
+          <% component.with_row(display: :flex, align_items: :flex_start) do %>
+            <div class="flex-1">
+              <div class="d-flex flex-items-center mb-2">
+                <strong class="flex-1"><%= link_to first_product.name.presence || "(unnamed)", stafftools_product_catalog_path(first_product), class: "Link--primary" %></strong>
+
+                <div class="d-flex flex-items-center">
+
+
+                  <%= render Primer::Beta::Label.new(scheme: zuora_color, mr: 1) do %>
+                    <%= render Primer::Beta::Octicon.new(zuora_icon, size: :xsmall) %> <%= zuora_label %>
+                  <% end %>
+
+                  <% if metered_filter == "metered" && first_product.metered? %>
+                    <% bp_product = billing_platform_products&.dig(product_key) %>
+                    <% if bp_product %>
+
+                      <%= render Primer::Beta::Label.new(scheme: :success) do %>
+                        <%= render Primer::Beta::Octicon.new(:sync, size: :xsmall) %> BP Synced
+                      <% end %>
+                    <% else %>
+                      <%= render Primer::Beta::Label.new(scheme: :secondary) do %>
+                        <%= render Primer::Beta::Octicon.new(:dash, size: :xsmall) %> BP Not Found
+                      <% end %>
+                    <% end %>
+                  <% end %>
+                </div>
+              </div>
+
+              <div class="text-small color-fg-muted mb-2">
+                <span class="text-bold">Product Key:</span> <code class="mr-2"><%= product_key %></code>
+              </div>
+
+              <div class="d-flex flex-wrap flex-items-center">
+                <% key_products.sort_by(&:billing_cycle).each do |product| %>
+                  <div class="tmp-mr-3 mb-2 d-flex flex-items-center">
+                    <%= link_to stafftools_product_catalog_path(product), class: "mr-1" do %>
+                      <%= render Primer::Beta::Label.new(scheme: :primary) do %>
+                        <%= render Primer::Beta::Octicon.new(:calendar, size: :xsmall) %>
+                        <%= product.billing_cycle %>
+                      <% end %>
+                    <% end %>
+                    <% if product.charges.any? %>
+                      <% product_charge = product.charges.first %>
+                      <span class="text-small text-bold">
+                        <%= number_to_currency(product_charge.price) %>
+                        <% if product_charge.unit_of_measure.present? %>
+                          / <%= product_charge.unit_of_measure %>
+                        <% end %>
+                      </span>
+                    <% end %>
+                  </div>
+                <% end %>
+              </div>
+            </div>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <div class="paginate-container">
+      <%= will_paginate product_uuids, renderer: WillPaginateRenderer %>
+    </div>
+  <% else %>
+    <div class="blankslate">
+      <h3 class="blankslate-heading">No products found</h3>
+      <p>There are no product metadata records matching the selected filters.</p>
+    </div>
+  <% end %>
+<% end %>

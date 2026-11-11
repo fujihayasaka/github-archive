@@ -1,0 +1,2 @@
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[72063],{799074(t,a,s){s.r(a);var i=s(331635),u=s(651135);class e extends HTMLElement{static attrPrefix="";showFallbackSmsModal(){this.button.hasAttribute("data-sudo-required")||document.getElementsByClassName("fallback-configure")[0].click()}}(0,i.Cg)([u.aC],e.prototype,"button",void 0),(0,i.Cg)([(0,u.p_)("two-factor-fallback-sms-config-toggle")],e)}}]);
+//# sourceMappingURL=chunk-72063-42dad0ae1e6e461a-2e7a21bbc4a9bda8.js.map

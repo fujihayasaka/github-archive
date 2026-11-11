@@ -1,0 +1,103 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unicorn
+  annotations:
+    moda.github.net/canary-replicas: "5"
+    moda.github.net/allow-missing-ready-pods: "2"
+    moda.github.net/cluster-preferences: |
+      {
+        "dotcom-1-ash1-iad": {
+          "spec": {
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "unicorn",
+                    "env": [
+                      {
+                        "name": "LOCAL_WRITE_V2",
+                        "value": "true"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "dotcom-7-ac4-iad": {
+          "spec": {
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "unicorn",
+                    "env": [
+                      {
+                        "name": "DATADOG_MONKEY_PATCH_SENDER_ENABLED",
+                        "value": "1"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+
+spec:
+  selector:
+    matchLabels:
+      service: unicorn-lowprio
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 15%
+  template:
+    metadata:
+      labels:
+        service: unicorn-lowprio
+        sidecar.istio.io/inject: "true"
+        istio.io/rev: stable
+    spec:
+      dnsPolicy: ClusterFirst
+      containers:
+        - name: nginx
+        - name: voltron
+        - name: unicorn
+          resources:
+            requests:
+              cpu: 6
+            limits:
+              memory: 30Gi
+          env:
+            - name: KUBE_DEPLOYMENT_NAME
+              value: unicorn-lowprio
+            - name: DEFAULT_REQUEST_TIMEOUT
+              value: "8"
+            - name: AZURE_FEDERATED_TOKEN_FILE_SHORT
+              value: /var/run/secrets/azure-msft/token
+            - name: MEMCACHED_PROXY_ENABLED
+              value: "true"
+            - name: MEMCACHED_HTMLPIPELINE_SERVERS
+              value: "memcachedproxy.memcached-proxy-production.svc.cluster.local:11213"
+            - name: MEMCACHED_USERCONTENT_SERVERS
+              value: "memcachedproxy.memcached-proxy-production.svc.cluster.local:11214"
+            - name: MEMCACHED_GLOBAL_SERVERS
+              value: "memcachedproxy.memcached-proxy-production.svc.cluster.local:11211"
+            - name: MEMCACHED_RYOW_SERVERS
+              value: "memcachedproxy.memcached-proxy-production.svc.cluster.local:11215"
+          volumeMounts:
+            - name: azure-federated-token-msft
+              mountPath: /var/run/secrets/azure-msft
+              readOnly: true
+      volumes:
+        - name: azure-federated-token-msft
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 86400
+                  audience: api://AzureADTokenExchange

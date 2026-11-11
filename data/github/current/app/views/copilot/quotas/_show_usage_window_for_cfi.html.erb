@@ -1,0 +1,48 @@
+<%= render(Primer::Beta::BorderBox.new(padding: :default, )) do |component| %>
+  <%= component.with_header(scheme: :warning) do |header| %>
+    <% header.with_title(tag: :h2) do %>
+      AI Credits Usage
+    <% end %>
+  <% end %>
+
+  <% interval_snapshots = copilot_user.interval_snapshots %>
+  <% if interval_snapshots.any? %>
+    <% interval_snapshots.each do |feature, details| %>
+      <%= component.with_row(scheme: :default) do %>
+        <div class="d-flex flex-column" style="width: 100%;">
+          <span class="text-bold mb-1"><%= feature.titleize %></span>
+          <span class="color-fg-muted f6 mb-1">Percent remaining</span>
+          <% pct = details[:percent_remaining].to_f %>
+          <% bar_color = pct > 50 ? "color-bg-success-emphasis" : (pct >= 20 ? "color-bg-attention-emphasis" : "color-bg-danger-emphasis") %>
+          <div class="d-flex flex-items-center mb-1" style="width: 100%;">
+            <div class="rounded-2 overflow-hidden mr-2" style="flex: 1; height: 8px; background: var(--bgColor-neutral-muted, var(--color-neutral-muted));">
+              <div class="<%= bar_color %> rounded-2" style="width: <%= [pct, 100].min %>%; height: 100%;"></div>
+            </div>
+            <span class="f6 text-bold" style="min-width: 45px; text-align: right;"><%= format("%.1f%%", pct) %></span>
+          </div>
+          <% if details[:quota_reset_at].is_a?(Integer) && details[:quota_reset_at] > 0 %>
+            <span class="color-fg-muted f6">Resets at: <%= Time.at(details[:quota_reset_at]).utc.strftime("%Y-%m-%d %H:%M UTC") %></span>
+          <% end %>
+        </div>
+      <% end %>
+    <% end %>
+
+    <%= component.with_row(scheme: :default) do %>
+      <%= primer_form_with(url: copilot_quota_update_path(this_user), method: :put) do |f| %>
+        <%= render(Primer::Alpha::TextField.new(hidden: true, label: "", name: "mode", value: "reset_usage_intervals")) %>
+        <p class="mb-2 color-fg-muted">
+          Reset the immediate (5h) and extended (7d) usage interval counters. This will clear all accumulated usage and restart the windows.
+        </p>
+        <%= render Primer::Beta::Button.new(scheme: :danger, type: :submit, display: :inline, mt: 2, "aria-label": "Reset Usage Intervals") do %>
+          Reset Usage Intervals
+        <% end %>
+      <% end %>
+    <% end %>
+  <% elsif copilot_user.consumptive_user? && copilot_user.use_token_based_billing? %>
+    <%= component.with_row(scheme: :default) do %>
+      <div class="d-flex flex-items-center">
+        <span class="color-fg-muted">No usage interval data available at this time. Try refreshing the page in a few moments.</span>
+      </div>
+    <% end %>
+  <% end %>
+<% end %>

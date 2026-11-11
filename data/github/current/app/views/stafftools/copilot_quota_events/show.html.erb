@@ -1,0 +1,125 @@
+<%
+  page_info(title: "#{ this_user } / copilot quota events", selected_link: :stafftools_user_copilot_quota_events)
+%>
+
+<div class="site-admin-subhead ruleless">
+  <h2 class="site-admin-subhead-heading">Broadcast Copilot QuotaEvent</h2>
+  <p class="color-fg-muted">
+    Publish a real <code>copilot.v0.QuotaEvent</code> to Hydro for <strong><%= this_user.display_login %></strong>.
+    The Copilot Limiter's Aqueduct worker will consume and process this event through the normal pipeline.
+  </p>
+</div>
+
+<%= render(Primer::Beta::BorderBox.new(classes: "tmp-mb-4")) do |component| %>
+  <% component.with_header do %>
+    <h3 class="f4">User Info (auto-populated)</h3>
+  <% end %>
+  <% component.with_row do %>
+    <div class="d-flex flex-justify-between flex-items-center">
+      <strong>Copilot Tracking ID</strong>
+      <code><%= copilot_tracking_id %></code>
+    </div>
+  <% end %>
+  <% component.with_row do %>
+    <div class="d-flex flex-justify-between flex-items-center">
+      <strong>GitHub User ID</strong>
+      <code><%= user.id %></code>
+    </div>
+  <% end %>
+  <% component.with_row do %>
+    <div class="d-flex flex-justify-between flex-items-center">
+      <strong>Copilot Access Type</strong>
+      <code><%= copilot_access_type %></code>
+    </div>
+  <% end %>
+<% end %>
+
+<% if target_user_enabled %>
+  <%= render(Primer::Beta::BorderBox.new) do |component| %>
+    <% component.with_header do %>
+      <h3 class="f4">QuotaEvent Configuration</h3>
+    <% end %>
+    <% component.with_body do %>
+      <%= render Primer::Alpha::Banner.new(
+        icon: :alert,
+        scheme: :warning,
+        classes: "tmp-mb-3") do %>
+        <strong>Warning:</strong> This will publish a real QuotaEvent that the Copilot Limiter will process.
+        It will count against the user's quota and may trigger over-quota enforcement.
+      <% end %>
+
+      <%= form_with url: stafftools_user_copilot_quota_events_path(this_user), scope: :quota_event, method: :post, local: true do |f| %>
+        <div class="form-group">
+          <div class="form-group-header">
+            <label for="qe_feature">Feature <span class="color-fg-danger">*</span></label>
+          </div>
+          <div class="form-group-body">
+            <%= f.select :feature,
+                options_for_select([
+                  ["chat", "chat"],
+                  ["completions", "completions"],
+                ], "chat"),
+                {},
+                id: "qe_feature",
+                class: "form-select width-full",
+                required: true,
+                data: { test_selector: "quota_event_feature" } %>
+            <p class="note">
+              The limiter only accepts <code>chat</code> and <code>completions</code> as incoming features.
+              For TBB users on individual SKUs (e.g. CFI), the limiter's chat processor automatically
+              handles interval quota enforcement (immediate + extended) when <code>is_premium</code>
+              and <code>is_token_based_billing</code> are set.
+            </p>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div class="form-group-header">
+            <label for="qe_calculated_tbb_aiu_quantity">Calculated TBB AIU Quantity <span class="color-fg-danger">*</span></label>
+          </div>
+          <div class="form-group-body">
+            <%= f.number_field :calculated_tbb_aiu_quantity,
+                id: "qe_calculated_tbb_aiu_quantity",
+                class: "form-control width-full",
+                value: "1",
+                min: 0,
+                required: true,
+                data: { test_selector: "quota_event_tbb_aiu" } %>
+            <p class="note">TBB AI units. <code>aiu_quantity_nano</code> is auto-calculated (value × 1,000,000,000).</p>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div class="form-group-header">
+            <label for="qe_quota_request_type">Quota Request Type</label>
+          </div>
+          <div class="form-group-body">
+            <%= f.select :quota_request_type,
+                options_for_select([
+                  ["USER_INITIATED", "USER_INITIATED"],
+                  ["SYSTEM_INITIATED", "SYSTEM_INITIATED"],
+                  ["ORG_INITIATED", "ORG_INITIATED"],
+                ], "USER_INITIATED"),
+                {},
+                id: "qe_quota_request_type",
+                class: "form-select width-full",
+                data: { test_selector: "quota_event_request_type" } %>
+            <p class="note">Use SYSTEM_INITIATED to simulate system-generated events (e.g. agent sub-requests).</p>
+          </div>
+        </div>
+
+        <%= f.submit "Broadcast QuotaEvent",
+            class: "btn btn-danger tmp-mt-3",
+            data: { confirm: "Are you sure you want to broadcast a QuotaEvent for #{this_user.display_login}? This will count against their quota.", test_selector: "quota_event_submit" } %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% else %>
+  <%= render Primer::Alpha::Banner.new(
+    icon: :stop,
+    scheme: :danger,
+    classes: "tmp-mt-3") do %>
+    <strong><%= this_user.display_login %></strong> is not enabled for quota event broadcasting.
+    Enable the <code>copilot_limiter_stafftools_broadcast_quota_events</code> feature flag for this user first.
+  <% end %>
+<% end %>

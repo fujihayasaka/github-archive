@@ -1,0 +1,2 @@
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[49330],{470537(t,s,i){i.r(s);var e=i(331635),h=i(651135);class a extends HTMLElement{connectedCallback(){this.showAfterMs=parseInt(this.getAttribute("data-show-after-ms")||"500"),setTimeout(()=>{this.style.display="block"},this.showAfterMs)}}(0,e.Cg)([(0,h.p_)("delayed-loading")],a)}}]);
+//# sourceMappingURL=chunk-49330-9a0487379d273c2f-1536ad87e2cad674.js.map

@@ -1,0 +1,48 @@
+#!/usr/bin/env safe-ruby
+# frozen_string_literal: true
+
+# Seeds the Copilot CLI agent Integration record and updates
+# copilot-mission-control env files with the seeded app ID.
+#
+# Use this for existing codespaces that were set up before CLI agent seeding
+# was added to setup-codespaces-copilot-swe-agent-v2.
+#
+# Usage: script/seed-copilot-cli-agent
+
+require_relative "../config/environment"
+
+unless Rails.env.development?
+  abort "This is a dev-only script"
+end
+
+puts "➡️ Seeding Copilot CLI agent..."
+
+cli = Apps::Privileged::CopilotCLI.seed_database!
+if cli.nil?
+  abort "❌ Failed to seed Copilot CLI agent"
+end
+
+puts "✅ Copilot CLI agent seeded (Integration ID: #{cli.id})"
+
+# Update copilot-mission-control env files with the seeded ID
+mc_env_dir = "/workspaces/copilot-mission-control/.env"
+key = "INTEGRATION_APPLICATION_IDS_COPILOT_DEVELOPER_CLI"
+
+%w[.env.local.rest .env.local.streaming].each do |filename|
+  path = File.join(mc_env_dir, filename)
+  unless File.exist?(path)
+    puts "⚠️  #{filename} not found, skipping"
+    next
+  end
+
+  content = File.read(path)
+  if content.include?("#{key}=")
+    content.gsub!(/^#{Regexp.escape(key)}=.*$/, "#{key}=#{cli.id}")
+    File.write(path, content)
+    puts "✅ Updated #{key}=#{cli.id} in #{filename}"
+  else
+    puts "⚠️  #{key} not found in #{filename}, skipping"
+  end
+end
+
+puts "\n🎉 Done! Restart copilot-mission-control to pick up the new ID."

@@ -1,0 +1,58 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+    name: restart-slow-query-api
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+    name: restart-slow-query-api
+rules:
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  resourceNames: ["slow-query-api"]
+  verbs: ["get", "patch"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+    name: restart-slow-query-api
+subjects:
+- kind: ServiceAccount
+  name: restart-slow-query-api
+roleRef:
+    kind: Role
+    name: restart-slow-query-api
+    apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: restart-slow-query-api
+spec:
+    schedule: "23 * * * *"
+    concurrencyPolicy: Forbid
+    successfulJobsHistoryLimit: 2
+    failedJobsHistoryLimit: 2
+    jobTemplate:
+        spec:
+            activeDeadlineSeconds: 600
+            ttlSecondsAfterFinished: 3600
+            template:
+                metadata:
+                    annotations:
+                        sidecar.istio.io/inject: "false"
+                spec:
+                    dnsPolicy: ClusterFirst
+                    serviceAccountName: restart-slow-query-api
+                    restartPolicy: Never
+                    containers:
+                        - name: restart
+                          image: bitnami/kubectl:latest@sha256:fc4a5171e6c9a379a9dd86d43f851a6247c31ad3b5919e93f13e916820040b0b
+                          command:
+                            - sh
+                            - -c
+                            - kubectl rollout restart deployment/slow-query-api

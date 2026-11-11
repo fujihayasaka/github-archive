@@ -1,0 +1,468 @@
+#!/usr/bin/env safe-ruby
+# frozen_string_literal: true
+
+# Configures a single existing user into an arbitrary Copilot CFI "matrix state" for
+# manually testing the checkout / billing-summary UI:
+#
+#   app/views/copilot/{pro,pro_plus,max}/_billing_summary.html.erb
+#
+# Unlike script/setup-copilot, this script:
+#   * mutates only ONE user
+#   * never truncates tables
+#   * never flips global feature flags
+#   * keeps billing writes local (no Zuora / billing-platform fan-out)
+#
+# Matrix dimensions:
+#   --trust        trusted | neutral | untrusted
+#   --subscription none | pro | pro-plus | max
+#   --coupon       none | percent:<N> | dollar:<N>
+#   --overage      <dollar amount>
+#
+# Examples:
+#   script/setup-copilot-user --subscription pro --overage 12.50
+#   script/setup-copilot-user --subscription pro-plus --coupon percent:30 --coupon-expiry before-renewal
+#   script/setup-copilot-user --login monalisa --trust trusted --subscription max --overage 5
+
+require_relative "#{Rails.root}/config/environment"
+require_relative "seeds/factory_bot_loader"
+require_relative "seeds/runners/billing_product_uuids"
+require "optparse"
+require "logger"
+
+LOGGER = Logger.new($stderr)
+
+unless Rails.env.development?
+  raise "This is a dev-only script"
+end
+
+class SetupCopilotUser
+  TRUST_TIERS = {
+    "trusted" => TrustTiers::Tier::TRUSTED,     # 1
+    "neutral" => TrustTiers::Tier::NEUTRAL,     # 2
+    "untrusted" => TrustTiers::Tier::UNTRUSTED, # 3
+  }.freeze
+
+  # product_key (monthly) for each subscription tier
+  SUBSCRIPTION_PRODUCT_KEYS = {
+    "pro" => Copilot::INDIVIDUAL_PRO_PRODUCT_KEY,           # "v0"
+    "pro-plus" => Copilot::INDIVIDUAL_PRO_PLUS_PRODUCT_KEY, # "pro-plus"
+    "max" => Copilot::INDIVIDUAL_MAX_PRODUCT_KEY,           # "max"
+    "edu" => "edu",                                         # educational complimentary SKU
+  }.freeze
+
+  PLAN_SYM = {
+    "pro" => :pro,
+    "pro-plus" => :pro_plus,
+    "max" => :max,
+    "edu" => :educational,
+  }.freeze
+
+  # EDU access requires both the edu SKU subscription item AND a student coupon redemption.
+  EDUCATIONAL_COUPON_CODE = "student-partner"
+
+  COUPON_CODE_PREFIX = "DEVCFI"
+
+  def initialize(options)
+    @options = options
+  end
+
+  def call
+    user = User.find_by_login(@options[:login])
+    raise "User not found: #{@options[:login]}" unless user
+
+    log("Configuring Copilot matrix state for #{user.login} (id=#{user.id})")
+
+    if @options[:billing] == "none"
+      clear_billing(user)
+    else
+      ensure_billing_account(user)
+      apply_country(user)
+    end
+    apply_trust_tier(user)
+    apply_subscription(user)
+    apply_subscription_expiry(user)
+    apply_coupon(user)
+    apply_overage(user)
+
+    log("Done. Visit the checkout pages, e.g. /github-copilot/signup or /github-copilot/pro_plus/signup")
+  end
+
+  private
+
+  # --- Billing contact / country -------------------------------------------
+
+  # Clears the user's payment method and billing contact so that
+  # has_saved_billing_information? and has_valid_payment_method? are both false,
+  # exercising the checkout UI where no subscribe form is shown yet.
+  def clear_billing(user)
+    user.remove_billing_information(actor: user, skip_validations: true)
+    user.customer_accounts.each(&:destroy!)
+    user.reload
+    log("-> Cleared billing contact and payment method")
+  end
+
+  # Seeds a complete billing contact for the given --country so that
+  # has_saved_billing_information? is true and the country-specific checkout
+  # branches (e.g. the Korea "KR" privacy-agreement dialog) render.
+  def apply_country(user)
+    return unless @options[:country]
+
+    country = @options[:country].upcase
+    contact = user.billing_contact
+    contact.assign_attributes(
+      first_name: contact.first_name.presence || "Mona",
+      last_name: contact.last_name.presence || "Lisa",
+      address1: contact.address1.presence || "123 Octocat St",
+      city: contact.city.presence || "Seoul",
+      region: contact.region.presence || "Seoul",
+      postal_code: contact.postal_code.presence || "04524",
+      country_code: country,
+    )
+    contact.save!(validate: false)
+    log("-> Seeded billing contact with country_code = #{country}")
+  end
+
+  # --- Trust tier ----------------------------------------------------------
+
+  def apply_trust_tier(user)
+    return unless @options[:trust]
+
+    tier = TRUST_TIERS.fetch(@options[:trust])
+    user.settings.set!(:trust_tier, tier.to_s)
+    log("-> Forced trust tier: #{@options[:trust]} (#{tier})")
+  end
+
+  # --- Subscription --------------------------------------------------------
+
+  def ensure_billing_account(user)
+    return if user.customer_account
+
+    log("-> Creating fake credit-card customer account")
+    user.update!(
+      billing_type: "card",
+      customer_account: FactoryBot.create(:credit_card_customer_account, user: user),
+    )
+  end
+
+  def apply_subscription(user)
+    return unless @options[:subscription]
+
+    clear_copilot_subscriptions(user)
+    clear_dev_coupons(user)
+
+    if @options[:subscription] == "none"
+      log("-> Cleared Copilot subscription (none)")
+      return
+    end
+
+    product_key = SUBSCRIPTION_PRODUCT_KEYS.fetch(@options[:subscription])
+    product = ensure_product_uuid(product_key)
+    result = Billing::Public::SubscriptionItem.create(
+      product: product,
+      account: user,
+      actor: user,
+      free_trial_length: 0.days,
+      skip_sync: true,
+    )
+    raise "Failed to create subscription item: #{result.error.message}" unless result.ok?
+
+    # Locally there is no billing backend to settle the purchase, which leaves the item at
+    # quantity 0 (cancelled). Force it active so it shows up as a real subscription.
+    activate_copilot_subscription(user, product_key)
+
+    if @options[:subscription] == "edu"
+      edu_coupon = Coupon.find_by_code(EDUCATIONAL_COUPON_CODE) || Coupon.create!(
+        code: EDUCATIONAL_COUPON_CODE,
+        discount: 1.0,
+        group: "education-org",
+        limit: 9999,
+      )
+      CouponRedemption.for_user(user.id).delete_all
+      user.redeem_coupon(edu_coupon)
+      log("-> Redeemed educational coupon (#{EDUCATIONAL_COUPON_CODE})")
+    end
+
+    log("-> Created #{@options[:subscription]} subscription")
+  end
+
+  def activate_copilot_subscription(user, product_key)
+    user.reload
+    item = user.subscription_items.detect do |subscription_item|
+      subscription_item.subscribable.is_a?(Billing::ProductUUID) &&
+        subscription_item.subscribable.product_type == Copilot::PRODUCT_TYPE &&
+        subscription_item.subscribable.product_key == product_key
+    end
+    return unless item
+    return if item.active?
+
+    item.reactivate!(quantity: 1, skip_sync: true)
+  end
+
+  def clear_copilot_subscriptions(user)
+    items = user.subscription_items.select do |item|
+      item.subscribable.is_a?(Billing::ProductUUID) &&
+        item.subscribable.product_type == Copilot::PRODUCT_TYPE
+    end
+    return if items.empty?
+
+    items.each(&:destroy!)
+    user.reload
+    log("-> Removed #{items.size} existing Copilot subscription item(s)")
+  end
+
+  def ensure_product_uuid(product_key)
+    product = find_copilot_product_uuid(product_key)
+    return product if product
+
+    log("-> Seeding Copilot Billing::ProductUUIDs")
+    Seeds::Runner::BillingProductUUIDs.execute(product_type: "copilot")
+    find_copilot_product_uuid(product_key) ||
+      raise("Could not find or create Copilot ProductUUID for #{product_key}")
+  end
+
+  def find_copilot_product_uuid(product_key)
+    Billing::ProductUUID.find_by(
+      product_type: Copilot::PRODUCT_TYPE,
+      product_key: product_key,
+      billing_cycle: "month",
+    )
+  end
+
+  # --- Subscription expiry (account billing date) --------------------------
+
+  def apply_subscription_expiry(user)
+    return unless @options[:subscription_expires]
+
+    duration = parse_duration(@options[:subscription_expires])
+    billed_on = (Time.zone.now + duration).to_date
+    user.update!(billed_on: billed_on)
+    seed_next_billing_date(user, billed_on)
+    log("-> Account billed_on set to #{billed_on} (in #{@options[:subscription_expires]})")
+  end
+
+  # The checkout / billing-summary reads next_billing_date from the active subscription item's
+  # Zuora rate plan charge (charged_through_date), not from user.billed_on. Locally there's no
+  # Zuora sync to populate that cache, so seed it directly. Writes both the legacy serialized
+  # column and the backing table so it works regardless of the
+  # read_from_zuora_rate_plan_charges_table feature flag.
+  def seed_next_billing_date(user, billed_on)
+    user.reload
+    item = copilot_subscription_item(user)
+    return unless item
+
+    plan_subscription = item.plan_subscription
+    charge = item.subscribable.charges.first
+    return unless plan_subscription && charge
+
+    charge_id = charge.zuora_product_rate_plan_charge_id
+    number = "C-DEV#{user.id}"
+
+    # Legacy serialized column (read when read_from_zuora_rate_plan_charges_table is off).
+    plan_subscription.update!(
+      zuora_rate_plan_charges: { charge_id => { number: number, charged_through_date: billed_on } },
+    )
+
+    # Backing table (read when the flag is on).
+    record = plan_subscription.subscription_rate_plan_charges
+      .find_or_initialize_by(product_rate_plan_charge_id: charge_id)
+    record.payload = {
+      "id" => SecureRandom.alphanumeric(32),
+      "number" => number,
+      "productRatePlanChargeId" => charge_id,
+      "type" => "Recurring",
+      "billingPeriod" => "Month",
+      "effectiveStartDate" => Date.today.to_s,
+      "processedThroughDate" => Date.today.to_s,
+      "chargedThroughDate" => billed_on.to_s,
+    }
+    record.save!
+
+    log("-> Seeded next_billing_date = #{billed_on} on subscription item ##{item.id}")
+  end
+
+  def copilot_subscription_item(user)
+    user.subscription_items.detect do |item|
+      item.subscribable.is_a?(Billing::ProductUUID) &&
+        item.subscribable.product_type == Copilot::PRODUCT_TYPE &&
+        item.active?
+    end
+  end
+
+  # --- Coupon --------------------------------------------------------------
+
+  def apply_coupon(user)
+    return unless @options[:coupon]
+
+    clear_dev_coupons(user)
+
+    if @options[:coupon] == "none"
+      log("-> Cleared Copilot coupon (none)")
+      return
+    end
+
+    kind, raw_amount = @options[:coupon].split(":", 2)
+    amount = raw_amount.to_f
+    raise "Invalid coupon spec: #{@options[:coupon]}" if amount <= 0
+
+    # Coupon#discount: a fraction (< 1) is a percentage, a whole number is a fixed dollar amount.
+    discount = case kind
+    when "percent" then amount / 100.0
+    when "dollar" then amount
+    else raise "Unknown coupon kind: #{kind} (use percent:<N> or dollar:<N>)"
+    end
+
+    product_key = coupon_target_product_key(user)
+    coupon = create_dev_coupon(discount: discount, product_key: product_key)
+    redeem_dev_coupon(user, coupon)
+
+    log("-> Applied #{kind}:#{raw_amount} coupon targeting #{product_key}")
+  end
+
+  # The coupon should target the plan whose checkout page is being tested. Defaults to the
+  # explicit --coupon-product, then the --subscription tier, then the user's current tier.
+  def coupon_target_product_key(user)
+    if @options[:coupon_product]
+      return SUBSCRIPTION_PRODUCT_KEYS.fetch(@options[:coupon_product])
+    end
+
+    if @options[:subscription] && @options[:subscription] != "none"
+      return SUBSCRIPTION_PRODUCT_KEYS.fetch(@options[:subscription])
+    end
+
+    copilot_user = Copilot::User.new(user)
+    case
+    when copilot_user.has_max_access? then Copilot::INDIVIDUAL_MAX_PRODUCT_KEY
+    when copilot_user.has_pro_plus_access? then Copilot::INDIVIDUAL_PRO_PLUS_PRODUCT_KEY
+    else Copilot::INDIVIDUAL_PRO_PRODUCT_KEY
+    end
+  end
+
+  def create_dev_coupon(discount:, product_key:)
+    ensure_product_uuid(product_key)
+
+    # A finite duration makes Coupon#will_expire? true so the checkout UI renders an end date.
+    code = "#{COUPON_CODE_PREFIX}-#{SecureRandom.hex(4)}"
+    coupon = FactoryBot.create(
+      :coupon,
+      :unsynced,
+      code: code,
+      discount: discount,
+      duration: 30,
+      group: "internal",
+    )
+    CouponProductTarget.create!(
+      coupon: coupon,
+      product_type: Copilot::PRODUCT_TYPE,
+      product_key: product_key,
+    )
+    coupon
+  end
+
+  def redeem_dev_coupon(user, coupon)
+    redemption = CouponRedemption.new(
+      coupon: coupon,
+      billable_entity: user,
+      expires_at: coupon_expires_at(user),
+      skip_sync: true,
+    )
+    redemption.save!
+    redemption
+  end
+
+  # before-renewal => coupon ends before the next billing date (next payment shows full price)
+  # after-renewal  => coupon still active at the next billing date (next payment shows discount)
+  # An explicit --coupon-expires SPAN (e.g. 2m) overrides both and sets an absolute end date.
+  def coupon_expires_at(user)
+    if @options[:coupon_expires]
+      return (Date.today + parse_duration(@options[:coupon_expires])).to_time
+    end
+
+    renewal = user.billed_on || (Date.today + 1.month)
+    case @options[:coupon_expiry]
+    when "before-renewal" then (renewal - 3.days).to_time
+    when "after-renewal", nil then (renewal.to_date + 1.month).to_time
+    else raise "Unknown coupon-expiry: #{@options[:coupon_expiry]}"
+    end
+  end
+
+  def clear_dev_coupons(user)
+    redemptions = user.coupon_redemptions.select do |redemption|
+      redemption.coupon&.code.to_s.start_with?(COUPON_CODE_PREFIX)
+    end
+    return if redemptions.empty?
+
+    redemptions.each do |redemption|
+      coupon = redemption.coupon
+      redemption.skip_sync = true
+      redemption.destroy!
+      coupon&.destroy!
+    end
+    user.reload
+    log("-> Removed #{redemptions.size} existing dev coupon(s)")
+  end
+
+  # --- Usage / overage -----------------------------------------------------
+
+  def apply_overage(user)
+    return unless @options[:overage]
+
+    overage = parse_overage(@options[:overage])
+    key = "#{Copilot::QuotaDataHelper::DEV_SPENDING_OVERRIDE_KV_PREFIX}#{user.id}"
+
+    GitHub.kv.set(key, overage.to_s, expires: 1.year.from_now)
+    log("-> Seeded current_overage = $#{format('%.2f', overage)}")
+  end
+
+  # Parses a plain dollar amount like "5" or "12.50".
+  def parse_overage(spec)
+    raise "Invalid overage: #{spec} (use a dollar amount, e.g. 5 or 12.50)" unless spec.match?(/\A\d+(?:\.\d+)?\z/)
+
+    spec.to_f
+  end
+
+  # --- Helpers -------------------------------------------------------------
+
+  # Parses simple timespans like "3d", "2w", "1m", "1y" into an ActiveSupport::Duration.
+  def parse_duration(spec)
+    match = spec.match(/\A(\d+)([dwmy])\z/)
+    raise "Invalid timespan: #{spec} (use e.g. 3d, 2w, 1m, 1y)" unless match
+
+    value = match[1].to_i
+    case match[2]
+    when "d" then value.days
+    when "w" then value.weeks
+    when "m" then value.months
+    when "y" then value.years
+    end
+  end
+
+  def log(message)
+    LOGGER.info(message)
+  end
+end
+
+options = { login: "monalisa" }
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: script/setup-copilot-user [options]"
+  opts.separator ""
+
+  opts.on("--login LOGIN", "User login to configure (default: monalisa)") { |v| options[:login] = v }
+  opts.on("--country CODE", "Billing contact country code, e.g. KR, US (seeds a complete billing contact)") { |v| options[:country] = v }
+  opts.on("--billing STATE", %w[complete none], "Billing/payment info: complete|none (none clears it to test the empty-billing UI)") { |v| options[:billing] = v }
+  opts.on("--trust TIER", %w[trusted neutral untrusted], "Force trust tier: trusted|neutral|untrusted") { |v| options[:trust] = v }
+  opts.on("--subscription TIER", %w[none pro pro-plus max edu], "Subscription: none|pro|pro-plus|max|edu") { |v| options[:subscription] = v }
+  opts.on("--subscription-expires SPAN", "Account renewal in e.g. 3d, 2w, 1m, 1y") { |v| options[:subscription_expires] = v }
+  opts.on("--coupon SPEC", "Coupon: none|percent:<N>|dollar:<N>") { |v| options[:coupon] = v }
+  opts.on("--coupon-product TIER", %w[pro pro-plus max], "Plan the coupon targets: pro|pro-plus|max (default: --subscription tier)") { |v| options[:coupon_product] = v }
+  opts.on("--coupon-expiry WHEN", %w[before-renewal after-renewal], "before-renewal|after-renewal") { |v| options[:coupon_expiry] = v }
+  opts.on("--coupon-expires SPAN", "Absolute coupon end date, e.g. 3d, 2w, 2m, 1y (overrides --coupon-expiry)") { |v| options[:coupon_expires] = v }
+  opts.on("--overage AMOUNT", "Outstanding overage as a dollar amount, e.g. 5 or 12.50") { |v| options[:overage] = v }
+  opts.on_tail("-h", "--help", "Show this message") do
+    puts opts
+    exit
+  end
+end
+parser.parse!(ARGV)
+
+$VERBOSE = nil
+SetupCopilotUser.new(options).call

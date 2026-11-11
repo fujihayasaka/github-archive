@@ -1,0 +1,168 @@
+<% page_info title: "Payment fingerprint #{card_fingerprint}", selected_link: :reused_card_fingerprints %>
+
+<%= render layout: "stafftools/stafftools" do %>
+  <%= render(Primer::Beta::Breadcrumbs.new(classes: "tmp-mb-3")) do |component| %>
+    <% component.with_item(href: stafftools_reused_card_fingerprints_path) do %>
+      Reused card fingerprints
+    <% end %>
+
+    <% component.with_item(href: lookup_stafftools_reused_card_fingerprints_path(card_fingerprint: card_fingerprint)) do %>
+      <%= card_fingerprint %>
+    <% end %>
+  <% end %>
+
+  <%= render Primer::Beta::Subhead.new do |component| %>
+    <% component.with_heading(tag: :h2) do %>
+      Payment fingerprint: <%= card_fingerprint %>
+    <% end %>
+
+    <%= component.with_actions do %>
+      <%= link_to 'View in Spamurai', spamurai_link, class: 'btn' %>
+    <% end %>
+  <% end %>
+
+  <% if blocklisted_payment_method %>
+    <%= render(Primer::Beta::BorderBox.new(border_color: :danger, classes: "tmp-mb-3")) do |component| %>
+      <% component.with_header(border_color: :danger, bg: :danger) do |h| %>
+        <% h.with_title(tag: :h2, color: :danger) do %>
+          <%= primer_octicon(:alert) %>
+          This card fingerprint has been blocked
+        <% end %>
+      <% end %>
+
+      <% component.with_row(border_color: :danger) do %>
+        <p>
+          This card fingerprint was added to the deny list on <strong><%= I18n.l blocklisted_payment_method.created_at %></strong>.
+        </p>
+
+        <p class="tmp-mb-3">
+          When blocking a card fingerprint, all future payments made with that card will be rejected. All customer accounts linked to the card are suspended.
+        </p>
+
+        <%= render Stafftools::Billing::CardFingerprintDialogComponent.new(card_fingerprint:, action: Stafftools::Billing::CardFingerprintDialogComponent::Action::Unblock) %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <div class="boxed-group flush">
+    <h3>
+      Payment methods
+    </h3>
+
+    <% has_blocklisted_payment_method = payment_method_wrappers.any? { |payment_method_wrapper| payment_method_wrapper.blocklisted? }%>
+    <div class="boxed-group-inner seamless">
+      <table class="stafftools-table">
+        <thead>
+          <th class="no-wrap billing-table-cell pr-0">ID</th>
+          <th class="no-wrap billing-table-cell pr-0">Created at</th>
+          <th class="no-wrap billing-table-cell pr-0">Login</th>
+          <th class="no-wrap billing-table-cell pr-0">Customer</th>
+          <th class="no-wrap billing-table-cell pr-0">Payment processor</th>
+          <% if has_blocklisted_payment_method %>
+            <th class="no-wrap billing-table-cell pr-0">Reason</th>
+          <% end %>
+          <th class="no-wrap billing-table-cell pr-0">Notes</th>
+        </thead>
+
+        <tbody>
+          <% payment_method_wrappers.each do |payment_method_wrapper| %>
+            <tr>
+              <td class="no-wrap tiny">
+                <%= payment_method_wrapper.payment_method_id || "N/A" %>
+              </td>
+
+              <td class="no-wrap tiny">
+                <%= payment_method_wrapper.created_at ? time_ago_in_words(payment_method_wrapper.created_at) + " ago" : "Unavailable" %>
+              </td>
+
+              <td class="no-wrap tiny">
+                <% if payment_method_wrapper.owner.is_a?(User) %>
+                  <%= link_to payment_method_wrapper.owner.login, stafftools_user_path(payment_method_wrapper.owner), data: { "test_selector" => "user-pmt-fp-lookup" } %>
+                <% elsif payment_method_wrapper.customer&.business %>
+                  <%= link_to payment_method_wrapper.customer.business.name, stafftools_enterprise_path(payment_method_wrapper.customer.business), data: { "test_selector" => "biz-pmt-fp-lookup" } %>
+                <% end %>
+              </td>
+
+              <td class="no-wrap tiny">
+                <%= payment_method_wrapper.customer.try(:name) %>
+              </td>
+
+              <td class="no-wrap tiny">
+                <%= payment_method_wrapper.payment_processor_type %>
+              </td>
+
+              <% if has_blocklisted_payment_method %>
+                <td class="tiny">
+                  <%= blocklisted_payment_method&.reason || "N/A" %>
+                </td>
+              <% end %>
+
+              <td class="no-wrap tiny">
+                <% if payment_method_wrapper.owner&.suspended? %>
+                  <%= render(Primer::Beta::IconButton.new(icon: :alert, color: :danger, "aria-label": "User has been suspended")) %>
+                <% elsif payment_method_wrapper.manually_reviewed? && payment_method_wrapper.manually_reviewed_by.present? %>
+                  <%= render(
+                    Primer::Beta::IconButton.new(
+                      icon: :verified,
+                      color: :success,
+                      "aria-label": "Payment method manually reviewed by #{payment_method_wrapper.manually_reviewed_by.login} on #{I18n.l payment_method_wrapper.manually_reviewed_at}"
+                    )
+                  ) %>
+                <% end %>
+                <% if payment_method_wrapper.payment_method? %>
+                  <% unless payment_method_wrapper.manually_reviewed? || payment_method_wrapper.owner&.suspended? || blocklisted_payment_method.present? %>
+                    <% payment_method_object = payment_method_wrapper.payment_method %>
+                    <%= form_for(payment_method_object, url: stafftools_manually_review_payment_method_path(payment_method_object), method: :patch) do |f| %>
+                      <%= f.button 'Mark as reviewed', class: 'btn btn-sm' %>
+                    <% end %>
+                  <% end %>
+                <% end %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <% unless blocklisted_payment_method %>
+    <hr>
+
+    <%= render(Primer::Beta::BorderBox.new(border_color: :danger)) do |component| %>
+      <% component.with_header(border_color: :danger, bg: :danger) do |h| %>
+        <% h.with_title(tag: :h2, color: :danger) do %>
+          Add this payment fingerprint to the deny list
+        <% end %>
+      <% end %>
+
+      <% component.with_row(border_color: :danger) do %>
+        <p>
+          Adding this payment fingerprint to the deny list will mean the following will occur:
+        </p>
+
+        <ul class="tmp-pl-4 tmp-mb-4">
+          <li>
+            Prevent future customers from using this card fingerprint as a payment method.
+          </li>
+
+          <li>
+            Suspend and lock billing for all customers already using this card fingerprint.
+          </li>
+        </ul>
+
+        <p>
+          Some things that will need to be manually handled:
+        </p>
+
+        <ul class="tmp-pl-4 tmp-mb-4">
+          <li>
+            Refunds for any customers that have already been charged.
+          </li>
+        </ul>
+
+
+        <%= render Stafftools::Billing::CardFingerprintDialogComponent.new(card_fingerprint:, action: Stafftools::Billing::CardFingerprintDialogComponent::Action::Block) %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

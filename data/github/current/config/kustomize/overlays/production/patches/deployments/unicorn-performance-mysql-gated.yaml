@@ -1,0 +1,122 @@
+# Production-only (dotcom LUC) mysql-gated proxy sidecar for unicorn-performance.
+#
+# Scoped here as a production overlay patch — NOT in
+# base/commonBase/unicorn-performance — so it only lands on the dotcom
+# production deployment. Other consumers of the shared commonBase
+# (e.g. the gc-cus-02 Azure region) are intentionally untouched: the rollout
+# proxies a small, growing set of low-blast-radius readonly connections on the
+# dotcom LUC canary only.
+#
+# The mysql-gated-init container's GH_UNICORN_WORKER_COUNT is a placeholder the
+# `replacements:` rule in overlays/production/kustomization.yaml overwrites with
+# the unicorn container's real worker count at build time.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: UNUSED
+spec:
+  template:
+    metadata:
+      annotations:
+        fluentbit.io/parser-mysql-gated: logfmt_sloppy
+    spec:
+      containers:
+        - name: unicorn
+          volumeMounts:
+            # Proxy-patched database.yml routes artifact_registry_readonly
+            # through the mysql-gated Unix socket; all other connections are
+            # untouched and connect directly to MySQL.
+            - mountPath: /build/config/database.yml
+              name: mysql-gated-config
+              subPath: database.yml
+              readOnly: true
+            - mountPath: /build/tmp/mysql-gated
+              name: mysql-gated-config
+      initContainers:
+        - name: mysql-gated-init
+          image: github
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - exec /build/bin/safe-ruby /build/script/generate-mysql-gated-production-config.rb /build/tmp/mysql-gated
+          env:
+            # Pinning: each frontend pins a dedicated backend (full session
+            # isolation). Keeps backend count at/below the no-proxy baseline and
+            # auto-corrects to a warm pool if flipped to multiplexing. See
+            # mysql-gated#129. PoolMaxIdle/PoolIdleTimeout use the generator's
+            # pinning defaults (1 / 900s).
+            - name: MYSQL_GATED_POOL_MULTIPLEX
+              value: 'false'
+            # Readonly connections proxied in this rollout step (mysql-gated#146);
+            # everything else connects directly to MySQL.
+            - name: MYSQL_GATED_PROXY_ALLOWLIST
+              value: artifact_registry_readonly,signup_flow_readonly,security_overview_analytics_readonly
+            # Mirrored from the unicorn container's GH_UNICORN_WORKER_COUNT by
+            # the `replacements:` rule in kustomization.yaml so it always tracks
+            # the app's real worker count. The generator sizes PoolMaxOpen =
+            # workers × pool_size; the value below is a placeholder kustomize
+            # overwrites at build time.
+            - name: GH_UNICORN_WORKER_COUNT
+              value: 'PLACEHOLDER_REPLACED_BY_KUSTOMIZE'
+          envFrom:
+            - configMapRef:
+                name: application-config
+            - secretRef:
+                name: vault-secrets
+          # Sized for a short-lived Ruby/ERB run (evaluate database.yml, emit
+          # config.json, then exit); CPU bursts to finish fast. Starting estimate
+          # carried over from the proven config; revisit with LUC data.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: mysql-gated-config
+              mountPath: /build/tmp/mysql-gated
+        - name: mysql-gated
+          image: octofactory.service.private-us-east-1.github.net/moda-artifacts-docker/mysql-gated:f39e2f29a1b443de876241e398e5178d53061c43
+          args: ["--config", "/build/tmp/mysql-gated/config.json"]
+          restartPolicy: Always
+          # No CPU limit on purpose: throttling adds latency jitter on a hot
+          # query path. Memory is bounded. Starting estimate from the proven
+          # config; revisit with LUC data.
+          resources:
+            requests:
+              cpu: 50m
+              memory: "96Mi"
+            limits:
+              memory: "256Mi"
+          # Intentionally no startupProbe or readinessProbe: Istio rewrites
+          # every probe to httpGet against istio-proxy, which is not up during
+          # the init phase, so any probe fails and the kubelet kills the
+          # sidecar. mysql-gated binds all listeners within a millisecond of
+          # start while the next init container plus unicorn take minutes to
+          # boot, so there is no realistic race. Crash-restart is handled by
+          # restartPolicy: Always.
+          volumeMounts:
+            - mountPath: /build/tmp/mysql-gated
+              name: mysql-gated-config
+          env:
+            # GOMAXPROCS=2 comes from mysql-gated#55/#71 benchmarks. With a Unix socket
+            # frontend and TCP backend, 2 beat 1/4/default because the proxy is I/O-bound
+            # and needs enough scheduler parallelism to overlap frontend reads with backend
+            # writes. The 50m CPU request is only a scheduling reservation, not a cap; we
+            # intentionally leave CPU unlimited to avoid CFS throttling on the query path.
+            - name: GOMAXPROCS
+              value: '2'
+            - name: GOMEMLIMIT
+              value: '200MiB'
+            - name: MYSQL_GATED_METRICS_STATSD_ADDRESS
+              value: '/var/run/datadog/dsd.socket'
+          envFrom:
+            - configMapRef:
+                name: kube-cluster-metadata
+            - configMapRef:
+                name: observability-config
+      volumes:
+        - name: mysql-gated-config
+          emptyDir: {}

@@ -1,0 +1,118 @@
+# typed: strict
+# frozen_string_literal: true
+
+module Copilot
+  module Billable
+    module IBillable
+      extend T::Helpers
+      interface!
+
+      sig { abstract.returns(T::Boolean) }
+      def copilot_billable?; end
+    end
+
+    extend T::Helpers
+    include GitHub::Memoizer
+    include IBillable
+
+    abstract!
+
+    # 1-second timeout for billing platform calls. Normal P99 is ~762ms (30-day analysis).
+    # If billing is slow, the fail-open behavior activates — the user proceeds with signup
+    # and billing reconciles asynchronously. See github/new-user-experience#1890.
+    BILLING_PLATFORM_TIMEOUT_SECONDS = T.let(1, Integer)
+
+    CopilotBillableResult = T.type_alias do
+      {
+        billable: T::Boolean,
+        reason: Symbol,
+      }
+    end
+
+    sig { override.returns(T::Boolean) }
+    def copilot_billable?
+      copilot_billable_result[:billable]
+    end
+
+    sig { returns(CopilotBillableResult) }
+    def copilot_billable_result
+      return { billable: true, reason: :free } if billable_object.feature_flag_enabled_or_raise?(:copilot_for_business_free) # rubocop:disable GitHub/FeatureManagement/NoVexiActorFeatureFlagEnabledOrRaiseUsage
+      return { billable: true, reason: :proxima } if GitHub.multi_tenant_enterprise?
+
+      billable = billable_object
+
+      # If there is no billable object, we cannot bill
+      return { billable: false, reason: :no_owner } if billable.nil?
+      result = billable.metered_services_billable?(commercial_restriction_feature_type: :copilot, timeout: BILLING_PLATFORM_TIMEOUT_SECONDS)
+
+      GitHub.logger.info(
+        "Checked metered_services_billable",
+        "gh.copilot.metered_services_billable.billable_object" => billable.class.name,
+        "gh.copilot.measured_services_billable.billable_id" =>  billable.id,
+        "gh.copilot.metered_services_billable" => result[:billable],
+        "gh.copilot.metered_services_billable.reason" => result[:reason],
+      )
+
+      # If billable is nil, then an error occurred when retrieving the billable status
+      # In this case, the default behavior is to fail open
+      if result[:billable].nil?
+        { billable: true, reason: result[:reason] }
+      else
+        # The billable value should be non-nil here
+        T.cast(result, CopilotBillableResult)
+      end
+    end
+
+    sig { returns(T::Boolean) }
+    def billed_via_zuora?
+      billable_object.customer&.billing_platform_billing_target == BillingPlatform::Api::V1::BillingTarget::Zuora
+    end
+
+    sig { returns(T.any(::User, ::Business)) }
+    memoize def billable_object
+      object = __getobj__
+
+      billable = if object.is_a?(::Organization)
+        if object.business.present?
+          object.business
+        else
+          object
+        end
+      else
+        object
+      end
+
+      T.must(billable)
+    end
+
+    sig { returns(T.any(::Organization, ::Business, ::Customer, NilClass)) }
+    def customer_for
+      billable = billable_object
+      case billable
+      when ::Business, ::User
+        billable.customer_for(Customer::DEFAULT_PURPOSE)
+      else
+        T.absurd(billable)
+      end
+    end
+
+    sig { params(organization_to_exclude_id: Integer, assigned_user_id: Integer).returns(T::Array[Copilot::Seat]) }
+    def users_other_seats_for_this_billable_entity(organization_to_exclude_id, assigned_user_id)
+      ## Figure out who we are charging and ensure that the assigned user
+      ## is not in another entity in the customer, this will prevent double billing.
+      if billable_object.is_a?(::Business)
+        org_ids = billable_object.organizations.pluck(:id) - [organization_to_exclude_id]
+        Copilot::Seat.where(assigned_user_id: assigned_user_id, organization_id: org_ids).order(created_at: :desc).to_a
+      elsif billable_object.is_a?(::Organization)
+        # Organizations are standalone
+        []
+      else
+        # TODO: do we need to log anything here?
+        []
+      end
+    end
+
+    sig { abstract.returns(T.any(::Organization, ::Business)) }
+    def __getobj__; end
+  end
+end

@@ -1,0 +1,59 @@
+<%# rubocop:disable Lint/InstanceVariable %>
+<%
+  page_info(
+    title: %{New release · #{current_repository.name_with_display_owner}},
+    container_xl: true,
+    selected_link: :repo_releases,
+  )
+  @disable_branch_selector = true
+
+  marketplace_view = Releases::ActionMarketplaceView.new(
+    release: @release,
+    current_user: current_user,
+    marketplace_enabled: GitHub.marketplace_enabled?,
+    query_params: params
+  )
+%>
+
+<%= render layout: "layouts/repository_container", locals: { repository: current_repository } do %>
+<div class="clearfix container-xl tmp-px-3 tmp-px-md-4 tmp-px-lg-5 tmp-mt-4">
+  <div class="mb-2">
+    <%= render(Primer::Beta::Link.new(href: "#{releases_path(current_repository)}")) do |component| %>
+      <% component.with_leading_visual_icon(icon: :"arrow-left", size: :small) %>
+      Releases
+    <% end %>
+  </div>
+  <%= render Primer::Beta::Subhead.new(classes: "tmp-mb-4") do |component| %>
+    <% component.with_heading(tag: :h1, size: :medium) do %>
+      <strong>New release</strong>
+    <% end %>
+  <% end %>
+  <div class="clearfix">
+    <div class="float-left col-12 col-md-9 tmp-pr-md-3">
+      <% if @immutable_releases_enabled %>
+        <%= render(Primer::Alpha::Banner.new(icon: :info, test_selector: "immutable-release-enabled-banner", classes: "tmp-mb-4")) do %>
+          You will not be able to edit the tag or assets after publishing because immutable releases are enabled.
+          <%= render(Primer::Beta::Link.new(href: "#{GitHub.help_url}/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases", classes: "Link--inTextBlock", scheme: :default, underline: true)) { "Learn more about immutable releases" } %>
+        <% end %>
+      <% end %>
+      <% if marketplace_view.show_locked? %>
+        <% if marketplace_view.potential_marketplace_action? && !marketplace_view.action_package_listed_to_marketplace?  %>
+          <%= render partial: "releases/action_marketplace_locked", locals: { view: marketplace_view } %>
+        <% end %>
+      <% end %>
+      <%= form_for @release,
+          :url => create_release_path,
+          :html => {
+            :class => "js-release-form",
+            :"data-repo-url" => repository_path(current_repository)
+          } do |f| %>
+        <%= render partial: "releases/release_form", locals: { f: f, marketplace_view: marketplace_view } %>
+      <% end %>
+    </div>
+
+    <div class="float-left col-12 col-md-3 pl-md-2 tmp-pt-4 tmp-pt-md-0">
+      <%= render :partial => "releases/suggestions" %>
+    </div>
+  </div>
+</div>
+<% end %>

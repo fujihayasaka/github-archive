@@ -1,0 +1,142 @@
+---
+summary: Get Copilot cloud agent configuration for a repository
+description: |-
+  > [!NOTE]
+  > This endpoint is in public preview and is subject to change.
+
+  Gets the Copilot cloud agent configuration for a repository, including MCP server
+  configuration, enabled review tools, Actions workflow approval settings, and firewall
+  configuration.
+
+  OAuth app tokens and personal access tokens (classic) need the `repo` scope to use this endpoint.
+tags:
+- copilot
+operationId: copilot/get-copilot-cloud-agent-configuration
+externalDocs:
+  description: API method documentation
+  url: '${externalDocsUrl}/rest/copilot/copilot-cloud-agent-management#get-copilot-cloud-agent-configuration-for-a-repository'
+x-github-internal:
+  path: /repos/{owner}/{repo}/copilot/cloud-agent/configuration
+  http-method: get
+  published: true
+  owner: '@github/copilot-coding-agent-reviewers'
+x-github-releases:
+- api.github.com
+- ghec
+parameters:
+- $ref: '../../components/parameters/owner.yaml'
+- $ref: '../../components/parameters/repo.yaml'
+responses:
+  '200':
+    description: Response
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            mcp_configuration:
+              description: |-
+                The user-supplied MCP server configuration for the repository, as a free-form JSON object. This will be set to `null` if no configuration has been set.
+
+                The shape of a valid MCP configuration may evolve over time, so this property is intentionally not strictly typed. Clients should not assume a fixed schema.
+              nullable: true
+              type: object
+              additionalProperties: true
+            enabled_tools:
+              type: object
+              description: The enabled review tools for Copilot cloud agent.
+              properties:
+                codeql:
+                  type: boolean
+                  description: Whether the CodeQL tool is enabled for the Copilot cloud agent.
+                copilot_code_review:
+                  type: boolean
+                  description: Whether the Copilot code review tool is enabled for the Copilot cloud agent.
+                secret_scanning:
+                  type: boolean
+                  description: Whether the secret scanning tool is enabled for the Copilot cloud agent.
+                dependency_vulnerability_checks:
+                  type: boolean
+                  description: Whether the dependency vulnerability checks tool is enabled for the Copilot cloud agent.
+              required:
+              - codeql
+              - copilot_code_review
+              - secret_scanning
+              - dependency_vulnerability_checks
+            require_actions_workflow_approval:
+              type: boolean
+              description: Whether Actions workflow approval is required for Copilot cloud agent pull requests.
+            is_firewall_enabled:
+              type: boolean
+              description: Whether the firewall is enabled.
+            is_firewall_recommended_allowlist_enabled:
+              type: boolean
+              description: Whether the firewall recommended allowlist is enabled.
+            custom_allowlist:
+              type: array
+              description: A list of custom allowlist entries, as hosts or URLs, that the firewall will allow the Copilot cloud agent to access.
+              items:
+                type: string
+                description: A custom allowlist entry, as a host or URL, that the firewall will allow the Copilot cloud agent to access.
+          required:
+          - mcp_configuration
+          - enabled_tools
+          - require_actions_workflow_approval
+          - is_firewall_enabled
+          - is_firewall_recommended_allowlist_enabled
+          - custom_allowlist
+        examples:
+          default:
+            summary: Default configuration
+            value:
+              mcp_configuration: null
+              enabled_tools:
+                codeql: true
+                copilot_code_review: true
+                secret_scanning: true
+                dependency_vulnerability_checks: true
+              require_actions_workflow_approval: true
+              is_firewall_enabled: true
+              is_firewall_recommended_allowlist_enabled: true
+              custom_allowlist: []
+          configured:
+            summary: Configuration with an MCP server and a custom firewall allowlist
+            value:
+              mcp_configuration:
+                mcpServers:
+                  sentry:
+                    type: local
+                    command: npx
+                    args:
+                    - "@sentry/mcp-server@latest"
+                    - "--host=$SENTRY_HOST"
+                    env:
+                      SENTRY_HOST: https://octo-org.sentry.io
+                      SENTRY_ACCESS_TOKEN: "$COPILOT_MCP_SENTRY_ACCESS_TOKEN"
+                    tools:
+                    - search_issues
+                    - get_issue_details
+              enabled_tools:
+                codeql: true
+                copilot_code_review: true
+                secret_scanning: true
+                dependency_vulnerability_checks: true
+              require_actions_workflow_approval: false
+              is_firewall_enabled: true
+              is_firewall_recommended_allowlist_enabled: true
+              custom_allowlist:
+              - sentry.io
+              - https://api.example.com
+  '500':
+    $ref: '../../components/responses/internal_error.yaml'
+  '401':
+    $ref: '../../components/responses/requires_authentication.yaml'
+  '403':
+    $ref: '../../components/responses/forbidden.yaml'
+  '404':
+    $ref: '../../components/responses/not_found.yaml'
+x-github:
+  githubCloudOnly: false
+  enabledForGitHubApps: true
+  category: copilot
+  subcategory: copilot-cloud-agent-management

@@ -1,0 +1,2 @@
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[92480],{660803(i,t,e){e.r(t);var s=e(331635),h=e(651135);class o extends HTMLElement{connectedCallback(){this.hide()}hide(){this.form.reset(),this.footer.hidden=!0}show(){this.footer.hidden=!1}}(0,s.Cg)([h.aC],o.prototype,"footer",void 0),(0,s.Cg)([h.aC],o.prototype,"form",void 0),(0,s.Cg)([(0,h.p_)("alert-dismissal")],o)}}]);
+//# sourceMappingURL=chunk-92480-e7ad13463935b964-e75b8b7b7bb57e27.js.map

@@ -1,0 +1,36 @@
+using Azure;
+using Azure.AI.Inference;
+
+
+var endpoint = new Uri("<%= GitHub.models_gateway_url %>/inference");
+var credential = new AzureKeyCredential(System.Environment.GetEnvironmentVariable("GITHUB_TOKEN"));
+var model = "<%= model %>";
+
+var client = new ChatCompletionsClient(
+    endpoint,
+    credential,
+    new AzureAIInferenceClientOptions());
+
+var requestOptions = new ChatCompletionsOptions()
+{
+    Messages =
+    {
+        <%- if supports_system_prompt && assistant_role != "developer" -%>
+        new ChatRequestSystemMessage("<%= system_message_value %>"),
+        <%- end -%>
+        new ChatRequestUserMessage("What is the capital of France?"),
+    },
+    <%- if supports_temperature-%>
+    Temperature = <%= temperature_value %>f,
+    <%- end -%>
+    <%- if supports_top_p-%>
+    NucleusSamplingFactor = <%= top_p_value %>f,
+    <%- end -%>
+    <%- if supports_max_tokens-%>
+    MaxTokens = <%= max_tokens_value %>,
+    <%- end -%>
+    Model = model
+};
+
+Response<ChatCompletions> response = client.Complete(requestOptions);
+System.Console.WriteLine(response.Value.Content);

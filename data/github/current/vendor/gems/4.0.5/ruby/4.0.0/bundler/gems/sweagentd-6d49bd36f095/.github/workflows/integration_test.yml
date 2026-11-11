@@ -1,0 +1,191 @@
+name: "Test Copilot Coding Agent"
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Run continuously - every 15 minutes
+    - cron: "*/15 * * * *"
+  pull_request:
+    branches:
+      - "main"
+    paths:
+      - ".github/workflows/integration_test*"
+
+permissions:
+  contents: read
+
+jobs:
+  define-stamp-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      stamp_matrix: ${{ steps.set-matrix.outputs.stamp_matrix }}
+    steps:
+      # all tokens belong to user `cca-testing-bot` which is a member of the `copilot-api-test` org
+      # login credentials are in the capi vault, stamps are accessed through okta
+      # to rotate tokens refresh in UI, grant SSO, and then update in https://github.com/github/sweagentd/settings/secrets/actions
+      # to add a new proxima stamp create a new repo at copilot-api-test/cca-automated-testing and create the mcp issue (if you do it right away it will be number 1)
+      # then update the matrix below with the new stamp details and token secret
+      - id: set-matrix
+        shell: bash
+        run: |
+          stamp_matrix='[
+            {"name":"dotcom","capi_base_url":"https://api.githubcopilot.com","github_api_url":"https://api.github.com","github_server_url":"https://github.com","token_secret":"CCA_TESTING_TOKEN","repo_nwo":"github/cca-automated-testing","mcp_issue_number":"3710"},
+            {"name":"staffship-01","capi_base_url":"https://copilot-api.staffship-01.ghe.com","github_api_url":"https://api.staffship-01.ghe.com","github_server_url":"https://staffship-01.ghe.com","token_secret":"CCA_TESTING_TOKEN_STAFFSHIP_01","repo_nwo":"copilot-api-test/cca-automated-testing","mcp_issue_number":"6"},
+            {"name":"test-prodae01","capi_base_url":"https://copilot-api.test-prodae01.ghe.com","github_api_url":"https://api.test-prodae01.ghe.com","github_server_url":"https://test-prodae01.ghe.com","token_secret":"CCA_TESTING_TOKEN_TEST_PRODAE01","repo_nwo":"copilot-api-test/cca-automated-testing","mcp_issue_number":"1"},
+            {"name":"test-prodsdc01","capi_base_url":"https://copilot-api.test-prodsdc01.ghe.com","github_api_url":"https://api.test-prodsdc01.ghe.com","github_server_url":"https://test-prodsdc01.ghe.com","token_secret":"CCA_TESTING_TOKEN_TEST_PRODSDC01","repo_nwo":"copilot-api-test/cca-automated-testing","mcp_issue_number":"1"},
+            {"name":"test-prodjpw01","capi_base_url":"https://copilot-api.test-prodjpw01.ghe.com","github_api_url":"https://api.test-prodjpw01.ghe.com","github_server_url":"https://test-prodjpw01.ghe.com","token_secret":"CCA_TESTING_TOKEN_TEST_PRODJPW01","repo_nwo":"copilot-api-test/cca-automated-testing","mcp_issue_number":"1"},
+            {"name":"test-prodweu01","capi_base_url":"https://copilot-api.test-prodweu01.ghe.com","github_api_url":"https://api.test-prodweu01.ghe.com","github_server_url":"https://test-prodweu01.ghe.com","token_secret":"CCA_TESTING_TOKEN_TEST_PRODWEU01","repo_nwo":"copilot-api-test/cca-automated-testing","mcp_issue_number":"1"},
+            {"name":"test-prodcus01","capi_base_url":"https://copilot-api.test-prodcus01.ghe.com","github_api_url":"https://api.test-prodcus01.ghe.com","github_server_url":"https://test-prodcus01.ghe.com","token_secret":"CCA_TESTING_TOKEN_TEST_PRODCUS01","repo_nwo":"copilot-api-test/cca-automated-testing","mcp_issue_number":"1"},
+            {"name":"test-testcnc01","capi_base_url":"https://copilot-api.test-testcnc01.ghe.com","github_api_url":"https://api.test-testcnc01.ghe.com","github_server_url":"https://test-testcnc01.ghe.com","token_secret":"CCA_TESTING_TOKEN_TEST_TESTCNC01","repo_nwo":"copilot-api-test/cca-automated-testing","mcp_issue_number":"1"},
+            {"name":"test-prodwus301","capi_base_url":"https://copilot-api.test-prodwus301.ghe.com","github_api_url":"https://api.test-prodwus301.ghe.com","github_server_url":"https://test-prodwus301.ghe.com","token_secret":"CCA_TESTING_TOKEN_TEST_PRODWUS301","repo_nwo":"copilot-api-test/cca-automated-testing","mcp_issue_number":"1"}
+          ]'
+          {
+            echo 'stamp_matrix<<EOF'
+            echo "$stamp_matrix"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+  job-api-test:
+    needs: define-stamp-matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        stamp: ${{ fromJSON(needs.define-stamp-matrix.outputs.stamp_matrix) }}
+    uses: ./.github/workflows/integration_test_job_api.yml
+    secrets:
+      token: ${{ secrets[matrix.stamp.token_secret] }}
+      datadog_api_key: ${{ secrets.DATADOG_API_KEY }}
+    with:
+      repo_nwo: ${{ matrix.stamp.repo_nwo }}
+      reporting_id: job-api-linux-${{ matrix.stamp.name }}
+      capi_base_url: ${{ matrix.stamp.capi_base_url }}
+      github_api_url: ${{ matrix.stamp.github_api_url }}
+      github_server_url: ${{ matrix.stamp.github_server_url }}
+      stamp: ${{ matrix.stamp.name }}
+      # Keep the stagger input wired, but disable launch delays to validate
+      # whether prevent_new_token_deletion is enough to fix #11848.
+      stagger_delay_seconds: 0
+  job-api-test-windows:
+    # https://github.com/github/cca-automated-testing-windows/blob/main/.github/copilot-setup-steps.yml
+    # is a special setup that is not being projected to proxima at the moment
+    uses: ./.github/workflows/integration_test_job_api.yml
+    secrets:
+      token: ${{ secrets.CCA_TESTING_TOKEN }}
+      datadog_api_key: ${{ secrets.DATADOG_API_KEY }}
+    with:
+      repo_nwo: github/cca-automated-testing-windows
+      reporting_id: job-api-windows
+      capi_base_url: https://api.githubcopilot.com
+      github_api_url: https://api.github.com
+      github_server_url: https://github.com
+      stamp: dotcom
+      stagger_delay_seconds: 0
+  mcp-test-linux:
+    needs: define-stamp-matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        stamp: ${{ fromJSON(needs.define-stamp-matrix.outputs.stamp_matrix) }}
+    uses: ./.github/workflows/integration_test_mcp.yml
+    secrets:
+      token: ${{ secrets[matrix.stamp.token_secret] }}
+      datadog_api_key: ${{ secrets.DATADOG_API_KEY }}
+    with:
+      repo_nwo: ${{ matrix.stamp.repo_nwo }}
+      reporting_id: mcp-test-linux-${{ matrix.stamp.name }}
+      issue_number: ${{ matrix.stamp.mcp_issue_number }}
+      capi_base_url: ${{ matrix.stamp.capi_base_url }}
+      github_api_url: ${{ matrix.stamp.github_api_url }}
+      github_server_url: ${{ matrix.stamp.github_server_url }}
+      stamp: ${{ matrix.stamp.name }}
+      stagger_delay_seconds: 0
+  mcp-test-windows:
+    # https://github.com/github/cca-automated-testing-windows/blob/main/.github/copilot-setup-steps.yml
+    # is a special setup that is not being projected to proxima at the moment
+    uses: ./.github/workflows/integration_test_mcp.yml
+    secrets:
+      token: ${{ secrets.CCA_TESTING_TOKEN }}
+      datadog_api_key: ${{ secrets.DATADOG_API_KEY }}
+    with:
+      repo_nwo: github/cca-automated-testing-windows
+      reporting_id: mcp-test-windows
+      issue_number: 22
+      capi_base_url: https://api.githubcopilot.com
+      github_api_url: https://api.github.com
+      github_server_url: https://github.com
+      stamp: dotcom
+      stagger_delay_seconds: 0
+  issue-assignment-cli-test:
+    needs: define-stamp-matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        stamp: ${{ fromJSON(needs.define-stamp-matrix.outputs.stamp_matrix) }}
+    uses: ./.github/workflows/integration_test_issue_assignment_cli.yml
+    secrets:
+      token: ${{ secrets[matrix.stamp.token_secret] }}
+      datadog_api_key: ${{ secrets.DATADOG_API_KEY }}
+    with:
+      repo_nwo: ${{ matrix.stamp.repo_nwo }}
+      reporting_id: issue-assignment-cli-${{ matrix.stamp.name }}
+      capi_base_url: ${{ matrix.stamp.capi_base_url }}
+      github_api_url: ${{ matrix.stamp.github_api_url }}
+      github_server_url: ${{ matrix.stamp.github_server_url }}
+      stamp: ${{ matrix.stamp.name }}
+      stagger_delay_seconds: 0
+  pr-comment-test:
+    needs: define-stamp-matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        stamp: ${{ fromJSON(needs.define-stamp-matrix.outputs.stamp_matrix) }}
+    uses: ./.github/workflows/integration_test_pr_comment.yml
+    secrets:
+      token: ${{ secrets[matrix.stamp.token_secret] }}
+      datadog_api_key: ${{ secrets.DATADOG_API_KEY }}
+    with:
+      repo_nwo: ${{ matrix.stamp.repo_nwo }}
+      reporting_id: pr-comment-${{ matrix.stamp.name }}
+      capi_base_url: ${{ matrix.stamp.capi_base_url }}
+      github_api_url: ${{ matrix.stamp.github_api_url }}
+      github_server_url: ${{ matrix.stamp.github_server_url }}
+      stamp: ${{ matrix.stamp.name }}
+      stagger_delay_seconds: 0
+  check-token-expiry:
+    if: ${{ github.event_name == 'schedule' }}
+    needs: define-stamp-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        stamp: ${{ fromJSON(needs.define-stamp-matrix.outputs.stamp_matrix) }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: script/check-token-expiry
+          sparse-checkout-cone-mode: false
+
+      - name: Check token expiry (${{ matrix.stamp.name }})
+        id: check_expiry
+        run: |
+          output=$(./script/check-token-expiry)
+          echo "$output"
+          days=$(echo "$output" | sed -n 's/^Days until expiry: //p')
+          echo "days_until_expiry=$days" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets[matrix.stamp.token_secret] }}
+          STAMP: ${{ matrix.stamp.name }}
+          API_URL: ${{ matrix.stamp.github_api_url }}
+
+      - name: Emit token expiry metric to Datadog
+        if: ${{ steps.check_expiry.outputs.days_until_expiry != '' }}
+        uses: masci/datadog@7696b770aa52aee8a8bffcd1fd52c0a71423ce04
+        with:
+          api-key: ${{ secrets.DATADOG_API_KEY }}
+          metrics: |
+            - type: "gauge"
+              name: "sweagentd.github_token.days_until_expiry"
+              value: ${{ steps.check_expiry.outputs.days_until_expiry }}
+              tags:
+                - "token:cca_testing_token"
+                - "stamp:${{ matrix.stamp.name }}"

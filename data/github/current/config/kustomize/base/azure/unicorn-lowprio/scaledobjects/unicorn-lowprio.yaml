@@ -1,0 +1,44 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: unicorn
+spec:
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Percent
+              value: 100
+              periodSeconds: 30
+        scaleDown:
+          stabilizationWindowSeconds: 1500
+          policies:
+            - type: Percent
+              value: 10
+              periodSeconds: 60
+  maxReplicaCount: 20
+  minReplicaCount: 2
+  scaleTargetRef:
+    name: unicorn-lowprio
+    envSourceContainerName: unicorn
+  triggers:
+    - metadata:
+        containerName: unicorn
+        value: "70"
+      metricType: Utilization
+      type: cpu
+    - type: datadog
+      authenticationRef:
+        kind: ClusterTriggerAuthentication
+        name: keda-trigger-auth-datadog-secret
+      metricType: Value
+      metadata:
+        age: "300"
+        query: >-
+          (avg:unicorn.workers{kube_deployment:unicorn-lowprio,kube_cluster:%cluster%}
+          - avg:unicorn.idle_workers{kube_deployment:unicorn-lowprio,kube_cluster:%cluster%})
+          * 100
+          / avg:unicorn.workers{kube_deployment:unicorn-lowprio,kube_cluster:%cluster%}
+        queryValue: "66"

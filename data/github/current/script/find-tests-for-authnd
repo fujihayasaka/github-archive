@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+declare -a TESTS=()
+
+function add_test_file() {
+  local file="$1"
+
+  if [[ -f "$file" && "$file" == *_test.rb ]]; then
+    TESTS+=("$file")
+  fi
+}
+
+function add_tests_from_path() {
+  local path="$1"
+
+  if [[ -d "$path" ]]; then
+    while IFS= read -r -d '' file; do
+      add_test_file "$file"
+    done < <(find "$path" -name "*_test.rb" -type f -print0 2>/dev/null || true)
+  else
+    add_test_file "$path"
+  fi
+}
+
+function add_tests_from_pattern() {
+  local pattern="$1"
+
+  if [[ "$pattern" == *"*"* ]]; then
+    return
+  elif [[ "$pattern" == */ ]]; then
+    add_tests_from_path "${pattern%/}"
+  else
+    add_tests_from_path "$pattern"
+  fi
+}
+
+while IFS= read -r pattern; do
+  add_tests_from_pattern "$pattern"
+done < <(awk 'NF >= 2 && $1 !~ /^#/ && $NF == ":authnd" { print $1 }' SERVICEOWNERS)
+
+while IFS= read -r file; do
+  add_test_file "$file"
+done < <(find test packages -type f \( -name "*authnd*_test.rb" -o -name "*authentication*_test.rb" \) 2>/dev/null || true)
+
+while IFS= read -r file; do
+  add_test_file "$file"
+done < <(grep -RIl --include="*_test.rb" -e "authnd" -e "Authnd" -e "X-GitHub-Authnd" test packages 2>/dev/null || true)
+
+if [[ "${#TESTS[@]}" -eq 0 ]]; then
+  echo "ERROR: No authnd tests were found." >&2
+  exit 1
+fi
+
+printf "%s\n" "${TESTS[@]}" | sort -u

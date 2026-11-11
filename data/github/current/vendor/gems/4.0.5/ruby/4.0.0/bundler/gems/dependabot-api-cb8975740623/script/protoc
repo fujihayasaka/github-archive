@@ -1,0 +1,29 @@
+#!/bin/bash
+#/ Usage: script/protoc
+#/
+#/ Generate Ruby code from protos
+
+set -e
+
+if [ -z "${IN_CONTAINER}" ]; then
+  cd $(dirname $0)/..
+  IMAGE_NAME="dependabot/api-protoc"
+  docker build -f proto/dependabot-api/Dockerfile -t ${IMAGE_NAME} .
+  PKG="/go/src/github.com/dependabot/api"
+  exec docker run --rm --net=none -v $(pwd):${PKG} -w ${PKG} ${IMAGE_NAME}
+fi
+
+mkdir -p ruby/lib
+set -x
+
+# Input Path
+PROTO_PATH=./proto/dependabot-api/twirp
+
+# Output Paths
+RUBY_CLIENT_PATH_V1=./gen/ruby/lib/proto/dependabot-api/v1
+
+protoc \
+  --proto_path="$PROTO_PATH" \
+  --ruby_out="$RUBY_CLIENT_PATH_V1" \
+  --twirp_ruby_out="$RUBY_CLIENT_PATH_V1" \
+  "$PROTO_PATH"/*.proto

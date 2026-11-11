@@ -1,0 +1,20 @@
+# typed: true
+# frozen_string_literal: true
+
+module Platform
+  module Unions
+    class ProjectV2ItemContent < Platform::Unions::Base
+      docs_category :projects
+      description "Types that can be inside Project Items."
+
+      visibility :public, environments: [:dotcom, :enterprise]
+
+      possible_types(
+        Objects::Issue,
+        Objects::PullRequest,
+        Objects::DraftIssue,
+        Objects::AgentTask
+      )
+    end
+  end
+end

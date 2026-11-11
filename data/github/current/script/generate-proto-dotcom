@@ -1,0 +1,144 @@
+#!/usr/bin/env safe-ruby
+# frozen_string_literal: true
+
+#/ Usage: bin/generate-proto-dotcom [--watch]
+#/
+#/ Regenerates the committed *_pb.rb bindings for every .proto file under
+#/ lib/proto/. Downloads a pinned protoc (matching the google-protobuf gem
+#/ version from Gemfile.lock) into tmp/protoc/ on first run.
+#/
+#/ Sorbet RBIs are produced separately by `bin/tapioca dsl`; sorbet/config
+#/ ignores /lib/proto/ so Sorbet reads those RBIs instead of the _pb.rb
+#/ files. Run `bin/tapioca dsl` before opening a PR (also after --watch).
+
+require "fileutils"
+
+PROTOC_DIR = File.expand_path("../tmp/protoc", __dir__)
+# All proto sources and their generated `_pb.rb` bindings live under
+# `lib/proto/`. `lib/proto` is on `$LOAD_PATH` (see config/basic.rb), so
+# consumers and protoc-emitted cross-proto imports resolve via
+# `require "<pkg>/<v>/foo_pb"`. The directory layout under `lib/proto/`
+# mirrors each `.proto` file's `package` namespace.
+PROTO_ROOT = File.expand_path("../lib/proto", __dir__)
+
+def main
+  watch = ARGV.delete("--watch")
+  abort "Unknown arguments: #{ARGV.join(" ")}" unless ARGV.empty?
+
+  version = protobuf_gem_version
+  protoc, well_known_include = ensure_protoc(version)
+
+  generate_all(protoc, well_known_include, version)
+
+  if watch
+    puts "Watching #{PROTO_ROOT} for changes. Ctrl-C to exit."
+    puts "(Skipping tapioca/RBI regeneration in watch mode.)"
+    watch_loop(protoc, well_known_include, version)
+  else
+    puts "DONE!"
+  end
+end
+
+def generate_all(protoc, well_known_include, version)
+  FileUtils.mkdir_p(PROTO_ROOT)
+  proto_files = Dir.glob("#{PROTO_ROOT}/**/*.proto").sort
+  return if proto_files.empty?
+
+  puts "Generating Ruby bindings (protoc #{version}) under #{PROTO_ROOT.sub("#{File.expand_path("..", __dir__)}/", "")}/:"
+  proto_files.each { |f| puts "  #{f.sub("#{PROTO_ROOT}/", "")}" }
+
+  system protoc,
+    "--proto_path=#{PROTO_ROOT}",
+    "--proto_path=#{well_known_include}",
+    "--ruby_out=#{PROTO_ROOT}",
+    *proto_files.map { |f| f.sub("#{PROTO_ROOT}/", "") }
+end
+
+# Use the `listen` gem (already in Gemfile :development/:test) to react to
+# .proto changes via OS file events instead of polling. Loaded lazily so
+# non-watch invocations don't pay the require cost.
+def watch_loop(protoc, well_known_include, version)
+  require "listen"
+
+  listener = Listen.to(PROTO_ROOT, only: /\.proto\z/) do |modified, added, removed|
+    changed = (modified + added + removed)
+    next if changed.empty?
+
+    puts "\n[#{Time.now.strftime("%H:%M:%S")}] proto change detected:"
+    changed.each { |f| puts "  #{f}" }
+    generate_all(protoc, well_known_include, version)
+  end
+
+  listener.start
+  sleep
+rescue Interrupt
+  puts "\nStopped watching."
+end
+
+# Read the google-protobuf gem version from Gemfile.lock and trim it to the
+# upstream release form (e.g. "3.14.0.1.r907f12546" -> "3.14.0").
+def protobuf_gem_version
+  lockfile = File.read(File.expand_path("../Gemfile.lock", __dir__))
+  match = lockfile.match(/^\s+google-protobuf \((\d+\.\d+\.\d+)/)
+  abort "Could not find google-protobuf version in Gemfile.lock" unless match
+  match[1]
+end
+
+# Download and extract the matching protoc release, returning
+# [protoc_path, well_known_include_dir]. Subsequent runs reuse the cached
+# extraction under tmp/protoc/<version>/.
+def ensure_protoc(version)
+  install_root = File.join(PROTOC_DIR, version)
+  protoc = File.join(install_root, "bin", "protoc")
+  include_dir = File.join(install_root, "include")
+
+  return [protoc, include_dir] if File.executable?(protoc) && File.directory?(include_dir)
+
+  os, arch = detect_platform
+  zip_name = "protoc-#{version}-#{os}-#{arch}.zip"
+  url = "https://github.com/protocolbuffers/protobuf/releases/download/v#{version}/#{zip_name}"
+
+  FileUtils.mkdir_p(install_root)
+  zip_path = File.join(PROTOC_DIR, zip_name)
+
+  puts "Downloading #{url} ..."
+  unless system("curl", "--fail", "--location", "--silent", "--show-error", "--output", zip_path, url)
+    abort "Failed to download protoc from #{url}"
+  end
+
+  unless system("unzip", "-q", "-o", zip_path, "-d", install_root)
+    abort "Failed to extract #{zip_path}"
+  end
+
+  File.chmod(0o755, protoc)
+  [protoc, include_dir]
+end
+
+def detect_platform
+  # RUBY_PLATFORM has the form "<cpu>-<os>[<version>]", e.g. "arm64-darwin24"
+  # or "x86_64-linux". Parse it instead of shelling out to uname.
+  cpu, os_tag = RUBY_PLATFORM.split("-", 2)
+  abort "Could not parse RUBY_PLATFORM: #{RUBY_PLATFORM.inspect}" unless cpu && os_tag
+
+  os = case os_tag
+  when /\Alinux/ then "linux"
+  when /\Adarwin/ then "osx"
+  else abort "Unsupported OS: #{os_tag} (from RUBY_PLATFORM=#{RUBY_PLATFORM})"
+  end
+
+  arch = case [os, cpu]
+  # Older protoc releases (matching the pinned google-protobuf 3.14.x gem)
+  # don't publish an osx-aarch_64 build. Apple Silicon runs the x86_64
+  # binary fine under Rosetta 2, so map Darwin arm64 to x86_64.
+  when %w[osx arm64], %w[osx aarch64], %w[osx x86_64] then "x86_64"
+  when %w[linux x86_64] then "x86_64"
+  when %w[linux aarch64], %w[linux arm64] then "aarch_64"
+  else abort "Unsupported architecture: #{cpu} on #{os}"
+  end
+
+  [os, arch]
+end
+
+main
+
+# vim: ft=ruby

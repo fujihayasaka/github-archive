@@ -1,0 +1,67 @@
+#!/bin/bash
+# Lightweight Datadog distribution point reporter — no Ruby boot required.
+#
+# Replaces the slow `bin/safe-ruby script/report-*` pattern which loads the
+# full monolith gem environment (~3.5 min from cold disk, ~2s warm) to post a single metric.
+#
+# Usage:
+#   script/dx/telemetry/report <metric_name> <value> [tags...]
+#
+# Arguments:
+#   metric_name  Datadog metric name (e.g. "dx.monolith.post_create.time")
+#   value        Numeric value to report
+#   tags...      Additional tags in "key:value" format
+#
+# Environment:
+#   DX_TELEMETRY_DATADOG_API_KEY  Required. Skips silently if unset.
+#   GITHUB_USER                   Added as "user:<value>" tag. Defaults to "none".
+#
+# Examples:
+#   script/dx/telemetry/report "dx.monolith.post_create.time" 42
+#   script/dx/telemetry/report "dx.monolith.bootstrap.time" 120 "result:success"
+
+# Telemetry reporting should never break callers
+set +e
+
+metric="$1"
+value="$2"
+[[ -z "$metric" || -z "$value" ]] && exit 0
+shift 2
+
+# In local devcontainers, forward select metrics to the GitHub Issues reporter.
+# Only low-frequency metrics belong here — high-frequency ones (e.g. resource
+# sampling every 60s) would flood the issue with comments.
+if [[ "${LOCAL_DEVCONTAINER:-}" == "1" ]]; then
+  case "$metric" in
+    dx.monolith.bootstrap.time|\
+    dx.monolith.server.start.time|\
+    dx.monolith.language_server.start.time)
+      SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+      exec "$SCRIPT_DIR/report-local" "$metric" "$value" "$@"
+      ;;
+  esac
+fi
+
+# Bail silently if no API key is configured
+if [[ -z "${DX_TELEMETRY_DATADOG_API_KEY:-}" ]]; then
+  exit 0
+fi
+
+timestamp=$(date '+%s')
+
+# Build the JSON payload with jq for proper escaping
+tags=$(jq -n --arg user "${GITHUB_USER:-none}" \
+  '$ARGS.positional + ["user:" + $user]' \
+  --args -- "$@")
+
+payload=$(jq -n \
+  --arg metric "$metric" \
+  --argjson ts "$timestamp" \
+  --argjson val "$value" \
+  --argjson tags "$tags" \
+  '{series: [{metric: $metric, points: [[$ts, [$val]]], tags: $tags}]}')
+
+curl -sSo /dev/null --max-time 10 -X POST "https://api.datadoghq.com/api/v1/distribution_points" \
+  -H "Content-Type: application/json" \
+  -H "DD-API-KEY: ${DX_TELEMETRY_DATADOG_API_KEY}" \
+  -d "$payload" || true

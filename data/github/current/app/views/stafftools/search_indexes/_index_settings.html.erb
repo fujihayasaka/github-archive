@@ -1,0 +1,80 @@
+<%# rubocop:disable Lint/InstanceVariable %>
+<% candidate_routing_enabled =  @index.candidate_routing_enabled?(current_user) %>
+<% modify_candidate_routing_enabled = @index.modify_candidate_routing_enabled?(current_user) %>
+<% is_primary = @index.primary %>
+<div class="form-checkbox">
+  <label>
+    <%= form.check_box :searchable %>
+    <%= primer_octicon(:book) %> Make the index searchable (<i>deprecated</i>)
+  </label>
+  <p class="note">
+    This field is deprecated and has no effect. It will be removed soon.
+    <% if modify_candidate_routing_enabled %>
+      Primary indexes are always searchable.
+      Non-primary indexes can be made searchable by setting the read percentage to a value greater than 0.
+    <% end %>
+  </p>
+</div>
+
+<div class="form-checkbox">
+  <label>
+    <%= form.check_box :writable %>
+    <%= render(Primer::Beta::Octicon.new(icon: "pencil")) %> Make the index writable
+  </label>
+  <p class="note">
+    When marked as writable, future <%= @index.kind %> updates will be dual-written to this index.
+    To sync all records from MySQL, run a repair job for the index.
+  </p>
+</div>
+
+<% if candidate_routing_enabled && @index.persisted? %>
+  <div class="form-group">
+    <div class="form-group-header">
+      <label for="search_index_view_read_pct">
+        <%= render(Primer::Beta::Octicon.new(icon: "graph")) %> Read percentage
+      </label>
+    </div>
+    <div class="form-group-body">
+      <% other_candidate = @index.other_candidate %>
+      <%= form.number_field :read_pct,
+          value: @index.display_read_pct,
+          min: 0,
+          # Even though we don't accept read_pct updates for primary indexes, we want to show the current
+          # read percentage, which could be 100 for primaries.
+          max: is_primary ? 100 : 50,
+          disabled: is_primary || !modify_candidate_routing_enabled || other_candidate,
+          class: "form-control input-sm",
+          style: "width: 100px;" %>
+      <p class="note">
+        <% if is_primary %>
+          <%
+            # We only allow one candidate to be set, but in case some discrepancy is ever introduced,
+            # we want to display all candidates and not hide this fact from users, which is why we account
+            # for multiples in the output.
+          %>
+          <% candidates = @index.candidates %>
+          <% if candidates.any? %>
+            This primary index is receiving <%= @index.display_read_pct %>% of read traffic.
+            <% candidates.each do |candidate| %>
+              <%= render(Primer::Beta::Link.new(href: stafftools_search_index_path(candidate.name), classes: "Link--inTextBlock")) { candidate.name } %>
+              is receiving <%= candidate.read_pct %>% of read traffic.
+            <% end %>
+          <% else %>
+            Primary indexes handle 100% of read traffic by default. This field cannot be directly modified for primary indexes.
+          <% end %>
+        <% else %>
+          Percentage of read traffic this non-primary index should receive (0-50%).
+          Only one non-primary index per kind can have read traffic enabled at a time.
+          <% if other_candidate %>
+            Cannot be set: <%= render(Primer::Beta::Link.new(href: stafftools_search_index_path(other_candidate.name), classes: "Link--inTextBlock")) { other_candidate.name } %> already has a read percentage set.
+          <% else %>
+            <% primary_index = @index.primary_index %>
+            <% if primary_index %>
+              The current primary index is <%= render(Primer::Beta::Link.new(href: stafftools_search_index_path(primary_index.name), classes: "Link--inTextBlock")) { primary_index.name } %>.
+            <% end %>
+          <% end %>
+        <% end %>
+      </p>
+    </div>
+  </div>
+<% end %>

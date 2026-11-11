@@ -1,0 +1,39 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative "../config/environment"
+
+begin
+  # Load these classes to register them in Development
+  DEVELOPMENT_PROCESSORS = [
+    InstallationCreateProcessor,
+    InstallationDeleteProcessor,
+    InstallationRepositoriesAddedProcessor,
+    InstallationRepositoriesRemovedProcessor,
+    RepositoryCommitStatusCreatedProcessor,
+    RepositoryPushProcessor,
+    VulnerabilityAlertProcessor,
+    VulnerabilityAlertResolveRequestProcessor,
+    VulnerabilityUpdatesDisabledProcessor,
+    VulnerabilityUpdatesEnabledProcessor,
+    RepositoryDependencyUpdate::CleanedUpProcessor,
+    RepositoryPush::ConfigFileProcessor,
+  ].freeze
+
+  processor = MultiTopicProcessor.new
+  consumer_options = processor.options
+  consumer_options[:subscribe_to] = processor.topics
+  consumer = Dependabot.hydro_consumer(consumer_options)
+  Dependabot.hydro_client.run(processor,
+                              consumer: consumer,
+                              shutdown_signals: %i(INT TERM))
+rescue StandardError => e
+  transaction = processor.class.to_s
+  rollup = Digest::SHA256.hexdigest("#{e.class}#{transaction}")
+  error_context = {
+    rollup: rollup,
+    transaction: transaction,
+  }
+  Dependabot::Exceptions.report(e, error_context)
+  exit 1
+end

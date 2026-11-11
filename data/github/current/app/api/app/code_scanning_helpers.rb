@@ -1,0 +1,202 @@
+# typed: strict
+# frozen_string_literal: true
+
+require "turboscan"
+
+module Api::App::CodeScanningHelpers
+  ADVANCED_SECURITY_DISABLED_MESSAGE = "Advanced Security must be enabled for this repository to use code scanning."
+  CODE_SECURITY_DISABLED_MESSAGE = "Code Security must be enabled for this repository to use code scanning."
+  CODE_SCANNING_REPOSITORY_DISABLED_MESSAGE = "Code scanning is not enabled for this repository. Please enable code scanning in the repository settings."
+  MAX_ALERT_NUMBER = 4294967295 # We limit the maximum alert number you can request, to prevent overflow when serializing the alert number as protobuf.
+  EXEMPTION_REQUEST_STATUSES = %w[all pending approved expired denied].freeze
+  TIME_PERIODS = %w[hour day week month].freeze
+  extend T::Helpers
+  requires_ancestor { Api::App }
+
+  include Api::App::CodeScanningCategoryHelper
+  include SecretScanning::Features::FeatureFlagHelper
+
+  sig { returns(String) }
+  def self.code_scanning_disabled_message
+    if GitHub.enterprise?
+      "Code scanning is not enabled. Please contact your local GitHub Enterprise site administrator for assistance."
+    else
+      CODE_SCANNING_REPOSITORY_DISABLED_MESSAGE
+    end
+  end
+
+  # Check that the current user has read access to the given repo, and that
+  # code scanning is usable on that repo.
+  #
+  # Use "forbid" to give a 403 vs a 404 response in the case that the user
+  # does not have read access to the repository.
+  sig { params(repo: Repository, forbid: T::Boolean).void }
+  def ensure_read_access_and_code_scanning_enabled!(repo, forbid: false)
+    can_read = access_allowed? :v4_get_repo,
+                                resource: repo,
+                                repo: repo,
+                                allow_integrations: true,
+                                allow_user_via_granular_actor: true
+
+    deliver_error!(forbid ? 403 : 404) if !can_read
+
+    ensure_code_scanning_enabled!(repo)
+  end
+
+  # Check that code scanning is usable on the given repo.
+  sig { params(repo: Repository).void }
+  def ensure_code_scanning_enabled!(repo)
+    # Report a user-friendly message if the repo is not opted in to advanced security / code scanning
+    # We clear the accepted scopes, otherwise some clients misinterpret the 403 error in comination with the `X-Accepted-Oauth-Scopes` header as meaning you need more scopes.
+    if repo.code_scanning_disabled_by_advanced_security?
+      @accepted_scopes = T.let([], T.nilable(T::Array[Symbol]))
+      deliver_error!(403, message: ADVANCED_SECURITY_DISABLED_MESSAGE)
+    end
+    if repo.code_scanning_disabled_by_code_security?
+      @accepted_scopes = T.let([], T.nilable(T::Array[Symbol]))
+      deliver_error!(403, message: CODE_SECURITY_DISABLED_MESSAGE)
+    end
+
+    if !repo.code_scanning_usable?
+      @accepted_scopes = T.let([], T.nilable(T::Array[Symbol]))
+      deliver_error!(403, message: Api::App::CodeScanningHelpers.code_scanning_disabled_message)
+    end
+  end
+
+  sig { void }
+  def ensure_non_conflicting_cursor_params!
+    if params.key?(:after) && params.key?(:before)
+      deliver_error!(400, message: "Please do not provide both 'before' and 'after' parameters.")
+    end
+
+    if params.key?(:page) && (params.key?(:after) || params.key?(:before))
+      deliver_error!(400, message: "Please do not provide both 'page' and cursor parameters ('before' or 'after').")
+    end
+  end
+
+  sig { void }
+  def ensure_non_conflicting_tool_params!
+    if params[:tool_name].present? && params[:tool_guid].present?
+      deliver_error!(400, message: "Please do not provide both 'tool_name' and 'tool_guid' parameters.")
+    end
+  end
+
+  sig { returns(T.noreturn) }
+  def deliver_code_scanning_unavailable_error!
+    deliver_error!(503, message: "Code scanning unavailable. Please try again later.")
+  end
+
+  sig { returns(String) }
+  def code_scanning_forbid_read_message
+    "You are not authorized to read code scanning alerts."
+  end
+
+  sig { returns(String) }
+  def code_scanning_forbid_write_message
+    "You are not authorized to write code scanning alerts."
+  end
+
+  sig { params(repo: Repositories::IRepository, commit_oid: T.nilable(String), field_name: String).void }
+  def ensure_commit_oid_format!(repo, commit_oid, field_name: "commit_oid")
+    return if commit_oid.nil?
+
+    unless repo.hash_algo.valid_full_oid?(commit_oid)
+      deliver_error!(422, message: "Invalid request.\n\nInvalid property /#{field_name}: commit identifier does not match repository hash algorithm.")
+    end
+
+    return if repo.hash_algo.name == :sha1
+    return if repo.feature_flag_enabled?(:code_scanning_sha256, default: false)
+
+    deliver_error!(422, message: "Invalid request.\n\nInvalid property /#{field_name}: SHA-256 commit identifiers are not yet supported.")
+  end
+
+  sig { params(repo: Repository).returns(T::Boolean) }
+  def logged_into_public_repo_as_code_scanning_bot(repo)
+    @remote_token_auth = T.let(@remote_token_auth, T.nilable(T::Boolean))
+    !!(@remote_token_auth && repo.public && GitHub.is_code_scanning_bot?(current_user))
+  end
+
+  sig { params(visibilities: T::Array[String]).returns(T::Array[Integer]) }
+  def from_repo_visibilities_to_proto_enums(visibilities)
+    visibilities.map { |visibility| from_repo_visibility_to_proto_enum(visibility) }.compact
+  end
+
+  sig { params(visibility: String).returns(T.nilable(Integer)) }
+  def from_repo_visibility_to_proto_enum(visibility)
+    case visibility
+    when Repository::PUBLIC_VISIBILITY
+      Turboscan::Proto::RepositoryVisibility::REPOSITORY_VISIBILITY_PUBLIC
+    when Repository::PRIVATE_VISIBILITY
+      Turboscan::Proto::RepositoryVisibility::REPOSITORY_VISIBILITY_PRIVATE
+    when Repository::INTERNAL_VISIBILITY
+      Turboscan::Proto::RepositoryVisibility::REPOSITORY_VISIBILITY_INTERNAL
+    end
+  end
+
+  sig { params(alert_number: Integer).void }
+  def ensure_valid_alert_number!(alert_number)
+    deliver_error!(400, message: "alert_number must be greater than zero") if alert_number < 1
+    deliver_error!(400, message: "alert_number must be less than #{MAX_ALERT_NUMBER + 1}") if alert_number > MAX_ALERT_NUMBER
+  end
+
+  sig { params(repo: T.untyped, data: T.untyped).void }
+  def store_code_scanning_action_in_progress(repo, data)
+    return if data["action_name"] != "init" && data["status"] != "starting"
+
+    ref = data["ref"]
+    commit_oid = data["commit_oid"]
+    analysis_key = data["analysis_key"]
+    matrix_vars = data["matrix_vars"]
+    workflow_run_id = data["workflow_run_id"]
+
+    # if matrix_vars is not present we can set it to an empty json object and compute a valid category
+    matrix_vars = "{}" unless matrix_vars.present?
+
+    if ref.present? && commit_oid.present? && analysis_key.present? && workflow_run_id.present?
+      category = compute_category(analysis_key, matrix_vars)
+      repo.store_code_scanning_action_in_progress(ref, commit_oid, category, workflow_run_id)
+    else
+      GitHub.dogstats.increment("store_code_scanning_action_in_progress.failed")
+    end
+  end
+
+  sig { params(repo: Repository, data: T::Hash[String, T.untyped], feature: Symbol).returns(String) }
+  def adjust_managed_analyses_configuration!(repo, data, feature)
+    languages = T.let(data["languages"], T::Array[String])
+    if languages.blank?
+      deliver_error! 422, message: "Languages have to be present."
+    end
+
+    run_id = T.let(data["workflow_run_id"], T.nilable(Integer)) if data["workflow_run_id"].present?
+
+    error = CodeScanning::ManagedAnalysesEnablement.new(repo, feature, false).adjust(languages, run_id)
+    if error
+      if error.twirp_error&.code == :failed_precondition && error.twirp_error&.msg == "wrong workflow run"
+        deliver_error! 409, message: "The configuration being validated by the workflow has already been superseded."
+      elsif error.twirp_error&.code == :failed_precondition && error.twirp_error&.msg == "repository is not onboarding"
+        deliver_error! 409, message: "Adjustment of the configuration being validated by the workflow is not possible anymore."
+      end
+
+      Failbot.report(error,  { "gh.repo.id" => repo.id, "gh.managed_analyses.feature" => feature })
+      deliver_error! 422, message: "Failed to adjust configuration"
+    end
+
+    deliver_empty(status: 202)
+  end
+
+  sig { params(assignees: String).returns(T.nilable(T::Hash[Symbol, T.untyped])) }
+  def parse_assignees(assignees)
+    query_string = if assignees == "*"
+      "#{Search::Queries::SecurityCenter::CodeScanningBaseQuery::QUALIFIER_HAS}:#{Search::Queries::SecurityCenter::CodeScanningBaseQuery::QUALIFIER_ASSIGNEE}"
+    elsif assignees == "none"
+      "#{Search::Queries::SecurityCenter::CodeScanningBaseQuery::QUALIFIER_NO}:#{Search::Queries::SecurityCenter::CodeScanningBaseQuery::QUALIFIER_ASSIGNEE}"
+    else
+      "#{Search::Queries::SecurityCenter::CodeScanningBaseQuery::QUALIFIER_ASSIGNEE}:#{assignees}"
+    end
+
+    CodeScanning::AlertQueryService::ScopeStrategy.assigned_users_filter(
+      current_user: current_user,
+      parsed_query: Search::Queries::SecurityCenter::CodeScanningRepoQuery.new(query_string.strip),
+    )
+  end
+end

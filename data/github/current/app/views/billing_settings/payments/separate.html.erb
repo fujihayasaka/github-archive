@@ -1,0 +1,89 @@
+<%# post_success_form / failure_redirect_to are only supplied by the Copilot upgrade finalization
+    flow (see BillingSettings::PaymentsController); default them to nil for other render sites. -%>
+<% post_success_form = local_assigns[:post_success_form] %>
+<% failure_redirect_to = local_assigns[:failure_redirect_to] %>
+<% content = capture do %>
+  <%= render Primer::Beta::Subhead.new do |component| %>
+    <% component.with_heading(tag: :h2) do %>
+      <%= link_to "Billing & plans", target_billing_url(target), "data-pjax" => true %>
+      / Pay your bill
+    <% end %>
+  <% end %>
+
+  <%= render Primer::Alpha::Layout.new do |component| %>
+    <% component.with_sidebar do %>
+      <%= render(Billing::Settings::Payments::SidebarComponent.new(
+        manual_payment: manual_payment,
+      )) %>
+    <% end %>
+    <% component.with_main do %>
+      <% if post_success_form %>
+        <%# Shown when the customer reached this page because an advance payment was
+            declined for a manual-transaction (India RBI) account. Explains what happened, what to do,
+            and that the upgrade finalizes automatically once payment is confirmed. %>
+        <%= render(Primer::Alpha::Banner.new(
+          icon: :info,
+          scheme: :default,
+          test_selector: "rbi-upgrade-manual-payment",
+          classes: "tmp-mb-3",
+        )) do %>
+          <strong>Complete your payment to activate your subscription.</strong>
+          Under Reserve Bank of India (RBI) regulations, automatic card payments are disabled on your
+          account, so your card couldn't be charged automatically. Authorize the one-time payment below
+          to finish your <%= manual_payment.invoice_product&.name.presence || "GitHub Copilot" %>
+          upgrade. Once your payment is confirmed, we'll finish setting up your subscription and
+          redirect you automatically. This usually only takes a moment.
+        <% end %>
+      <% end %>
+
+      <%= render(Billing::Settings::Payments::SummaryComponent.new(
+        manual_payment: manual_payment,
+      )) %>
+
+      <%= render(Billing::Settings::Payments::BillingInfoComponent.new(
+        manual_payment: manual_payment,
+        trade_screening_needed: trade_screening_needed,
+      )) %>
+
+      <%= render(Billing::Settings::Payments::CreditCardFormComponent.new(
+        manual_payment: manual_payment,
+        trade_screening_needed: trade_screening_needed,
+        post_success_form_selector: (post_success_form ? post_success_form[:form_selector] : nil),
+        # When the payment can't be confirmed in time, send the customer back to the checkout page to
+        # retry activation once their payment finishes processing (rather than POSTing a finalization).
+        failure_redirect_to: failure_redirect_to,
+      )) %>
+
+      <% if post_success_form %>
+        <%# Hidden form submitted by billing/zuora.ts after a successful manual (e.g. RBI) payment to
+            finalize a deferred product upgrade by POSTing to the product's create action. %>
+        <%= form_with(url: post_success_form[:path], method: :post,
+          html: { class: post_success_form[:form_class], hidden: true }) do |f| %>
+          <% post_success_form[:params].each do |name, value| %>
+            <% if value.is_a?(Hash) %>
+              <% value.each do |nested_name, nested_value| %>
+                <%= f.hidden_field "#{name}[#{nested_name}]", value: nested_value %>
+              <% end %>
+            <% else %>
+              <%= f.hidden_field name, value: value %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>
+
+<% if target.is_a?(Business) %>
+  <%= render layout: "businesses/layout", locals: { business: target, hide_sidebar: true } do %>
+    <%= content %>
+  <% end %>
+<% elsif current_context.is_a?(Organization) %>
+  <%= render layout: "orgs/settings/layout", locals: { hide_sidebar: true } do %>
+    <%= content %>
+  <% end %>
+<% else %>
+  <%= render layout: "settings/settings", locals: { hide_sidebar: true } do %>
+    <%= content %>
+  <% end %>
+<% end %>

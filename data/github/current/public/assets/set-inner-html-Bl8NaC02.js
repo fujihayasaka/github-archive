@@ -1,0 +1,1 @@
+function e(e,t){e.innerHTML=t}export{e as t};

@@ -1,0 +1,26 @@
+# typed: true
+# frozen_string_literal: true
+
+module Platform
+  module Objects
+    class IssueDependenciesSummary < Platform::Objects::Base
+      docs_category :issues
+      description "Summary of the state of an issue's dependencies"
+
+      # Access to dependency summary is dependent on access to the parent object
+      def self.async_api_can_access?(_permission, _object)
+        true # rubocop:disable GitHub/GraphqlApiAuthorization
+      end
+
+      # Access to dependency summary is dependent on access to the parent object
+      def self.async_viewer_can_see?(_permission, _object)
+        true # rubocop:disable GitHub/GraphqlApiAuthorization
+      end
+
+      field :blocked_by, Integer, description: "Count of issues this issue is blocked by", null: false
+      field :total_blocked_by, Integer, description: "Total count of issues this issue is blocked by (open and closed)", null: false
+      field :blocking, Integer, description: "Count of issues this issue is blocking", null: false
+      field :total_blocking, Integer, description: "Total count of issues this issue is blocking (open and closed)", null: false
+    end
+  end
+end

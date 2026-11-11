@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unicorn-api
+  annotations:
+    moda.github.net/cluster-preferences: |
+      {
+        "dotcom-7-ac4-iad": {
+          "spec": {
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "unicorn",
+                    "env": [
+                      {
+                        "name": "DATADOG_MONKEY_PATCH_SENDER_ENABLED",
+                        "value": "1"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+spec:
+  template:
+    spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - preference:
+              matchExpressions:
+              - key: gpanel.githubapp.com/machine_type
+                operator: In
+                values:
+                - general5.m.large
+                - storage5.m.large
+            weight: 1
+      containers:
+        - name: nginx
+        - name: unicorn
+          env:
+            - name: AZURE_FEDERATED_TOKEN_FILE_SHORT
+              value: /var/run/secrets/azure-msft/token
+            - name: MEMCACHED_PROXY_ENABLED
+              value: "true"
+            - name: MEMCACHED_HTMLPIPELINE_SERVERS
+              value: "memcachedproxy.memcached-proxy-production.svc.cluster.local:11213"
+            - name: MEMCACHED_USERCONTENT_SERVERS
+              value: "memcachedproxy.memcached-proxy-production.svc.cluster.local:11214"
+            - name: MEMCACHED_GLOBAL_SERVERS
+              value: "memcachedproxy.memcached-proxy-production.svc.cluster.local:11211"
+            - name: MEMCACHED_RYOW_SERVERS
+              value: "memcachedproxy.memcached-proxy-production.svc.cluster.local:11215"
+          volumeMounts:
+            - name: azure-federated-token-msft
+              mountPath: /var/run/secrets/azure-msft
+              readOnly: true
+          resources:
+            requests:
+              cpu: 6
+      volumes:
+        - name: azure-federated-token-msft
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 86400
+                  audience: api://AzureADTokenExchange

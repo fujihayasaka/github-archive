@@ -1,0 +1,61 @@
+<%# view is an instance of Integrations::ShowView %>
+<%# locals: (view:, show_permissions_acknowledgment_error: false) %>
+<% page_info\
+  responsive: true,
+  title: "GitHub Apps - #{view.integration.name}",
+  selected_link: view.selected_link,
+  stafftools: gh_stafftools_app_path(view.integration.owner, view.integration)
+%>
+
+<%= render layout: "settings/settings_focus" do %>
+  <div class="container-lg tmp-px-3">
+    <div class="gutter clearfix">
+      <div class="col-12 col-md-3 float-left tmp-my-3">
+        <%= render "integrations/settings/integration_menu", :view => view %>
+      </div>
+      <div class="col-12 col-md-9 float-left">
+        <%= render "integrations/settings/integration_header", :view => view %>
+        <%= render Primer::Beta::Subhead.new do |component| %>
+          <% component.with_heading(tag: :h2) do %>
+            Enable agent features
+          <% end %>
+          <% component.with_description do %>
+            Makes this GitHub App an agent app. You will be able to assign issues to it, @mention it with <b>@<%= view.integration.slug %>[agent]</b> in pull request comments and trigger it from the Agents tab. Some permissions are required for agent apps.
+          <% end %>
+        <% end %>
+        <%= form_for view.integration, url: gh_settings_app_create_agent_setup_path(view.integration), method: :post, html: {"aria-label": "Enable agent features", class: "d-flex flex-column gap-3"} do |f| %>
+          <%= f.fields_for :agent_source do |agent_source_fields| %>
+            <%= render partial: "integrations/settings/agent_source_fields", locals: { integration: view.integration, agent_source_fields: agent_source_fields } %>
+          <% end %>
+
+          <% checkbox_label = capture do %>
+            I am aware that enabling agent features may add new required permissions to my app. <span class="color-fg-danger" aria-hidden="true">*</span><span class="sr-only">, required</span>
+          <% end %>
+          <% permissions_list = AgenticApp::PermissionsDependency::MINIMUM_PERMISSIONS.map { |resource, action|
+            group = Permissions::FineGrainedResources::Metadata.resource_group(resource)
+            title = Permissions::FineGrainedResources::Metadata.title(resource)
+            "#{group.capitalize} #{title} (#{humanized_action_name(action)})"
+          }.to_sentence %>
+          <%= render Primer::Alpha::CheckBoxGroup.new(
+            label: "Required permissions acknowledgment",
+            visually_hide_label: true,
+            validation_message: show_permissions_acknowledgment_error ? "You must acknowledge the required permissions before enabling agent features." : nil,
+            invalid: show_permissions_acknowledgment_error,
+          ) do |group| %>
+            <% group.check_box(
+              name: "permissions_acknowledged",
+              label: checkbox_label,
+              caption: "Required permissions: #{permissions_list}. Existing permissions at or above these levels will not be changed.",
+              value: "1",
+              checked: params[:permissions_acknowledged] == "1",
+            ) %>
+          <% end %>
+
+          <div>
+            <%= render Primer::Beta::Button.new(type: :submit, scheme: :primary) do %>Enable agent features<% end %>
+          </div>
+        <% end %>
+      </div>
+    </div>
+  </div>
+<% end %>

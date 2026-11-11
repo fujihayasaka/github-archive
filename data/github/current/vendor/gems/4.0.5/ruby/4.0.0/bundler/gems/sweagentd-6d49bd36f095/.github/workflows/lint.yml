@@ -1,0 +1,45 @@
+name: "go-linter"
+
+env:
+  HUSKY: 0
+
+on:
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    env:
+      LINT_VERSION: v2.7.2
+    steps:
+      - uses: actions/checkout@v6
+      - uses: github/setup-goproxy@v1.1.0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Check Go formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "FAIL! The following files are not formatted with gofmt:"
+            echo "$unformatted"
+            echo ""
+            echo "Please run 'make format' or 'gofmt -w .' to format the code."
+            exit 1
+          fi
+      - name: Cache custom golangci-lint binary
+        uses: actions/cache@v5
+        with:
+          path: |
+            bin/custom-gcl
+            bin/customgcl.sum
+          key: custom-gcl-${{ hashFiles('pkg/goerrorslint/**', '.custom-gcl.yml') }}-${{ env.LINT_VERSION }}
+      - name: Run Go Linter
+        # opt packages out of linting by adding them to .github/lint_skip.txt
+        run: script/lint

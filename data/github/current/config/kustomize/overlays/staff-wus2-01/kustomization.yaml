@@ -1,0 +1,176 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base/proxima
+
+configMapGenerator:
+  - name: observability-config
+    behavior: merge
+    literals:
+      - DB_TRACECONTEXT_PROPAGATOR=tracecontext
+
+replicas:
+  - name: dependabot-alerts-alerting-progress-processor
+    count: 3
+  - name: dependabot-alerts-vulnerable-dependency-processor
+    count: 3
+  - name: memex-events-processor
+    count: 3
+  - name: memex-live-updates-processor
+    count: 3
+  - name: unicorn-gitauth-api
+    count: 4
+  - name: unicorn-performance
+    count: 3
+
+patches:
+  # Override proxima ScaledObject replica counts for this environment
+  - target:
+      kind: ScaledObject
+      name: unicorn
+    patch: |-
+      - op: replace
+        path: /spec/minReplicaCount
+        value: 9
+      - op: replace
+        path: /spec/maxReplicaCount
+        value: 9
+  - target:
+      kind: ScaledObject
+      name: unicorn-api
+    patch: |-
+      - op: replace
+        path: /spec/minReplicaCount
+        value: 19
+      - op: replace
+        path: /spec/maxReplicaCount
+        value: 19
+  - target:
+      kind: ScaledObject
+      name: unicorn-api-graphql
+    patch: |-
+      - op: replace
+        path: /spec/minReplicaCount
+        value: 5
+      - op: replace
+        path: /spec/maxReplicaCount
+        value: 5
+  - target:
+      kind: ScaledObject
+      name: unicorn-internal-api
+    patch: |-
+      - op: replace
+        path: /spec/minReplicaCount
+        value: 6
+      - op: replace
+        path: /spec/maxReplicaCount
+        value: 6
+  # Remove replicas from deployments managed by KEDA ScaledObjects
+  - target:
+      kind: Deployment
+      name: unicorn-api
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+  - target:
+      kind: Deployment
+      name: ^unicorn$
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+  - target:
+      kind: Deployment
+      name: unicorn-internal-api
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+  - target:
+      kind: ServiceMeshConfig
+      name: config
+    patch: |-
+      - op: replace
+        path: /spec/authorization/strictTLS
+        value: true
+  - target:
+      kind: Deployment
+      name: unicorn-api
+    patch: |-
+      - op: test
+        path: /spec/template/spec/containers/1/env/14/name
+        value: CPS_NETWORK_SERVICE_URL
+      - op: replace
+        path: /spec/template/spec/containers/1/env/14/value
+        value: "https://cps-network-service-staffship.githubapp.com/api/v1"
+      - op: add
+        path: /metadata/annotations/moda.github.net~1allow-missing-ready-pods
+        value: "1"
+  - target:
+      kind: Deployment
+      name: unicorn
+    patch: |-
+      - op: test
+        path: /spec/template/spec/containers/2/env/14/name
+        value: CPS_NETWORK_SERVICE_URL
+      - op: replace
+        path: /spec/template/spec/containers/2/env/14/value
+        value: "https://cps-network-service-staffship.githubapp.com/api/v1"
+      - op: replace
+        path: /metadata/annotations/moda.github.net~1latest-image-placeholders-for
+        value: "geoip"
+  - target:
+      kind: Namespace
+      name: base-namespace
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: github-staff-wus2-01
+      - op: replace
+        path: "/metadata/labels/github.com~1name"
+        value: github-staff-wus2-01
+  - target:
+      kind: ResourceQuota
+      name: pod-object-count
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: github-staff-wus2-01
+  - target:
+      kind: Deployment
+      name: unicorn-(|api|api-graphql|internal-api|gitauth-api)
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/1/env/-
+        value:
+          name: COPILOT_USAGE_REPORTS_KUSTO_CLUSTER_NAME
+          value: "reportsstaffwus201.westus2"
+  - target:
+      kind: Deployment
+      name: unicorn
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: COPILOT_USAGE_REPORTS_KUSTO_CLUSTER_NAME
+          value: "reportsstaffwus201.westus2"
+  # Override proxima ScaledObject replica counts for aqueduct workers
+  - target:
+      kind: ScaledObject
+      name: sharedworker
+    patch: |-
+      - op: replace
+        path: /spec/minReplicaCount
+        value: 4
+      - op: replace
+        path: /spec/maxReplicaCount
+        value: 4
+  - target:
+      kind: ScaledObject
+      name: hookworker
+    patch: |-
+      - op: replace
+        path: /spec/minReplicaCount
+        value: 2
+      - op: replace
+        path: /spec/maxReplicaCount
+        value: 2

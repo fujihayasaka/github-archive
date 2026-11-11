@@ -1,0 +1,35 @@
+# typed: true
+# frozen_string_literal: true
+
+class Stafftools::Businesses::ShortcodeCheckController < Stafftools::Businesses::BusinessBaseController
+  skip_before_action :business_required
+
+  def create
+    return head 400 if shortcode_from_params.blank?
+
+    sample_business = Business.new(
+      name: "test",
+      slug: "test",
+      business_type: :enterprise_managed,
+      shortcode: shortcode_from_params
+    )
+    unless sample_business.valid?
+      error_msg = sample_business.errors[:shortcode].first
+    end
+
+    if error_msg.present?
+      render status: 422, plain: "'#{shortcode_from_params}' #{error_msg}"
+    else
+      render \
+        status: 200,
+        plain: "The enterprise managed users in this enterprise will \
+          be created with login handles like monalisa_#{shortcode_from_params}".squish
+    end
+  end
+
+  private
+
+  memoize def shortcode_from_params
+    params[:value].to_s.downcase
+  end
+end

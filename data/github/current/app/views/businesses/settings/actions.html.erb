@@ -1,0 +1,152 @@
+<%# erblint:counter DeprecatedComponentsCounter 1 %>
+<% page_info title: "Actions settings · #{view.business.name}",
+             selected_link: :business_actions_settings,
+             sidebar: :policies,
+             stafftools: stafftools_enterprise_path(view.business) %>
+
+<%= render layout: "businesses/layout",
+  locals: {
+    business: view.business,
+    title: "Actions",
+    container_attributes: "itemscope itemtype='http://schema.org/Business'"
+  } do %>
+
+  <%= render "businesses/settings/actions/tabs", business: view.business, should_display_custom_images_tab: should_display_custom_images_tab %>
+
+  <h2 class="pb-2">Policies</h2>
+
+  <p class="col-10 mb-2">
+    Actions can be enabled for all organizations or only for specific organizations. If disabled, GitHub Actions cannot run.
+  </p>
+
+  <div class="pt-2 pb-1">
+    <%= form_tag settings_actions_update_access_policy_enterprise_path, method: :put do %>
+      <%= render GitHub::MenuComponent.new(items: view.action_policy_list) do |menu| %><%# erblint:disable Primer::Accessibility::DetailsMenuMigration %>
+        <% menu.with_summary do %>
+          <%= render Primer::ButtonComponent.new(tag: :summary, classes: "select-menu-button") do %>
+            <span data-menu-button><%= menu.default_selection_text %></span>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <% if view.show_org_list? %>
+      <%= render "businesses/settings/actions/orgs", view: view %>
+    <% end %>
+  </div>
+  <div class="col-10">
+    <actions-policy-form>
+      <%= primer_form_with(url: settings_actions_update_allowed_actions_enterprise_path, method: :put) do |f| %>
+        <%= render(Actions::Policy::AllowedActionsForm.new(f, owner: view.business, current_user: current_user)) %>
+      <% end %>
+    </actions-policy-form>
+  </div>
+
+  <div class="col-10 tmp-my-6">
+    <%= render Businesses::Actions::Policies::RunnerPoliciesComponent.new(entity: view.business) %>
+  </div>
+
+  <% unless view.business.actions_disabled? %>
+    <% if Actions::DebuggerPolicyConfig.new(view.business).feature_flag_enabled? %>
+      <div class="col-10 tmp-my-6">
+        <h2 class="text-normal mb-2">Job debugger</h2>
+        <% config = Actions::DebuggerPolicyConfig.new(view.business) %>
+        <p class="mb-2">Allow organizations to enable the job debugger. Organizations and repositories must individually opt in to use it.</p>
+        <%= form_tag settings_actions_update_debugger_enterprise_path, method: :put, data: { test_selector: "debugger_policy_form" } do %>
+          <%= render GitHub::MenuComponent.new(items: [
+            GitHub::Menu::ButtonComponent.new(
+              text: "Enabled",
+              description: "Organizations can enable the job debugger for their repositories",
+              replace_text: "Enabled",
+              checked: !config.disabled?,
+              name: "policy",
+              value: Actions::DebuggerPolicyConfig::ALL_ENTITIES,
+              type: "submit",
+            ),
+            GitHub::Menu::ButtonComponent.new(
+              text: "Disabled",
+              description: "The job debugger is disabled for all organizations in this enterprise",
+              replace_text: "Disabled",
+              checked: config.disabled?,
+              name: "policy",
+              value: Actions::DebuggerPolicyConfig::NO_ENTITIES,
+              type: "submit",
+            ),
+          ]) do |menu| %><%# erblint:disable Primer::Accessibility::DetailsMenuMigration %>
+            <% menu.with_summary do %>
+              <%= render Primer::Beta::Button.new(tag: :summary, test_selector: "policy-selection") do |c| %>
+                <% c.with_trailing_action_icon(icon: "triangle-down") %>
+                <span data-menu-button><%= menu.default_selection_text %></span>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+
+        <% if Actions::DebuggerSelfHostedRunnersPolicyConfig.new(view.business).feature_flag_enabled? %>
+          <% self_hosted_config = Actions::DebuggerSelfHostedRunnersPolicyConfig.new(view.business) %>
+          <p class="tmp-mt-3 mb-2">Allow live debugging on self-hosted runners. Organizations and repositories must individually opt in.</p>
+          <%= form_tag settings_actions_update_debugger_self_hosted_runners_enterprise_path, method: :put, data: { test_selector: "debugger_self_hosted_runners_policy_form" } do %>
+            <%= render GitHub::MenuComponent.new(items: [
+              GitHub::Menu::ButtonComponent.new(
+                text: "Allowed",
+                description: "Organizations can opt into allowing live debugging on self-hosted runners",
+                replace_text: "Allowed",
+                checked: self_hosted_config.local_allowed?,
+                name: "enabled",
+                value: "true",
+                type: "submit",
+              ),
+              GitHub::Menu::ButtonComponent.new(
+                text: "Not allowed",
+                description: "Live debugging on self-hosted runners is not allowed anywhere in this enterprise",
+                replace_text: "Not allowed",
+                checked: !self_hosted_config.local_allowed?,
+                name: "enabled",
+                value: "false",
+                type: "submit",
+              ),
+            ]) do |menu| %><%# erblint:disable Primer::Accessibility::DetailsMenuMigration %>
+              <% menu.with_summary do %>
+                <%= render Primer::Beta::Button.new(tag: :summary, test_selector: "self-hosted-policy-selection") do |c| %>
+                  <% c.with_trailing_action_icon(icon: "triangle-down") %>
+                  <span data-menu-button><%= menu.default_selection_text %></span>
+                <% end %>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      </div>
+    <% end %>
+
+    <%= render Actions::Settings::RetentionComponent.new(
+      entity: view.business,
+      update_retention_limit_path: settings_actions_update_retention_enterprise_path,
+    ) %>
+
+    <%= render Actions::Settings::CachePoliciesComponent.new(
+      entity: view.business
+    ) %>
+
+    <%= render Actions::Policy::ForkPrApprovalsComponent.new(
+      entity: view.business,
+      action: settings_actions_fork_pr_approvals_policy_enterprise_path
+    ) %>
+
+    <% if FeatureFlag.vexi.enabled?(:dotcom_public_fork_pr_workflows_policy, view.business, default: false) %>
+      <%= render Actions::Policy::PublicForkPullRequestComponent.new(
+        action: settings_actions_public_fork_pr_workflows_policy_enterprise_path,
+        entity: view.business,
+      ) %>
+    <% end %>
+
+    <%= render Actions::Policy::ForkPullRequestComponent.new(
+      action: settings_actions_fork_pr_workflows_policy_enterprise_path,
+      entity: view.business,
+    ) %>
+
+    <%= render Actions::Policy::DefaultWorkflowPermissionsComponent.new(
+      action: settings_actions_update_default_workflow_permissions_enterprise_path,
+      entity: view.business,
+    ) %>
+  <% end %>
+<% end %>

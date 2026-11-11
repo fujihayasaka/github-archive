@@ -1,0 +1,60 @@
+# typed: true
+# frozen_string_literal: true
+
+class Repos::SecurityAndAnalysis::CodeScanning::AiFindingsSettingsController < AbstractRepositoryController
+  track_availability_slo "ui-request"
+  track_latency_slo "p50-ui-request", 500
+  track_latency_slo "p99-ui-request", 2000
+
+  skip_before_action :privacy_check
+  skip_before_action :cap_pagination
+  before_action :manage_security_products_permission_required
+  before_action :writable_repository_required
+
+  def update
+    case params[:policy]
+    when CodeScanning::AiFindings::POLICY_NAME
+      updated_settings
+    else
+      render_404
+    end
+  end
+
+  private
+
+  def policy_value
+    case params[:value]
+    when "1"
+      "enabled"
+    when "0"
+      "disabled"
+    else
+      nil
+    end
+  end
+
+  def updated_settings
+    return render_404 unless CodeScanning::AiFindings.repo_settings_configurable?(current_repository)
+
+    case policy_value
+    when "enabled"
+      CodeScanningRepositoryConfig.new(current_repository).enable_code_scanning_ai_findings_settings(actor: current_user)
+
+      GitHub.instrument("repo.code_scanning_ai_findings_enabled", actor: current_user, repo: current_repository, org: current_repository.owner)
+      GlobalInstrumenter.instrument("security_analysis.update", event_name: "code_scanning_ai_findings.enabled", owner: current_repository.owner, actor: current_user)
+
+      flash[:notice] = "AI security findings are now enabled for this repository."
+    when "disabled"
+      CodeScanningRepositoryConfig.new(current_repository).disable_code_scanning_ai_findings_settings(actor: current_user)
+
+      GitHub.instrument("repo.code_scanning_ai_findings_disabled", actor: current_user, repo: current_repository, org: current_repository.owner)
+      GlobalInstrumenter.instrument("security_analysis.update", event_name: "code_scanning_ai_findings.disabled", owner: current_repository.owner, actor: current_user)
+
+      flash[:notice] = "AI security findings are now disabled for this repository."
+    else
+      flash[:error] = "You provided an invalid input value. Please try again."
+    end
+
+    redirect_to :back
+  end
+end

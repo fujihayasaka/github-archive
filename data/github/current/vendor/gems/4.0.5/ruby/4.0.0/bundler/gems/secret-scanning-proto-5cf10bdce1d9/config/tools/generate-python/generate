@@ -1,0 +1,53 @@
+#!/bin/bash
+#
+# Expected to execute inside the docker container built from config/tools/generate-python/Dockerfile
+#
+set -e
+
+echo "Cleaning older version..."
+
+rm -rf gen/python
+
+echo "Applying template..."
+
+cp -r _template/python gen
+
+echo "Generating proto files..."
+
+python_out=./gen/python/src/github/proto/secret_scanning/
+
+mkdir -p $python_out
+
+packages=('api/v1'
+'api/v2'
+'blobs/v1'
+'businesses/v1'
+'repositories/v1'
+'organizations/v1'
+'scans/v1'
+'users/v1'
+'api/v3'
+'scans/v2'
+'metrics/v1'
+'types/v1'
+'issues/v1'
+'pull_requests/v1'
+'discussions/v1'
+'tenant/v1'
+'secretverification/v1'
+'publicmonitoring/v1'
+'bypassers/v1'
+'actionlogs/v1'
+)
+
+for p in "${packages[@]}"; do
+  set -x
+  protoc --proto_path=proto \
+    --python_out=$python_out \
+    --twirpy_out=$python_out \
+    ./proto/"${p}"/*.proto
+    { set +x; } 2>/dev/null
+done
+
+echo "Creating __init__.py files..."
+find ./gen/python/src -type d -exec touch {}/__init__.py \;

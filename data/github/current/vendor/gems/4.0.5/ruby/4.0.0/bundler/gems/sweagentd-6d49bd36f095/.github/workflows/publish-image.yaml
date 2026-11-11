@@ -1,0 +1,275 @@
+# Reusable workflow: Build and Publish Image
+#
+# Called by image publishing workflows.
+# Builds the devcontainer image, pushes it to GHCR, and registers it
+# as a public sandbox disk image via the Sandbox API.
+
+name: Build and Publish Image (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      docker_image_name:
+        description: 'Full Docker image name (e.g. ghcr.io/org/repo/image)'
+        required: true
+        type: string
+      disk_image_name:
+        description: 'Sandbox disk image name for the API'
+        required: true
+        type: string
+      devcontainer_path:
+        description: "Path to the devcontainer.json file (relative to repository root)"
+        required: true
+        type: string
+      runtime_tarball_dest:
+        description: 'Optional: directory to write a generated ccav3 runtime tarball before building (e.g. images/cca-runtime).'
+        required: false
+        type: string
+        default: ''
+      runtime_sha:
+        description: 'Optional: runtime submodule commit SHA to build instead of the SHA pinned in this repository.'
+        required: false
+        type: string
+        default: ''
+      dry_run:
+        description: 'If true, build the image but skip GHCR push and Sandbox API registration. Allows validating the build from non-main branches without producing release side effects.'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      SANDBOX_IMAGE_TOKEN:
+        required: true
+      RUNTIME_REPO_TOKEN:
+        description: 'Optional: GitHub token with read access to the runtime submodule. Required when runtime_tarball_dest is set.'
+        required: false
+      AUTOFIND_DOWNLOAD_GITHUB_TOKEN:
+        description: 'Optional: GitHub token with read access to github/codeml-detector releases. Required when runtime_tarball_dest is set.'
+        required: false
+      GPGSIGN_DOWNLOAD_GITHUB_TOKEN:
+        description: 'Optional: GitHub token with read access to github/gh-gpgsign releases. Required when runtime_tarball_dest is set.'
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    name: Build and Push
+    runs-on: ubuntu-latest
+    # Production publish is restricted to main. Dry runs are allowed from any
+    # branch so feature branches can validate the image build without pushing.
+    if: github.ref == 'refs/heads/main' || inputs.dry_run
+
+    steps:
+      - name: Validate runtime build inputs
+        if: inputs.runtime_tarball_dest != ''
+        run: |
+          missing=()
+          if [ -z "$RUNTIME_REPO_TOKEN" ]; then
+            missing+=("RUNTIME_REPO_TOKEN")
+          fi
+          if [ -z "$AUTOFIND_DOWNLOAD_GITHUB_TOKEN" ]; then
+            missing+=("AUTOFIND_DOWNLOAD_GITHUB_TOKEN")
+          fi
+          if [ -z "$GPGSIGN_DOWNLOAD_GITHUB_TOKEN" ]; then
+            missing+=("GPGSIGN_DOWNLOAD_GITHUB_TOKEN")
+          fi
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::runtime_tarball_dest requires these secrets: ${missing[*]}"
+            exit 1
+          fi
+        env:
+          RUNTIME_REPO_TOKEN: ${{ secrets.RUNTIME_REPO_TOKEN }}
+          AUTOFIND_DOWNLOAD_GITHUB_TOKEN: ${{ secrets.AUTOFIND_DOWNLOAD_GITHUB_TOKEN }}
+          GPGSIGN_DOWNLOAD_GITHUB_TOKEN: ${{ secrets.GPGSIGN_DOWNLOAD_GITHUB_TOKEN }}
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          token: ${{ inputs.runtime_tarball_dest != '' && secrets.RUNTIME_REPO_TOKEN || github.token }}
+          submodules: ${{ inputs.runtime_tarball_dest != '' && 'recursive' || 'false' }}
+
+      - name: Checkout runtime at specified SHA
+        if: inputs.runtime_tarball_dest != '' && inputs.runtime_sha != ''
+        run: |
+          git -C runtime fetch origin "$RUNTIME_SHA"
+          git -C runtime checkout "$RUNTIME_SHA"
+        env:
+          RUNTIME_SHA: ${{ inputs.runtime_sha }}
+
+      - name: Setup Node.js for ccav3 runtime build
+        if: inputs.runtime_tarball_dest != ''
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: ./runtime/.nvmrc
+
+      - name: Install runtime dependencies
+        if: inputs.runtime_tarball_dest != ''
+        run: npm ci
+        working-directory: ./runtime
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HUSKY: 0
+
+      - name: Install Linux sysroot for glibc compatibility
+        if: inputs.runtime_tarball_dest != ''
+        run: script/runtime-linux-sysroot-env >> "$GITHUB_ENV"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Build ccav3 runtime tarball
+        if: inputs.runtime_tarball_dest != ''
+        run: |
+          mkdir -p "$DEST"
+          rm -f "$DEST/copilot-developer-action.tar.gz"
+
+          # The ccav3 app-local build copies these helpers into dist-cca-v3.
+          (
+            cd runtime
+            script/autofind-build "$(pwd)/autofind" false
+            script/gh-gpgsign-build "$(pwd)/gh-gpgsign"
+            src/apps/ccav3/script/action-build "$(pwd)/script/npm"
+
+            # Build the runtime-tools MCP client bundle. The ccav3 build above
+            # only emits dist-cca-v3; it never builds the mcp-client bundle. The
+            # Actions image build additionally runs the runtime's top-level
+            # script/action-build, which does `npm run build:mcp-client` and
+            # stages dist-mcp-client at mcp/dist. The sandbox tarball must mirror
+            # that layout so the runtime's getRuntimeToolsCommand() can resolve
+            # ../mcp/dist/runtime-tools.js (a sibling of dist-cca-v3).
+            # Root node_modules (incl. tsx/esbuild) are already installed by the
+            # earlier "Install runtime dependencies" step (npm ci in ./runtime).
+            # See github/sweagentd#13065 and #13101.
+            script/npm run build:mcp-client
+          )
+
+          staging_parent="$RUNNER_TEMP/ccav3-runtime-tarball"
+          staging_dir="$staging_parent/copilot-developer-action-main"
+          rm -rf "$staging_parent"
+          mkdir -p "$staging_dir"
+
+          cp -R runtime/dist-cca-v3 "$staging_dir/dist-cca-v3"
+          # Stage the runtime-tools MCP client bundle alongside dist-cca-v3,
+          # mirroring the Actions `script/action-build` layout (which does
+          # `cp -r dist-mcp-client/* mcp/dist` plus package.json/package-lock.json
+          # into mcp/). getRuntimeToolsCommand() resolves the server relative to
+          # dist-cca-v3 as ../mcp/dist/runtime-tools.js.
+          mkdir -p "$staging_dir/mcp/dist"
+          cp -R runtime/dist-mcp-client/* "$staging_dir/mcp/dist"
+          cp runtime/package.json "$staging_dir/mcp/package.json"
+          cp runtime/package-lock.json "$staging_dir/mcp/package-lock.json"
+          # Fail fast if the runtime-tools bundle is missing rather than shipping
+          # a tarball that breaks the runtime-tools MCP server at runtime (#13101).
+          test -f "$staging_dir/mcp/dist/runtime-tools.js"
+          git -C runtime rev-parse --verify HEAD > "$staging_dir/version"
+          tar -C "$staging_parent" -czf "$DEST/copilot-developer-action.tar.gz" copilot-developer-action-main
+        env:
+          DEST: ${{ inputs.runtime_tarball_dest }}
+          GITHUB_TOKEN: ${{ github.token }}
+          HUSKY: 0
+          AUTOFIND_DOWNLOAD_GITHUB_TOKEN: ${{ secrets.AUTOFIND_DOWNLOAD_GITHUB_TOKEN }}
+          GPGSIGN_DOWNLOAD_GITHUB_TOKEN: ${{ secrets.GPGSIGN_DOWNLOAD_GITHUB_TOKEN }}
+
+      - name: Generate tags
+        id: tags
+        run: |
+          DATE_TAG=$(date -u +%Y%m%d-%H%M)
+          echo "date_tag=${DATE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Free disk space for runtime build
+        # The cca-runtime build is the only caller that runs an `npm ci`
+        # plus a full ccav3 build on the runner before invoking docker.
+        # Combined with the standard GHA runner image footprint (~30 GB of
+        # preinstalled SDKs we don't use), the docker build then runs out
+        # of disk while writing layers. Reclaim space we know we don't
+        # need before invoking the devcontainer CLI.
+        if: inputs.runtime_tarball_dest != ''
+        run: |
+          echo "Before cleanup:"
+          df -h /
+          # Runtime build leftovers: node_modules and intermediate build
+          # output dirs have already been packed into the tarball and are
+          # no longer needed.
+          sudo rm -rf runtime/node_modules runtime/dist-cca-v3 runtime/dist-mcp-client runtime/autofind runtime/gh-gpgsign || true
+          # GHA-preinstalled SDKs we don't use in this build.
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/boost \
+            /usr/local/share/powershell \
+            /usr/local/share/chromium \
+            /usr/local/lib/heroku \
+            "$AGENT_TOOLSDIRECTORY/Ruby" \
+            "$AGENT_TOOLSDIRECTORY/PyPy" \
+            "$AGENT_TOOLSDIRECTORY/CodeQL" || true
+          docker image prune -af || true
+          echo "After cleanup:"
+          df -h /
+
+      - name: Log in to GHCR
+        if: ${{ !inputs.dry_run }}
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image with devcontainer CLI
+        run: |
+          npx --yes @devcontainers/cli@0.80.2 build \
+            --workspace-folder . \
+            --config "$DEVCONTAINER_PATH" \
+            --image-name "$DOCKER_IMAGE_NAME:latest"
+        env:
+          DOCKER_IMAGE_NAME: ${{ inputs.docker_image_name }}
+          DEVCONTAINER_PATH: ${{ inputs.devcontainer_path }}
+
+      - name: Push image tags
+        # Defense in depth: even if dry_run is somehow false, refuse to push
+        # from a non-main ref. The `if` on the job already enforces this for
+        # the normal case; this is a belt-and-suspenders check.
+        if: ${{ !inputs.dry_run && github.ref == 'refs/heads/main' }}
+        run: |
+          docker tag "$DOCKER_IMAGE_NAME:latest" "$DOCKER_IMAGE_NAME:$DATE_TAG"
+          docker push "$DOCKER_IMAGE_NAME:latest"
+          docker push "$DOCKER_IMAGE_NAME:$DATE_TAG"
+        env:
+          DOCKER_IMAGE_NAME: ${{ inputs.docker_image_name }}
+          DATE_TAG: ${{ steps.tags.outputs.date_tag }}
+
+      - name: Publish public disk image
+        if: ${{ !inputs.dry_run && github.ref == 'refs/heads/main' }}
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X POST \
+            https://api.github.com/user/sandboxes/images \
+            -H "Authorization: Bearer ${{ secrets.SANDBOX_IMAGE_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            -d "{
+              \"image\": {\"base\": \"${{ inputs.docker_image_name }}:latest\"},
+              \"name\": \"${{ inputs.disk_image_name }}\",
+              \"is_public\": true
+            }")
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | sed '$d')
+          echo "$body" | jq . >> "$GITHUB_STEP_SUMMARY" || echo "$body" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$http_code" -lt 200 || "$http_code" -ge 300 ]]; then
+            echo "::error::Sandbox API returned HTTP $http_code"
+            exit 1
+          fi
+          echo "Disk image published (HTTP $http_code)"
+
+      - name: Dry run summary
+        if: ${{ inputs.dry_run }}
+        run: |
+          {
+            echo "## Dry run"
+            echo ""
+            echo "Image \`${DOCKER_IMAGE_NAME}\` built successfully from \`${GITHUB_REF}\`."
+            echo "GHCR push and Sandbox API registration were skipped."
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          DOCKER_IMAGE_NAME: ${{ inputs.docker_image_name }}

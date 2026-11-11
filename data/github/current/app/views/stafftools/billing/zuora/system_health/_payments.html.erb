@@ -1,0 +1,158 @@
+<%
+  # Sort payment data by error count descending
+  payment_volume_sorted = payment_volume.sort_by { |r| -(r["error"] || r[:error] || 0).to_i }
+
+  # Compute payment totals
+  pay_total_success = payment_volume.sum { |r| (r["success"] || r[:success] || 0).to_i }
+  pay_total_errors = payment_volume.sum { |r| (r["error"] || r[:error] || 0).to_i }
+  pay_total = pay_total_success + pay_total_errors
+  pay_error_pct = pay_total > 0 ? (pay_total_errors.to_f / pay_total * 100).round(1) : 0
+  if error
+    pay_status = "yellow"
+    pay_label = "Unknown"
+    pay_scheme = :attention
+  else
+    pay_status = pay_error_pct > 5 ? "red" : pay_error_pct > 1 ? "yellow" : "green"
+    pay_label = pay_status == "green" ? "Healthy" : pay_status == "yellow" ? "Degraded" : "Unhealthy"
+    pay_scheme = pay_status == "green" ? :success : pay_status == "yellow" ? :attention : :danger
+  end
+%>
+
+<div class="health-card" style="flex: 1; min-width: 300px;">
+  <% if error %>
+    <%= render(Primer::Alpha::Banner.new(icon: :alert, scheme: :danger, mb: 2)) { error } %>
+  <% end %>
+  <div class="health-card-header">
+    <span class="f4 text-bold">
+      <span class="status-dot <%= pay_status %>"></span>Payments
+    </span>
+    <%= render(Primer::Beta::Label.new(scheme: pay_scheme)) { pay_label } %>
+  </div>
+  <% if payment_volume_sorted.any? %>
+    <div style="max-height: 280px; overflow-y: auto;">
+      <table class="stafftools-table" style="margin-bottom: 0;">
+        <thead>
+          <tr>
+            <th>Gateway</th>
+            <th>Method</th>
+            <th style="text-align:right; width: 60px;">OK</th>
+            <th style="text-align:right; width: 60px;">Errors</th>
+            <th style="text-align:right; width: 80px;">Error %</th>
+            <th style="width: 80px;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <% payment_volume_sorted.each do |row| %>
+            <%
+              gw = row["paymentGatewayType"] || row[:paymentGatewayType] || "Unknown"
+              pm = row["paymentMethodType"] || row[:paymentMethodType] || ""
+              ok = (row["success"] || row[:success] || 0).to_i
+              errs = (row["error"] || row[:error] || 0).to_i
+              total_row = ok + errs
+              pct = total_row > 0 ? (errs.to_f / total_row * 100).round(1) : 0
+              bar_ok = total_row > 0 ? (ok.to_f / total_row * 70).round : 70
+              bar_err = 70 - bar_ok
+              gw_danger = pct > 10
+            %>
+            <tr>
+              <td><% if gw_danger %><strong style="color: var(--fgColor-danger);"><%= gw %></strong><% else %><%= gw %><% end %></td>
+              <td><%= render(Primer::Beta::Label.new(scheme: :secondary)) { pm } %></td>
+              <td style="text-align:right; color: var(--fgColor-success);"><%= number_with_delimiter(ok) %></td>
+              <td style="text-align:right;<%= " color: var(--fgColor-danger); font-weight: 600;" if errs > 0 %>"><%= number_with_delimiter(errs) %></td>
+              <%
+                pct_color = if pct >= 10
+                  "var(--fgColor-danger)"
+                elsif pct >= 5
+                  "var(--fgColor-attention)"
+                elsif pct > 0
+                  "var(--fgColor-muted)"
+                else
+                  "var(--fgColor-muted)"
+                end
+                pct_weight = pct >= 5 ? "600" : "normal"
+              %>
+              <td class="pct-cell" style="text-align:right; color: <%= pct_color %>; font-weight: <%= pct_weight %>;"><%= pct %>%</td>
+              <td>
+                <span class="error-rate-bar success" style="width: <%= bar_ok %>px;"></span><% if bar_err > 0 %><span class="error-rate-bar error" style="width: <%= bar_err %>px;"></span><% end %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+        <tfoot>
+          <tr style="font-weight: 600; background: var(--bgColor-muted);">
+            <td colspan="2" style="white-space: nowrap; border-top: 2px solid var(--borderColor-default);">Total</td>
+            <td style="text-align:right; white-space: nowrap; border-top: 2px solid var(--borderColor-default);"><%= number_with_delimiter(pay_total_success) %></td>
+            <td style="text-align:right; white-space: nowrap; border-top: 2px solid var(--borderColor-default);"><%= number_with_delimiter(pay_total_errors) %></td>
+            <%
+              pay_pct_color = if pay_error_pct >= 10
+                "var(--fgColor-danger)"
+              elsif pay_error_pct >= 5
+                "var(--fgColor-attention)"
+              elsif pay_error_pct > 0
+                "var(--fgColor-muted)"
+              else
+                "var(--fgColor-muted)"
+              end
+              pay_pct_weight = pay_error_pct >= 5 ? "600" : "normal"
+            %>
+            <td style="text-align:right; white-space: nowrap; border-top: 2px solid var(--borderColor-default); color: <%= pay_pct_color %>; font-weight: <%= pay_pct_weight %>;"><%= pay_error_pct %>%</td>
+            <td style="border-top: 2px solid var(--borderColor-default);"></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  <% else %>
+    <p class="color-fg-muted f6">No payment data available for this time range.</p>
+  <% end %>
+</div>
+
+<%# ═══ Payment Details (collapsible) ═══ %>
+<% if payment_records.any? %>
+  <details class="tmp-mb-3 col-12" style="flex-basis: 100%;">
+    <%= render Primer::Beta::Button.new(tag: :summary, scheme: :link, font_weight: :bold) do %>
+      ▸ Payment Records (<%= payment_records.size %>)
+    <% end %>
+    <div class="Box mt-2">
+      <table class="stafftools-table detail-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Gateway</th>
+            <th>Method</th>
+            <th style="text-align:right;">Amount</th>
+            <th>Currency</th>
+            <th>Status</th>
+            <th>Response</th>
+            <th style="text-align:right;">Duration</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% payment_records.each do |rec| %>
+            <%
+              p_date = rec["payment_date"] || rec[:payment_date] || ""
+              p_gw = rec["payment_gateway_type"] || rec[:payment_gateway_type] || ""
+              p_method = rec["payment_method_type"] || rec[:payment_method_type] || ""
+              p_amount = rec["amount"] || rec[:amount] || 0
+              p_currency = rec["currency"] || rec[:currency] || ""
+              p_status = rec["payment_status"] || rec[:payment_status] || ""
+              p_resp = rec["payment_gateway_response_msg"] || rec[:payment_gateway_response_msg] || ""
+              p_dur = (rec["request_duration"] || rec[:request_duration] || 0).to_i
+              p_status_scheme = p_status.downcase == "error" || p_status.downcase == "declined" ? :danger : :success
+              p_gw_danger = p_status.downcase == "error" || p_status.downcase == "declined"
+            %>
+            <tr>
+              <td><%= p_date %></td>
+              <td><% if p_gw_danger %><strong style="color: var(--fgColor-danger);"><%= p_gw %></strong><% else %><%= p_gw %><% end %></td>
+              <td><%= render(Primer::Beta::Label.new(scheme: :secondary)) { p_method } %></td>
+              <td style="text-align:right;"><%= number_to_currency(p_amount.to_f / 100) %></td>
+              <td><%= p_currency %></td>
+              <td><%= render(Primer::Beta::Label.new(scheme: p_status_scheme)) { p_status } %></td>
+              <td style="color: var(--fgColor-muted); font-style: italic;"><%= p_resp.present? ? "\"#{h(p_resp)}\"" : "—" %></td>
+              <td style="text-align:right;<%= " color: var(--fgColor-attention); font-weight: 600;" if p_dur > 2000 %><%= " color: var(--fgColor-danger); font-weight: 600;" if p_dur > 10000 %>"><%= number_with_delimiter(p_dur) %>ms</td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </details>
+<% end %>

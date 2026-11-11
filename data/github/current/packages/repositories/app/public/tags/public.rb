@@ -1,0 +1,81 @@
+# typed: strict
+# frozen_string_literal: true
+
+module Tags
+  module Public
+    class << self
+      # Retrieve tag ref mappings for a repository in chronological
+      # order. The ordering is based on the creation date of the peeled commit
+      # object the tag ref points to.
+      #
+      # Note that the collection returned only includes tag refs which resolve
+      # to a commit object. Tag refs that resolve to any other type are
+      # excluded.
+      sig { params(repository: ::Repository, pattern: T.nilable(String)).returns(T::Array[ITag]) }
+      def sorted_for(repository:, pattern: nil)
+        if pattern
+          # * is not a valid tag name character, so we can safely remove it to prevent globbing issues
+          pattern = pattern.gsub("*", "")
+        end
+
+        refs = begin
+          SpokesAPI::Client.paged_responses do |cursor|
+            repository.spokes_api.list_references_with_details(include_globs: ["refs/tags/**/*#{pattern}*/**"], cursor:)
+          end.flat_map do |response|
+            response.refs.map do |ref|
+              [ref.reference.name, ref.target_id.id, ref.peeled_id.id, ref.commit_time&.timestamp&.to_time.to_i]
+            end
+          end
+        rescue SpokesAPI::Error
+          []
+        end
+
+        sort_refs!(refs)
+        refs.map { |ref| ref[0..2] }
+      end
+
+      # Public: Find tag names whose reachability graph contains the given commit SHA.
+      # Stops collecting after `limit` tags to cap cost for repos with many tags.
+      #
+      # Returns a Set of tag names (without the "refs/tags/" prefix).
+      sig { params(repository: ::Repository, sha: String, limit: Integer, timeout: T.any(Integer, Float)).returns(T::Set[String]) }
+      def tags_containing_commit(repository:, sha:, limit: 500, timeout: 2)
+        tag_names = T.let(Set.new, T::Set[String])
+        spokes = repository.spokes_api(timeout: timeout)
+
+        SpokesAPI::Client.paged_responses do |cursor|
+          spokes.list_references(include_prefixes: ["refs/tags/"], cursor: cursor, contains: [sha])
+        end.each do |page|
+          page.reference_items.each do |item|
+            name = item.reference&.name
+            next unless name&.start_with?("refs/tags/")
+            tag_names << name.delete_prefix("refs/tags/")
+
+            return tag_names if tag_names.size >= limit
+          end
+        end
+
+        tag_names
+      rescue SpokesAPI::Error => e
+        GitHub.dogstats.increment("tags.containing_commit.spokes_error", tags: ["error:#{e.class.name}"])
+        T.must(tag_names) # Sorbet can't prove non-nilability across rescue; tag_names is always initialized above
+      end
+
+      private
+
+      # Sorts refs by nearest day of creation, then semver, then second of creation
+      sig { params(refs: T::Array[[String, String, String, Integer]]).returns(T::Array[[String, String, String, Integer]]) }
+      def sort_refs!(refs)
+        refs.sort! do |a, b|
+          same_day = (a[3] / 86400) <=> (b[3] / 86400)
+          if !same_day.zero?
+            same_day
+          else
+            semver = VersionSorter.compare(a[0], b[0]) <=> 0
+            semver.zero? ? a[3] <=> b[3] : semver
+          end
+        end
+      end
+    end
+  end
+end

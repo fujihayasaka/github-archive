@@ -1,0 +1,124 @@
+<% scheme = if dependabot_error || dependabot_unavailable || update_job_error?
+               :danger
+             elsif update_job_warnings?
+               :warning
+             else
+               :default
+             end %>
+<%= render(Primer::Alpha::Banner.new(scheme: scheme, dismiss_scheme: :hide, mb: 2, test_selector: "update_graph_job_component")) do |component| %>
+  <div class="d-flex">
+    <div class="flex-1 overflow-x-auto">
+      <div>
+        <% if dependabot_error || dependabot_unavailable %>
+          We couldn't check the status of your Dependabot graph update jobs
+        <% elsif access_recommendation? %>
+          Dependabot can't access <%= grantable_repositories.map(&:name_with_display_owner).to_sentence %>
+        <% elsif broken? %>
+          Dependabot graph updates have stopped for your repository due to repeated
+          <a class="Link--inTextBlock" href="<%= failed_update_jobs_link %>" target="_blank" rel="noopener noreferrer">errors</a>
+          . The last error message was:
+        <% elsif update_job_error? %>
+          Dependabot encountered
+          <a class="Link--inTextBlock" href="<%= failed_update_jobs_link %>" target="_blank" rel="noopener noreferrer"><%= errors_count %></a>
+          while updating the dependency graph. The last error message was:
+        <% else %>
+          <%= update_job.pretty_state %>
+        <% end %>
+      </div>
+
+      <% if dependabot_error %>
+        <div class="mt-2">
+          <span class="text-bold">
+            Dependabot encountered an error
+          </span>
+          <div>
+            We've been notified of the problem, and are working to fix it.
+          </div>
+        </div>
+      <% elsif dependabot_unavailable %>
+        <div class="mt-2">
+          <span class="text-bold">
+            Dependabot is currently unavailable
+          </span>
+          <div>
+            We've been notified of the problem, and are working to fix it.
+          </div>
+        </div>
+      <% elsif update_job_error? %>
+        <div class="mt-2">
+          <% unless access_recommendation? %>
+            <span class="text-bold">
+              <%= update_job.last_error.msg %>
+            </span>
+          <% end %>
+          <%= body %>
+        </div>
+        <% if show_refresh_link? %>
+          <div class="tmp-mt-3">
+            <% if refresh_on_cooldown? %>
+              <span class="color-fg-muted text-small">
+                <%= render Primer::Beta::Octicon.new(icon: "sync", aria: { label: "Sync disabled", hidden: false }, classes: "mr-1") %>
+                Dependency graph refresh requested recently, available again in <%= distance_of_time_in_words_to_now cooldown_ends_at %>
+              </span>
+            <% else %>
+              <span>
+                Fixed the issue? <a class="Link--inTextBlock mx-1" href="<%= refresh_graph_path %>">Refresh the dependency graph.</a>
+              </span>
+            <% end %>
+          </div>
+        <% end %>
+      <% elsif update_job_warnings? %>
+        <div class="mt-2">
+          <div class="text-bold">Warnings:</div>
+          <% update_job.warnings.each_with_index do |warning, index| %>
+            <div>
+              <div><strong><%= warning.title %></strong></div>
+              <div><%= warning.description %></div>
+            </div>
+            <% if index < update_job.warnings.size - 1 %>
+              <hr class="my-2">
+            <% end %>
+          <% end %>
+        </div>
+        <% if show_refresh_link? %>
+          <div class="tmp-mt-3">
+            <% if refresh_on_cooldown? %>
+              <span class="color-fg-muted text-small">
+                <%= render Primer::Beta::Octicon.new(icon: "sync", aria: { label: "Sync disabled", hidden: false }, classes: "mr-1") %>
+                Dependency graph refresh requested recently, available again in <%= distance_of_time_in_words_to_now cooldown_ends_at %>
+              </span>
+            <% else %>
+              <span>
+                Fixed the issue? <a class="Link--inTextBlock mx-1" href="<%= refresh_graph_path %>">Refresh the dependency graph.</a>
+              </span>
+            <% end %>
+          </div>
+        <% end %>
+      <% else %>
+        <span class="color-fg-muted text-small">
+          <% if update_job.finished_at %>
+            Finished <%= time_ago_in_words_js Time.at(update_job.finished_at.seconds) %>
+          <% else %>
+            Running now
+          <% end %>
+        </span>
+      <% end %>
+    </div>
+
+    <% if access_recommendation? %>
+      <div class="flash-action">
+        <% if adminable_by_current_user? %>
+          <%= form_tag network_apply_dependabot_repository_access_recommendations_path(repository: repository, user_id: owner), method: :post do %>
+            <input type="hidden" name="update_config_id" value="<%= update_job.update_config_id %>">
+            <input type="hidden" name="update_job_id" value="<%= update_job.id %>">
+            <% grantable_repositories.pluck(:id).each do |id| %>
+              <input type="hidden" name="repository_ids[]" value="<%= id %>">
+            <% end %>
+
+            <%= render Primer::Beta::Button.new(mr: 2, type: :submit) do %>Grant access<% end %>
+          <% end %>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+<% end %>

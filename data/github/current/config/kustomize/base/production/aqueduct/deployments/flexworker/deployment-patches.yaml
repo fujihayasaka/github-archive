@@ -1,0 +1,38 @@
+# Worker-specific patches for flexworker
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aqueduct-worker
+spec:
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        azure.workload.identity/use: "true"
+    spec:
+      containers:
+        - name: aqueduct
+          args:
+            - bin/resqued
+            - --pidfile
+            - /resqued-pidfile/resqued.pid
+            - config/resqued/github-environment.rb
+            - config/resqued/github-flexworker-kube.rb
+          resources:
+            requests:
+              cpu: 3
+              memory: 15Gi
+            limits:
+              cpu: 10
+              memory: 20Gi
+          env:
+            - name: JOB_WORKER_GRACEFUL_MEMORY_LIMIT_IN_MB
+              value: "3072"
+            - name: DOGSTATSD_ADDITIONAL_TAGS
+              value: "kube_deployment:flexworker"
+            - name: GITHUB_CONFIG_ROLE
+              value: "flexworker"
+            - name: OTEL_SERVICE_NAME
+              value: "github-flexworker-kube"

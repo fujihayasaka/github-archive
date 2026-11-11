@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -e
+
+TEST_GOTAUTH=${TEST_GOTAUTH:-0}
+TEST_REPOSD=${TEST_REPOSD:-0}
+
+if [[ "$TEST_GOTAUTH" -eq 0 && "$TEST_REPOSD" -eq 0 ]]; then
+  echo "TEST_GOTAUTH or TEST_REPOSD must be set to 1"
+  exit 1
+fi
+
+GOTAUTH_TESTS=""
+REPOSD_TESTS=""
+
+if [ "$TEST_REPOSD" = "1" ]; then
+  REPOSD_TESTS=(
+    test/integration/api/repository_contents/delete_content_test.rb
+    test/integration/api/repository_contents/create_content_test.rb
+    test/integration/api/repository_contents/create_content_web_flow_test.rb
+    test/integration/api/repository_contents/update_content_test.rb
+    test/integration/api/repository_contents/get_contents_test.rb
+    test/integration/api/internal/raw/raw_pub_test.rb
+    test/integration/api/internal/raw/raw_test.rb
+    test/integration/api/repository_contents/get_contents_authz_test.rb
+    test/integration/api/repository_contents/get_contents_authzd_extraction_test.rb
+    test/integration/api/internal/archive_test.rb
+    test/integration/api/stores/create_store_test.rb
+    test/integration/api/stores/get_store_test.rb
+    test/integration/api/stores/delete_store_test.rb
+    packages/apps/test/models/scoped_integration_installation/scoped_to_store_creator_test.rb
+    test/integration/api/integrations/create_store_scoped_installation_access_tokens_test.rb
+  )
+fi
+
+if [ "$TEST_GOTAUTH" = "1" ]; then
+  DEFAULT_GOTAUTH_TEST_PATTERNS=(
+    test/lib/git_auth/access_characterization_test.rb
+  )
+
+  MATCHING_GOTAUTH_TESTS=$(grep -rl --include="*_test.rb" -e "GitHub::GitAuthTestCase" -e "GitAuthCertificateFixturesTest" -e ":gotauth" test/ | grep -v '^test/lib/github/repo_permissions_gotauth_verify_key_experiment_test.rb$')
+  BABELD_TESTS=$(find test/integration -name '*babeld*_test.rb')
+  if [[ "$MULTI_TENANT_ENTERPRISE" == "1" || "$ENTERPRISE" == "1" ]]; then
+    # these tests are not currently configured to run in multitenant mode
+    # remove until they can run with MULTI_TENANT_ENTERPRISE=1
+    MATCHING_GOTAUTH_TESTS=$(echo "$MATCHING_GOTAUTH_TESTS" | grep -v \
+      -e 'test/integration/babeld/replication_deploy_key_test.rb' \
+      -e 'test/lib/github/repo_permissions_spokesd_enabled_test.rb' \
+      -e 'test/lib/github/intel_fork_restriction_cli_test.rb' \
+      -e 'test/lib/github/repo_permissions_enterprise_redirects_test.rb')
+    BABELD_TESTS=()
+  fi
+
+  GOTAUTH_TESTS="${DEFAULT_GOTAUTH_TEST_PATTERNS[*]} ${MATCHING_GOTAUTH_TESTS[*]} ${BABELD_TESTS[*]}"
+fi
+
+TESTS=("${REPOSD_TESTS[@]}" ${GOTAUTH_TESTS[@]})
+EXPANDED_TESTS=""
+for pattern in "${TESTS[@]}"; do
+  for file in $pattern; do
+    EXPANDED_TESTS="$EXPANDED_TESTS $file"
+  done
+done
+TESTS=$EXPANDED_TESTS
+
+echo "$TESTS"

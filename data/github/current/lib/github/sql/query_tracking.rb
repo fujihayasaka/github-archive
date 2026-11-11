@@ -1,0 +1,99 @@
+# typed: true
+# frozen_string_literal: true
+
+module GitHub
+  class SQL
+    module QueryTracking
+      extend self
+
+      # Regex to match SQL comments, including OTel tracecontext and application tags
+      # Uses character class approach to handle multiline comments
+      COMMENT_REGEXP = /\/\*(?:[^*]|\*[^\/])*\*\//m.freeze
+
+      # Redact sql to remove sensitive and/or information not relevant to query tracking analysis
+      # Returns a string.
+      def redact_sql(sql)
+        redacted = sql.gsub(";", "").gsub(COMMENT_REGEXP, "").strip
+        if redacted.start_with?("SELECT")
+          redacted = redacted.gsub(/\ASELECT.+FROM/m, "SELECT ... FROM")
+        elsif redacted.start_with?("INSERT INTO")
+          redacted = redacted_sql_for_insert(redacted.gsub("`", ""))
+        end
+        redacted
+      end
+
+      # returns a string
+      def redacted_sql_for_insert(query)
+        query_parts = parse_insert_query(query)
+
+        if query_parts.nil? || query_parts[:table_name].nil?
+          ""
+        else
+          redacted_value_string = query_parts[:rows].map do |values|
+            values.map.with_index do |value, index|
+              column = query_parts[:columns][index]
+              column&.ends_with?("_id") ? value : "?"
+            end.join(", ")
+          end.join("), (")
+
+          "INSERT INTO `#{query_parts[:table_name]}` (#{query_parts[:columns].join(', ')}) VALUES (#{redacted_value_string})"
+        end
+      end
+
+      # Returns a positional array
+      def parse_insert_query(query)
+        # rubocop:disable GitHub/InsertOnDuplicateKeyUpdate
+        # Match INSERT INTO table_name (columns) VALUES (one or more values)
+        match = query.match(/INSERT INTO\s+`?(?<table_name>\w+)`?\s*\((?<columns>[^)]+)\)\s+VALUES\s+(?<rows>.+?)(?:\s+ON DUPLICATE KEY UPDATE.*)?\z/m)
+        # rubocop:enable GitHub/InsertOnDuplicateKeyUpdate
+        return if match.nil?
+
+        column_names = match[:columns].split(",").map { |name| name.gsub("`", "").strip }
+        rows = split_sql_rows(match[:rows]).map do |values|
+          split_sql_values(values).map { |value| value.gsub(/\A\(|\)\z/, "").strip }
+        end
+
+        {
+          table_name: match[:table_name],
+          columns: column_names,
+          rows: rows,
+        }
+      end
+
+      # Splits a multi-row VALUES clause on "), (" while respecting single-quoted strings.
+      def split_sql_rows(str)
+        sentinel = "\x00"
+        replaced = str.gsub(/'(?:''|\\'|[^'])*'|\), \(/m) do |match|
+          match.start_with?("'") ? match : sentinel
+        end
+        replaced.split(sentinel)
+      end
+
+      # Splits a SQL VALUES row on commas while respecting single-quoted strings.
+      def split_sql_values(str)
+        str.scan(/(?:'(?:''|\\'|[^'])*'|[^,])+/m)
+      end
+
+      # Returns queries that are unique by sql string, connection, and if it's part of a transaction
+      # then scrubs sensitive/unnecessary information from sql string
+      def unique_redacted_queries(queries)
+        queries_with_redacted_sql = queries.map do |q|
+          [q, redact_sql(q.sql)]
+        end
+
+        queries_with_redacted_sql.uniq do |q, redacted|
+          [redacted, q.transaction_uuid, q.connection_class.try(:current_role), q.on_primary]
+        end.map do |q, redacted|
+          {
+            redacted_sql: redacted,
+            digested_sql: q.digested_sql,
+            transaction_uuid: q.transaction_uuid,
+            connection_class_name: q.connection_class.try(:name),
+            connection_class_role: q.connection_class.try(:current_role),
+            on_primary: q.on_primary,
+          }
+        end
+      end
+    end
+  end
+end

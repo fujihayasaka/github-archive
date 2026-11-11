@@ -1,0 +1,113 @@
+---
+summary: Upload a Code Coverage report
+description: |-
+  Uploads a Code Coverage report for a repository.
+tags:
+- code-quality
+operationId: code-coverage/upload-code-coverage-report
+externalDocs:
+  description: API method documentation
+  url: '${externalDocsUrl}/rest/code-quality/code-coverage#upload-a-code-coverage-report'
+x-github-resource-owner: '@github/code-scanning-experiences'
+x-github-internal:
+  owner: '@github/code-scanning-experiences'
+  path: '/repos/{owner}/{repo}/code-coverage/report'
+  http-method: put
+  published: false
+x-github-releases:
+- api.github.com
+- ghec
+parameters:
+- $ref: '../../components/parameters/owner.yaml'
+- $ref: '../../components/parameters/repo.yaml'
+requestBody:
+  required: true
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          commit_oid:
+            description: The commit SHA that triggered this coverage upload.
+            type: string
+            minLength: 40
+            maxLength: 64
+            pattern: '^([0-9a-f]{40}(?:[0-9a-f]{24})?)$'
+            example: f921edcc74d6b492ec068f5aa02b0e9a2cd45f5b
+          ref:
+            description: The git ref for this coverage upload.
+            type: string
+            pattern: '^refs/(heads|pull)/.*$'
+            example: refs/heads/main
+          coverage_report:
+            description: Base64-encoded coverage report payload.
+            type: string
+            example: VGhpcyBpcyBhIGJhc2U2NC1lbmNvZGVkIGNvdmVyYWdlIHJlcG9ydC4=
+          language_name:
+            description: The language of the code coverage report. For example, `javascript` or `python`.
+            type: string
+            example: javascript
+          label:
+            description: A label that can be used to differentiate the uploaded coverage report from other code coverage uploads for the same commit. For example, `code-coverage/pytest`.
+            type: string
+            maxLength: 64
+            example: code-coverage/pytest
+          pull_request_number:
+            description: The number of the pull request associated with this coverage report.
+            type: integer
+            example: 42
+        required:
+          - commit_oid
+          - coverage_report
+          - language_name
+          - label
+        oneOf:
+          - title: ref-based upload
+            description: Provide a git ref. Do not provide pull_request_number.
+            required:
+              - ref
+          - title: pull-request-based upload
+            description: Provide a pull request number. Do not provide ref.
+            required:
+              - pull_request_number
+      examples:
+        default:
+          value:
+            commit_oid: f921edcc74d6b492ec068f5aa02b0e9a2cd45f5b
+            ref: refs/heads/main
+            coverage_report: VGhpcyBpcyBhIGJhc2U2NC1lbmNvZGVkIGNvdmVyYWdlIHJlcG9ydC4=
+            label: end-to-end-tests
+            language_name: ruby
+responses:
+  '201':
+    description: Successful upload
+  '200':
+    description: The commit does not match the latest commit on the ref, so the report was not uploaded.
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+        examples:
+          default:
+            value:
+              message: "Coverage report for f921ed cannot be uploaded for main because it is not the latest commit on the branch"
+  '400':
+    description: Bad Request
+  '403':
+    $ref: '../../components/responses/code_quality_forbidden_write.yaml'
+  '404':
+    $ref: '../../components/responses/not_found.yaml'
+  '413':
+    description: Payload Too Large
+  '422':
+    description: Unprocessable Entity
+x-github:
+  githubCloudOnly: false
+  enabledForGitHubApps: true
+  previews: []
+  category: code-quality
+  subcategory: code-coverage

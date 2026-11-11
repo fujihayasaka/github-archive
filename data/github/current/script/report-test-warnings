@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+
+set -e
+
+DOWNLOAD_RETRIES=${DOWNLOAD_RETRIES:-3}
+DOWNLOAD_RETRY_DELAY_SECONDS=${DOWNLOAD_RETRY_DELAY_SECONDS:-5}
+
+download_artifacts_with_retries() {
+  local run_id="$1"
+  local destination="$2"
+  local attempt
+
+  for ((attempt = 1; attempt <= DOWNLOAD_RETRIES; attempt++)); do
+    if gh run download -R github/github "$run_id" -D "$destination" -p "github*" -p "enterprise*"; then
+      return 0
+    fi
+
+    if [ "$attempt" -lt "$DOWNLOAD_RETRIES" ]; then
+      echo "Download attempt $attempt/$DOWNLOAD_RETRIES failed. Retrying in ${DOWNLOAD_RETRY_DELAY_SECONDS}s..."
+      sleep "$DOWNLOAD_RETRY_DELAY_SECONDS"
+    fi
+  done
+
+  return 1
+}
+
+find_and_report_warnings() {
+  local title="$1"
+  local tmp_suffix="$2"
+  local pattern="$3"
+  local count=0
+  local sorted_tmp_file="$REPORT_FILE.$tmp_suffix.sorted.tmp"
+
+  echo "" >> "$REPORT_FILE"
+  echo "## $title" >> "$REPORT_FILE"
+
+  # Process all matching lines in one pass to avoid expensive per-file/per-line loops.
+  grep -R -h -n --include="test_stderr.txt" "$pattern" "$TEMP_DIR" 2>/dev/null \
+    | sed -E 's/^[0-9]+:([^:]+:)?//; s/^Mocha warning: //' \
+    | sort -u > "$sorted_tmp_file" || true
+
+  if [ -s "$sorted_tmp_file" ]; then
+    count=$(wc -l < "$sorted_tmp_file")
+    cat "$sorted_tmp_file" >> "$REPORT_FILE"
+
+    echo "" >> "$REPORT_FILE"
+    echo "Total: $count $title." >> "$REPORT_FILE"
+  fi
+
+  rm -f "$sorted_tmp_file"
+
+  echo "$count"
+}
+
+if [ -z "$1" ]; then
+  echo "Error: Please provide a GitHub Actions run ID"
+  echo "Usage: script/report-test-warnings RUN_ID EXISTING_TEMP_DIR"
+  exit 1
+fi
+
+RUN_ID=$1
+REPORT_FILE="test_warnings_report_$RUN_ID.txt"
+
+if [ -z "$2" ]; then
+  TEMP_DIR=$(mktemp -d)
+  echo "Creating temporary directory at $TEMP_DIR."
+  echo "Downloading artifacts from run $RUN_ID."
+
+  if ! download_artifacts_with_retries "$RUN_ID" "$TEMP_DIR"; then
+    echo "Error: Failed to download artifacts"
+    rm -rf "$TEMP_DIR"
+    exit 1
+  fi
+  echo "Deleting everything that isn't a txt file, and thus empty directories..."
+  find "$TEMP_DIR" -type f ! -name "*.txt" -exec rm -f {} \;
+  echo "Temporary directory created at $TEMP_DIR. Artifacts downloaded."
+else
+  echo "Using pre-existing temporary directory and assuming it contains artifacts."
+  TEMP_DIR=$2
+fi
+
+{
+  echo "# Test Warnings (Run ID: $RUN_ID)"
+  echo "Generated on $(date)"
+  echo "--------------------------------------------"
+} > "$REPORT_FILE"
+
+MISSING_ASSERTIONS_COUNT=$(find_and_report_warnings "Tests Missing Assertions" "missing_assertions" "missing assertions")
+STUBBING_NON_EXISTENT_METHOD_COUNT=$(find_and_report_warnings "Non-existent Method Stubs" "nonexistent_method" "stubbing non-existent method")
+
+echo "" >> "$REPORT_FILE"
+echo "## Summary" >> "$REPORT_FILE"
+echo "* Missing Assertions: ${MISSING_ASSERTIONS_COUNT:-0}" >> "$REPORT_FILE"
+echo "* Non-existent Method Stubs: ${STUBBING_NON_EXISTENT_METHOD_COUNT:-0}" >> "$REPORT_FILE"
+TOTAL_WARNINGS=$((${MISSING_ASSERTIONS_COUNT:-0} + ${STUBBING_NON_EXISTENT_METHOD_COUNT:-0}))
+echo "* Total Warnings: $TOTAL_WARNINGS" >> "$REPORT_FILE"
+
+echo "Report generated in $REPORT_FILE."

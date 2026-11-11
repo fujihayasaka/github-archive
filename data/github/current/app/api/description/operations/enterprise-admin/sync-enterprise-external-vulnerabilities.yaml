@@ -1,0 +1,112 @@
+---
+summary: Sync external vulnerabilities for an enterprise
+description: |-
+  Synchronize external vulnerability data with the Advisory Database for an enterprise.
+  This endpoint receives vulnerability data in OSV format and creates, updates, or withdraws
+  innersource vulnerabilities accordingly. Dependabot alerting is triggered for created and
+  updated vulnerabilities.
+
+  The request body accepts up to 100 vulnerabilities per call.
+
+  OAuth app tokens and personal access tokens (classic) need the `admin:enterprise` scope to use this endpoint.
+operationId: enterprise-admin/sync-enterprise-external-vulnerabilities
+tags:
+  - enterprise-admin
+externalDocs:
+  description: API method documentation
+  url: "${externalDocsUrl}/rest/enterprise-admin/security-advisories#sync-external-vulnerabilities-for-an-enterprise"
+x-github-internal:
+  path: /enterprises/{enterprise}/external-vulnerabilities/sync
+  http-method: post
+  published: false
+  owner: "@github/advisory-database"
+parameters:
+  - $ref: "../../components/parameters/enterprise.yaml"
+requestBody:
+  required: true
+  content:
+    application/json:
+      schema:
+        type: array
+        description: Array of vulnerabilities in OSV format to synchronize
+        items:
+          $ref: "../../components/schemas/osv-vulnerability.yaml"
+        minItems: 1
+        maxItems: 100
+      examples:
+        default:
+          value:
+            - id: "MVS-2026-001"
+              schema_version: "1.4.0"
+              summary: "Example vulnerability summary"
+              aliases:
+                - "GHSA-xxxx-xxxx-xxxx"
+              affected:
+                - package:
+                    ecosystem: "npm"
+                    name: "example-package"
+                  ranges:
+                    - type: "SEMVER"
+                      events:
+                        - introduced: "1.0.0"
+                        - fixed: "1.0.1"
+responses:
+  "200":
+    description: Sync operation completed successfully (synchronous mode)
+    content:
+      application/json:
+        schema:
+          $ref: "../../components/schemas/external-vulnerability-sync-result.yaml"
+        examples:
+          default:
+            value:
+              processed: 1
+              created: 1
+              updated: 0
+              withdrawn: 0
+              errors: 0
+              results:
+                - external_id: "MVS-2026-001"
+                  status: "created"
+                  ghsa_id: "GHIS-xxxx-xxxx-xxxx"
+  "202":
+    description: Sync operation accepted for asynchronous processing. Poll the returned URL for results.
+    headers:
+      Location:
+        description: URL to poll for sync results
+        schema:
+          type: string
+          format: uri
+      Retry-After:
+        description: Number of seconds to wait before polling
+        schema:
+          type: integer
+          example: 1
+    content:
+      application/json:
+        schema:
+          $ref: "../../components/schemas/external-vulnerability-sync-accepted.yaml"
+        examples:
+          default:
+            value:
+              id: "external-vulnerability-sync-a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+              url: "https://api.github.com/enterprises/my-enterprise/external-vulnerabilities/sync/status/external-vulnerability-sync-a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+              status: "queued"
+  "400":
+    $ref: "../../components/responses/bad_request.yaml"
+  "401":
+    $ref: "../../components/responses/requires_authentication.yaml"
+  "403":
+    $ref: "../../components/responses/forbidden.yaml"
+  "404":
+    $ref: "../../components/responses/not_found.yaml"
+  "422":
+    $ref: "../../components/responses/validation_failed.yaml"
+x-github-releases:
+  - api.github.com
+  - ghec
+x-github:
+  githubCloudOnly: false
+  enabledForGitHubApps: true
+  category: enterprise-admin
+  subcategory: security-advisories

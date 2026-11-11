@@ -1,0 +1,1 @@
+import{o as e}from"./chunk-jRWAZmH_.js";import{Qp as t,ts as n}from"./index-M6n1L9AM.js";var r=e(t()),i=(0,r.createContext)({});i.displayName=`RouteStateMapContext`;function a(){return(0,r.use)(i)[n().key]}function o(){let e=a();return(e&&e.type===`loaded`?e.data:void 0)?.payload}export{o as t};

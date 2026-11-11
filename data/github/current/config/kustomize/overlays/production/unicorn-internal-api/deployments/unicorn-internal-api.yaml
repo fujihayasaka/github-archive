@@ -1,0 +1,66 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unicorn-internal-api
+  annotations:
+    heaven.githubapp.com/deploy-requirement: "true"
+    moda.github.net/allow-missing-ready-pods: 5
+    moda.github.net/canary-v2: "true"
+    moda.github.net/canary-replicas: 10
+    moda.github.net/canary-label: "role"
+spec:
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 6%
+  template:
+    metadata:
+      labels:
+        sidecar.istio.io/inject: "true"
+        istio.io/rev: "stable"
+        moda.github.net/proxy-bypass: "outbound-non-mesh"
+    spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - preference:
+              matchExpressions:
+              - key: gpanel.githubapp.com/machine_type
+                operator: In
+                values:
+                - general5.m.large
+                - storage5.m.large
+            weight: 1
+      dnsPolicy: "ClusterFirst"
+      containers:
+        - name: nginx
+        - env:
+            - name: API_HOST_NAME
+              value: internal-api.service.iad.github.net
+            - name: SERVICE_MESH_ENABLED
+              value: "true"
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  key: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT_INGRESS
+                  name: observability-config
+            - name: GH_HOSTNAME
+              value: github.com
+            - name: MONOLITH_REDIS_RATE_LIMITER_TIMEOUT
+              value: '0.2'
+            - name: MEMCACHED_PROXY_ENABLED
+              value: "true"
+            - name: MEMCACHED_HTMLPIPELINE_SERVERS
+              value: "memcachedproxy.memcached-proxy-production.svc.cluster.local:11213"
+            - name: MEMCACHED_USERCONTENT_SERVERS
+              value: "memcachedproxy.memcached-proxy-production.svc.cluster.local:11214"
+            - name: MEMCACHED_GLOBAL_SERVERS
+              value: "memcachedproxy.memcached-proxy-production.svc.cluster.local:11211"
+            - name: MEMCACHED_RYOW_SERVERS
+              value: "memcachedproxy.memcached-proxy-production.svc.cluster.local:11215"
+            - name: UNICORN_CHECK_CLIENT_CONNECTION_ENABLED
+              value: "1"
+          name: unicorn
+          resources:
+            requests:
+              cpu: 6

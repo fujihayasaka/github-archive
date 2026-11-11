@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -eu -o pipefail
+
+cd $(git rev-parse --show-toplevel)
+
+IMAGE=script-proto-buf
+
+tar cf - \
+    config/tools/buf |
+docker build -f config/tools/buf/Dockerfile -t ${IMAGE} -
+
+COMMAND="lint"
+if [ $# -gt 0 ]; then
+  case "$1" in
+    format|lint|breaking)
+      COMMAND="$1"
+      shift
+      ;;
+  esac
+fi
+
+if [ "$COMMAND" = "breaking" ]; then
+  has_against=false
+
+  for arg in "$@"; do
+    case "$arg" in
+      --against|--against=*)
+        has_against=true
+        ;;
+    esac
+  done
+
+  if [ "$has_against" = false ]; then
+    if git show-ref --verify --quiet refs/remotes/origin/main; then
+      set -- "$@" --against "./.git#branch=origin/main,subdir=proto"
+    else
+      set -- "$@" --against "./.git#branch=main,subdir=proto"
+    fi
+  fi
+fi
+
+extra_args=
+if [ "$(uname -s)" = "Linux" ]; then
+  extra_args="-u $(id -u):$(id -g) --env XDG_CACHE_HOME=/tmp/xdghome"
+fi
+
+docker run --rm \
+        ${extra_args} \
+        --net=none \
+        -v $(pwd)/.git:/go/src/github.com/github/secret-scanning-proto/.git \
+        -v $(pwd)/proto:/go/src/github.com/github/secret-scanning-proto/proto \
+          ${IMAGE} ${COMMAND} "$@"

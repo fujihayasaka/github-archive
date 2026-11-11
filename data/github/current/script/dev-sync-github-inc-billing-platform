@@ -1,0 +1,67 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Development script to sync the github-inc enterprise customer
+# against a local billing-platform instance for development purposes.
+#
+# Usage:
+#   script/dev-sync-github-inc-billing-platform
+#
+# This script will:
+# 1. Find the "GitHub, Inc" business by slug 'github-inc'
+# 2. Get the associated customer
+# 3. Run UpdateCustomerInBillingPlatformJob to sync it with billing platform
+
+require_relative "../config/environment"
+
+unless Rails.env.development?
+  abort "❌ This script can only be run in development environment"
+end
+
+puts "🔍 Finding GitHub Inc business..."
+
+# Find the GitHub Inc business by slug
+business = Business.find_by_slug("github-inc")
+
+unless business
+  puts "❌ GitHub Inc business not found"
+  puts "   Expected to find a business with slug 'github-inc'"
+  puts "   Make sure the database is set up and seeded properly"
+  puts "   You can run: bundle exec rails db:seed"
+  exit 1
+end
+
+puts "✅ Found GitHub Inc business: #{business.name} (ID: #{business.id})"
+
+# Get the associated customer
+customer = business.customer
+
+unless customer
+  puts "❌ No customer found for GitHub Inc business"
+  puts "   The business exists but has no associated customer record"
+  exit 1
+end
+
+puts "✅ Found customer: #{customer.name} (ID: #{customer.id})"
+
+puts "🚀 Running UpdateCustomerInBillingPlatformJob..."
+
+begin
+  # Run the job synchronously for development
+  Billing::UpdateCustomerInBillingPlatformJob.perform_now(customer)
+  puts "✅ Successfully synced customer #{customer.id} to billing platform"
+rescue => e
+  puts "❌ Failed to sync customer: #{e.message}"
+  puts "   Error class: #{e.class.name}"
+  puts "   This may be expected if billing-platform is not running locally"
+  puts "   Backtrace:"
+  puts e.backtrace.first(5).map { |line| "     #{line}" }
+  exit 1
+end
+
+puts "🎉 Development sync completed successfully!"
+puts ""
+puts "💡 Note: For this to work with a local billing-platform instance:"
+puts "   1. Ensure billing-platform is running locally"
+puts "   2. Check that feature flags are enabled for billing platform"
+puts "   3. Verify network connectivity to the billing platform service"

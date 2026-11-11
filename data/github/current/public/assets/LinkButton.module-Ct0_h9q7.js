@@ -1,0 +1,1 @@
+var e={linkButton:`LinkButton-module_spLpMa_linkButton`};export{e as t};

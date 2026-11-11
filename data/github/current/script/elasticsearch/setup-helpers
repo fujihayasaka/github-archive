@@ -1,0 +1,85 @@
+#!/bin/bash
+# Setup Elasticsearch development environment aliases and functions
+
+setup_elasticsearch_environment() {
+    echo "Setting up Elasticsearch development environment..."
+
+    local bashrc="$HOME/.bashrc"
+    local marker_start="# >>> github-elasticsearch >>>"
+    local marker_end="# <<< github-elasticsearch <<<"
+
+    touch "$bashrc"
+
+    if grep -Fq "$marker_start" "$bashrc" 2>/dev/null; then
+        echo "Elasticsearch helpers already present in $bashrc; skipping alias redefinition."
+    else
+        cat >> "$bashrc" <<'EOF'
+
+# >>> github-elasticsearch >>>
+# Elasticsearch Development Aliases
+alias es-status='curl -s http://localhost:9400/_cluster/health | jq'
+alias es-nodes='curl -s http://localhost:9400/_cat/nodes?v'
+alias es-indices='curl -s http://localhost:9400/_cat/indices?v'
+alias kibana-status='curl -s http://localhost:5601/api/status | jq'
+alias es-license='curl -s http://localhost:9400/_license | jq'
+alias es-inference='curl -s http://localhost:9400/_inference | jq'
+
+# Helper functions
+es-test-inference() {
+    local endpoint=${1:-test-endpoint}
+    local text=${2:-"Hello, this is a test message"}
+    echo "Testing inference endpoint: $endpoint"
+    curl -s -X POST "http://localhost:9400/_inference/$endpoint" \
+        -H "Content-Type: application/json" \
+        -d "{\"input\": \"$text\"}" | jq
+}
+
+es-create-inference() {
+    local name=${1:-my-endpoint}
+    local model=${2:-.multilingual-e5-small}
+    echo "Creating inference endpoint: $name with model: $model"
+    curl -s -X PUT "http://localhost:9400/_inference/text_embedding/$name" \
+        -H "Content-Type: application/json" \
+        -d "$(jq -n --arg model_id "$model" '{service: "elasticsearch", service_settings: {model_id: $model_id}}')" | jq
+}
+
+export ELASTICSEARCH_URL="http://localhost:9400"
+export KIBANA_URL="http://localhost:5601"
+# <<< github-elasticsearch <<<
+
+EOF
+    fi
+
+    echo "Environment setup completed"
+}
+
+display_elasticsearch_info() {
+    # Get versions for display
+    local es_version=$(curl -s http://localhost:9400/ 2>/dev/null | jq -r '.version.number // "unknown"')
+    local kibana_version=$(curl -s http://localhost:5601/api/status 2>/dev/null | jq -r '.version.number // "unknown"')
+
+    echo ""
+    echo "Elasticsearch + Kibana Development Environment Ready!"
+    echo ""
+    echo "Service URLs:"
+    echo "  - Elasticsearch: http://localhost:9400 (v$es_version)"
+    echo "  - Kibana:        http://localhost:5601 (v$kibana_version)"
+    echo ""
+    echo "Helpful Commands:"
+    echo "  - es-status         - Check Elasticsearch cluster health"
+    echo "  - es-indices        - List all indices"
+    echo "  - es-license        - Check license status"
+    echo "  - es-inference      - List inference endpoints"
+    echo "  - kibana-status     - Check Kibana status"
+    echo ""
+    echo "Inference Functions:"
+    echo "  - es-test-inference [endpoint] [text] - Test an inference endpoint"
+    echo "  - es-create-inference [name] [model]  - Create a new inference endpoint"
+    echo ""
+}
+
+# Main execution if script is run directly
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    setup_elasticsearch_environment
+    display_elasticsearch_info
+fi

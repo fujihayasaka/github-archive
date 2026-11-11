@@ -1,0 +1,552 @@
+---
+summary: Get a task by repo
+description: |
+  > [!NOTE]
+  > This endpoint is in public preview and is subject to change.
+
+  Returns a task by ID scoped to an owner/repo path
+
+  **Fine-grained access tokens for "Get a task by repo"**
+
+  This endpoint works with the following fine-grained token types:
+
+  * [GitHub App user access tokens](${externalDocsUrl}/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
+  * [Fine-grained personal access tokens](${externalDocsUrl}/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token)
+
+  The fine-grained token must have the following permission set:
+
+  * "Agent tasks" repository permissions (read)
+
+  GitHub App installation access tokens are not supported for this endpoint.
+tags:
+  - agent-tasks
+operationId: agent-tasks/get-task-by-repo-and-id
+externalDocs:
+  description: API method documentation
+  url: ${externalDocsUrl}/rest/agent-tasks/agent-tasks#get-a-task-by-repo
+x-github:
+  githubCloudOnly: false
+  enabledForGitHubApps: true
+  category: agent-tasks
+  subcategory: agent-tasks
+x-github-internal:
+  http-method: get
+  published: true
+  owner: '@github/copilot-mission-control-reviewers'
+  path: /agents/repos/{owner}/{repo}/tasks/{task_id}
+x-github-releases:
+  - ghec
+  - api.github.com
+parameters:
+  - name: owner
+    in: path
+    required: true
+    schema:
+      type: string
+    description: The account owner of the repository. The name is not case sensitive.
+  - name: repo
+    in: path
+    required: true
+    schema:
+      type: string
+    description: The name of the repository. The name is not case sensitive.
+  - name: task_id
+    in: path
+    required: true
+    schema:
+      type: string
+    description: The unique identifier of the task.
+responses:
+  "200":
+    description: Task retrieved successfully
+    content:
+      application/json:
+        schema:
+          allOf:
+            - type: object
+              required:
+                - id
+                - state
+                - created_at
+              properties:
+                id:
+                  type: string
+                  description: Unique task identifier
+                url:
+                  type: string
+                  description: API URL for this task
+                html_url:
+                  type: string
+                  description: Web URL for this task
+                name:
+                  type: string
+                  description: Human-readable name derived from the task prompt
+                creator:
+                  oneOf:
+                    - type: object
+                      description: A GitHub user
+                      properties:
+                        id:
+                          type: integer
+                          format: int64
+                          description: The unique identifier of the user
+                  description: The entity who created this task
+                creator_type:
+                  type: string
+                  description: Type of the task creator
+                  enum:
+                    - user
+                    - organization
+                user_collaborators:
+                  type: array
+                  items:
+                    type: object
+                    description: A GitHub user
+                    properties:
+                      id:
+                        type: integer
+                        format: int64
+                        description: The unique identifier of the user
+                  description: User objects of collaborators on this task
+                  deprecated: true
+                owner:
+                  description: The owner of the repository
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                      format: int64
+                      description: The unique identifier of the user
+                repository:
+                  description: The repository this task belongs to
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                      format: int64
+                      description: The unique identifier of the repository
+                state:
+                  type: string
+                  description: Current state of the task, derived from its most recent session
+                  enum:
+                    - queued
+                    - in_progress
+                    - completed
+                    - failed
+                    - idle
+                    - waiting_for_user
+                    - timed_out
+                    - cancelled
+                session_count:
+                  type: integer
+                  format: int32
+                  description: Number of sessions in this task
+                artifacts:
+                  type: array
+                  items:
+                    type: object
+                    description: A resource generated by the task
+                    required:
+                      - provider
+                      - type
+                      - data
+                    properties:
+                      provider:
+                        type: string
+                        enum:
+                          - github
+                        description: Provider namespace
+                      type:
+                        type: string
+                        enum:
+                          - pull
+                          - branch
+                        description: |
+                          Type of artifact. Available Values: `pull`, `branch`.
+                      data:
+                        oneOf:
+                          - type: object
+                            description: A GitHub resource (pull request, issue, etc.)
+                            required:
+                              - id
+                            properties:
+                              id:
+                                type: integer
+                                format: int64
+                                description: GitHub resource ID
+                              global_id:
+                                type: string
+                                description: GraphQL global ID
+                          - type: object
+                            description: A Git branch reference
+                            required:
+                              - head_ref
+                              - base_ref
+                            properties:
+                              head_ref:
+                                type: string
+                                description: Head branch name
+                              base_ref:
+                                type: string
+                                description: Base branch name
+                        description: Resource data (shape depends on type)
+                  description: Resources created by this task (PRs, branches, etc.)
+                archived_at:
+                  type: string
+                  format: date-time
+                  nullable: true
+                  description: Timestamp when the task was archived, null if not archived
+                updated_at:
+                  type: string
+                  format: date-time
+                  description: Timestamp of the most recent update
+                created_at:
+                  type: string
+                  format: date-time
+                  description: Timestamp when the task was created
+            - type: object
+              properties:
+                sessions:
+                  type: array
+                  items:
+                    type: object
+                    description: Full session details within a task
+                    required:
+                      - id
+                      - state
+                      - created_at
+                    properties:
+                      id:
+                        type: string
+                        description: Session ID
+                      name:
+                        type: string
+                        description: Session name
+                      user:
+                        description: The user who created this session
+                        type: object
+                        properties:
+                          id:
+                            type: integer
+                            format: int64
+                            description: The unique identifier of the user
+                      owner:
+                        description: The owner of the repository
+                        type: object
+                        properties:
+                          id:
+                            type: integer
+                            format: int64
+                            description: The unique identifier of the user
+                      repository:
+                        description: The repository this session belongs to
+                        type: object
+                        properties:
+                          id:
+                            type: integer
+                            format: int64
+                            description: The unique identifier of the repository
+                      task_id:
+                        type: string
+                        description: Task ID this session belongs to
+                      state:
+                        type: string
+                        description: Current state of a session
+                        enum:
+                          - queued
+                          - in_progress
+                          - completed
+                          - failed
+                          - idle
+                          - waiting_for_user
+                          - timed_out
+                          - cancelled
+                      created_at:
+                        type: string
+                        format: date-time
+                        description: Creation timestamp
+                      updated_at:
+                        type: string
+                        format: date-time
+                        description: Last update timestamp
+                      completed_at:
+                        type: string
+                        format: date-time
+                        description: Completion timestamp
+                      prompt:
+                        type: string
+                        description: Content of the triggering event
+                      head_ref:
+                        type: string
+                        description: Head branch name
+                      base_ref:
+                        type: string
+                        description: Base branch name
+                      model:
+                        type: string
+                        description: Model used for this session
+                      error:
+                        type: object
+                        description: Error details for a failed session
+                        properties:
+                          message:
+                            type: string
+                            description: Error message
+                  description: Sessions associated with this task
+        examples:
+          default:
+            value:
+              id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+              url: https://api.github.com/agents/repos/octocat/hello-world/tasks/a1b2c3d4-e5f6-7890-abcd-ef1234567890
+              html_url: https://github.com/octocat/hello-world/copilot/tasks/a1b2c3d4-e5f6-7890-abcd-ef1234567890
+              name: Fix the login button on the homepage
+              creator:
+                id: 1
+              creator_type: user
+              owner:
+                id: 1
+              repository:
+                id: 1296269
+              state: completed
+              session_count: 1
+              artifacts:
+                - provider: github
+                  type: pull
+                  data:
+                    id: 42
+              archived_at: null
+              created_at: "2025-01-01T00:00:00Z"
+              updated_at: "2025-01-01T01:00:00Z"
+              sessions:
+                - id: s1a2b3c4-d5e6-7890-abcd-ef1234567890
+                  name: Fix the login button on the homepage
+                  user:
+                    id: 1
+                  owner:
+                    id: 1
+                  repository:
+                    id: 1296269
+                  task_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                  state: completed
+                  created_at: "2025-01-01T00:00:00Z"
+                  updated_at: "2025-01-01T01:00:00Z"
+                  completed_at: "2025-01-01T01:00:00Z"
+                  prompt: Fix the login button on the homepage
+                  head_ref: copilot/fix-1
+                  base_ref: main
+                  model: claude-sonnet-4.6
+  "400":
+    description: Bad request
+    content:
+      application/json:
+        schema:
+          type: object
+          description: |-
+            Structured error response following GitHub REST API conventions.
+            For 422 Unprocessable Entity the errors array contains validation
+            details; for other error status codes only message and
+            documentation_url are returned.
+          required:
+            - message
+            - documentation_url
+          properties:
+            message:
+              type: string
+              description: Summary message (e.g. "Validation Failed", "Not Found")
+            errors:
+              type: array
+              items:
+                type: object
+                description: A single validation error
+                required:
+                  - code
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - missing
+                      - missing_field
+                      - invalid
+                      - already_exists
+                      - unprocessable
+                      - custom
+                    description: Machine-readable error code
+                  message:
+                    type: string
+                    description: Human-readable message (populated when code is "custom")
+              description: List of validation errors (present only for 422 responses)
+            documentation_url:
+              type: string
+              description: URL to relevant API documentation
+  "401":
+    description: Authentication required
+    content:
+      application/json:
+        schema:
+          type: object
+          description: |-
+            Structured error response following GitHub REST API conventions.
+            For 422 Unprocessable Entity the errors array contains validation
+            details; for other error status codes only message and
+            documentation_url are returned.
+          required:
+            - message
+            - documentation_url
+          properties:
+            message:
+              type: string
+              description: Summary message (e.g. "Validation Failed", "Not Found")
+            errors:
+              type: array
+              items:
+                type: object
+                description: A single validation error
+                required:
+                  - code
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - missing
+                      - missing_field
+                      - invalid
+                      - already_exists
+                      - unprocessable
+                      - custom
+                    description: Machine-readable error code
+                  message:
+                    type: string
+                    description: Human-readable message (populated when code is "custom")
+              description: List of validation errors (present only for 422 responses)
+            documentation_url:
+              type: string
+              description: URL to relevant API documentation
+  "403":
+    description: Insufficient permissions
+    content:
+      application/json:
+        schema:
+          type: object
+          description: |-
+            Structured error response following GitHub REST API conventions.
+            For 422 Unprocessable Entity the errors array contains validation
+            details; for other error status codes only message and
+            documentation_url are returned.
+          required:
+            - message
+            - documentation_url
+          properties:
+            message:
+              type: string
+              description: Summary message (e.g. "Validation Failed", "Not Found")
+            errors:
+              type: array
+              items:
+                type: object
+                description: A single validation error
+                required:
+                  - code
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - missing
+                      - missing_field
+                      - invalid
+                      - already_exists
+                      - unprocessable
+                      - custom
+                    description: Machine-readable error code
+                  message:
+                    type: string
+                    description: Human-readable message (populated when code is "custom")
+              description: List of validation errors (present only for 422 responses)
+            documentation_url:
+              type: string
+              description: URL to relevant API documentation
+  "404":
+    description: Resource not found
+    content:
+      application/json:
+        schema:
+          type: object
+          description: |-
+            Structured error response following GitHub REST API conventions.
+            For 422 Unprocessable Entity the errors array contains validation
+            details; for other error status codes only message and
+            documentation_url are returned.
+          required:
+            - message
+            - documentation_url
+          properties:
+            message:
+              type: string
+              description: Summary message (e.g. "Validation Failed", "Not Found")
+            errors:
+              type: array
+              items:
+                type: object
+                description: A single validation error
+                required:
+                  - code
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - missing
+                      - missing_field
+                      - invalid
+                      - already_exists
+                      - unprocessable
+                      - custom
+                    description: Machine-readable error code
+                  message:
+                    type: string
+                    description: Human-readable message (populated when code is "custom")
+              description: List of validation errors (present only for 422 responses)
+            documentation_url:
+              type: string
+              description: URL to relevant API documentation
+  "422":
+    description: Validation Failed
+    content:
+      application/json:
+        schema:
+          type: object
+          description: |-
+            Structured error response following GitHub REST API conventions.
+            For 422 Unprocessable Entity the errors array contains validation
+            details; for other error status codes only message and
+            documentation_url are returned.
+          required:
+            - message
+            - documentation_url
+          properties:
+            message:
+              type: string
+              description: Summary message (e.g. "Validation Failed", "Not Found")
+            errors:
+              type: array
+              items:
+                type: object
+                description: A single validation error
+                required:
+                  - code
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - missing
+                      - missing_field
+                      - invalid
+                      - already_exists
+                      - unprocessable
+                      - custom
+                    description: Machine-readable error code
+                  message:
+                    type: string
+                    description: Human-readable message (populated when code is "custom")
+              description: List of validation errors (present only for 422 responses)
+            documentation_url:
+              type: string
+              description: URL to relevant API documentation

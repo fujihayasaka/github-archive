@@ -1,0 +1,127 @@
+syntax = "proto3";
+
+package github.pull_requests.v1;
+
+import "google/protobuf/wrappers.proto";
+
+// Response payload for
+// GET /:owner/:repo/pull/:number/page_data/timeline
+//
+// Defined by PullRequests::PageData::SharedController#timeline.
+//
+// The legacy endpoint renders a top-level JSON array of timeline items.
+// Proto3-JSON always serializes a message to an object, so the array is
+// wrapped in a repeated `items` field; the client reads `response.items`.
+message TimelineResponse {
+  repeated TimelineItem items = 1;
+}
+
+// A single timeline entry. `additional_info` is a `oneof` keyed on the item's
+// `type` (see AdditionalInfo); the populated arm matches the item type, and
+// proto3 omits the message entirely when there is no metadata.
+message TimelineItem {
+  string id = 1;
+
+  // The kind of timeline entry. Serializes as the UPPER_SNAKE_CASE enum value
+  // name (e.g. TIMELINE_ITEM_TYPE_ISSUE_COMMENT); the client maps it back to
+  // its own representation. Unknown/future types serialize as
+  // TIMELINE_ITEM_TYPE_UNSPECIFIED.
+  TimelineItemType type = 2;
+
+  // ISO8601 timestamp. Wrapper type because the serializer can emit null.
+  google.protobuf.StringValue timestamp = 3;
+
+  // Null/absent for some item types (e.g. PullRequestRevisionMarker). A
+  // message field cannot carry an explicit JSON null, so absent is read as
+  // null by the client.
+  TimelineUser user = 4;
+
+  // Per-type metadata. Absent (read as null by the client) when the item has
+  // no additional info, e.g. CrossReference, PullRequestReviewThread,
+  // IssueEdit.
+  AdditionalInfo additional_info = 5;
+}
+
+// Discriminant for a TimelineItem. The arm of AdditionalInfo populated for an
+// item corresponds to its type.
+enum TimelineItemType {
+  TIMELINE_ITEM_TYPE_UNSPECIFIED = 0;
+  TIMELINE_ITEM_TYPE_ISSUE_COMMENT = 1;
+  TIMELINE_ITEM_TYPE_ISSUE_EVENT = 2;
+  TIMELINE_ITEM_TYPE_PULL_REQUEST_REVIEW = 3;
+  TIMELINE_ITEM_TYPE_PULL_REQUEST_COMMIT = 4;
+  TIMELINE_ITEM_TYPE_CROSS_REFERENCE = 5;
+  TIMELINE_ITEM_TYPE_PULL_REQUEST_REVIEW_THREAD = 6;
+  TIMELINE_ITEM_TYPE_PULL_REQUEST_REVISION_MARKER = 7;
+  TIMELINE_ITEM_TYPE_ISSUE_EDIT = 8;
+}
+
+message TimelineUser {
+  // User id. int64 (serialized as a JSON string) since user ids can exceed
+  // the int32 range.
+  int64 id = 1;
+  string display_login = 2;
+  string avatar_url = 3;
+}
+
+message Label {
+  string name = 1;
+  string color = 2;
+}
+
+// Per-type metadata, modeled as a `oneof` keyed on the item's `type`. Each
+// arm is its own message so the JSON nests under the member name, e.g.
+// `{ "additionalInfo": { "issueComment": { "commentId": "1" } } }`. The client
+// narrows on whichever member is present. Wrapper types are used within each
+// arm where a value can be absent vs. present, or where a zero/false value is
+// meaningful and must not be omitted as a proto3 default.
+message AdditionalInfo {
+  oneof info {
+    IssueCommentInfo issue_comment = 1;
+    IssueEventInfo issue_event = 2;
+    PullRequestReviewInfo pull_request_review = 3;
+    PullRequestCommitInfo pull_request_commit = 4;
+    PullRequestRevisionMarkerInfo pull_request_revision_marker = 5;
+  }
+}
+
+message IssueCommentInfo {
+  int64 comment_id = 1;
+}
+
+message IssueEventInfo {
+  string event_type = 1;
+  Label label = 2;
+  google.protobuf.StringValue reviewer_login = 3;
+  google.protobuf.StringValue reviewer_team_slug = 4;
+  google.protobuf.StringValue assignee_login = 5;
+  google.protobuf.StringValue previous_title = 6;
+  google.protobuf.StringValue new_title = 7;
+  google.protobuf.StringValue before_commit_oid = 8;
+  google.protobuf.StringValue after_commit_oid = 9;
+  google.protobuf.StringValue ref = 10;
+  google.protobuf.StringValue dismissal_message = 11;
+  google.protobuf.StringValue commit_oid = 12;
+  google.protobuf.StringValue state_reason = 13;
+  google.protobuf.StringValue lock_reason = 14;
+}
+
+message PullRequestReviewInfo {
+  string state = 1;
+  int64 review_id = 2;
+  google.protobuf.Int32Value comment_count = 3;
+  google.protobuf.BoolValue is_author = 4;
+  google.protobuf.BoolValue qualified_reviewer = 5;
+  string reviewer_type = 6;
+  google.protobuf.StringValue dismissed_state = 7;
+}
+
+message PullRequestCommitInfo {
+  string sha = 1;
+  google.protobuf.StringValue base_sha = 2;
+  google.protobuf.StringValue short_message_text = 3;
+}
+
+message PullRequestRevisionMarkerInfo {
+  google.protobuf.StringValue last_seen_commit_oid = 1;
+}

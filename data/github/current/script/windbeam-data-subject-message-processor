@@ -1,0 +1,20 @@
+#!/usr/bin/env ruby
+# typed: true
+# frozen_string_literal: true
+
+require_relative "../config/environment"
+processor = GitHub::StreamProcessors::Windbeam::DataSubjectMessageProcessor.new
+processor_options = processor.options.merge(GitHub.hydro_windbeam_mtls_client_options)
+consumer = GitHub.hydro_consumer(processor_options)
+
+DataSubjectMessageProcessorError = Class.new(StandardError)
+
+begin
+  GitHub.logger.info("start", { "code.namespace" => processor.class.name })
+  GitHub.hydro_client.run(processor, consumer: consumer, shutdown_signals: [:INT, :TERM])
+  GitHub.logger.info("finish", { "code.namespace" => processor.class.name })
+rescue => e
+  GitHub.logger.error("failed to run stream processor", { "code.namespace" => processor.class.name, :exception => e })
+  Failbot.report(DataSubjectMessageProcessorError.new(e))
+  raise
+end

@@ -1,0 +1,107 @@
+# typed: true
+# frozen_string_literal: true
+
+class Stafftools::Organizations::PrivateRegistries::IndexComponent < ApplicationComponent
+  def initialize(organization:, configurations:, secrets:)
+    @organization = organization
+    @configurations = configurations
+    @secrets = secrets
+  end
+
+  private
+
+  attr_reader :organization, :configurations, :secrets
+
+  def enterprise?
+    organization.business.present?
+  end
+
+  def can_use_org_secrets?
+    organization.can_use_org_secrets?
+  end
+
+  def can_use_secrets_for_private_repos?
+    organization.plan.supports?(:private_secrets_and_variables)
+  end
+
+  memoize def configuration_rows
+    configurations.map do |config|
+      secret = secrets_by_name[config.secret_name]
+      row = {
+        missing_secret: secret.nil?,
+        configuration_id: config.id,
+        secret_name: config.secret_name,
+        registry_type: config.registry_type,
+        auth_type: config.auth_type,
+        url: config.url,
+        created_at: config.created_at.utc.to_datetime,
+        updated_at: config.updated_at.utc.to_datetime,
+        secret_created_at: secret ? Secrets.secret_created_at(secret) : nil,
+        secret_updated_at: secret ? Secrets.secret_updated_at(secret) : nil,
+        secret_visibility: secret ? describe_secret_visibility(secret) : nil,
+      }
+
+      if config.authenticates_with_username_and_password?
+        row[:username] = config.username
+      end
+
+      if config.oidc_azure?
+        row[:tenant_id] = config.tenant_id
+        row[:client_id] = config.client_id
+      elsif config.oidc_aws?
+        row[:aws_region] = config.aws_region
+        row[:account_id] = config.account_id
+        row[:role_name] = config.role_name
+        row[:domain] = config.domain
+        row[:domain_owner] = config.domain_owner
+        row[:audience] = config.audience
+      elsif config.oidc_jfrog?
+        row[:jfrog_oidc_provider_name] = config.jfrog_oidc_provider_name
+        row[:audience] = config.audience
+        row[:identity_mapping_name] = config.identity_mapping_name
+      elsif config.oidc_cloudsmith?
+        row[:namespace] = config.namespace
+        row[:service_slug] = config.service_slug
+        row[:audience] = config.audience
+        row[:api_host] = config.api_host
+      elsif config.oidc_gcp?
+        row[:workload_identity_provider] = config.workload_identity_provider
+        row[:service_account] = config.service_account
+        row[:audience] = config.audience
+      end
+
+      row
+    end
+  end
+
+  memoize def orphaned_secret_rows
+    orphaned_secret_names = secrets_by_name.keys - configurations_by_name.keys
+    secrets_by_name.slice(*orphaned_secret_names).values.map do |secret|
+      {
+        name: secret.name,
+        created_at: Secrets.secret_created_at(secret),
+        updated_at: Secrets.secret_updated_at(secret),
+        visibility: describe_secret_visibility(secret),
+      }
+    end
+  end
+
+  memoize def configurations_by_name
+    configurations.each_with_object({}) { |config, acc| acc[config.secret_name] = config }
+  end
+
+  memoize def secrets_by_name
+    secrets.each_with_object({}) { |secret, acc| acc[secret.name] = secret }
+  end
+
+  def describe_secret_visibility(secret)
+    case secret.visibility
+    when GitHub::KredzClient::Credz::CREDENTIAL_VISIBILITY_ALL_REPOS
+      can_use_secrets_for_private_repos? ? "all repositories" : "public repositories"
+    when GitHub::KredzClient::Credz::CREDENTIAL_VISIBILITY_PRIVATE_REPOS
+      enterprise? ? "private and internal repositories" : "private repositories"
+    when GitHub::KredzClient::Credz::CREDENTIAL_VISIBILITY_SELECTED_REPOS
+      "#{secret.selected_repositories_count} #{"repository".pluralize(secret.selected_repositories_count)}"
+    end
+  end
+end

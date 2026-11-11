@@ -1,0 +1,108 @@
+<%# locals(subscribe_path:, copilot_user:, success_path: nil, return_to_path: nil) -%>
+
+<%
+  success_path ||= nil
+  return_to_path ||= nil
+
+  checkout = copilot_checkout_context(
+    product_key: Copilot::INDIVIDUAL_PRO_PLUS_PRODUCT_KEY,
+    user: current_user,
+    copilot_user: copilot_user
+  )
+
+  has_entered_all_required_info = current_user.has_saved_billing_information? && current_user.has_valid_payment_method?
+%>
+
+<%= render Primer::Box.new(border: true, border_radius: 2, bg: :default, classes: "tmp-p-3") do %>
+  <h2 class="sr-only">Subscription summary</h2>
+
+  <% if checkout.has_coupon? %>
+    <%= render Primer::Beta::Label.new(scheme: :accent, mb: 2) do %>
+      <%= render(Primer::Beta::Octicon.new(icon: "gift", size: :small, mr: 1)) %>
+      Coupon applied
+    <% end %>
+  <% end %>
+
+  <%= render Primer::Alpha::Stack.new(direction: :horizontal, justify: :space_between, mb: 2) do %>
+    <%= render Primer::Beta::Text.new(tag: :p, font_size: 5, font_weight: :bold, flex_grow: 0, mb: 0) do %>
+      <span>GitHub Copilot Pro+</span>
+    <% end %>
+
+    <%= render Primer::Beta::Text.new(tag: :p, font_size: 5, font_weight: :bold, mb: 0) do %>
+      <% if checkout.upgrade_delta %>
+        <span class="color-fg-muted" style="text-decoration: line-through;"><%= checkout.formatted_original_price %></span>
+      <% end %>
+      <%= checkout.formatted_billing_amount %>
+    <% end %>
+  <% end %>
+
+  <% if checkout.has_coupon? %>
+    <div class="tmp-mb-3">
+      <div class="d-flex flex-justify-between color-fg-muted f6">
+        <span>Regular price</span>
+        <span><%= checkout.formatted_today_full_price %><%= "/mo" unless checkout.upgrade_delta %></span>
+      </div>
+      <div class="d-flex flex-justify-between color-fg-success f6">
+        <span><%= checkout.discount_label %></span>
+        <span>−<%= checkout.formatted_today_discount %></span>
+      </div>
+    </div>
+  <% end %>
+
+  <%= render Primer::Alpha::Stack.new(direction: :horizontal, align: :center, gap: :condensed, classes: "tmp-mb-3") do %>
+    <%= render Primer::Beta::Octicon.new(:"sparkle-fill", size: :small, color: :done, flex_grow: 0) %>
+
+    <%= render Primer::Beta::Text.new(tag: :p, color: :muted, font_size: 6, mb: 0) do %>
+      Includes access to GitHub Spark
+    <% end %>
+  <% end %>
+
+  <%= render Primer::Beta::Text.new(tag: :p, color: :default, font_size: 6, mb: 0) do %>
+    You will be billed <%= checkout.formatted_billing_amount %> today<%= upgrade_credit_summary_clause(checkout) %>.
+    Your next payment will be <%= checkout.formatted_next_billing_amount %> on <%= checkout.formatted_next_billing_date %>.
+  <% end %>
+
+  <% if has_entered_all_required_info %>
+    <% if current_user.billing_contact.country_code == "KR" %>
+      <%= render Primer::Alpha::Dialog.new(title: "Privacy agreement", size: :medium_portrait) do |d| %>
+        <% d.with_header(show_divider: true) do %>
+          Privacy agreement
+        <% end %>
+
+        <% d.with_show_button(scheme: :primary, size: :large, block: true, mt: 3) { "Continue" } %>
+
+        <% d.with_body do %>
+          <%= render "copilot/pro_plus/subscribe_form",
+            subscribe_path: subscribe_path,
+            payment_duration: "monthly",
+            success_path: success_path,
+            return_to_path: return_to_path,
+            hide_submit: true
+          %>
+        <% end %>
+
+        <% d.with_footer(show_divider: true) do %>
+          <%= render Primer::Beta::Button.new(scheme: :primary, type: :submit, size: :large, block: true,
+            form: "copilot-pro-plus-subscription-form",
+            data: {
+              target: "billing-checkout.submitButton",
+              action: "click:billing-checkout#handleSubscriptionActivation"
+            }
+          ) do %>
+            Activate now
+          <% end %>
+        <% end %>
+      <% end %>
+    <% else %>
+      <hr class="tmp-my-3">
+
+      <%= render "copilot/pro_plus/subscribe_form",
+        subscribe_path: subscribe_path,
+        payment_duration: "monthly",
+        success_path: success_path,
+        return_to_path: return_to_path,
+        hide_submit: !billing_info_exists_without_errors
+      %>
+    <% end %>
+  <% end %>
+<% end %>

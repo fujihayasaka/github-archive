@@ -1,0 +1,167 @@
+<%
+  page_info title: "Zuora System Health",
+    selected_link: :billing_zuora_system_health,
+    container_xl: true
+
+  range_labels = { "30m" => "30 minutes", "1h" => "1 hour", "6h" => "6 hours", "24h" => "24 hours", "7d" => "7 days" }
+  current_range_label = range_labels[range] || "1 hour"
+%>
+
+<style>
+  .stafftools-table { width: 100%; border-collapse: collapse; }
+  .stafftools-table th { text-align: left; padding: 8px 12px; font-size: 12px; color: var(--fgColor-muted); border-bottom: 1px solid var(--borderColor-default); }
+  .stafftools-table td { padding: 8px 12px; border-bottom: 1px solid var(--borderColor-default); font-size: 13px; }
+  .stafftools-table tr:hover td { background: var(--bgColor-muted); }
+  .health-card { border: 1px solid var(--borderColor-default); border-radius: 6px; background: var(--bgColor-default); padding: 16px; min-width: 0; overflow: hidden; }
+  .health-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .health-card .stafftools-table { table-layout: fixed; }
+  .health-card .stafftools-table td code { word-break: break-all; }
+  .metric-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--borderColor-muted); font-size: 13px; }
+  .metric-row:last-child { border-bottom: none; }
+  .metric-label { color: var(--fgColor-muted); }
+  .metric-value { font-weight: 600; }
+  .error-rate-bar { display: inline-block; height: 6px; border-radius: 3px; vertical-align: middle; }
+  .error-rate-bar.success { background: var(--bgColor-success-emphasis); }
+  .error-rate-bar.error { background: var(--bgColor-danger-emphasis); }
+  .pct-cell { font-variant-numeric: tabular-nums; }
+  .detail-table { font-size: 12px; }
+  .detail-table th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .detail-table td { font-size: 12px; font-family: ui-monospace, SFMono-Regular, monospace; }
+  .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .status-dot.green { background: var(--bgColor-success-emphasis); }
+  .status-dot.yellow { background: var(--bgColor-attention-emphasis); }
+  .status-dot.red { background: var(--bgColor-danger-emphasis); }
+  /* IncludeFragment elements need to participate in flex layout */
+  .health-grid > include-fragment { flex: 1 1 calc(50% - 16px); min-width: 300px; display: flex; }
+</style>
+
+<%= render layout: "stafftools/stafftools" do %>
+  <%# ═══ HEADER ═══ %>
+  <div class="tmp-mb-4" style="background: linear-gradient(135deg, var(--bgColor-accent-muted) 0%, var(--bgColor-done-muted) 100%); border-radius: 12px; padding: 24px 28px; border: 1px solid var(--borderColor-accent-muted);">
+    <div class="d-flex flex-items-center mb-2">
+      <div style="background: var(--bgColor-accent-emphasis); border-radius: 10px; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; margin-right: 14px;">
+        <%= render(Primer::Beta::Octicon.new(icon: :pulse, color: :on_emphasis, size: :medium)) %>
+      </div>
+      <div>
+        <h1 class="f1" style="margin: 0; font-weight: 700; letter-spacing: -0.5px;">Zuora System Health</h1>
+      </div>
+    </div>
+    <p class="mb-0 f5" style="color: var(--fgColor-muted); max-width: 680px;">
+      Real-time health metrics straight from Zuora — monitor API traffic, payment processing, billing documents, and tax calculations all in one place.
+    </p>
+  </div>
+
+  <%# ═══ FILTER BAR ═══ %>
+  <div class="Box tmp-p-3 tmp-mb-3">
+    <div class="d-flex flex-items-center flex-wrap" style="gap: 8px;">
+      <%# Time Range %>
+      <details class="details-reset details-overlay d-inline-block">
+        <%= render Primer::Beta::Button.new(tag: :summary, size: :small, "aria-haspopup": "listbox") do %>
+          <em>Time range:</em> <%= current_range_label %>
+          <span class="dropdown-caret"></span>
+        <% end %>
+        <div class="SelectMenu">
+          <div class="SelectMenu-modal" style="min-width: 200px;">
+            <div class="SelectMenu-list" role="listbox" aria-label="Time range">
+              <% range_labels.each do |val, label| %>
+                <a class="SelectMenu-item" href="<%= stafftools_billing_zuora_system_health_index_path(range: val, gateway: gateway_filter, path: path_filter) %>" role="option" <%= "aria-selected=true" if val == range %>>
+                  <%= label %>
+                </a>
+              <% end %>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <%# Gateway Filter %>
+      <details class="details-reset details-overlay d-inline-block">
+        <%= render Primer::Beta::Button.new(tag: :summary, size: :small, "aria-haspopup": "listbox") do %>
+          <em>Gateway:</em> <%= gateway_filter || "All" %>
+          <span class="dropdown-caret"></span>
+        <% end %>
+        <div class="SelectMenu">
+          <div class="SelectMenu-modal" style="min-width: 200px;">
+            <div class="SelectMenu-list" role="listbox" aria-label="Gateway filter">
+              <a class="SelectMenu-item" href="<%= stafftools_billing_zuora_system_health_index_path(range: range, path: path_filter) %>" role="option" <%= "aria-selected=true" unless gateway_filter %>>All Gateways</a>
+              <% %w[Stripe Braintree PayPal].each do |gw| %>
+                <a class="SelectMenu-item" href="<%= stafftools_billing_zuora_system_health_index_path(range: range, gateway: gw, path: path_filter) %>" role="option" <%= "aria-selected=true" if gateway_filter == gw %>><%= gw %></a>
+              <% end %>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <%# API Path Filter %>
+      <%= form_with url: stafftools_billing_zuora_system_health_index_path, method: :get, local: true, class: "d-inline-flex flex-items-center", style: "gap: 4px;" do |f| %>
+        <%= f.hidden_field :range, value: range %>
+        <%= f.hidden_field :gateway, value: gateway_filter %>
+        <%= f.text_field :path, value: path_filter, placeholder: "Filter by API path...", class: "form-control input-sm", style: "width: 200px;" %>
+        <%= render(Primer::Beta::Button.new(type: :submit, size: :small)) { "Filter" } %>
+      <% end %>
+    </div>
+  </div>
+
+  <%# ═══ CARDS — each loads independently via IncludeFragment ═══ %>
+  <div class="d-flex flex-wrap health-grid" style="gap: 16px; margin-bottom: 24px;">
+
+    <%# ─── API Health ─── %>
+    <%= render Primer::Alpha::IncludeFragment.new(
+      src: api_health_stafftools_billing_zuora_system_health_index_path(range: range, path: path_filter),
+      loading: :lazy
+    ) do %>
+      <div class="health-card" style="flex: 1; min-width: 0;">
+        <div class="health-card-header">
+          <span class="f4 text-bold">API Health</span>
+        </div>
+        <div class="d-flex flex-items-center flex-justify-center tmp-p-4">
+          <%= render(Primer::Beta::Spinner.new(size: :medium)) %>
+        </div>
+      </div>
+    <% end %>
+
+    <%# ─── Payments ─── %>
+    <%= render Primer::Alpha::IncludeFragment.new(
+      src: payments_stafftools_billing_zuora_system_health_index_path(range: range, gateway: gateway_filter),
+      loading: :lazy
+    ) do %>
+      <div class="health-card" style="flex: 1; min-width: 0;">
+        <div class="health-card-header">
+          <span class="f4 text-bold">Payments</span>
+        </div>
+        <div class="d-flex flex-items-center flex-justify-center tmp-p-4">
+          <%= render(Primer::Beta::Spinner.new(size: :medium)) %>
+        </div>
+      </div>
+    <% end %>
+
+    <%# ─── Bill Runs ─── %>
+    <%= render Primer::Alpha::IncludeFragment.new(
+      src: billing_docs_stafftools_billing_zuora_system_health_index_path(range: range),
+      loading: :lazy
+    ) do %>
+      <div class="health-card" style="flex: 1; min-width: 0;">
+        <div class="health-card-header">
+          <span class="f4 text-bold">Bill Runs</span>
+        </div>
+        <div class="d-flex flex-items-center flex-justify-center tmp-p-4">
+          <%= render(Primer::Beta::Spinner.new(size: :medium)) %>
+        </div>
+      </div>
+    <% end %>
+
+    <%# ─── Tax ─── %>
+    <%= render Primer::Alpha::IncludeFragment.new(
+      src: tax_stafftools_billing_zuora_system_health_index_path(range: range),
+      loading: :lazy
+    ) do %>
+      <div class="health-card" style="flex: 1; min-width: 0;">
+        <div class="health-card-header">
+          <span class="f4 text-bold">Tax Calculations</span>
+        </div>
+        <div class="d-flex flex-items-center flex-justify-center tmp-p-4">
+          <%= render(Primer::Beta::Spinner.new(size: :medium)) %>
+        </div>
+      </div>
+    <% end %>
+  </div>
+<% end %>

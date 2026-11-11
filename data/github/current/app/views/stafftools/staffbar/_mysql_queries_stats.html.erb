@@ -1,0 +1,432 @@
+<%# `view` is an instance of Stafftools::Staffbar::::MysqlQueriesStatsView %>
+<% if Rails.env.development? %>
+  <label>Show queries ran by templates
+    <input type=checkbox
+           id="highlight-templates-that-ran-queries">
+  </label>
+<% end %>
+<button class="Box-btn-octicon btn-octicon float-right tmp-mt-3 js-toggle-mysql-tracer" type="button" aria-label="Close dialog" data-close-dialog>
+  <%= render(Primer::Beta::Octicon.new(:"x-circle", color: :attention)) %>
+</button>
+
+<div class="d-flex flex-wrap gap-3 tmp-mb-3">
+  <div class="Box-row Box-row--focus-gray p-2">
+    <strong class="color-fg-accent">Query Time:</strong>
+    <span class="color-fg-muted ml-1"><%= "%.2fms" % (view.query_time * 1000.0) %></span>
+  </div>
+  <div class="Box-row Box-row--focus-gray p-2">
+    <strong class="color-fg-accent">Results:</strong>
+    <span class="color-fg-muted ml-1"><%= pluralize(view.row_count, "row") %></span>
+    <span class="color-fg-subtle ml-1">(+ <%= view.cached_row_count %> from cache)</span>
+  </div>
+</div>
+
+<% unless Rails.env.test? %>
+  <%= render(Primer::Alpha::UnderlinePanels.new(id: "#{view.html_id}_tab_panels", label: "MySQL Query Stats Types")) do |component| %>
+    <% component.with_tab(selected: true, id: "#{view.html_id}_queries_tab") do |tab| %>
+      <%= pluralize(view.query_count, "query") %> (<%= view.primary_query_count %> primary)
+      <% tab.with_panel(id: "#{view.html_id}_queries_panel") do %>
+        <table class="queries js-query-table js-sortable-table" id="<%= view.html_id %>_query_table">
+          <thead>
+          <tr>
+          <th class="numeric">
+            <%= render Primer::Beta::Button.new(scheme: :invisible) do %>
+            Start <%= primer_octicon(:"triangle-up") %><%= primer_octicon(:"triangle-down") %>
+            <% end %>
+          </th>
+          <th class="numeric is-sort-desc" data-sort-order="desc">
+            <%= render Primer::Beta::Button.new(scheme: :invisible) do %>
+            Duration <%= primer_octicon(:"triangle-down") %><%= primer_octicon(:"triangle-up") %>
+            <% end %>
+          </th>
+          <th class="numeric">
+            <%= render Primer::Beta::Button.new(scheme: :invisible) do %>
+            Results <%= primer_octicon(:"triangle-down") %><%= primer_octicon(:"triangle-up") %>
+            <% end %>
+          </th>
+          <th class="text js-not-sortable">
+            <%= render(Primer::Alpha::Dropdown.new(with_caret: true)) do |component| %>
+            <% component.with_button(scheme: :link) do %>
+              Cluster
+            <% end %>
+            <% component.with_menu do |menu|
+              menu.with_item(classes: "cluster-dropdown-item cluster-dropdown-item", data: "*") { "*" }
+
+              view.queries_per_database.keys.sort.each do |connection_class|
+              menu.with_item(data: connection_class) { connection_class.sub("ApplicationRecord::", "") }
+              end
+            end %>
+            <% end %>
+          </th>
+          <th class="js-not-sortable">Query</th>
+          </tr>
+          </thead>
+          <tbody>
+          <%
+          view.sorted_queries.each do |query|
+            similar_queries_count = view.similar_queries_count(query)
+          %>
+          <tr class="js-query-row" data-query-digest="<%= Digest::SHA256.hexdigest(query.digested_sql) %>" style="<%= "background-color: #28142f" if query.on_primary %>">
+            <td class="time" style="color: lightslategray"><%= "%.3f" % (query.start_time * 1000) %>ms</td>
+            <% if query.duration %>
+            <td class="time" style="color: <%= view.time_class(query) %>"><%= "%.3f" % (query.duration * 1000)%>ms</td>
+            <% else %>
+            <td class="time" style="color: <%= view.time_class(query) %>" data-sort-value="-1">CACHE</td>
+            <% end %>
+            <td class="time"><%= query.result_count %></td>
+            <td data="<%= query.connection_class.to_s %>" data-sort-value="<%= view.queries_per_database.keys.sort.index(query.connection_class.to_s) %>"><%= query.connection_class.to_s.sub("ApplicationRecord::", "") %></td>
+            <td class="sql">
+            <% if similar_queries_count > 1 %>
+              <%= render(Primer::Beta::Button.new(scheme: :link, classes: "query-search js-query-search", "aria-label": "Highlight #{ similar_queries_count } similar queries")) do |button| %><% button.with_tooltip(type: :label, text: "Highlight #{ similar_queries_count } similar queries", direction: :s) %><%= primer_octicon(:search) %><% end %>
+              <%= render(Primer::Beta::Button.new(scheme: :link, classes: "query-clear-search js-query-clear-search", "aria-label": "Remove highlighting")) do |button| %><% button.with_tooltip(type: :label, text: "Remove highlighting", direction: :s) %><%= render(Primer::Beta::Octicon.new(icon: "x")) %><% end %>
+            <% end %>
+            <span class="highlight">
+              <code><%= query.sql %></code>
+            </span>
+            <br>
+            <br>
+            <details>
+              <summary>
+              <b class="color-fg-attention">Expand to see stacktrace</b>
+              </summary>
+              <% location = query.backtrace.present? ? GitHub::FormattedStackLocation.from_location(query.backtrace.shift) : nil %>
+              <% if location.nil? %>
+                <div class="mt-2 color-fg-muted">Location unavailable</div>
+              <% else %>
+                <% if loader_tag = view.loader_tag(query) %>
+                  <div class="mt-2"><%= loader_tag %></div>
+                <% end %>
+                <div class="mt-2"><%= location.description %></div>
+                <% if location.linkable? %>
+                  <div class="mt-2">
+                    <a class="query-backtrace-link" href="<%= location.view_source_url %>" target="_blank">
+                      <%= primer_octicon(:link, size: :medium, "aria-label": "View file") %>
+                      View file
+                    </a>
+                  </div>
+                <% end %>
+              <% end %>
+              <div>
+              <ul class="list-style-none">
+                <% query.backtrace.each do |location| %>
+                <% location = GitHub::FormattedStackLocation.from_location(location) %>
+                <li>
+                  <% if !location.linkable? %>
+                  <%= location.description %>
+                  <% else %>
+                  <%= location.description %>
+                  <a class="query-backtrace-link" href="<%= location.view_source_url %>" target="_blank">
+                    <%= primer_octicon(:link, size: :medium, "aria-label": "View file") %>
+                  </a>
+                  <% end %>
+                </li>
+                <% end %>
+              </ul>
+              </div>
+            </details>
+            <br>
+            <b class="color-fg-attention">Database Info</b>
+            <br>
+            Class: <%= query.connection_class %> | Role: <%= query.on_primary ? "writing" : "reading" %>
+            <br>
+            (<%= query.connection_url %>)
+            <br><br>
+            <b class="color-fg-attention">Resilience Info</b>
+            <br>
+            <%
+              fallbacks = view.fallbacks(query)
+              fallbacks_string = fallbacks.any? ? fallbacks.join(", ") : "none found"
+              dependency_level = view.dependency_level(query.connection_class)
+            -%>
+            Cluster dependency: <%= dependency_level %> | Fallback: <%= fallbacks_string %>
+            <% if dependency_level == "optional" && fallbacks.empty? %>
+              <p class="meta">
+              <%= render Primer::Beta::Octicon.new(icon: "info", color: :attention) %>
+              Consider using the <code>ResilienceHelper</code>, or the
+              <code>ApplicationComponent::Rescuable</code> mixin.<br>
+              If you're already handing database errors that might arise from
+              this query, you can silence this warning by wrapping the call with<br>
+              <code>GitHub::MysqlInstrumenter.tag_queries("fallback:custom") { … }</code>
+              </p>
+            <% elsif dependency_level == "undeclared" %>
+              <p class="meta">
+              <%= render Primer::Beta::Octicon.new(icon: "alert", color: :danger) %>
+              All cluster dependencies should be declared by calling <code>depends_on_cluster</code> in the controller
+              </p>
+            <% end %>
+            </td>
+          </tr>
+          <% end %>
+          </tbody>
+        </table>
+      <% end %>
+    <% end %>
+
+    <% component.with_tab(id: "#{view.html_id}_digest_tab") do |tab| %>
+      <%= pluralize(view.digest_count, "digest") %>
+      <% tab.with_panel(id: "#{view.html_id}_digest_panel") do %>
+        <table class="queries js-query-table js-sortable-table" id="<%= view.html_id %>_digest_table">
+          <thead>
+          <tr>
+          <th class="numeric is-sort-desc" data-sort-order="desc">
+            <%= render Primer::Beta::Button.new(scheme: :invisible) do %>
+            Count <%= primer_octicon(:"triangle-up") %><%= primer_octicon(:"triangle-down") %>
+            <% end %>
+          </th>
+          <th class="numeric">
+            <%= render Primer::Beta::Button.new(scheme: :invisible) do %>
+            Duration <%= primer_octicon(:"triangle-down") %><%= primer_octicon(:"triangle-up") %>
+            <% end %>
+          </th>
+          <th class="numeric">
+            <%= render Primer::Beta::Button.new(scheme: :invisible) do %>
+            Results <%= primer_octicon(:"triangle-down") %><%= primer_octicon(:"triangle-up") %>
+            <% end %>
+          </th>
+          <th class="js-not-sortable">Digest</th>
+          </tr>
+          </thead>
+          <tbody>
+          <% view.sorted_digest_stats.each do |digest, stats| %>
+            <tr>
+            <td class="time"><%= stats[:count] %></td>
+            <td class="time"><%= "%.3f" % (stats[:time] * 1000) %>ms</td>
+            <td class="time"><%= stats[:results] %></td>
+            <td class="sql"><%= digest %></td>
+            </tr>
+          <% end %>
+          </tbody>
+        </table>
+      <% end %>
+    <% end %>
+
+    <% component.with_tab(id: "#{view.html_id}_cache_tab") do |tab| %>
+      <%= pluralize(view.cached_query_count, "cache hit") %>
+      <% tab.with_panel(id: "#{view.html_id}_cache_panel") do %>
+        <table class="queries js-query-table js-sortable-table" id="<%= view.html_id %>_query_cache_table">
+          <thead>
+          <tr>
+          <th class="numeric">
+            <%= render Primer::Beta::Button.new(scheme: :invisible) do %>
+            Count <%= primer_octicon(:"triangle-up") %><%= primer_octicon(:"triangle-down") %>
+            <% end %>
+          </th>
+          <th class="numeric is-sort-desc" data-sort-order="desc">
+            <%= render Primer::Beta::Button.new(scheme: :invisible) do %>
+            Results <%= primer_octicon(:"triangle-down") %><%= primer_octicon(:"triangle-up") %>
+            <% end %>
+          </th>
+          <th class="js-not-sortable">Digest</th>
+          </tr>
+          </thead>
+          <tbody>
+          <% view.sorted_cached_digest_stats.each do |digest, stats| %>
+            <tr>
+            <td class="time"><%= stats[:count] %></td>
+            <td class="time"><%= stats[:results] %></td>
+            <td class="sql"><%= digest %></td>
+            </tr>
+          <% end %>
+          </tbody>
+        </table>
+      <% end %>
+    <% end %>
+
+    <% component.with_tab(id: "#{view.html_id}_n_plus1_tab") do |tab| %>
+      <%= pluralize(view.n_plus1_queries.count, "N+1") %>
+      <% tab.with_panel(id: "#{view.html_id}_n_plus1_panel") do %>
+        <table class="queries js-query-table js-sortable-table" id="<%= view.html_id %>_n_plus1_table">
+          <thead>
+          <tr>
+          <th class="numeric">
+            <%= render Primer::Beta::Button.new(scheme: :invisible) do %>
+            Duration <%= primer_octicon(:"triangle-down") %><%= primer_octicon(:"triangle-up") %>
+            <% end %>
+          </th>
+          <th class="numeric is-sort-asc" data-sort-order="asc">
+            <%= render Primer::Beta::Button.new(scheme: :invisible) do %>
+            Count <%= primer_octicon(:"triangle-up") %><%= primer_octicon(:"triangle-down") %>
+            <% end %>
+          </th>
+          <th class="numeric">
+            <%= render Primer::Beta::Button.new(scheme: :invisible) do %>
+            Results <%= primer_octicon(:"triangle-down") %><%= primer_octicon(:"triangle-up") %>
+            <% end %>
+          </th>
+          <th class="js-not-sortable">Query</th>
+          </tr>
+          </thead>
+          <tbody>
+          <%
+          view.n_plus1_queries.each do |queries|
+          %>
+          <tr class="js-query-row" data-query-digest="<%= Digest::SHA256.hexdigest(queries.first.digested_sql) %>">
+            <td class="time" style="color: lightslategray"><%= "%.3f" % (queries.select { |q| q.duration }.sum(&:duration) * 1000)%>ms</td>
+            <td class="time"><%= queries.count %></td>
+            <td class="time"><%= queries.sum { |query| query.result_count.to_i } %></td>
+            <td class="sql">
+            <span class="highlight">
+              <code><%= queries.first.digested_sql %></code>
+            </span>
+            <details>
+              <summary>
+              Source Location
+              </summary>
+              <div>
+              <% queries.first.backtrace.each do |location| %>
+                <% location = GitHub::FormattedStackLocation.from_location(location) %>
+                <div class="mt-1">
+                <% if !location.linkable? %>
+                <%= location.description %>
+                <% else %>
+                <a class="query-backtrace-link" href="<%= location.view_source_url %>" target="_blank">
+                  <%= location.description %>
+                </a>
+                <% end %>
+                </div>
+              <% end %>
+              </div>
+            </details>
+            </td>
+          </tr>
+          <% end %>
+          </tbody>
+        </table>
+      <% end %>
+    <% end %>
+
+    <% component.with_tab(id: "#{view.html_id}_callstack_tab") do |tab| %>
+      By Callstack
+      <% tab.with_panel(id: "#{view.html_id}_callstack_panel") do %>
+        <table class="js-query-table queries" id="<%= view.html_id %>_by_callstack_table">
+          <thead>
+          <tr>
+            <th>Count</th>
+            <th>Duration</th>
+            <th>Location</th>
+          </tr>
+          </thead>
+          <tbody>
+          <% view.by_callstack_queries.each do |path, queries| %>
+          <tr>
+            <td class="time"><%= queries.count %></td>
+            <td class="time" style="color: lightslategray"><%= "%.3f" % (queries.select { |q| q.duration }.sum(&:duration) * 1000)%>ms</td>
+            <td class="sql" style="width: 85%">
+            <details>
+              <summary><%= path || "multiple paths" %></summary>
+
+              <table class="queries condensed js-sortable-table">
+              <thead>
+                <tr>
+                <th class="numeric is-sort-desc">
+                  <%= render Primer::Beta::Button.new(scheme: :invisible) do %>
+                  Duration <%= primer_octicon(:"triangle-down") %><%= primer_octicon(:"triangle-up") %>
+                  <% end %>
+                </th>
+                <th class="numeric">
+                  <%= render Primer::Beta::Button.new(scheme: :invisible) do %>
+                  Results <%= primer_octicon(:"triangle-down") %><%= primer_octicon(:"triangle-up") %>
+                  <% end %>
+                </th>
+                <th class="js-not-sortable">Query</th>
+                </tr>
+              </thead>
+              <tbody>
+              <% queries.each do |query| %>
+                <tr class="js-query-row">
+                <% if query.duration %>
+                  <td class="time" style="color: <%= view.time_class(query) %>"><%= "%.3f" % (query.duration * 1000)%>ms</td>
+                <% else %>
+                  <td class="time" style="color: <%= view.time_class(query) %>" data-sort-value="-1">CACHE</td>
+                <% end %>
+                <td class="time"><%= query.result_count %></td>
+                <td class="sql">
+                  <span class="highlight">
+                  <code><%= query.sql %></code>
+                  </span>
+                  <details>
+                  <summary>
+                    <% location = GitHub::FormattedStackLocation.from_location(query.backtrace.shift) %>
+                    <%= location.description %>
+                  </summary>
+                  <% if location.linkable? %>
+                  <div class="mt-2">
+                    <a class="query-backtrace-link" href="<%= location.view_source_url %>" target="_blank">
+                      <%= primer_octicon(:link, "aria-label": "View file") %>
+                      View file
+                    </a>
+                  </div>
+                  <% end %>
+                  <div>
+                    <% query.backtrace.each do |location| %>
+                    <% location = GitHub::FormattedStackLocation.from_location(location) %>
+                    <br>
+                    <% if !location.linkable? %>
+                      <%= location.description %>
+                    <% else %>
+                      <a class="query-backtrace-link" href="<%= location.view_source_url %>" target="_blank">
+                      <%= location.description %>
+                      </a>
+                    <% end %>
+                    <% end %>
+                  </div>
+                  </details>
+                </td>
+                </tr>
+              <% end%>
+              </tbody>
+              </table>
+            </details>
+            </td>
+          </tr>
+          <% end %>
+          </tbody>
+        </table>
+      <% end %>
+    <% end %>
+
+    <% component.with_tab(id: "#{view.html_id}_database_tab") do |tab| %>
+      By Database
+      <% tab.with_panel(id: "#{view.html_id}_database_panel") do %>
+        <table class="queries js-query-table js-sortable-table" id="<%= view.html_id %>_by_database_table">
+          <thead>
+          <tr>
+            <th class="numeric is-sort-asc" data-sort-order="asc">
+            <%= render Primer::Beta::Button.new(scheme: :invisible) do %>
+              Percent <%= primer_octicon(:"triangle-up") %><%= primer_octicon(:"triangle-down") %>
+            <% end %>
+            </th>
+            <th class="numeric is-sort-asc" data-sort-order="asc">
+            <%= render Primer::Beta::Button.new(scheme: :invisible) do %>
+              Count <%= primer_octicon(:"triangle-up") %><%= primer_octicon(:"triangle-down") %>
+            <% end %>
+            </th>
+            <th>Database Cluster Class</th>
+            <th>Dependency</th>
+          </tr>
+          </thead>
+          <tbody>
+          <% view.queries_per_database.each do |klass, count| %>
+          <tr>
+            <td class="numeric"><%= number_to_percentage(count.to_f / view.query_count.to_f * 100.0, precision: 2) %></td>
+            <td class="numeric" style="color: lightslategray"><%= count %></td>
+            <td class="sql" style="min-width: 65%">
+            <%= klass %>
+            </td>
+            <% dependency_level = view.dependency_level(klass) %>
+            <% if dependency_level == "undeclared" %>
+            <td class="color-fg-danger">
+              <%= render Primer::Beta::Octicon.new(icon: "alert") %>
+              Undeclared
+            </td>
+            <% else %>
+            <td><%= dependency_level.capitalize %></td>
+            <% end %>
+          </tr>
+          <% end %>
+          </tbody>
+        </table>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

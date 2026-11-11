@@ -1,0 +1,64 @@
+<%# locals(copilot_user:, amount_to_pay:, submit_path:, return_to:) -%>
+
+<%
+  page_info(
+    title: "Pay to continue checkout",
+    class: "bgColor-inset",
+    full_height_scrollable: true,
+    full_height: true,
+    hide_footer: logged_in?,
+  )
+
+  user = current_user
+
+  has_no_billing_and_payment_info = !user.has_saved_billing_information? && !user.has_valid_payment_method?
+  has_billing_but_no_payment_info = user.has_saved_billing_information? && !user.has_valid_payment_method?
+  has_billing_and_payment_info = user.has_saved_billing_information? && user.has_valid_payment_method?
+
+  steps = [
+    { title: "Billing information", is_current: has_no_billing_and_payment_info },
+    { title: "Payment method", is_current: has_billing_but_no_payment_info },
+    { title: "Review", is_current: has_billing_and_payment_info }
+  ]
+%>
+
+<%= render Primer::Box.new(container: :lg, px: [3, 4], py: [5, 7]) do %>
+  <%= render Primer::Beta::Heading.new(tag: :h1, mb: 2, font_size: 2, text_align: :left, data: {hpc: true}) do %>
+    Pay for additional usage
+  <% end %>
+
+  <p>You're paying for additional usage and resetting your usage cap.</p>
+
+  <%= render "copilot/pay_to_continue/payment_processing_notice" %>
+  <%= render "copilot/pay_to_continue/rbi_manual_payment_notice", user: current_user %>
+
+  <%= render "copilot/signup/steps_list", steps: steps %>
+
+  <billing-checkout>
+    <%= render Primer::Alpha::Layout.new(gutter: :spacious, first_in_source: :main) do |component| %>
+      <% component.with_main do %>
+        <%= render Primer::Alpha::Stack.new(direction: :vertical, gap: :spacious) do %>
+          <%= render Copilot::Checkout::AccountSectionComponent.new(user: user) %>
+          <%= render Copilot::Checkout::BillingInfoSectionComponent.new(user: user, return_to_path: return_to) %>
+          <%= render Copilot::Checkout::PaymentMethodSectionComponent.new(user: user, return_to_path: return_to) %>
+
+          <% if user.has_commercial_interaction_restriction?(feature_type: :copilot) %>
+            <%= render(TradeCompliance::TradeScreeningRestrictionNoticeComponent.new(
+              target: user,
+              title: "You can't proceed with your payment",
+              feature_type: :copilot,
+            )) %>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <% component.with_sidebar(col_placement: :end, row_placement: :end, mt: [2, 2, 0]) do %>
+        <%= render "copilot/pay_to_continue/billing_summary",
+          amount_to_pay: amount_to_pay,
+          submit_path: submit_path,
+          return_to: return_to
+        %>
+      <% end %>
+    <% end %>
+  </billing-checkout>
+<% end %>

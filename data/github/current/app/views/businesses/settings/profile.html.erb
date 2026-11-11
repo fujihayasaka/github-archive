@@ -1,0 +1,216 @@
+<% page_info title: "General",
+  selected_link: :business_profile_settings,
+  sidebar: :settings,
+  stafftools: stafftools_enterprise_path(this_business) %>
+
+<% content_for :content do %>
+  <main>
+    <%= render layout: "businesses/layout",
+      locals: {
+        business: this_business,
+        title: "General",
+        container_attributes: "itemscope itemtype='http://schema.org/Business'"
+      } do %>
+
+  <p class="mt-2 color-fg-muted">
+    Your enterprise URL is
+    <%= link_to enterprise_url(this_business), enterprise_url(this_business), class: "Link--inTextBlock" %>.
+  </p>
+
+  <% if GitHub.multi_tenant_enterprise? && GitHub::Config::Proxima.current_region_label.present? %>
+    <p class="tmp-mt-4" <%= test_selector "hosting-region" %>>
+      Your hosting region is <strong><%= GitHub::Config::Proxima.current_region_label %></strong>.
+      <%= link_to \
+        "About data residency",
+        "#{GitHub.help_url}/enterprise-cloud@latest/admin/data-residency/about-github-enterprise-cloud-with-data-residency",
+        class: "Link--inTextBlock" %>.
+    </p>
+  <% end %>
+
+  <% if GitHub.single_business_environment? %>
+    <p <%= test_selector "slug-details" %>>
+      The <strong><%= this_business.slug %></strong> slug in the URL
+        was generated based on the company name in your license file and cannot be changed.
+    </p>
+  <% end %>
+
+  <%= form_tag settings_profile_enterprise_path(this_business),
+    method: :put,
+    novalidate: "novalidate",
+    "data-warn-unsaved-changes": "Unsaved changes to your info form may be lost." do %>
+    <div class="d-flex flex-column flex-lg-row flex-shrink-0 clearfix" data-hpc>
+      <div class="flex-auto col-lg-8 tmp-mr-lg-6 tmp-mb-4 tmp-mb-lg-0">
+        <dl class="form-group required" role="presentation">
+          <dt><%= label_tag "business[name]", "Enterprise display name" %></dt>
+          <dd>
+            <%= text_field_tag "business[name]", this_business.name,  {
+              "aria-required": "true",
+              class: "width-full #{'border-danger' if this_business.errors[:name].any?}",
+              style: this_business.errors[:name].any? ? "border-color: var(--borderColor-danger-emphasis) !important;" : nil
+            } %>
+            <% if this_business.errors[:name].any? %>
+              <p class="note color-fg-danger d-flex flex-items-center gap-1" style="min-height: 1.2em;">
+                <%= render(Primer::Beta::Octicon.new(:"alert-fill", size: :xsmall, color: :danger)) %>
+                <span><%= this_business.errors[:name].first %></span>
+              </p>
+            <% end %>
+            <div class="note">
+              Required name used to refer to your enterprise around
+              <%= GitHub.flavor %>.
+            </div>
+          </dd>
+        </dl>
+
+        <dl class="form-group" role="presentation">
+          <dt><%= label_tag "business[description]", "Description" %></dt>
+          <dd class="js-length-limited-input-container position-relative">
+            <text-expander keys=": @" data-emoji-url="<%= emoji_suggestions_path %>" data-mention-url="<%= user_suggestions_path %>">
+              <%= text_field_tag \
+                "business[description]",
+                this_business.description,
+                class: "width-full js-length-limited-input",
+                "data-input-max-length": Business::MAX_DESCRIPTION_LENGTH,
+                "data-warning-text": "{{remaining}} remaining" %>
+            </text-expander>
+            <p class="js-length-limited-input-warning user-profile-bio-message d-none"></p>
+            <div class="note">
+              Optional description of your enterprise.
+            </div>
+          </dd>
+        </dl>
+
+        <dl class="form-group" role="presentation">
+          <dt><%= label_tag "business[website_url]", "Website URL" %></dt>
+          <dd>
+            <%= url_field_tag "business[website_url]", this_business.website_url, class: "width-full" %>
+            <div class="note">
+              Optional URL of your enterprise website.
+            </div>
+          </dd>
+        </dl>
+
+        <dl class="form-group" role="presentation">
+          <dt><%= label_tag "business[location]", "Location" %></dt>
+          <dd>
+            <%= url_field_tag "business[location]", this_business.location, class: "width-full" %>
+            <div class="note">
+              Optional location of your enterprise.
+            </div>
+          </dd>
+        </dl>
+
+        <% unless GitHub.enterprise? %>
+          <dl class="form-group" role="presentation">
+            <dt><%= label_tag "business[security_contact_email]", "Security contact email" %></dt>
+            <dd>
+              <%= email_field_tag "business[security_contact_email]", this_business.security_contact_email, class: "width-full" %>
+              <div class="note">
+                Optional additional email address for security incident notifications.
+                Notifications will also be sent to relevant technical stakeholders as determined by GitHub.
+              </div>
+            </dd>
+          </dl>
+        <% end %>
+
+        <div class="mb-0">
+          <%= render Primer::Beta::Button.new(type: :submit, scheme: :default) do %>Update enterprise profile<% end %>
+        </div>
+      </div>
+
+      <div class="flex-shrink-0 col-lg-4">
+        <%= file_attachment_tag(
+          model: :avatars,
+          input: "avatar-upload-input",
+          class: "is-default js-upload-avatar-image",
+          "data-alambic-owner-id": this_business.id,
+          "data-alambic-owner-type": "Business"
+        ) do %>
+          <%= render partial: "settings/avatar", locals: { owner: this_business, input_id: "avatar-upload-input" } %>
+        <% end %>
+      </div>
+    </div>
+    <div class="tmp-mb-6"></div>
+  <% end %>
+
+  <div>
+    <%= render Businesses::Policies::UserNameDisplayComponent.new(business: this_business) %>
+  </div>
+
+  <h2 id="custom-footer" class="tmp-mt-7 tmp-mb-3">Custom footer</h2>
+
+  <% (5 - this_business.footer_links.size).times { this_business.footer_links.build } %>
+  <%= form_for this_business, url: settings_profile_enterprise_path(this_business), method: :put, novalidate: "novalidate" do |form| %>
+    <div class="enterprise-settings" data-hpc>
+      <%= form.fields_for :footer_links do |footer_fields| %>
+        <% has_errors = field_has_errors?(footer_fields.object, :title) || field_has_errors?(footer_fields.object, :url) %>
+        <% readable_footer_index = footer_fields.index + 1 %>
+
+        <div class="form-group tmp-mb-3 #{'errored' if has_errors}">
+          <div class="d-flex flex-column flex-lg-row gap-3">
+            <div class="flex-1">
+              <%= footer_fields.label :title, "Link #{readable_footer_index} title", class: "form-label d-block", style: "margin-bottom: var(--base-size-8);" %>
+              <%= footer_fields.text_field :title,
+                                         id: "footer_link_#{readable_footer_index}_title",
+                                         class: "form-control width-full #{'border-danger' if footer_fields.object.errors[:title].any?}",
+                                         placeholder: "e.g., About Us",
+                                         "data-input-max-length": 80,
+                                         "aria-describedby": footer_fields.object.errors[:title].any? ? "footer_link_#{readable_footer_index}_title_error" : nil,
+                                         style: footer_fields.object.errors[:title].any? ? "border-color: var(--borderColor-danger-emphasis) !important;" : nil
+              %>
+              <% if footer_fields.object.errors[:title].any? %>
+                <p id="footer_link_<%= readable_footer_index %>_title_error" class="note color-fg-danger d-flex flex-items-center gap-1 mt-1 mb-1" role="alert">
+                  <%= render(Primer::Beta::Octicon.new(:"alert-fill", size: :xsmall, color: :danger)) %>
+                  <span><%= footer_fields.object.errors[:title].first %></span>
+                </p>
+              <% end %>
+            </div>
+
+            <div class="flex-1">
+              <%= footer_fields.label :url, "Link #{readable_footer_index} URL", class: "form-label d-block", style: "margin-bottom: var(--base-size-8);" %>
+              <div class="d-flex flex-column flex-lg-row gap-3">
+                <div class="flex-1">
+                  <%= footer_fields.text_field :url,
+                                             id: "footer_link_#{readable_footer_index}_url",
+                                             class: "form-control width-full #{'border-danger' if footer_fields.object.errors[:url].any?}",
+                                             placeholder: "https://example.com/about",
+                                             "data-input-max-length": 255,
+                                             "aria-describedby": footer_fields.object.errors[:url].any? ? "footer_link_#{readable_footer_index}_url_error" : nil,
+                                             style: footer_fields.object.errors[:url].any? ? "border-color: var(--borderColor-danger-emphasis) !important;" : nil
+                  %>
+                  <% if footer_fields.object.errors[:url].any? %>
+                    <p id="footer_link_<%= readable_footer_index %>_url_error" class="note color-fg-danger d-flex flex-items-center gap-1 mt-1 mb-0" role="alert">
+                      <%= render(Primer::Beta::Octicon.new(:"alert-fill", size: :xsmall, color: :danger)) %>
+                      <span><%= footer_fields.object.errors[:url].first %></span>
+                    </p>
+                  <% end %>
+                </div>
+
+                <div class="flex-shrink-0 mt-0">
+                  <%= render Primer::Beta::Button.new(
+                    scheme: :danger,
+                    size: :medium,
+                    type: :submit,
+                    name: "#{footer_fields.object_name}[_destroy]",
+                    value: 1,
+                    classes: "js-footer-delete-btn"
+                  ) do %>
+                    <%= render(Primer::Beta::Octicon.new(:trash, size: :small)) %>
+                    Remove
+                  <% end %>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>      <% end %>
+    </div>
+    <%= render Primer::Beta::Button.new(type: :submit, scheme: :default) do %>Update footer<% end %>
+  <% end %>
+
+  <% if !GitHub.enterprise? && !GitHub.multi_tenant_enterprise? && !this_business.enterprise_managed_user_enabled? && this_business.feature_flag_enabled?(:in_product_messaging_business_opt_out, default: false) %>
+        <%= render(Settings::InProductMessagingComponent.new(owner: this_business)) %>
+      <% end %>
+
+      <%= render Businesses::DangerZoneComponent.new(business: this_business) %>
+    <% end %>
+  </main>
+<% end %>

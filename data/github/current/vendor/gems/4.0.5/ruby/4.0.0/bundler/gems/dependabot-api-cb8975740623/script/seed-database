@@ -1,0 +1,49 @@
+if !Rails.env.development?
+  puts "Can only seed the database in the development environment"
+  exit 1
+end
+
+USER_ID = 123
+USER_LOGIN = "some-user"
+INSTALLATION_ID = "123"
+REPO_NAME = "some-user/repo"
+UPDATE_CONFIG_PACKAGE_MANAGER = "bundler"
+UPDATE_CONFIG_DIRECTORY = "/ruby"
+
+user_details = { "id" => USER_ID, "login" => USER_LOGIN, "type" => "User" }
+account = FindOrCreateAccount.new(
+  github_account: user_details,
+  repo_selection: "all",
+).run
+
+if account.current_state != "active"
+  ActivateAccount.new(
+    account: account,
+    installation_id: INSTALLATION_ID,
+    sender: user_details,
+  ).run
+end
+
+client = GitHubHelpers::ClientWithRetries.new(
+  account: account,
+)
+
+user = client.user(user_details["id"])
+
+repo_details = client.repo(REPO_NAME)
+repo = FindOrCreateRepo.new(github_repo: repo_details).run
+
+update_config_details = {
+  "package-manager" => UPDATE_CONFIG_PACKAGE_MANAGER,
+  "update-schedule" => "daily",
+  "directory" => UPDATE_CONFIG_DIRECTORY,
+  "target-branch" => "master",
+  "lockfile-only" => false,
+  "dependencies" => [],
+}
+
+update_config = FindOrCreateUpdateConfig.new(
+  repo: repo,
+  update_config_details: update_config_details,
+  user: user,
+).run

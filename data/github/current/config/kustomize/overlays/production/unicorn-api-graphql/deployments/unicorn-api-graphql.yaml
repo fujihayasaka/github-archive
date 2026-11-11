@@ -1,0 +1,58 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unicorn-api
+  annotations:
+    moda.github.net/canary-replicas: 15
+    moda.github.net/canary-maxunavailable: 1
+    moda.github.net/allow-missing-ready-pods: 3
+    moda.github.net/cluster-preferences: ""
+
+spec:
+  selector:
+    matchLabels:
+      service: unicorn-api-graphql
+  template:
+    metadata:
+      labels:
+        service: unicorn-api-graphql
+    spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - preference:
+              matchExpressions:
+              - key: gpanel.githubapp.com/machine_type
+                operator: In
+                values:
+                - general5.m.large
+                - storage5.m.large
+            weight: 1
+      containers:
+        - name: unicorn
+          env:
+            - name: KUBE_DEPLOYMENT_NAME
+              value: unicorn-api-graphql
+            - name: GH_UNICORN_WORKER_COUNT
+              value: "10"
+            - name: UNICORN_CHECK_CLIENT_CONNECTION_ENABLED
+              value: "1"
+            - name: USERS_CACHE_CONNECT_API
+              value: "0"
+            - name: MEMCACHED_PROXY_ENABLED
+              value: "true"
+            - name: MEMCACHED_HTMLPIPELINE_SERVERS
+              value: "memcachedproxy.memcached-proxy-production.svc.cluster.local:11213"
+            - name: MEMCACHED_USERCONTENT_SERVERS
+              value: "memcachedproxy.memcached-proxy-production.svc.cluster.local:11214"
+            - name: MEMCACHED_GLOBAL_SERVERS
+              value: "memcachedproxy.memcached-proxy-production.svc.cluster.local:11211"
+            - name: MEMCACHED_RYOW_SERVERS
+              value: "memcachedproxy.memcached-proxy-production.svc.cluster.local:11215"
+          resources:
+            requests:
+              cpu: 6
+              memory: 16Gi
+            limits:
+              memory: 20Gi

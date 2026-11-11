@@ -1,0 +1,100 @@
+<%# erblint:counter DeprecatedComponentsCounter 1 %>
+<%= render(Primer::Alpha::Dialog.new(id: "staffbar-feedback", title: "Submit internal feedback", size: :large, classes: "js-feedback-modal")) do |d| %>
+  <% d.with_show_button(
+    scheme: :link,
+    classes: "js-feedback-button internal-feedback-button",
+    style: "background-color: rgba(0, 0, 0, 0.75) !important; border: 0; color: rgba(255, 255, 255, 0.75); font-size: 11px; padding: 2px 6px; border-radius: 2em",
+    "data-hotkey": "!",
+    data: hydro_click_tracking_attributes("staff_bar.feedback.click", {}),
+    mx: 1,
+  ) do %>
+    ✨ Feedback
+  <% end %>
+
+  <% d.with_header(show_divider: true) do %>
+    <h3 class="Box-title d-flex">
+      <div style="line-height: 2">Submit internal feedback to</div>
+      <div style="line-height: 2" class="current-service js-catalog-service-name ml-1"><%= controller.logical_service %></div>
+      <div class="js-feedback-target-container d-flex" hidden>
+        <%= render(Primer::Alpha::AutoComplete.new(
+          src: "/search_internal_feedback_repos",
+          input_id: "feedback_target",
+          is_label_inline: true,
+          list_id: "repos-popup",
+          label_text: "github/",
+          mx: 1
+          )) do |c| %>
+          <% c.with_input(classes: "js-feedback-target-input") %>
+        <% end %>
+      </div>
+      <%= render(Primer::Beta::Button.new(scheme: :link, font_weight: :light, font_size: 6, classes: "js-feedback-target-toggle", ml: 1)) { "change" } %>
+    </h3>
+  <% end %>
+
+  <% d.with_body do %>
+    <%= form_for Issue.new, url: internal_feedback_path(format: :json), method: :post, html: { id: 'feedback-form', class: 'js-feedback-form' } do |f| %>
+      <div class="js-feedback-form-container">
+        <div <%= test_selector("feedback-issue-form") %>>
+          <%
+            title_field_options = {
+              class: "input-lg input-block input-contrast required#{' valid' unless f.object.title.blank?} title js-session-resumable js-quick-submit",
+              required: true,
+              autocomplete: 'off',
+              placeholder: 'Title',
+              "aria-label": "Title",
+              id: "feedback-issue-title"
+            }
+
+            body_field_options = {
+              class: "my-2 form-control input-contrast comment-form-textarea js-comment-field js-paste-markdown js-task-list-field js-quick-submit js-size-to-fit size-to-fit js-session-resumable js-saved-reply-shortcut-comment-field",
+              "aria-label": "Title",
+              id: "feeback-issue-body"
+            }
+          %>
+          <%= f.text_field(:title, title_field_options) %>
+          <%= hidden_field_tag :sha, GitHub.current_sha %>
+          <%= hidden_field_tag :branch, GitHub.current_ref.dup.force_encoding('UTF-8').scrub! %>
+          <%= hidden_field_tag :rails_version, Rails.version %>
+          <% stats ||= Stafftools::Staffbar::Stats.new(request: request) %>
+          <%= hidden_field_tag :logical_service, controller.logical_service, class: "js-catalog-service-name-field" %>
+          <%= hidden_field_tag :response_time_stats, stats.response_time_stats %>
+          <%= hidden_field_tag :cpu, stats.cpu_stats %>
+          <%= hidden_field_tag :gc, "#{stats.gc_time} / #{stats.gc_info&.count}" %>
+          <%= hidden_field_tag :es_loader_stats, "#{stats.es_loader_stats if stats.es_loader_stats?}" %>
+          <%= hidden_field_tag :es_stats, "#{stats.process_stat(:es_stats) if stats.process_stat_tracked?(:es)}" %>
+          <%= hidden_field_tag :render_time, "#{stats.render_time if stats.render_stats?}" %>
+          <%= hidden_field_tag :redis, "#{stats.process_stat(:redis_stats) if stats.process_stat_tracked?(:redis)}" %>
+          <%= hidden_field_tag :cache, "#{stats.process_stat(:memcached_stats) if stats.process_stat_tracked?(:cache)}" %>
+          <%= hidden_field_tag :graphql, "#{stats.process_stat(:graphql_stats) if stats.process_stat_tracked?(:graphql)}" %>
+          <%= hidden_field_tag :mysql, "#{stats.process_stat(:mysql_stats) if stats.process_stat_tracked?(:mysql)} / #{GitHub::MysqlInstrumenter.primary_query_count} / #{stats.query_cache_hits}" %>
+          <%= hidden_field_tag :gitrpc, "#{stats.process_stat(:gitrpc_stats) if stats.process_stat_tracked?(:gitrpc)}" %>
+          <%= hidden_field_tag :enabled_features, enabled_features_for_feedback %>
+          <%= hidden_field_tag :captured_headers, json_headers_for_feedback(request.headers) %>
+          <div class="tmp-my-3">
+            <%= render(Comments::PreviewableCommentFormComponent.new(
+              body: "<!-- 🔍   Notice something amiss? Make GitHub ✨ . This issue will be routed to the owning team’s repo along with a set of diagnostic data gathered on your behalf. Please provide as much detail as possible -- screenshots welcome! -->",
+              field_name: "issue[body]",
+              textarea_id: "feedback_issue_body",
+              required: false,
+              session_resumable: true,
+              subject: nil,
+              # This is hardcoded to the github/github repository ID. This was chosen because 99% of people who
+              # can submit feedback via the staff toolbar should have access to this repository. The location
+              # of the upload is largely not important, but is just used for access checks.
+              upload_repository_id: 3,
+              slash_commands_enabled: false,
+            )) %>
+          </div>
+
+          <%= render(Primer::Beta::Button.new(type: :submit, scheme: :primary, classes: "js-feedback-submit", data: hydro_click_tracking_attributes("staff_bar.feedback.submit", {}))) { "Submit new issue" } %>
+        </div>
+      </div>
+      <div class="js-feedback-form-response-container">
+        Thank you for reporting this. A new
+        <a href='' class="Link--inTextBlock js-feedback-issue-link">issue</a>
+        has been created to alert the owning team.
+      </div>
+      <div class="js-feedback-form-error"></div>
+    <% end %>
+  <% end %>
+<% end %>

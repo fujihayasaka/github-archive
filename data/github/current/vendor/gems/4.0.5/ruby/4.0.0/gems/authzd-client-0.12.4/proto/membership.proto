@@ -1,0 +1,130 @@
+syntax = "proto3";
+
+package dataaccess;
+
+option go_package = "github.com/github/authzd/pkg/dataaccess";
+option ruby_package = "Authzd::DataAccess";
+
+// Membership service provides data access APIs for membership information.
+service Membership {
+  rpc FindOrganizationIDsForUserByID(FindOrganizationIDsForUserByIDRequest)
+      returns (FindOrganizationIDsForUserByIDResponse);
+  rpc FindTeamIDsForUserByID(FindTeamIDsForUserByIDRequest)
+      returns (FindTeamIDsForUserByIDResponse);
+  rpc FindBusinessIDsForUserByID(FindBusinessIDsForUserByIDRequest)
+      returns (FindBusinessIDsForUserByIDResponse);
+  rpc FindEnterpriseTeamIDsForUserByID(FindEnterpriseTeamIDsForUserByIDRequest)
+      returns (FindEnterpriseTeamIDsForUserByIDResponse);
+  rpc UserIsEmployee(UserIsEmployeeRequest) returns (UserIsEmployeeResponse);
+  rpc UsersAreEmployees(UsersAreEmployeesRequest) returns (UsersAreEmployeesResponse);
+}
+
+message FindOrganizationIDsForUserByIDRequest {
+  uint64 user_id = 1;
+  PaginationOptions pagination = 2;
+}
+
+message FindOrganizationIDsForUserByIDResponse {
+  repeated uint64 organization_ids = 1;
+  // Cursor for the next page. Empty string indicates no more results.
+  string next_cursor = 2;
+}
+
+message PaginationOptions {
+  // Maximum number of results to return per page. Defaults to 1000, max 10000.
+  uint32 limit = 1;
+  // Cursor from previous response to continue pagination. Empty for first request.
+  string cursor = 2;
+}
+
+message FindTeamIDsForUserByIDRequest {
+  uint64 user_id = 1;
+  PaginationOptions pagination = 2;
+  // When true, includes BusinessTeam memberships in addition to Team memberships.
+  bool include_business_teams = 3;
+}
+
+// TeamType represents the type of team.
+enum TeamType {
+  TEAM_TYPE_UNSPECIFIED = 0;
+  TEAM_TYPE_ORGANIZATION = 1;
+  TEAM_TYPE_BUSINESS = 2;
+}
+
+// TeamRef represents a reference to a team with its type.
+message TeamRef {
+  uint64 id = 1;
+  TeamType type = 2;
+}
+
+message FindTeamIDsForUserByIDResponse {
+  repeated TeamRef teams = 1;
+  // Cursor for the next page. Empty string indicates no more results.
+  string next_cursor = 2;
+}
+
+message UserIsEmployeeRequest {
+  uint64 user_id = 1;
+}
+
+message UserIsEmployeeResponse {
+  bool is_employee = 1;
+  bool is_intern = 2;
+}
+
+message UsersAreEmployeesRequest {
+  repeated uint64 user_ids = 1;
+}
+
+message UsersAreEmployeesResponse {
+  // User IDs that are members of the github/employees team.
+  repeated uint64 employee_user_ids = 1;
+  // User IDs that are members of the github/interns team.
+  repeated uint64 intern_user_ids = 2;
+}
+
+message FindBusinessIDsForUserByIDRequest {
+  uint64 user_id = 1;
+  PaginationOptions pagination = 2;
+  // When true, includes unaffiliated business members (non-EMU users only).
+  bool include_unaffiliated = 3;
+  // When true, includes businesses accessible via outside collaborator repository access (non-EMU users only).
+  bool include_outside_collaborators = 4;
+}
+
+// MembershipType represents the type of membership a user has in a business.
+enum MembershipType {
+  MEMBERSHIP_TYPE_UNSPECIFIED = 0;
+  MEMBERSHIP_TYPE_ADMIN = 1;
+  MEMBERSHIP_TYPE_ORGANIZATION_MEMBER = 2;
+  MEMBERSHIP_TYPE_BILLING_MANAGER = 3;
+  MEMBERSHIP_TYPE_SUPPORT_ENTITLED = 4;
+  MEMBERSHIP_TYPE_UNAFFILIATED = 5;
+}
+
+// BusinessUserMembership represents a user's membership in a business with its type.
+message BusinessUserMembership {
+  uint64 business_id = 1;
+  MembershipType membership = 2;
+}
+
+message FindBusinessIDsForUserByIDResponse {
+  repeated BusinessUserMembership memberships = 1;
+  // Cursor for the next page. Empty string indicates no more results.
+  string next_cursor = 2;
+}
+
+message FindEnterpriseTeamIDsForUserByIDRequest {
+  uint64 user_id = 1;
+  PaginationOptions pagination = 2;
+  // Optional: if non-empty, scopes the query to these business IDs instead of resolving them
+  // from the user's memberships. Callers that have already resolved business IDs (e.g.
+  // copilot-token-service) can pass them here to avoid redundant lookups.
+  repeated uint64 business_ids = 3;
+}
+
+message FindEnterpriseTeamIDsForUserByIDResponse {
+  repeated uint64 enterprise_team_ids = 1;
+  // Cursor for the next page. Empty string indicates no more results.
+  string next_cursor = 2;
+}

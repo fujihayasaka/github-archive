@@ -1,0 +1,145 @@
+<% page_info title: "#{this_business.name} - Enterprise Team Migrations", selected_link: :enterprise_team_migrations %>
+
+<%= render Primer::Beta::Subhead.new do |component| %>
+  <% component.with_heading(tag: :h2) do %>Enterprise Team Migrations (ETv1 → ETv2)<% end %>
+<% end %>
+
+<%= render Primer::Alpha::Banner.new(classes: "tmp-mb-3", scheme: :warning) do %>
+  <strong> Do not use this tool without approval from the #enterprise-primitives team.</strong>
+<% end %>
+
+<% if migrations.any? %>
+  <%= render Primer::Beta::Subhead.new do |component| %>
+    <% component.with_heading(tag: :h3) do %>Migrations (<%= migrations.count %>)<% end %>
+  <% end %>
+
+  <table class="site-admin-table">
+    <thead>
+      <tr>
+        <th>ETv1 Team</th>
+        <th>ETv2 Team</th>
+        <th>Status</th>
+        <th>Members (ETv1)</th>
+        <th>Members (ETv2)</th>
+        <th>Started</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% migrations.each do |migration| %>
+        <tr <%= test_selector "migration-#{migration.id}" %>>
+          <td <%= test_selector "migration-enterprise-team" %>>
+            <% if migration.enterprise_team.present? %>
+              <%= link_to migration.enterprise_team.name, stafftools_enterprise_team_path(this_business, migration.enterprise_team) %>
+            <% else %>
+              <em>Deleted</em>
+            <% end %>
+          </td>
+          <td <%= test_selector "migration-business-team" %>>
+            <% if migration.business_team.present? %>
+              <%= migration.business_team.name %>
+              <small>(ID: <%= migration.business_team.id %>)</small>
+            <% else %>
+              <em>N/A</em>
+            <% end %>
+          </td>
+          <td <%= test_selector "migration-status" %>>
+            <% case migration.migration_status %>
+            <% when "in_progress" %>
+              <%= render Primer::Beta::Label.new(scheme: :attention) do %>in_progress<% end %>
+            <% when "dual_write" %>
+              <%= render Primer::Beta::Label.new(scheme: :success) do %>dual_write<% end %>
+            <% when "completed" %>
+              <%= render Primer::Beta::Label.new(scheme: :done) do %>completed<% end %>
+            <% when "failed" %>
+              <%= render Primer::Beta::Label.new(scheme: :danger) do %>failed<% end %>
+            <% end %>
+          </td>
+          <td <%= test_selector "migration-etv1-members" %>>
+            <%= migration.enterprise_team&.member_count || 0 %>
+          </td>
+          <td <%= test_selector "migration-etv2-members" %>>
+            <%= migration.business_team&.members_count || 0 %>
+          </td>
+          <td>
+            <%= migration.created_at&.strftime("%Y-%m-%d %H:%M:%S UTC") %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+
+  <div class="tmp-mt-4">
+    <% if migrations.any? { |m| m.dual_write? } %>
+      <%= form_tag stafftools_enterprise_team_migration_path(this_business), method: :patch, style: "display:inline" do %>
+        <%= render Primer::Beta::Button.new(type: :submit, scheme: :primary, "data-confirm": "Are you sure you want to complete all migrations? This will destroy all ETv1 EnterpriseTeams.") do %>
+          Complete All Migrations
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <% if migrations.any? { |m| !m.completed? } %>
+      <%= form_tag stafftools_enterprise_team_migration_path(this_business), method: :delete, style: "display:inline" do %>
+        <%= render Primer::Beta::Button.new(type: :submit, scheme: :danger, "data-confirm": "Are you sure you want to reset all migrations? This will destroy all ETv2 BusinessTeams.") do %>
+          Reset All Migrations
+        <% end %>
+      <% end %>
+    <% end %>
+  </div>
+
+  <div class="paginate-container">
+    <%= will_paginate migrations, param_name: :migrations_page %>
+  </div>
+<% end %>
+
+<% if unmigrated_teams.any? %>
+  <%= render Primer::Beta::Subhead.new do |component| %>
+    <% component.with_heading(tag: :h3) do %>Unmigrated Enterprise Teams (<%= unmigrated_teams.count %>)<% end %>
+  <% end %>
+
+  <table class="site-admin-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Members</th>
+        <th>Copilot Assignment</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% unmigrated_teams.each do |team| %>
+        <tr <%= test_selector "unmigrated-team-#{team.id}" %>>
+          <td <%= test_selector "unmigrated-team-name" %>>
+            <%= link_to team.name, stafftools_enterprise_team_path(this_business, team) %>
+          </td>
+          <td>
+            <%= pluralize team.member_count, "user" %>
+          </td>
+          <td <%= test_selector "unmigrated-team-copilot" %>>
+            <% if team.enterprise_team_assignments.where(assignment_type: "copilot").exists? %>
+              Yes
+            <% else %>
+              None
+            <% end %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+
+  <%= form_tag stafftools_enterprise_team_migration_path(this_business), method: :post do %>
+    <%= render Primer::Beta::Button.new(type: :submit, scheme: :primary, "data-confirm": "Are you sure you want to start migration for all enterprise teams? This will create ETv2 BusinessTeams and begin syncing.") do %>
+      Start Migration for All Enterprise Teams
+    <% end %>
+  <% end %>
+
+  <div class="paginate-container">
+    <%= will_paginate unmigrated_teams, param_name: :teams_page %>
+  </div>
+<% else %>
+  <% unless migrations.any? %>
+    <%= render Primer::Beta::Blankslate.new(classes: "tmp-mb-3") do |c| %>
+      <% c.with_heading(tag: :h3) do %>
+        No enterprise teams found for this enterprise.
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

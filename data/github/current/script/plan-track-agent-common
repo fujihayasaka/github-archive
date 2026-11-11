@@ -1,0 +1,205 @@
+#!/bin/bash
+# Shared utilities for Plan & Track agent setup scripts.
+# Source this file from setup-plan-track-fauxpilot-agent and setup-plan-track-e2e-agent.
+#
+# Provides:
+#   - Logging helpers (log_step, log_success, log_warn, log_error)
+#   - Port/URL helpers (wait_for_port, is_port_listening, verify_api_health)
+#   - Server management (ensure_rails_running, restart_workers)
+#   - Feature flag setup (enable_memex_agent_flags, enable_issues_agent_flags,
+#                         disable_local_dev_breaking_flags)
+
+# --- Colors ---
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+GITHUB_DIR="/workspaces/github"
+
+# --- Logging ---
+
+log_step() {
+  echo -e "\n${BLUE}-->  $1${NC}"
+}
+
+log_success() {
+  echo -e "${GREEN}OK  $1${NC}"
+}
+
+log_warn() {
+  echo -e "${YELLOW}!!  $1${NC}"
+}
+
+log_error() {
+  echo -e "${RED}ERR $1${NC}"
+}
+
+# --- Port / health helpers ---
+
+is_port_listening() {
+  lsof -Pi ":$1" -sTCP:LISTEN -t >/dev/null 2>&1
+}
+
+wait_for_port() {
+  local port=$1
+  local name=$2
+  local timeout=${3:-120}
+  local elapsed=0
+
+  echo -n "   Waiting for $name (port $port)..."
+  while ! is_port_listening "$port"; do
+    sleep 2
+    elapsed=$((elapsed + 2))
+    if [ "$elapsed" -ge "$timeout" ]; then
+      echo ""
+      log_error "$name did not start within ${timeout}s"
+      return 1
+    fi
+    echo -n "."
+  done
+  echo ""
+  log_success "$name is ready"
+}
+
+# Verify an API server on a given port is responding.
+# Tries GET /_ping first (CAPI), then falls back to checking the port is
+# listening (works for fauxpilot and other servers without /_ping).
+# Usage: verify_api_health <port> <name>
+verify_api_health() {
+  local port=$1
+  local name=$2
+  local status
+  # Try /_ping (real CAPI)
+  status=$(curl -sf -o /dev/null -w "%{http_code}" --max-time 5 "http://localhost:${port}/_ping" 2>/dev/null || true)
+  status="${status:0:3}"
+  if [ "$status" = "200" ]; then
+    log_success "$name health check passed (GET /_ping → $status)"
+    return 0
+  fi
+  # Fallback: just check the port is accepting connections (fauxpilot, etc.)
+  if is_port_listening "$port"; then
+    log_success "$name health check passed (port $port listening)"
+    return 0
+  fi
+  log_error "$name health check failed (port $port not responding)"
+  return 1
+}
+
+# --- Server management ---
+
+ensure_rails_running() {
+  log_step "Ensuring github/github server is running"
+  # PROJECTS=1 starts the Projects processors (denormalization, events,
+  # live-updates, sub-issue recalculation) which are needed for Memex.
+  export PROJECTS=1
+  if is_port_listening 3000; then
+    log_success "Rails server already running on port 3000"
+    # Restart the projects overmind process so it picks up PROJECTS=1
+    # in case the server was started without it.
+    cd "$GITHUB_DIR"
+    overmind restart projects 2>/dev/null || true
+  else
+    cd "$GITHUB_DIR"
+    # Clean up stale overmind socket — if overmind isn't actually running
+    # but the socket remains, server-start will silently fail.
+    if [ -S /tmp/overmind.sock ] && ! overmind status 2>/dev/null | grep -q "running"; then
+      log_warn "Removing stale overmind socket"
+      rm -f /tmp/overmind.sock .overmind.sock
+    fi
+    log_step "Starting Rails server (with local github-ui and Projects processors)"
+    script/dx/server-start --ui
+    wait_for_port 3000 "Rails web server" 180
+  fi
+
+  # Wait for the server to actually respond to HTTP, not just TCP-listen.
+  # The SWE agent setup (Net::HTTP.get_response) hangs if the server is
+  # still booting, so we gate on a real HTTP response first.
+  log_step "Waiting for Rails server to respond to HTTP requests"
+  local http_elapsed=0
+  local http_timeout=120
+  while true; do
+    local http_status
+    http_status=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 30 "http://github.localhost/" 2>/dev/null || true)
+    http_status="${http_status:0:3}"
+    if [[ "$http_status" =~ ^(200|301|302)$ ]]; then
+      log_success "Rails server responding (HTTP $http_status)"
+      break
+    fi
+    sleep 3
+    http_elapsed=$((http_elapsed + 3))
+    if [ "$http_elapsed" -ge "$http_timeout" ]; then
+      log_error "Rails server not responding successfully to HTTP within ${http_timeout}s (last status: $http_status)"
+      return 1
+    fi
+    echo -n "."
+  done
+}
+
+restart_workers() {
+  log_step "Restarting background workers (resqued)"
+  cd "$GITHUB_DIR"
+  overmind restart resqued
+  sleep 5
+  log_success "Workers restarted"
+}
+
+# --- Feature flags ---
+# These must be called AFTER setup-codespaces-copilot-swe-agent-v2 because
+# that script mirrors production flags which can re-enable flags that break
+# local development.
+
+enable_memex_agent_flags() {
+  log_step "Enabling Memex Agent Tasks feature flags"
+  cd "$GITHUB_DIR"
+  # AgentTask is a valid MemexProjectItem content type
+  bin/toggle-feature-flag enable memex_agent_tasks
+  # Run the autopilot workflow on column changes (HydroAutopilotColumnUpdateAutomationJob).
+  # Without this the "move card to Status X → assign Copilot" workflow never fires.
+  bin/toggle-feature-flag enable memex_autopilot
+}
+
+enable_issues_agent_flags() {
+  log_step "Enabling Issues agent feature flags"
+  cd "$GITHUB_DIR"
+  bin/toggle-feature-flag enable issue_cca_visualization
+  bin/toggle-feature-flag enable issues_copilot_use_mission_control_tasks
+  bin/toggle-feature-flag enable copilot_swe_agent_close_reference
+  bin/toggle-feature-flag enable agent_assignment_session_live_updates
+}
+
+disable_local_dev_breaking_flags() {
+  log_step "Disabling flags that break local development"
+  cd "$GITHUB_DIR"
+  bin/toggle-feature-flag disable copilot_api_combined_usage_store 2>/dev/null || true
+}
+
+# Kill anything occupying a port and wait for it to be free.
+kill_port() {
+  local port=$1
+  if is_port_listening "$port"; then
+    lsof -t -i:"$port" 2>/dev/null | xargs -r kill -15 2>/dev/null || true
+    sleep 2
+    if is_port_listening "$port"; then
+      lsof -t -i:"$port" 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+      sleep 1
+    fi
+  fi
+}
+
+# Stop any Docker container bound to a host port. Useful when a container from
+# another project (e.g. devcontainer cosmosdb-emulator) blocks a port that
+# sweagentd needs.
+kill_docker_port() {
+  local port=$1
+  local cid
+  cid=$(docker ps -q --filter "publish=$port" 2>/dev/null)
+  if [ -n "$cid" ]; then
+    local name
+    name=$(docker inspect --format '{{.Name}}' "$cid" 2>/dev/null | sed 's|^/||')
+    log_warn "Stopping Docker container '$name' occupying port $port"
+    docker stop "$cid" >/dev/null 2>&1 || true
+    docker rm "$cid" >/dev/null 2>&1 || true
+  fi
+}

@@ -1,0 +1,1 @@
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[4429],{860220(u,i,h){var s=h(332342);h.d(i,{UpsellBanner:()=>s.g})}}]);

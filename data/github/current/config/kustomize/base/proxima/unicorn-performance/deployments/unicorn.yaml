@@ -1,0 +1,52 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    moda.github.net/allow-missing-ready-pods: null
+  name: unicorn
+spec:
+  selector:
+    matchLabels:
+      service: unicorn-performance
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 100%
+  template:
+    metadata:
+      labels:
+        service: unicorn-performance
+        moda.github.net/reliability-test-engine: degrader
+      annotations:
+        observability.github.com/splunk_index: rails
+    spec:
+      containers:
+        - name: nginx
+        - name: voltron
+        - name: unicorn
+        - name: degrader
+          image: dxcrprod.azurecr.io/degrader:627e293cc1f3a92f5859cb5154e8214ee7399cd2
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: degrader
+            - name: DOGSTATSD_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: STATSD_ADDR
+              value: $(DOGSTATSD_HOST):28125
+          volumeMounts:
+            - mountPath: /etc/degrader/
+              name: degrader-config
+          resources:
+            requests:
+              cpu: 20m
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+      volumes:
+        - configMap:
+            name: degrader-config-unicorn-performance
+          name: degrader-config

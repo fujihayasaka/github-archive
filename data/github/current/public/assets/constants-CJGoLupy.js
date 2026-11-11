@@ -1,0 +1,1 @@
+var e=`copilot-chat-textarea`,t=`copilot-chat-topic-search`,n=`Review`,r=`copilot-chat-header-button`,i=`copilot-chat-panel`,a=`copilot-chat-panel`,o=`copilot-chat-docked-content`,s=`copilot-chat-docked-header`,c=`copilot-docked-panel:ready`,l=`copilot-docked-panel:closed`;export{e as a,o as c,t as i,c as l,i as n,l as o,a as r,s,r as t,n as u};

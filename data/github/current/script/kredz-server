@@ -1,0 +1,38 @@
+#!/bin/bash
+
+# Usage: script/kredz-server
+# Start the github/kredz web server if the repository has been cloned in the Codespace, or no-op otherwise.
+
+set -e
+
+# Match kredz's runtime mode to the monolith's. When github/github is running in
+# single-tenant enterprise mode (persisted in tmp/runtime/current), kredz must
+# also run in enterprise mode so that Secrets.store/fetch use the same
+# (enterprise) encryption path instead of the hosted/dotcom per-integration
+# secret-source path.
+kredz_flags="--fast"
+if [ "$(cat tmp/runtime/current 2>/dev/null)" = "enterprise" ]; then
+  echo "Monolith is in enterprise mode; starting kredz with --enterprise."
+  kredz_flags="$kredz_flags --enterprise"
+
+  # In enterprise mode kredz's hydro-consumer takes a code path that uses the
+  # KAFKA_VERSION env var directly (services/hydrosvc/config/config.go). That var
+  # is unset in the local dev environment, which makes the consumer crash with
+  # "parsing kafka version: invalid version ''" and tears down the whole kredz
+  # process group (forego), causing a restart loop. Pin it to the kafka-lite
+  # compatible version used elsewhere in dev.
+  export KAFKA_VERSION="${KAFKA_VERSION:-1.1.1}"
+fi
+
+if test -d /workspaces/actions/actions-codespaces; then
+  echo "Actions Development devcontainer detected, kredz server will be started by actions-codespaces."
+  sleep infinity
+elif test -f /workspaces/kredz/script/server; then
+  echo "Starting kredz server..."
+  cd /workspaces/kredz && script/server $kredz_flags
+else
+  echo "github/kredz repository has not been cloned, sleeping."
+  echo "If you want to run the github/kredz server, first run 'script/setup-kredz-server',"
+  echo "then 'overmind restart kredz'."
+  sleep infinity
+fi

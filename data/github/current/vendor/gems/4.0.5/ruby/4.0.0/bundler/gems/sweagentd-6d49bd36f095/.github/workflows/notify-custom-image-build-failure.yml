@@ -1,0 +1,140 @@
+name: Notify Custom Image Build Failure
+
+on:
+  workflow_run:
+    workflows: ["Build Custom Copilot Image"]
+    types: [completed]
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+jobs:
+  open-issue-on-failure:
+    if: >-
+      contains(fromJSON('["failure","timed_out"]'), github.event.workflow_run.conclusion) &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.run_attempt == 1
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch first responder from PagerDuty
+        id: fr
+        continue-on-error: true
+        uses: github/copilot-mission-control/.github/actions/fr-schedule@main
+        with:
+          pagerduty-token: ${{ secrets.PAGERDUTY_API_KEY }}
+          pagerduty-schedule: P8DYGLG # https://github.pagerduty.com/schedules#P8DYGLG
+
+      - name: Ensure ci-failure label exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "ci-failure:custom-image" \
+            --repo "$GITHUB_REPOSITORY" \
+            --description "Custom image build workflow failure" \
+            --color "B60205" --force
+
+      - name: Open tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          ACTOR: ${{ github.event.workflow_run.actor.login }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          FR: ${{ steps.fr.outputs.current-first-responder }}
+        run: |
+          set -euo pipefail
+
+          mention="@github/coding-agent-core-team"
+          if [ -n "${FR:-}" ]; then
+            mention="@$FR"
+          fi
+
+          body=$(cat <<EOF
+          <!-- custom-image-build-failure -->
+          The \`Build Custom Copilot Image\` workflow ${CONCLUSION} on \`main\`.
+
+          ${mention} please investigate.
+
+          ## Details
+
+          - Failed run: ${RUN_URL}
+          - Run number: #${RUN_NUMBER}
+          - Conclusion: \`${CONCLUSION}\`
+          - Commit: \`${HEAD_SHA}\`
+          - Triggered by: @${ACTOR}
+
+          ## Next steps
+
+          1. Open the failed run linked above and inspect the failing step.
+          2. Fix forward in a PR, or revert the commit that broke the build.
+          3. Once a subsequent \`push\` build on \`main\` succeeds, this issue will be closed automatically.
+          EOF
+          )
+
+          issue_url=$(gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Custom image build failed on main (run #${RUN_NUMBER})" \
+            --body "$body" \
+            --label "ci-failure:custom-image" \
+            --label "first-responder")
+
+          echo "Created issue: $issue_url"
+
+          if [ -n "${FR:-}" ]; then
+            gh issue edit "$issue_url" --repo "$GITHUB_REPOSITORY" --add-assignee "$FR" \
+              || echo "Could not assign $FR (user may not have repo access); FR is still @-mentioned in the body."
+          fi
+
+  close-issues-on-success:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.run_attempt == 1
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure ci-failure label exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "ci-failure:custom-image" \
+            --repo "$GITHUB_REPOSITORY" \
+            --description "Custom image build workflow failure" \
+            --color "B60205" --force
+
+      - name: Close open custom image build failure issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          # Capture gh output via command substitution so `set -e` propagates
+          # API failures (process substitution into `mapfile` would swallow them).
+          issues_json=$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --label "ci-failure:custom-image" \
+            --limit 200 \
+            --json number,body)
+
+          numbers_str=$(jq -r '.[] | select(.body | contains("<!-- custom-image-build-failure -->")) | .number' <<<"$issues_json")
+
+          if [ -z "$numbers_str" ]; then
+            echo "No open custom image build failure issues to close."
+            exit 0
+          fi
+
+          mapfile -t numbers <<<"$numbers_str"
+
+          comment="✅ Build green again. Closing — fixed by [run #${RUN_NUMBER}](${RUN_URL}) at \`${HEAD_SHA}\`."
+          for n in "${numbers[@]}"; do
+            gh issue comment "$n" --repo "$GITHUB_REPOSITORY" --body "$comment"
+            gh issue close "$n" --repo "$GITHUB_REPOSITORY" --reason completed
+          done

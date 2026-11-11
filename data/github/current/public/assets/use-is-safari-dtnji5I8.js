@@ -1,0 +1,1 @@
+import{o as e}from"./chunk-jRWAZmH_.js";import{Qp as t}from"./index-M6n1L9AM.js";var n=e(t());function r(){return(0,n.useSyncExternalStore)(o,i,a)}function i(){return/^((?!chrome|android).)*safari/i.test(navigator.userAgent)}function a(){return!1}function o(){return()=>{}}export{r as t};

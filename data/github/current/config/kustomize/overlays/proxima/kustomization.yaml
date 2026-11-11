@@ -1,0 +1,149 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base/proxima
+
+replicas:
+  - name: dependabot-alerts-alerting-progress-processor
+    count: 2
+  - name: dependabot-alerts-vulnerable-dependency-processor
+    count: 2
+  - name: memex-events-processor
+    count: 2
+  - name: memex-live-updates-processor
+    count: 2
+  - name: unicorn-performance
+    count: 3
+
+patches:
+  - target:
+      kind: Deployment
+      name: unicorn-api
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+  - target:
+      kind: Deployment
+      name: ^unicorn$
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+  - target:
+      kind: Deployment
+      name: unicorn-internal-api
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+  - target:
+      kind: ServiceMeshConfig
+      name: config
+    patch: |-
+      - op: replace
+        path: /spec/authorization/strictTLS
+        value: true
+  - target:
+      kind: Deployment
+      name: unicorn-api
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/labels/azure.workload.identity~1use
+        value: "true"
+  - target:
+      kind: Deployment
+      name: unicorn-api-graphql
+    patch: |-
+      - op: remove
+        path: /spec/template/metadata/labels/azure.workload.identity~1use
+  - target:
+      kind: Deployment
+      name: sharedworker
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/labels/azure.workload.identity~1use
+        value: "true"
+  - target:
+      kind: Deployment
+    patch: |-
+      - op: replace
+        path: /spec/progressDeadlineSeconds
+        value: 1200  # 20 minutes
+  - target:
+      kind: Deployment
+      name: unicorn-api
+    patch: |-
+        - op: replace
+          path: /spec/strategy/rollingUpdate/maxUnavailable
+          value: 1
+  - target:
+      kind: Namespace
+      name: base-namespace
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: github-%stamp%
+      - op: replace
+        path: "/metadata/labels/github.com~1name"
+        value: github-%stamp%
+  - target:
+      kind: ResourceQuota
+      name: pod-object-count
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: github-%stamp%
+  - target:
+      kind: Service
+      name: unicorn-internal-api
+    patch: |-
+      - op: remove
+        path: /spec/ports/0/nodePort
+  - target:
+      kind: Deployment
+      name: unicorn
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: COPILOT_LIMITER_URL
+          value: "http://copilot-limiter-http.copilot-limiter-%stamp%.svc.cluster.local:8080"
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: COPILOT_MODEL_REGISTRY_URL
+          value: "http://copilot-model-registry.copilot-model-registry-%stamp%.svc.cluster.local:8080"
+  - target:
+      kind: Deployment
+      name: unicorn-(api|api-graphql|internal-api|gitauth-api)
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/1/env/-
+        value:
+          name: COPILOT_LIMITER_URL
+          value: "http://copilot-limiter-http.copilot-limiter-%stamp%.svc.cluster.local:8080"
+      - op: add
+        path: /spec/template/spec/containers/1/env/-
+        value:
+          name: COPILOT_MODEL_REGISTRY_URL
+          value: "http://copilot-model-registry.copilot-model-registry-%stamp%.svc.cluster.local:8080"
+  # Override proxima ScaledObject replica counts for this environment
+  - target:
+      kind: ScaledObject
+      name: sharedworker
+    patch: |-
+      - op: replace
+        path: /spec/minReplicaCount
+        value: 4
+      - op: replace
+        path: /spec/maxReplicaCount
+        value: 4
+  - target:
+      kind: ScaledObject
+      name: hookworker
+    patch: |-
+      - op: replace
+        path: /spec/minReplicaCount
+        value: 2
+      - op: replace
+        path: /spec/maxReplicaCount
+        value: 2

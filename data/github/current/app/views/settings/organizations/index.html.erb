@@ -1,0 +1,121 @@
+<%# erblint:counter DeprecatedComponentsCounter 1 %>
+<%# erblint:counter GoogleAnalyticsDeprecation 1 %>
+<%# view = Settings::OrgsView %>
+<% page_info :title => "Organizations" %>
+<% ref_loc = "organization_settings_list" %>
+
+<%= render layout: "settings/settings" do %>
+  <% if params[:cb_200_offer_notice].present? %>
+    <%= render(Primer::Beta::Flash.new(
+      scheme: :success,
+      icon: :check,
+      test_selector: "cb_200_offer_notice",
+      classes: "tmp-mb-4")) do %>
+      We’re processing your credit now. It’ll be ready in 1–2 business days — we’ll let you know when you can put it to work.
+    <% end %>
+  <% end %>
+
+  <% if view.sso_orgs.present? &&  view.sso_orgs.any? %>
+    <%= render_react_partial name: "sso-orgs-settings-list", props: { ssoOrgs: view.sso_orgs } %>
+
+    <div class="paginate-container" data-pjax data-html-cleaner-suppress-children>
+      <%= will_paginate(view.paginated_sso_orgs, param_name: :sso_orgs_page, role: "navigation", "aria-label": "SSO organizations pagination") %>
+    </div>
+  <% end %>
+
+  <%= render Primer::Beta::Subhead.new(hide_border: true, mb: 1) do |component| %>
+    <% component.with_heading(tag: :h2, font_size: 3) do %>Organizations<% end %>
+    <% component.with_actions do %>
+      <% if user_can_create_organizations? && !current_user.is_enterprise_managed? %>
+        <%= render Primer::Beta::Button.new(tag: :a, href: new_organization_path, "data-ga-click": ga_label_with_analytics_tracking_id("Orgs,click,text:New organization;"), size: :small) do %>
+          New organization
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if view.eligible_organization_count > 0 %>
+    <%= render(Primer::Box.new(
+      bg: :accent,
+      border_color: :accent,
+      border: true,
+      border_radius: 2,
+      display: :flex,
+      align_self: :center,
+      test_selector: "org-settings-upgrade-banner",
+      classes: "tmp-p-3 tmp-mb-3")) do %>
+      <%= render(Primer::Beta::Octicon.new(:info, mr: 2, color: :accent, align_self: :center)) %>
+      <%= render(Primer::Beta::Text.new) do %>
+        You have (<%= view.eligible_organization_count %>) <%= "organization".pluralize(view.eligible_organization_count) %> eligible for a <%= render(Primer::Beta::Text.new(font_weight: :bold)) { "free upgrade" } %>.
+      <% end %>
+      <%= render(Primer::Box.new(flex: 1)) %>
+      <%= render(Primer::Beta::Link.new(
+        href: "#{GitHub.help_url}/admin/overview/about-enterprise-accounts",
+        data: analytics_click_attributes(
+          category: "entacct_migration",
+          action: "click_to_learn_more_about_enterprise_accounts",
+          label: "ref_loc:#{ref_loc};ref_cta:learn_more",
+        ))) { "Learn more" } %>
+    <% end %>
+  <% end %>
+
+  <% if view.memberships.any? || show_pending_invitations_indicator? %>
+    <% organizations_with_nudges.each do |membership| %>
+      <div class="Box tmp-mb-4" <%= test_selector("organization-with-nudges-box") %>>
+        <%= render partial: "settings/organizations/organization_list_item", locals: {
+          membership: membership,
+          view: view,
+          ref_loc: ref_loc,
+        } %>
+
+        <% if FeatureFlag.vexi.enabled?("enable_stackable_organization_nudges", current_user, default: false) %>
+          <%= render(InProductTargeting::Components::SettingsNudges::OrganizationStackableNudgeComponent.new(
+            organization: membership.organization,
+            user: current_user,
+          )) %>
+        <% else %>
+          <%= render(InProductTargeting::Components::SettingsNudges::OrganizationListItemNudgeComponent.new(
+            organization: membership.organization,
+            user: current_user,
+          )) %>
+        <% end %>
+      </div>
+    <% end %>
+
+    <div class="Box" <%= test_selector("organizations-without-nudges-box") %>>
+      <%= render Settings::PendingInvitationsComponent.new(user: current_user) %>
+
+      <% organizations_without_nudges.each do |membership| %>
+          <%= render partial: "settings/organizations/organization_list_item", locals: {
+          membership: membership,
+          view: view,
+          ref_loc: ref_loc,
+        } %>
+      <% end %>
+
+    </div>
+    <div class="paginate-container" data-pjax data-html-cleaner-suppress-children>
+      <%= will_paginate(view.paginated_organizations, param_name: :all_orgs_page, role: "navigation", "aria-label": "All organizations pagination") %>
+    </div>
+  <% else %>
+    <%= render Primer::Beta::Blankslate.new do |c| %>
+      <% c.with_heading(tag: :h2) do %>
+        You are not a member of any organizations.
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if can_move_work %>
+    <%= render Primer::Beta::Subhead.new(spacious: true) do |component| %>
+      <% component.with_heading(tag: :h2) do %>Move to an organization<% end %>
+    <% end %>
+    <p>Your personal account cannot be converted to an organization.
+    You must create a new organization and transfer your repositories and projects to it instead.
+    You can then rename your personal account and the organization if you want your organization to have the
+    same name that you are currently using for your personal account.</p>
+
+    <%= render Primer::Beta::Button.new(tag: :a, href: new_move_work_path(current_user), test_selector: "move-work-to-organization-button") do %>
+      Move work to an organization
+    <% end %>
+  <% end %>
+<% end %>

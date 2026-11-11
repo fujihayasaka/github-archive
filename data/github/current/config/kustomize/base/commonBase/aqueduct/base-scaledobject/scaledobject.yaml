@@ -1,0 +1,54 @@
+# Base KEDA ScaledObject template for aqueduct workers.
+# Each worker extends this via kustomize overlays to set its name.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: aqueduct-worker
+  labels:
+    service: aqueduct-worker
+    role: production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: aqueduct-worker
+    envSourceContainerName: aqueduct
+  minReplicaCount: 2
+  maxReplicaCount: 5
+  pollingInterval: 30
+  cooldownPeriod: 300
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Percent
+              value: 100
+              periodSeconds: 60
+        scaleDown:
+          stabilizationWindowSeconds: 1500
+          policies:
+            - type: Percent
+              value: 10
+              periodSeconds: 60
+  triggers:
+    - type: cpu
+      metadata:
+        type: Utilization
+        value: "70"
+        containerName: aqueduct
+      metricType: Utilization
+    - type: datadog
+      authenticationRef:
+        kind: ClusterTriggerAuthentication
+        name: keda-trigger-auth-datadog-secret
+      metricType: Value
+      metadata:
+        age: "300"
+        query: >-
+          (avg:aqueduct.workers.count{kube_deployment:aqueduct-worker,kube_cluster:%cluster%}
+          - avg:aqueduct.workers.idle.count{kube_deployment:aqueduct-worker,kube_cluster:%cluster%})
+          * 100
+          / avg:aqueduct.workers.count{kube_deployment:aqueduct-worker,kube_cluster:%cluster%}
+        queryValue: "66"

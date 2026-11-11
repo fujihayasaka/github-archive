@@ -1,0 +1,168 @@
+<%# Slide-out drawer using Primer Dialog positioned right %>
+<% status_config = { "pending" => { scheme: :attention, icon: :clock }, "investigating" => { scheme: :accent, icon: :search }, "ignored" => { scheme: :secondary, icon: :archive }, "processed" => { scheme: :success, icon: :check } } %>
+<% cfg = status_config[webhook.status] || { scheme: :secondary, icon: :question } %>
+<%= render(Primer::Alpha::Dialog.new(
+  title: "Webhook ##{webhook.id}",
+  id: "webhook-drawer-#{webhook.id}",
+  size: :xlarge,
+  position: :right,
+  position_narrow: :right,
+)) do |d| %>
+  <% d.with_show_button(scheme: :invisible, size: :small, "aria-label": "View details for webhook #{webhook.id}") do %>
+    <%= render(Primer::Beta::Octicon.new(:info, size: :small)) %>
+  <% end %>
+
+  <%# Header with status badge + kind label %>
+  <% d.with_header do %>
+    <div class="d-flex flex-items-center" style="gap: 8px;">
+      <span class="text-bold f4">Webhook #<%= webhook.id %></span>
+      <%= render(Primer::Beta::Label.new(scheme: cfg[:scheme])) do %>
+        <%= render(Primer::Beta::Octicon.new(cfg[:icon], size: :small, mr: 1)) %><%= webhook.status.titleize %>
+      <% end %>
+      <%= render(Primer::Beta::Label.new(scheme: :secondary)) { webhook.kind.titleize } %>
+    </div>
+  <% end %>
+
+  <%# Body %>
+  <% d.with_body do %>
+
+    <%# Meta Section %>
+    <div class="tmp-pb-3 tmp-mb-3" style="border-bottom: 1px solid var(--borderColor-muted);">
+      <dl class="f6">
+        <div class="d-flex mb-1" style="gap: 8px;">
+          <dt class="color-fg-muted" style="min-width: 80px;">Created</dt>
+          <dd class="mb-0">
+            <%= date_with_time_tooltip webhook.created_at %>
+            · <span class="color-fg-attention"><%= time_ago_in_words(webhook.created_at) %> ago</span>
+          </dd>
+        </div>
+        <div class="d-flex mb-1" style="gap: 8px;">
+          <dt class="color-fg-muted" style="min-width: 80px;">Kind</dt>
+          <dd class="mb-0"><%= webhook.kind %></dd>
+        </div>
+        <% if webhook.processed_at %>
+          <div class="d-flex mb-1" style="gap: 8px;">
+            <dt class="color-fg-muted" style="min-width: 80px;">Processed</dt>
+            <dd class="mb-0"><%= date_with_time_tooltip webhook.processed_at %></dd>
+          </div>
+        <% end %>
+      </dl>
+    </div>
+
+    <%# Investigation Section %>
+    <div class="tmp-pb-3 tmp-mb-3" style="border-bottom: 1px solid var(--borderColor-muted);">
+      <h2 class="f5 mb-2 d-flex flex-items-center" style="gap: 6px;">
+        <%= render(Primer::Beta::Octicon.new(:search, color: :accent)) %>
+        Investigation
+      </h2>
+
+      <% if webhook.investigation_notes_url.present? %>
+        <div class="tmp-mb-3">
+          <label class="f6 color-fg-muted d-block mb-1">Linked Issue</label>
+          <%= render partial: "stafftools/zuora_webhooks/issue_pill", locals: { webhook: webhook } %>
+        </div>
+      <% end %>
+
+      <% if webhook.processed? %>
+        <% if webhook.investigation_notes.present? %>
+          <p class="f6 color-fg-muted"><%= webhook.investigation_notes %></p>
+        <% else %>
+          <p class="f6 color-fg-muted" style="font-style: italic;">No investigation notes</p>
+        <% end %>
+      <% else %>
+        <%= form_tag stafftools_zuora_webhook_investigate_path(webhook), method: :put do %>
+          <div class="mb-2">
+            <label class="f6 color-fg-muted d-block mb-1" for="drawer-notes-<%= webhook.id %>">Notes</label>
+            <textarea
+              id="drawer-notes-<%= webhook.id %>"
+              name="investigation_notes"
+              class="form-control width-full"
+              rows="4"
+              placeholder="Add investigation notes..."
+              aria-label="Investigation notes"
+            ><%= webhook.investigation_notes %></textarea>
+            <p class="f6 color-fg-muted mt-1" style="font-style: italic;">💡 Paste a GitHub issue URL to auto-link it as a reference pill</p>
+          </div>
+          <%= render Primer::Beta::Button.new(scheme: :primary, type: :submit, size: :small) do %>
+            Save Investigation Notes
+          <% end %>
+        <% end %>
+      <% end %>
+    </div>
+
+    <%# Account Section %>
+    <div class="tmp-pb-3 tmp-mb-3" style="border-bottom: 1px solid var(--borderColor-muted);">
+      <h2 class="f5 mb-2 d-flex flex-items-center" style="gap: 6px;">
+        <%= render(Primer::Beta::Octicon.new(:organization, color: :muted)) %>
+        Account
+      </h2>
+      <dl class="f6">
+        <% if webhook.account_id %>
+          <div class="d-flex mb-2" style="gap: 8px;">
+            <dt class="color-fg-muted" style="min-width: 80px;">Zuora</dt>
+            <dd class="mb-0">
+              <a href="<%= webhook.customer_account_url %>" target="_blank" rel="noopener" class="Link--primary text-mono">
+                <%= webhook.account_id %>
+              </a>
+              <%= render(Primer::Beta::Octicon.new(:"link-external", size: :small, color: :muted, ml: 1)) %>
+            </dd>
+          </div>
+        <% end %>
+        <% if webhook.business_account? %>
+          <div class="d-flex mb-2" style="gap: 8px;">
+            <dt class="color-fg-muted" style="min-width: 80px;">GitHub</dt>
+            <dd class="mb-0">
+              <%= link_to webhook.account.name, stafftools_enterprise_path(webhook.account), class: "Link--primary" %>
+              <span class="color-fg-muted mx-1">&middot;</span>
+              <span class="f6 color-fg-muted">Business</span>
+            </dd>
+          </div>
+        <% elsif webhook.account %>
+          <div class="d-flex mb-2" style="gap: 8px;">
+            <dt class="color-fg-muted" style="min-width: 80px;">GitHub</dt>
+            <dd class="mb-0">
+              <%= link_to "@#{webhook.account.login}", billing_stafftools_user_path(webhook.account), class: "Link--primary" %>
+              <span class="color-fg-muted mx-1">&middot;</span>
+              <span class="f6 color-fg-muted">User</span>
+            </dd>
+          </div>
+        <% end %>
+      </dl>
+    </div>
+
+    <%# Payload Section %>
+    <details>
+      <summary class="f5 text-bold cursor-pointer" style="list-style: none;">
+        <div class="d-flex flex-items-center" style="gap: 6px;">
+          <%= render(Primer::Beta::Octicon.new(:code, color: :muted)) %>
+          Payload
+          <span class="ml-auto"><%= render(Primer::Beta::Octicon.new(:"chevron-down", color: :muted)) %></span>
+        </div>
+      </summary>
+      <div class="Box mt-2 tmp-p-3 overflow-auto color-bg-subtle rounded-2" style="max-height: 300px;">
+        <pre class="text-small mb-0"><%= JSON.pretty_generate(webhook.payload) %></pre>
+      </div>
+    </details>
+
+  <% end %>
+
+  <%# Footer with action buttons %>
+  <% d.with_footer do %>
+    <% unless webhook.processed? || webhook.ignored? %>
+      <div class="d-flex width-full" style="gap: 8px;">
+        <%= form_tag stafftools_zuora_webhook_perform_path(webhook), class: "flex-1", method: :put do %>
+          <%= render Primer::Beta::Button.new(type: :submit, size: :small, block: true, "data-confirm": "Are you sure you want to process this webhook?") do %>
+            <%= render(Primer::Beta::Octicon.new(:sync, mr: 1)) %>
+            Process
+          <% end %>
+        <% end %>
+        <%= form_tag stafftools_zuora_webhook_ignore_path(webhook), class: "flex-1", method: :put do %>
+          <%= render Primer::Beta::Button.new(type: :submit, scheme: :danger, size: :small, block: true, "data-confirm": "Are you sure you want to permanently ignore this webhook?") do %>
+            <%= render(Primer::Beta::Octicon.new(:archive, mr: 1)) %>
+            Ignore
+          <% end %>
+        <% end %>
+      </div>
+    <% end %>
+  <% end %>
+<% end %>

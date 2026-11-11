@@ -1,0 +1,74 @@
+<%
+  pull = local_assigns[:pull]
+  show_check_run_logs = local_assigns.fetch(:show_check_run_logs, false)
+  highlight_tab = local_assigns.fetch(:highlight_tab, :repo_actions)
+%>
+
+<% if pull # we are rendering from the pull requests page %>
+  <%
+    attribution = pull.user ? " by #{pull.user.display_login}" : ""
+    page_info title: "#{pull.title}#{attribution} · Pull Request ##{pull.number} · #{current_repository.name_with_display_owner}",
+      selected_link: :checks,
+      class: "full-width full-width-p-0",
+      description: pull.body_text,
+      skip_pjax_container: true,
+      full_height: false,
+      footer: true,
+      breadcrumb_object: pull,
+      richweb: {
+        title: "#{pull.title}#{attribution} · Pull Request ##{pull.number} · #{current_repository.name_with_display_owner}",
+        url: "#{GitHub.url}#{issue_permalink_path(pull.issue)}",
+        description: truncate(pull.body_text, length: 240),
+        image: avatar_url_for(pull.safe_user, 400)
+      }
+  %>
+
+<% else # this is coming from the commit view (detached from a pull)%>
+  <%
+    title = "#{commit.short_message} · #{current_repository.name_with_display_owner}@#{commit.abbreviated_oid} "
+    breadcrumb = if selected_check_run.present? && selected_check_run.check_suite.present? && selected_check_run.check_suite.workflow_run.present?
+      "#{selected_check_run.check_suite.workflow_name} ##{selected_check_run.check_suite.workflow_run.run_number}"
+    end
+    page_info \
+      title: title,
+      breadcrumb: breadcrumb,
+      container_xl: true,
+      selected_link: highlight_tab,
+      class: "full-width full-width-p-0",
+      skip_pjax_container: true,
+      full_height: true,
+      full_height_scrollable: true,
+      footer: false,
+      responsive: false
+  %>
+<% end %>
+
+<%= render layout: "layouts/repository_container", locals: { repository: current_repository } do %>
+  <div class="clearfix d-flex flex-column flex-auto d-flex flex-column width-full">
+
+    <% if pull # we are rendering from the pull requests page %>
+      <div class="tmp-px-4 tmp-mt-4">
+        <%= render :partial => 'comments/title', :locals => {
+          :pull         => pull,
+          :comment      => pull.issue,
+          :issue        => pull.issue,
+          :title        => pull.title.blank? ? "Untitled" : pull.title
+        } %>
+      </div>
+
+      <%= render :partial => "pull_requests/lazy_tabs", :locals => { :pull => pull } %>
+    <% end %>
+
+    <%= render partial: "pull_requests/checks_partial", locals: {
+      commit: commit,
+      selected_check_run: selected_check_run,
+      check_suites: check_suites,
+      blankslate: blankslate,
+      annotation_details: annotation_details,
+      commit_check_runs: commit_check_runs,
+      workflows_loading: local_assigns.fetch(:workflows_loading, false),
+      show_check_run_logs: show_check_run_logs,
+      pull: pull
+    } %>
+  </div>
+<% end %>

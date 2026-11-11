@@ -1,0 +1,1 @@
+⌨️ Start Copilot coding agent tasks without leaving your editor — available in [VS Code](https://gh.io/cca-vs-code-docs), [Visual Studio](https://gh.io/cca-visual-studio-docs), [JetBrains IDEs](https://gh.io/cca-jetbrains-docs) and [Eclipse](https://gh.io/cca-eclipse-docs).

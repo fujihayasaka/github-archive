@@ -1,0 +1,113 @@
+<% page_info \
+    container_xl: true,
+    responsive: true,
+    selected_link: :dependency_graph,
+    dashboard_pinnable_item_id: current_repository.global_relay_id
+%>
+<% page_title "Dependencies · #{current_repository.name_with_display_owner}" + (query.present? ? " · Search for #{query}" : "") %>
+
+<%= render layout: "layouts/repository/insights" do %>
+
+  <div id="dependencies" data-hpc>
+    <%= render(Primer::Beta::Subhead.new) do |component| %>
+      <% component.with_heading(tag: :h2) { "Dependency graph" }%>
+      <% if snapshot_status_enabled %>
+        <% component.with_description(test_selector: "snapshot-status") do %>
+          <%= render(DependencyGraph::SnapshotStatusComponent.new(
+            repository: current_repository,
+            owner: current_repository.owner,
+            last_content_scan_at: last_graph_update_at,
+            snapshot_metadata: snapshot_metadata,
+          )) %>
+        <% end %>
+      <% elsif dependabot_snapshot_readiness_enabled %>
+        <% component.with_description(test_selector: "dependabot-event-readiness") do %>
+          <%= render(DependabotAlerts::ReadinessSubheadComponent.new(
+            repository: current_repository,
+            last_content_scan_at: last_graph_update_at,
+          )) %>
+        <% end %>
+      <% elsif last_graph_update_at %>
+        <% component.with_description(test_selector: "last-graph-update-at") do %>
+          Last updated by Dependabot <%= time_ago_in_words_js(last_graph_update_at) %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <%= render partial: "network/dependency_tabs", locals: { selected_tab: :dependencies } %>
+
+    <% if current_repository.dependency_graph_enabled? %>
+      <% if current_repository.has_manifests? && !repository_has_snapshots %>
+        <%= render partial: "network/dependency_submission_prompt" %>
+      <% end %>
+
+      <% if graph_jobs_path && !snapshot_status_enabled %>
+        <%= render Primer::Alpha::IncludeFragment.new(
+          src: graph_jobs_path,
+          test_selector: "update_graph_job_loader",
+          style: "display: block;"
+        ) do %>
+          <%# Neutral-scheme, banner-shaped placeholder reserves space to reduce layout shift
+              when the async Dependabot job banner arrives. Height approximates a two-line banner. %>
+          <%= render(Primer::Alpha::Banner.new(scheme: :default, dismiss_scheme: :none, mb: 2, test_selector: "update_graph_job_placeholder")) do %>
+            <div class="d-flex flex-items-center" aria-live="polite" style="min-height: 70px;">
+              <%= render(Primer::Beta::Spinner.new(size: :small, mr: 2, "aria-label": "Loading")) %>
+              Checking Dependabot graph update status…
+            </div>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <div class="tmp-mb-3">
+        <%= render DependencyGraph::SearchComponent.new(
+          current_repository: current_repository,
+          query: query,
+          package_managers: package_managers,
+        ) %>
+      </div>
+
+      <% if results.empty? %>
+        <% if query.present? %>
+          <%= render partial: "network/dependencies/blankslates/no_search_results" %>
+        <% else %>
+          <%= render partial: "network/dependencies/blankslates/no_dependencies" %>
+        <% end %>
+      <% else%>
+        <%= render(Primer::Beta::BorderBox.new) do |component| %>
+          <% component.with_header(test_selector: "dg-repo-pkg-dependency_header", display: :flex, justify_content: :space_between) do %>
+            <div class="d-flex flex-items-center gap-1 text-bold" <%= test_selector "dependency-entries" %>>
+              <%= render Primer::Beta::Octicon.new(icon: "package") %>
+              <%= number_with_delimiter(results.total_entries) %> Total
+            </div>
+            <%= render DependencyGraph::EcosystemSelectPanelComponent.new(
+              current_repository: current_repository,
+              query_builder: query_builder,
+              package_managers: package_managers,
+            ) %>
+          <% end%>
+          <% results.each do |result| %>
+            <% component.with_row(test_selector: "dg-repo-pkg-dependency_row") do %>
+              <%= render DependencyGraph::SearchResultComponent.new(
+                search_result: result,
+                alerts: alerts[result],
+                package_repository: repositories_by_id[result.repository_id],
+                repository: current_repository,
+                does_results_have_root_ancestors: does_results_have_root_ancestors,
+              ) %>
+            <% end %>
+          <% end %>
+        <% end %>
+
+        <%= render DependencyGraph::ProTipComponent.new(repo: current_repository) %>
+
+        <div class="paginate-container">
+          <div class="pagination">
+            <%= will_paginate(results) %>
+          </div>
+        </div>
+      <% end %>
+    <% else %>
+      <%= render partial: "network/dependencies/blankslates/dependency_graph_disabled" %>
+    <% end %>
+  </div>
+<% end %>

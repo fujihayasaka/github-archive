@@ -1,0 +1,122 @@
+<turbo-frame id="bypass-reviewers-frame">
+  <div <%= test_selector("secret-scanning-delegated-bypass-settings")%> class="tmp-mb-3">
+    <%= render(Primer::Beta::BorderBox.new(mb: 1)) do |component| %>
+      <%= component.with_body do %>
+        <div class="d-flex flex-md-row flex-column flex-md-items-center">
+          <div class="mb-md-0 flex-auto">
+            <h5>Who can bypass push protection for secret scanning</h5>
+          </div>
+          <div class="flex-shrink-0">
+            <div class="BtnGroup flex-auto">
+              <% if config_enabled || config_disabled %>
+                <%= render(Primer::Beta::Button.new(
+                  scheme: :secondary,
+                  disabled: true,
+                  test_selector: "secret-scanning-delegated-bypass-disabled-enablement",
+                )) do %>
+                  <%= enablement_display_option %>
+                <% end %>
+              <% else %>
+                <details class="dropdown details-reset details-overlay" <%= test_selector("secret-scanning-delegated-bypass-enablement") %>>
+                  <%= render(Primer::Beta::Button.new(
+                    tag: :summary,
+                    "aria-haspopup": true
+                  )) do |c| %>
+                    <% c.with_trailing_action_icon(icon: "triangle-down") %>
+                    <%= enablement_display_option %>
+                  <% end %>
+                  <div class="SelectMenu">
+                    <div class="SelectMenu-modal">
+                      <div class="SelectMenu-list" role="menu">
+                        <% delegated_bypass_choices.each do |key, description| %>
+                          <%= button_to(update_path,
+                            class: "SelectMenu-item",
+                            "aria-checked": enablement_selection == key,
+                            data: test_selector_hash(key),
+                            role: "menuitemradio",
+                            method: :put,
+                            params: { display_option: key },
+                            ) do %>
+                              <input
+                                type="hidden"
+                                name="token_scanning_delegated_bypass_enabled"
+                                value="<%= key == :delegated_bypass_enabled ? 1 : 0 %>"
+                                id="token_scanning_delegated_bypass_enabled"
+                              >
+                              <%= render(Primer::Beta::Octicon.new(icon: "check", classes: "SelectMenu-icon SelectMenu-icon--check")) %>
+                              <%= description %>
+                            <% end %>
+                        <% end %>
+                      </div>
+                    </div>
+                  </div>
+                </details>
+              <% end %>
+            </div>
+          </div>
+        </div>
+      <% end %>
+    <% end %>
+    <% if delegated_bypass_enabled %>
+      <div class="mb-1" <%= test_selector("secret-scanning-delegated-bypass-reviewers")%>>
+        <div class="d-flex flex-md-row flex-column flex-md-items-center tmp-pb-3 py-2">
+          <div class="mb-md-0 mb-2 mr-2 flex-auto">
+            <div>
+              <%= render(Primer::Beta::Text.new(classes: "h4")) { "Bypass list" } %>
+            </div>
+            Grant specific roles or teams the ability to bypass push protection and review bypass requests.
+            Everyone else will need to submit a request to bypass push protection.
+            <%= render(Primer::Beta::Link.new(
+              href: helpers.docs_url("code-security/about-delegated-bypass-for-push-protection"),
+              classes: "Link--inTextBlock",
+            )) { "Learn more about bypass lists" } %>.
+          </div>
+          <div class="flex-shrink-0">
+            <div class="BtnGroup flex-auto">
+              <% if config_enabled %>
+                <%= render(Primer::Beta::Button.new(
+                  scheme: :secondary,
+                  disabled: true,
+                  test_selector: "secret-scanning-delegated-bypass-disabled-add-button",
+                )) do %>
+                  Add role or team
+                <% end %>
+              <% else %>
+                <%= helpers.render_react_partial name: "secret-scanning-bypassers-dialog", props: {
+                  baseAvatarUrl: GitHub.alambic_avatar_url,
+                  enabledBypassActors: enabled_bypass_actors,
+                  addBypasserPath: add_reviewers_path,
+                  initialSuggestions: suggested_bypassers,
+                  suggestionsUrl: suggested_reviewers_path,
+                  ownerId: @source.id,
+                  ownerScope: @source.is_a?(Organization) ? :ORGANIZATION_SCOPE : :REPOSITORY_SCOPE
+                } %>
+              <% end %>
+            </div>
+          </div>
+        </div>
+        <div class="position-relative">
+          <div class="bypass-list-placeholder" style="padding: 2rem; text-align: center;">
+            <%= render(Primer::Beta::Spinner.new) %>
+          </div>
+          <%= helpers.render_react_partial name: "secret-scanning-push-protection-bypassers-list", props: {
+            bypassers: current_actors,
+            baseAvatarUrl: GitHub.alambic_avatar_url,
+            suggestedBypassersUrl: suggested_reviewers_path,
+            addBypassActorUrl: add_reviewers_path,
+            updateBypassActorUrl: update_reviewers_path,
+            removeBypassActorUrl: remove_reviewers_path,
+            hidePlaceholderClassOnLoad: 'bypass-list-placeholder',
+            readOnly: config_enabled,
+          } %>
+        </div>
+      </div>
+    <% end %>
+    <% if config_enabled || config_disabled %>
+      <div class="mb-1" <%= test_selector("secret-scanning-delegated-bypass-org-enabled-warning")%>>
+        <%= render(Primer::Beta::Octicon.new(icon: :alert, color: :muted)) %>
+        <%= render(Primer::Beta::Text.new(color: :muted)) { "This setting has been set by #{human_readable_security_configuration_target_type} administrators." } %>
+      </div>
+    <% end %>
+  </div>
+</turbo-frame>

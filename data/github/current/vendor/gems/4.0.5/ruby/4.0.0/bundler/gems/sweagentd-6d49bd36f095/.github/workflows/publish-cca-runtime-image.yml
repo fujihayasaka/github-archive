@@ -1,0 +1,56 @@
+# Publish CCA Runtime Base Image
+#
+# Builds the CCA Runtime Dockerfile (includes ccav3 from the runtime submodule),
+# pushes it to GHCR, and registers it as a public disk image via the Sandbox API.
+#
+# Unlike the other CCA images, the reusable workflow builds the ccav3 tarball
+# from the runtime submodule before building.
+#
+# Triggers:
+#   - push to main when the runtime submodule, image config/build context, or publish workflows change
+#   - workflow_dispatch: manual trigger for testing / ad-hoc rebuilds
+
+name: Publish CCA Runtime Base Image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/publish-cca-runtime-image.yml"
+      - ".github/workflows/publish-image.yaml"
+      - "images/cca-runtime/**"
+      - "runtime"
+  workflow_dispatch:
+    inputs:
+      runtime_sha:
+        description: 'Runtime submodule commit SHA to build. Leave empty to use the SHA pinned in the repo.'
+        required: false
+        default: ''
+      dry_run:
+        description: 'Build only; skip GHCR push and Sandbox API registration. Allows validating from non-main branches.'
+        type: boolean
+        default: false
+
+concurrency:
+  group: publish-cca-runtime-image
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    uses: ./.github/workflows/publish-image.yaml
+    with:
+      docker_image_name: ghcr.io/github/sweagentd/copilot-cca-runtime
+      disk_image_name: cca-runtime
+      devcontainer_path: images/cca-runtime/devcontainer.json
+      runtime_tarball_dest: images/cca-runtime
+      runtime_sha: ${{ github.event_name == 'workflow_dispatch' && inputs.runtime_sha || '' }}
+      dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+    secrets:
+      SANDBOX_IMAGE_TOKEN: ${{ secrets.SANDBOX_CCA_IMAGE_TOKEN }}
+      RUNTIME_REPO_TOKEN: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+      AUTOFIND_DOWNLOAD_GITHUB_TOKEN: ${{ secrets.AUTOFIND_DOWNLOAD_GITHUB_TOKEN }}
+      GPGSIGN_DOWNLOAD_GITHUB_TOKEN: ${{ secrets.GPGSIGN_DOWNLOAD_GITHUB_TOKEN }}

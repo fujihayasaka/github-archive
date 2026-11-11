@@ -1,0 +1,187 @@
+<div class="flex-md-row flex-column flex-md-items-center"<%= test_selector("dependabot-runner-settings") %>>
+  <dependabot-runner-settings
+    data-default-label=<%= default_runner_label %>
+    data-runner-type="<%= current_runner_type %>"
+    data-runner-group="<%= current_runner_group || '' %>"
+    data-runner-label="<%= current_runner_label != default_runner_label ? current_runner_label : '' %>"
+    data-group-format-error="<%= runner_format_error(RUNNER_GROUP_FIELD_NAME) %>"
+    data-label-format-error="<%= runner_format_error(RUNNER_LABEL_FIELD_NAME) %>">
+    <div>
+      <%= render(Primer::Box.new(display: :flex, direction: :row, align_items: :center, gap: 4)) do %>
+        <%= render(Primer::Box.new(display: :inline_flex, direction: :column, flex: 1)) do %>
+          <div class="text-medium text-semibold"><%= runner_section_title %></div>
+          <%= render(Primer::Beta::Text.new(tag: :p, mt: 1, mb: 2, color: :muted, font_size: :small, classes: "tmp-mr-3")) do %>
+            <%= runner_section_description %>
+            <%= render(Primer::Beta::Link.new(href: "#{GitHub.help_url}/actions/concepts/runners", classes: "Link--inTextBlock")) {
+              "Learn about GitHub Actions runners."
+            } %>
+          <% end %>
+        <% end %>
+        <div class="d-flex flex-items-center">
+          <%= render(Primer::Beta::Text.new(tag: :span, color: :muted, font_size: :small, display: :inline_flex, align_items: :center, classes: "tmp-mr-3")) do %>
+            <%= current_runner_type_display %>
+          <% end %>
+          <%= render(Primer::Beta::IconButton.new(
+            icon: :pencil,
+            "aria-label": "Edit runner type",
+            scheme: :invisible,
+            data: {
+              "show-dialog-id": "dependabot-runner-settings-dialog",
+              action: "click:dependabot-runner-settings#handleDialogOpening"
+            }
+          )) %>
+        </div>
+      <% end %>
+    </div>
+    <%= render(Primer::Alpha::Dialog.new(
+      title: "Edit runner type for Dependabot",
+      id: "dependabot-runner-settings-dialog",
+      size: :medium_portrait,
+      style: "--overlay-height: 700px;"
+    )) do |dialog| %>
+      <% dialog.with_header(show_divider: true) %>
+
+      <% dialog.with_body do %>
+          <%= form_tag security_analysis_update_path(@owner), method: :put,
+              id: "dependabot-runner-settings-form",
+              "data-target": "dependabot-runner-settings.form" do %>
+
+            <div id="dependabot-runner-selection" data-target="dependabot-runner-settings.selectionStep">
+              <div class="tmp-mb-3">
+                <div class="mb-2">
+                  <label for="dependabot_runner_type">
+                    Runner type
+                  </label>
+                </div>
+                <div>
+                  <%= render(Primer::Alpha::ActionMenu.new(
+                    select_variant: :single,
+                    anchor_align: :start,
+                    anchor_side: :outside_bottom,
+                    dynamic_label: true,
+                    test_selector: "dependabot-runner-type-dropdown"
+                  )) do |menu| %>
+                    <% menu.with_show_button(data: {
+                      "target": "dependabot-runner-settings.runnerTypeSelect"
+                    }) { |button|
+                      button.with_trailing_action_icon(icon: :"triangle-down")
+                      current_runner_type_display
+                    } %>
+
+                    <% create_runner_type_menu_items(menu: menu) %>
+                  <% end %>
+
+                  <%= hidden_field_tag :dependabot_runner_type, current_runner_type,
+                      id: "dependabot_runner_type",
+                      data: { "target": "dependabot-runner-settings.runnerTypeHidden" } %>
+                </div>
+              </div>
+
+              <div class="js-labeled-runner-fields"
+                  data-target="dependabot-runner-settings.labeledFields"
+                  style="<%= 'display: none;' if current_runner_type != RUNNER_TYPE_LABELED %>">
+
+                <div class="mb-2">
+                  <label>Optional runner information</label>
+                </div>
+                <p class="note color-fg-muted mb-2">
+                  Provide any existing runner information you would like to use for Dependabot.
+                </p>
+
+                <%= render(Primer::Box.new(
+                  border: true,
+                  border_radius: 2,
+                  classes: "tmp-p-3")) do %>
+                  <div class="tmp-mb-4">
+                    <div class="mb-2">
+                      <label for="dependabot_runner_group">Runner group name</label>
+                    </div>
+                    <div>
+                      <%= text_field_tag :dependabot_runner_group, current_runner_group,
+                          class: "form-control",
+                          style: "width: 100%; max-width: 265px; background-color: var(--bgColor-default);",
+                          id: "dependabot_runner_group",
+                          placeholder: "Existing name",
+                          maxlength: 45,
+                          "data-target": "dependabot-runner-settings.runnerGroupInput",
+                          "aria-describedby": "group_validation_message"
+                      %>
+                      <div data-target="dependabot-runner-settings.groupValidationMessage" class="pt-2" hidden>
+                        <%= render(Primer::Beta::Octicon.new(icon: "alert-fill", color: :danger, font_size: :small)) %>
+                        <span data-target="dependabot-runner-settings.groupValidationError" id="group_validation_message" class="color-fg-danger text-small"></span>
+                      </div>
+                      <p class="note color-fg-attention mt-2 mb-0"
+                        data-target="dependabot-runner-settings.groupValidationWarning"
+                        style="display: none;">
+                        Verify spelling matches an existing runner group to ensure proper setup.
+                      </p>
+                    </div>
+                  </div>
+                  <div class="tmp-mb-4">
+                    <div class="mb-2">
+                      <label for="dependabot_runner_labels">Runner label</label>
+                    </div>
+                    <div>
+                      <p class="note color-fg-muted mb-2">
+                        The <%= render(
+                          Primer::Beta::Text.new(
+                            tag: :code,
+                            color: :muted,
+                            bg: :subtle,
+                            px: 1,
+                            border_radius: 1,
+                            font_family: :mono
+                          )) { default_runner_label } %>
+                          label is used by default. Learn how to
+                          <%= link_to "use or create custom labels", "#{GitHub.help_url}/actions/how-tos/manage-runners/self-hosted-runners/apply-labels", class: "Link--inTextBlock" %>.
+                      </p>
+                      <%= text_field_tag :dependabot_runner_labels,
+                          (current_runner_label != default_runner_label ? current_runner_label : ''),
+                          class: "form-control",
+                          style: "width: 100%; max-width: 265px; background-color: var(--bgColor-default);",
+                          id: "dependabot_runner_labels",
+                          placeholder: "Existing label",
+                          maxlength: 45,
+                          "data-target": "dependabot-runner-settings.runnerLabelInput",
+                          "aria-describedby": "label_validation_message"
+                      %>
+                      <div data-target="dependabot-runner-settings.labelValidationMessage" class="pt-2" hidden>
+                        <%= render(Primer::Beta::Octicon.new(icon: "alert-fill", color: :danger, font_size: :small)) %>
+                        <span data-target="dependabot-runner-settings.labelValidationError" class="color-fg-danger text-small"></span>
+                      </div>
+                      <p class="note color-fg-attention mt-2 mb-0"
+                        data-target="dependabot-runner-settings.labelValidationWarning"
+                        style="display: none;">
+                        Verify spelling matches an existing label to ensure proper setup.
+                      </p>
+                    </div>
+                  </div>
+                <% end %>
+              </div>
+          </div>
+
+          <% end %>
+      <% end %>
+
+      <% dialog.with_footer(show_divider: true) do %>
+        <div class="d-flex flex-justify-end gap-2">
+          <%= render(Primer::Beta::Button.new(
+            data: {
+              "close-dialog-id": "dependabot-runner-settings-dialog",
+              action: "click:dependabot-runner-settings#resetDialog"
+            }
+          )) { "Cancel" } %>
+
+          <%= render(Primer::Beta::Button.new(
+            scheme: :primary,
+            type: :button,
+            classes: "js-save-changes-button",
+            data: {
+              action: "click:dependabot-runner-settings#saveChanges"
+            }
+          )) { "Save runner selection" } %>
+        </div>
+      <% end %>
+    <% end %>
+  </dependabot-runner-settings>
+</div>

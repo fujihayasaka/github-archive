@@ -1,0 +1,92 @@
+#!/bin/bash
+
+export ALAMBIC_ADDR=127.0.0.1:3003
+export ALAMBIC_HMAC_KEY=octocat
+export AVATARS_HMAC_KEY=octocat
+export AVATARS_HMAC_STAMP_TAG=multi-tenant-development
+export LOCALCDN_PROXY_BASE=http://127.0.0.1:3003/origin
+export CDN_ENDPOINT=http://127.0.0.1:3003/origin/cdn
+export CDN_TOKEN=github.localhost # see GitHub.alambic_cdn_token
+export CDN_FASTLY_TOKEN=github.localhost
+export ENTERPRISE_ALAMBIC_AVATARS_ENABLED=1
+export GIT_SHA=$(cat config/alambic-version)
+export ALAMBIC_DB_FETCH_ENABLED=100
+export AVATARS_MEDIA_URL_TYPE=ghe
+export MYSQL_PRODUCTION_READONLY_HOST=127.0.0.1:3306
+export MYSQL_PRODUCTION_READONLY_DB=github_development
+export MYSQL_PRODUCTION_READONLY_USER=root
+export MYSQL_PRODUCTION_READONLY_PASSWORD=
+export MYSQL_PRODUCTION_READONLY_LOC=US/Pacific
+
+if [ "$GH_CLUSTER" = "0" ]; then
+  export STORAGE_PATH_PREFIX=assets
+else
+  export ALAMBIC_USE_STORAGE_ADAPTER="1"
+  export ALAMBIC_REPLICATOR=alambic
+  export ALAMBIC_NODE_NAME=localhost:3003
+  export REPLICATION_TOKEN=octocat
+fi
+
+if [ "$MULTI_TENANT_ENTERPRISE" = "1" ]; then
+  export ALAMBIC_MULTI_TENANT_ENTERPRISE=1
+  export LOCALCDN_PROXY_BASE=
+fi
+
+SKIP_ALAMBIC="${SKIP_ALAMBIC:-false}"
+
+if [ "$SKIP_ALAMBIC" = "true" ] || [ "$SKIP_ALAMBIC" = "1" ]; then
+  echo "alambic has been disabled"
+  sleep infinity
+else
+  SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+  source $SCRIPT_DIR/dx/lib/subproject-containers
+
+  SUBPROJECT_VERSION=$(subproject_version "alambic")
+  echo "alambic version $SUBPROJECT_VERSION"
+
+  pushd $SCRIPT_DIR/..
+  mkdir -p ./tmp/alambic/uploads
+
+  # Write environment variables defined in this file to /tmp/alambic.env, capture the full env caused bugs
+  env_vars=(
+    ALAMBIC_ADDR
+    ALAMBIC_HMAC_KEY
+    AVATARS_HMAC_KEY
+    AVATARS_HMAC_STAMP_TAG
+    LOCALCDN_PROXY_BASE
+    CDN_ENDPOINT
+    CDN_TOKEN
+    CDN_FASTLY_TOKEN
+    ENTERPRISE_ALAMBIC_AVATARS_ENABLED
+    GIT_SHA
+    ALAMBIC_DB_FETCH_ENABLED
+    AVATARS_MEDIA_URL_TYPE
+    MYSQL_PRODUCTION_READONLY_HOST
+    MYSQL_PRODUCTION_READONLY_DB
+    MYSQL_PRODUCTION_READONLY_USER
+    MYSQL_PRODUCTION_READONLY_PASSWORD
+    MYSQL_PRODUCTION_READONLY_LOC
+    STORAGE_PATH_PREFIX
+    ALAMBIC_USE_STORAGE_ADAPTER
+    ALAMBIC_REPLICATOR
+    ALAMBIC_NODE_NAME
+    REPLICATION_TOKEN
+    ALAMBIC_MULTI_TENANT_ENTERPRISE
+  )
+
+  env_file="/tmp/alambic.env"
+  # empty out current file
+  > "$env_file"
+  for var in "${env_vars[@]}"; do
+    # only include variables defined, but do include any that are empty strings
+    if [ "${!var+x}" ]; then
+      echo "$var=${!var}" >> "$env_file"
+    fi
+  done
+
+  # Run the service, mounting /tmp to keep state across runs
+  start_subproject --name=alambic \
+    --env-file "$env_file" \
+    --volume $(pwd)/tmp/alambic:/tmp/ \
+    "ghcr.io/github/alambic/alambic:$SUBPROJECT_VERSION"
+fi

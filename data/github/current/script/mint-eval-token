@@ -1,0 +1,40 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Mints OAuth tokens for Copilot Chat eval development.
+# Must be run via bin/rails runner.
+#
+# Usage:
+#   bin/rails runner script/mint-eval-token -- --api         # Raw ghu_ token for GitHub API calls
+#   bin/rails runner script/mint-eval-token -- --encrypted   # GitHub-Bearer encrypted token for CAPI auth
+#   bin/rails runner script/mint-eval-token -- --user 2      # Specify user ID (default: 2 = monalisa)
+
+user_id = 2
+mode = :encrypted
+
+ARGV.each_with_index do |arg, i|
+  case arg
+  when "--api"
+    mode = :api
+  when "--encrypted"
+    mode = :encrypted
+  when "--user"
+    user_id = ARGV[i + 1].to_i
+  end
+end
+
+require "rbnacl" if mode == :encrypted
+
+user = User.find(user_id)
+app = T.unsafe(Apps::Privileged).integration(:copilot_chat)
+access = app.grant(user, { entry_point: :eval })
+token, _ = access.redeem(extended_expiry: true)
+
+case mode
+when :api
+  puts token
+when :encrypted
+  box = GitHub.dotcom_capi_simple_box
+  encrypted = box.encrypt(token)
+  puts Base64.urlsafe_encode64(encrypted)
+end

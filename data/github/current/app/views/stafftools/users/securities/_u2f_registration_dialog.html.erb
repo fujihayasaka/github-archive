@@ -1,0 +1,84 @@
+<%= render(Primer::Alpha::Dialog.new(
+    title: "#{credential_type} '#{key.nickname}'",
+    id: "#{credential_type.parameterize}-#{key.id}",
+    size: :medium_portrait,
+  )) do |c| %>
+    <% c.with_show_button(scheme: :link, color: :default, font_weight: :bold) do %>
+      <%= key.nickname %>
+    <% end %>
+    <% c.with_header(show_divider: true) %>
+    <% c.with_body do %>
+      <table class="security-history-detail">
+        <tr>
+          <th>ID</th>
+          <td><%= key.id %></td>
+        </tr>
+        <tr>
+          <th>Created at</th>
+          <td><%= key.created_at %></td>
+        </tr>
+        <tr>
+          <th>Last used at</th>
+          <td><%= key.get_last_used_at %></td>
+        </tr>
+        <tr>
+          <th>Last updated at</th>
+          <td><%= key.updated_at %></td>
+        </tr>
+        <% if key.is_passkey_registration? %>
+          <tr>
+            <th>Synced</th>
+            <td><%= key.backup_eligibility %></td>
+          </tr>
+        <% end %>
+        <tr>
+          <th>Authenticator type</th>
+          <td><%= key.platform_authenticator? ? "platform" : "cross-platform" %></td>
+        </tr>
+        <tr>
+          <th>Transports</th>
+          <td><%= (key.transports.nil? || key.transports.empty?) ? "empty" : key.transports %></td>
+        </tr>
+      </table>
+      <% if stafftools_action_authorized?(controller: Stafftools::U2fRegistrationsController, action: :destroy) %>
+        <div>
+        <%= render(Primer::Experimental::Dialog.new(
+          dialog_id: "delete-#{credential_type.parameterize}-#{key.id}-dialog",
+          header_variant: :large,
+          width: :large,
+          title: "Delete #{credential_type} '#{key.nickname}'",
+          form_url: stafftools_user_u2f_registrations_path(user, id: key.id),
+          form_method: :delete
+        )) do |c| %>
+          <% c.with_show_button(
+            color: :danger,
+            size: :small,
+            float: :right,
+            test_selector: "delete-#{credential_type.parameterize}-#{key.id}-button-enabled"
+          ) do |s| %>
+            Delete
+          <% end %>
+          <% c.with_body do %>
+          <dl class="form-group">
+            <dt><label for="reason-<%= credential_type.parameterize %>-<%= key.id %>">Reason for deleting</label></dt>
+            <dd>
+              <input class="form-control" type="text" name="reason" id="reason-<%= credential_type.parameterize %>-<%= key.id %>"
+                  placeholder="Please provide an explanation or issue link for the audit log."
+              autofocus data-1p-ignore>
+            </dd>
+          </dl>
+          <% end %>
+          <% c.with_button(
+            data: { "close-dialog-id": "delete-#{credential_type.parameterize}-#{key.id}-dialog" }
+          ) { "Cancel" } %>
+          <% c.with_button(
+            type: :submit,
+            scheme: :danger,
+          ) { "Delete" } %>
+        <% end %>
+        </div>
+      <% else %>
+        <p><%= stafftools_not_authorized_html %></p>
+      <% end %>
+    <% end %>
+  <% end %>

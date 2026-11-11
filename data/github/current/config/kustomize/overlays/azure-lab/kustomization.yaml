@@ -1,0 +1,67 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: github-azure-lab
+
+components:
+  - ../../base/istio-azure/
+  - ../../base/metric-attribution/
+
+images:
+  - name: dxcrprod.azurecr.io/docker-nginx
+    digest: sha256:80c11338bbd7f71d16c66866571c2b43081be7027c0b6a901a2e5c58774c94ac
+
+resources:
+  - ../../base/azure/unicorn
+  - ../../base/azure/unicorn-api
+  - ../../base/azure/unicorn-internal-api
+  - ../../base/azure/namespaces
+  - ../../base/azure/configmaps
+  - ../../base/commonBase/configmaps/
+
+configMapGenerator:
+  - name: observability-config
+    behavior: merge
+    literals:
+      - FAILBOT_HAYSTACK_URL_MESH=http://failbotg.failbotg-production.svc.cluster.local/api/needles
+      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT_INGRESS=https://otelcol-dotcom.service.iad.github.net/v1/traces
+
+# If you need to override environment variables, resource limits, or other settings for specific deployments
+# you can use the patches here to apply those changes. Each patch file should contain the necessary patches
+# to modify the respective deployment as needed. Avoid creating patches directly in this file to keep it clean.
+patches:
+  - target:
+      kind: Namespace
+      name: github-azure
+    patch: |-
+      - op: replace
+        path: "/metadata/labels/github.com~1name"
+        value: github-azure-lab
+  - target:
+      kind: Deployment
+      labelSelector: service=unicorn
+    path: patches/deployments/unicorn.yaml
+  - target:
+      kind: Deployment
+      labelSelector: service=unicorn-api
+    path: patches/deployments/unicorn-api.yaml
+  - target:
+      kind: Service
+      labelSelector: service=unicorn
+    path: patches/services/unicorn.yaml
+  - target:
+      kind: Service
+      labelSelector: service=unicorn-internal-api
+    path: patches/services/unicorn-internal-api.yaml
+  - target:
+      kind: Service
+      name: unicorn-api
+    patch: |-
+      - op: remove
+        path: /metadata/annotations/moda.github.net~1canary-v2
+  - target:
+      kind: Service
+      name: unicorn
+    patch: |-
+      - op: remove
+        path: /metadata/annotations/moda.github.net~1canary-v2

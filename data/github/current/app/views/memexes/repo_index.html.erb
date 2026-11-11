@@ -1,0 +1,135 @@
+<%
+  page_info(
+    title: "Projects · #{this_repository.name}",
+    container_xl: true,
+    selected_link: :repo_projects,
+    breadcrumb: "Projects",
+    breadcrumb_owner: project_owner
+  )
+
+  is_templates_selected = show_templates_index && params[:query]&.include?("is:template")
+  selected_item_id = if is_templates_selected
+    Memex::UIIndexSearch::Categories::Templates
+  elsif params[:type] == "classic"
+    Memex::UIIndexSearch::Categories::Classic
+  else
+    Memex::UIIndexSearch::Categories::Projects
+  end
+
+  org_projects_disabled = project_owner.is_a?(Organization) && !project_owner.organization_projects_enabled?
+  repo_projects_disabled = !this_repository.repository_memex_projects_enabled?
+%>
+<%= render layout: "layouts/projects", locals: { project_owner: this_repository } do %>
+  <%
+    index_navigation_component_options = {
+      selected_item_id: selected_item_id.serialize,
+      beta_path: repo_projects_beta_path,
+      template_path: show_templates_index ? repo_projects_beta_path(query: "is:open is:template") : nil,
+      owner_type: :repo,
+    }
+  %>
+  <%= render Memex::IndexHeadingComponent.new(
+      repo: current_repository,
+      search_category: selected_item_id
+    )
+  %>
+  <%= render Memex::ProjectListContainerComponent.new(
+    project_owner: project_owner,
+    repository: current_repository,
+    index_navigation_component_options: index_navigation_component_options,
+  ) do %>
+    <%= render Memex::ProjectListComponent.new(
+      context: Repository,
+      projects: org_projects_disabled || repo_projects_disabled ? [] : memexes,
+      owner: project_owner,
+      is_recent_selected: false,
+      has_next_page: has_next_page,
+      cursor: cursor,
+      sort_query_cursor: sort_query_cursor,
+      parsed_query: parsed_query,
+      open_memex_count: open_memex_count,
+      closed_memex_count: closed_memex_count,
+      load_more_path: repo_projects_beta_path,
+      write_accessible_project_ids: write_accessible_project_ids,
+    ) do |list| %>
+      <% if pinned_views_sidebar_enabled %>
+        <%= list.with_header do %>
+          <%= render Primer::Box.new(display: :flex, align_items: :center, classes: "gap-2") do %>
+            <% if show_templates_index %>
+              <%# Narrow viewport: ActionMenu as heading + toggle (below lg) %>
+              <%= render Primer::Box.new(display: [:flex, :flex, :flex, :none]) do %>
+                <%= render Primer::Alpha::ActionMenu.new(select_variant: :single) do |menu| %>
+                  <% menu.with_show_button(scheme: :invisible, classes: "p-0") do |button| %>
+                    <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+                    <span class="f3 text-bold">
+                      <%= is_templates_selected ? "Templates" : "Projects" %>
+                    </span>
+                  <% end %>
+                  <% menu.with_item(label: "All projects", active: !is_templates_selected, href: repo_projects_beta_path) %>
+                  <% menu.with_item(label: "Templates", active: is_templates_selected, href: repo_projects_beta_path(query: "is:open is:template")) %>
+                <% end %>
+              <% end %>
+              <%# Wide viewport: static heading (lg+) %>
+              <%= render Primer::Beta::Heading.new(tag: :h2, font_size: 3, display: [:none, :none, :none, :flex]) do %>
+                Projects
+              <% end %>
+            <% else %>
+              <%= render Primer::Beta::Heading.new(tag: :h2, font_size: 3) do %>Projects<% end %>
+            <% end %>
+
+            <%= render Primer::Box.new(flex: :auto) %>
+
+            <% if show_templates_index %>
+              <%# Wide viewport: SegmentedControl toggle (lg+) %>
+              <%= render Primer::Box.new(display: [:none, :none, :none, :flex]) do %>
+                <%= render Primer::Alpha::SegmentedControl.new("aria-label": "Project type") do |control| %>
+                  <% control.with_item(tag: :a, href: repo_projects_beta_path, label: "All", selected: !is_templates_selected) %>
+                  <% control.with_item(tag: :a, href: repo_projects_beta_path(query: "is:open is:template"), label: "Templates", selected: is_templates_selected) %>
+                <% end %>
+              <% end %>
+            <% end %>
+
+            <% if current_user_can_push? && !(org_projects_disabled || repo_projects_disabled) %>
+              <%= render Memex::ProjectList::AddOrLinkProjectButtonContainerComponent.new(
+                context: Repository,
+                owner: project_owner,
+                tooltip: "Only projects that you are an admin of can be searched for and added to a repository",
+                is_template: is_templates_selected,
+                ui: MemexStats::UIValues::RepoIndex,
+                compact_labels: true,
+              ) %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+      <% unless org_projects_disabled || repo_projects_disabled %>
+        <%= list.with_controls do %>
+          <%= render Primer::Box.new(ml: 0, flex: :auto, classes: "remove-spacing-wrapper") do %>
+            <%= primer_form_with(method: :get) do |f| %>
+              <%= render(Memex::ProjectList::SearchForm.new(f, parsed_query: parsed_query, context: Repository)) %>
+            <% end %>
+          <% end %>
+          <% unless pinned_views_sidebar_enabled %>
+            <% if current_user_can_push? %>
+              <%= render Memex::ProjectList::AddOrLinkProjectButtonContainerComponent.new(
+                context: Repository,
+                owner: project_owner,
+                tooltip: "Only projects that you are an admin of can be searched for and added to a repository",
+                is_template: is_templates_selected,
+                ui: MemexStats::UIValues::RepoIndex,
+              ) %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>
+
+<% content_for :scripts do %><%# erblint:disable NoContentForScripts %>
+  <%= javascript_bundle "projects-splash-dialog" %>
+<% end %>
+
+<% content_for :head do %>
+  <%= stylesheet_bundle "projects" %>
+<% end %>

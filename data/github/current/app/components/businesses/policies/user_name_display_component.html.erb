@@ -1,0 +1,81 @@
+<%= render Primer::Box.new(display: :flex, justify_content: :space_between, align_items: :center, style: "gap:1em") do %>
+  <%= render Primer::Beta::Subhead.new(mt: 0, mb: 0, border_bottom: 0, test_selector: "member-appearance") do |subhead| %>
+    <% subhead.with_heading(tag: :h2, mt: 0, mb: 0) do %>
+      Member appearance
+    <% end %>
+  <% end %>
+  <% if policy_enabled? && !GitHub.single_business_environment? %>
+    <div class="mb-2 color-fg-muted" <%= test_selector("managed-by-blurb") %>>
+      <%= render(Primer::Beta::Octicon.new(:"shield-lock", size: :small)) %>
+      <%= render(Primer::Beta::Text.new) do %>
+        Managed by
+        <%= render(Primer::Beta::Link.new(href: business_path(organization.business))) do %>
+          <%= render(Primer::Beta::Text.new) { organization.business.name } %>
+        <% end %>
+      <% end %>
+    </div>
+  <% end %>
+<% end %>
+<%= render Primer::Box.new(border: true, border_radius: 2, test_selector: TEST_SELECTOR, **system_arguments, classes: "tmp-p-3") do %>
+  <div class="d-flex flex-column flex-lg-row justify-content-between flex-lg-items-center gap-3 mb-0">
+    <div class="flex-auto">
+      <p class="mb-1 mt-0"><strong>Profile name visibility</strong></p>
+      <p class="mb-0">If enabled, members' profile names will be visible with their handles in places like repositories, issues, pull requests, and discussions. <%= link_to "Learn more about showing member profile names.", helpers.docs_url("admin/configuring-user-display-name", ghec: true), class: "Link--inTextBlock" %></p>
+    </div>
+    <div class="flex-shrink-0 d-flex align-items-center" style="white-space: nowrap">
+      <% if organization_component? %>
+        <% if policy_enabled? %>
+          <%= render(Primer::Beta::Octicon.new(:"shield-lock", color: :muted, size: :small)) %>
+          <% if checked? %>
+            <span <%= test_selector "user-name-display-policy-on" %>>On</span>
+          <% else %>
+            <span <%= test_selector "user-name-display-policy-off" %>>Off</span>
+          <% end %>
+        <% else %>
+          <%= render(
+            Primer::Alpha::ToggleSwitch.new(
+              size: :small,
+              status_label_position: :start,
+              csrf_token: authenticity_token_for(organization_user_name_display_path(@organization)),
+              id: policy_id,
+              checked: checked?,
+              src: organization_user_name_display_path(@organization),
+              test_selector: "user-name-display-toggle-switch",
+              aria: { label: display_name }
+            )
+          ) %>
+        <% end %>
+      <% else %>
+        <%= render Primer::Alpha::ActionMenu.new(
+          select_variant: :single,
+          size: :medium,
+          dynamic_label: true
+        ) do |menu| %>
+          <% menu.with_show_button(test_selector: "user_name_display_selected_option", aria: { label: "#{setting_label}: #{selected_policy_text}" }) do |button| %>
+            <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+            <%= selected_policy_text %>
+          <% end %>
+          <% policy_options.each do |policy| %>
+            <% menu.with_item(
+              label: policy.label,
+              active: policy.active,
+              href: settings_user_name_display_enterprise_path(@business),
+              form_arguments: {
+                method: :put,
+                inputs: [{
+                  name: policy_name,
+                  value: policy.value,
+                }, {
+                  name: policy_field,
+                  value: policy.policy_value
+                }]
+              }
+            ) do |component| %>
+              <% component.with_description.with_content(policy.description) %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    </div>
+  </div>
+<% end %>

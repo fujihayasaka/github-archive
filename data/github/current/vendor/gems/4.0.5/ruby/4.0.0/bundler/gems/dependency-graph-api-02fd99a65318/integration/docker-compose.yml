@@ -1,0 +1,38 @@
+version: '3'
+services:
+  db:
+    image: mysql:8.0
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --sql_mode=NO_ENGINE_SUBSTITUTION
+      - --information_schema_stats_expiry=0
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: 1
+    volumes:
+      - dgdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
+      start_period: 5s
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: ghcr.io/github/dependency-graph-api/dependency-graph-api-production:${DG_CONTAINER_TAG:-latest}
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: integration.env
+    command: |
+      bash -c "./bin/rails db:create db:github:create db:schema:load && ./script/kube-server"
+    ports:
+      - 9596:9596
+    healthcheck:
+      test: curl --fail http://127.0.0.1:9596/_ping || exit 1
+      start_period: 5s
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  dgdata:

@@ -1,0 +1,2 @@
+performance.mark("js-parse-end:copilot-chat-2888df7fca8afc9d.js");
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[98589],{745442(){}},function(u){u(u.s=745442)}]);

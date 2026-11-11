@@ -1,0 +1,101 @@
+---
+summary: Download an upgrade package
+description: |-
+  Starts an asynchronous GitHub Enterprise Server upgrade package download on the
+  targeted node set.
+
+  On single-node and high availability topologies, the gateway fans out directly
+  to the targeted nodes and returns a `200 OK` response containing one result per
+  node, unless an orchestration option is provided. On cluster topologies, or
+  whenever `max_parallel`, `node_timeout`, or `max_attempts` is provided, the
+  gateway starts an in-memory throttled orchestration and returns `202 Accepted`.
+
+  If `version` is omitted, each agent resolves the latest eligible upgrade
+  package version for that node. The download runs in the background; use the
+  upgrade download status endpoint to monitor progress.
+operationId: enterprise-admin/download-manage-upgrade
+tags:
+  - enterprise-admin
+externalDocs:
+  description: API method documentation
+  url: '${externalDocsUrl}/rest/enterprise-admin/manage-ghes#download-an-upgrade-package'
+requestBody:
+  required: false
+  content:
+    application/json:
+      schema:
+        $ref: '../../components/schemas/ghes-download-manage-upgrade-request.yaml'
+      examples:
+        default:
+          $ref: '../../components/examples/ghes-download-manage-upgrade-request-default.yaml'
+        specific-nodes:
+          $ref: '../../components/examples/ghes-download-manage-upgrade-request-specific-nodes.yaml'
+        orchestrated-download:
+          $ref: '../../components/examples/ghes-download-manage-upgrade-request-orchestration.yaml'
+servers:
+- url: '{protocol}://{hostname}'
+  variables:
+    hostname:
+      default: 'HOSTNAME'
+      description: Self-hosted Enterprise Server hostname
+    protocol:
+      default: https
+      enum:
+        - https
+        - http
+responses:
+  '200':
+    description: Direct fan-out accepted the download request on the targeted nodes. Individual node failures are returned in each node result and do not change the HTTP status code.
+    content:
+      application/json:
+        schema:
+          $ref: '../../components/schemas/ghes-download-manage-upgrade-response.yaml'
+        examples:
+          default:
+            $ref: '../../components/examples/ghes-download-manage-upgrade-response.yaml'
+  '202':
+    description: Gateway-side throttled orchestration was accepted and started in the background.
+    content:
+      application/json:
+        schema:
+          $ref: '../../components/schemas/ghes-download-manage-upgrade-orchestration-response.yaml'
+        examples:
+          default:
+            $ref: '../../components/examples/ghes-download-manage-upgrade-orchestration-response.yaml'
+  '400':
+    description: Bad request
+  '401':
+    description: Unauthorized
+  '404':
+    description: Not found
+  '409':
+    description: Download orchestration could not start because another orchestration is running, or because a targeted node is already downloading a package.
+    content:
+      application/json:
+        schema:
+          $ref: '../../components/schemas/ghes-manage-downlod-error-response.yaml'
+        examples:
+          orchestration-active:
+            value:
+              error:
+                message: an upgrade package download orchestration is already in progress
+                request_id: ''
+          node-active:
+            value:
+              error:
+                message: 'download already in progress on node(s): ghe-node-1 (uuid-1)'
+                request_id: ''
+  '500':
+    description: Internal error
+x-github:
+  githubCloudOnly: false
+  enabledForGitHubApps: false
+  category: enterprise-admin
+  subcategory: manage-ghes
+x-github-internal:
+  path: '/manage/v1/upgrade/download'
+  http-method: post
+  service-tier: 1
+  published: false
+x-github-releases:
+- ghes: '>= 3.22'

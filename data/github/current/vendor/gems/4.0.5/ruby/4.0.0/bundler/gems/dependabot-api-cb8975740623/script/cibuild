@@ -1,0 +1,47 @@
+#!/bin/bash
+
+set -eu
+. "$(dirname $0)/../script/citools"
+
+export COMPOSE_FILE=${COMPOSE_FILE:-docker-compose.yml:docker-compose.cibuild.yml}
+export COMPOSE_DOCKER_CLI_BUILD=1
+export DOCKER_BUILDKIT=1
+
+function cleanup() {
+  echo
+  output_fold "Shutting down services..." docker compose down
+}
+
+trap cleanup EXIT
+
+
+if [ -f "/.github-full-larger-runner" ]; then
+  # Note: Ensure the `os` value matches the underlying Dockerfile OS... eg, correct Ubuntu version.
+  ruby /usr/local/bin/create-pkg-mirror-files --pkg-mirror-file --os noble --apt-auth-file
+fi
+
+output_fold "Bootstrapping container..." docker compose build
+output_fold "Pre-creating volumes with retry..." bash -c "docker compose up --no-start web || docker compose up --no-start web"
+output_fold "Starting up database..." docker compose up -d db redis
+
+function setup_db() {
+  script/poll-for-db
+  RAILS_ENV=test script/app-env bin/rake db:create:primary db:test:prepare:primary
+  RAILS_ENV=test script/app-env bin/rails db:environment:set || true
+}
+
+output_fold "Setting up database schemas..." setup_db
+
+if [ ${GITHUB_ACTIONS:-} ]; then
+  ci_format_args="--format RSpec::Github::Formatter --format progress"
+else
+  ci_format_args="--format RspecJSONDumper::Formatter --format progress"
+fi
+
+if [ ${JANKY_ENV_TEST_SUBSET:-} ]; then
+  tests=$JANKY_ENV_TEST_SUBSET
+else
+  tests=""
+fi
+
+script/test $ci_format_args $tests

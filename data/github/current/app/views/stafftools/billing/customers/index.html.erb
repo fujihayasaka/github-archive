@@ -1,0 +1,324 @@
+<% page_info title: "Customer Management", container_xl: true %>
+
+<%= render layout: "stafftools/stafftools" do %>
+  <div class="tmp-mb-4">
+    <%= render(Primer::Beta::Subhead.new) do |subhead| %>
+      <% subhead.with_heading(tag: :h2) do %>
+        <%= render(Primer::Beta::Octicon.new(icon: "database", classes: "tmp-mr-2")) %>
+        <%= render(Primer::Beta::Octicon.new(icon: "database", classes: "tmp-mr-2")) %>
+        Customer Management
+      <% end %>
+      <% subhead.with_description do %>
+        Search and inspect billing customer records and their associations.
+      <% end %>
+    <% end %>
+  </div>
+
+  <%# Search form %>
+  <%= render(Primer::Beta::BorderBox.new(classes: "tmp-mb-3")) do |box| %>
+    <% box.with_header do %>
+      <h3 class="Box-title">
+        <%= render(Primer::Beta::Octicon.new(icon: "search", classes: "tmp-mr-2")) %>
+        Find a Customer
+      </h3>
+    <% end %>
+    <% box.with_body(classes: "tmp-p-3") do %>
+      <%= form_with(url: stafftools_billing_customers_path, method: :get, local: true) do |form| %>
+        <div class="d-flex flex-items-end gap-3">
+          <div class="flex-auto">
+            <label class="d-block text-bold tmp-mb-1" for="query">Search</label>
+            <input
+              class="form-control input-contrast width-full"
+              type="text"
+              name="query"
+              id="query"
+              value="<%= params[:query] %>"
+              placeholder="Search by customer ID, user login, org login, or business slug…"
+              aria-label="Search by customer ID, user login, org login, or business slug"
+              autocomplete="off"
+            >
+          </div>
+          <%= render(Primer::Beta::Button.new(type: :submit, scheme: :primary)) do %>
+            <%= render(Primer::Beta::Octicon.new(icon: "search", classes: "tmp-mr-1")) %>
+            Search
+          <% end %>
+          <% if params[:query].present? %>
+            <%= render(Primer::Beta::Button.new(tag: :a, href: stafftools_billing_customers_path, scheme: :invisible)) do %>
+              <%= render(Primer::Beta::Octicon.new(icon: "x", classes: "tmp-mr-1")) %>
+              Clear
+            <% end %>
+          <% end %>
+        </div>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <%# Results %>
+  <% if params[:query].present? %>
+    <% if customers.any? %>
+      <%= render(Primer::Beta::BorderBox.new) do |box| %>
+        <% box.with_header do %>
+          <h3 class="Box-title">
+            <%= render(Primer::Beta::Octicon.new(icon: "list-unordered", classes: "tmp-mr-2")) %>
+            Results
+            <%= render(Primer::Beta::Counter.new(count: customers.size, scheme: :primary, classes: "tmp-ml-1")) %>
+          </h3>
+        <% end %>
+        <% box.with_body(classes: "tmp-p-0") do %>
+          <table class="stafftools-table width-full">
+            <thead>
+              <tr>
+                <th class="tmp-p-3">ID</th>
+                <th class="tmp-p-3">Owner Type</th>
+                <th class="tmp-p-3">Billable Entity</th>
+                <th class="tmp-p-3">Billing</th>
+                <th class="tmp-p-3">Status</th>
+                <th class="tmp-p-3">Created</th>
+                <th class="tmp-p-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% customers.each do |customer| %>
+                <% owner = customer.billable_owner %>
+                <tr>
+                  <td class="tmp-p-3">
+                    <strong>#<%= customer.id %></strong>
+                  </td>
+                  <td class="tmp-p-3">
+                    <% if owner.is_a?(Business) %>
+                      <%= render(Primer::Beta::Label.new(scheme: :accent)) do %>
+                        <%= render(Primer::Beta::Octicon.new(icon: "briefcase", classes: "tmp-mr-1")) %>
+                        Enterprise
+                      <% end %>
+                    <% elsif owner.is_a?(Organization) %>
+                      <%= render(Primer::Beta::Label.new(scheme: :accent)) do %>
+                        <%= render(Primer::Beta::Octicon.new(icon: "organization", classes: "tmp-mr-1")) %>
+                        Organization
+                      <% end %>
+                    <% elsif owner.is_a?(User) %>
+                      <%= render(Primer::Beta::Label.new(scheme: :accent)) do %>
+                        <%= render(Primer::Beta::Octicon.new(icon: "person", classes: "tmp-mr-1")) %>
+                        User
+                      <% end %>
+                    <% else %>
+                      <span class="color-fg-muted">—</span>
+                    <% end %>
+                  </td>
+                  <td class="tmp-p-3">
+                    <% if owner.is_a?(Business) %>
+                      <%= customer.business&.name || "—" %>
+                    <% elsif owner.respond_to?(:login) %>
+                      @<%= owner.login %>
+                    <% else %>
+                      <span class="color-fg-muted">—</span>
+                    <% end %>
+                  </td>
+                  <td class="tmp-p-3">
+                    <%= render(Primer::Beta::Label.new(scheme: :accent)) do %>
+                      <%= customer.billing_type == "invoice" ? "Invoice" : "Card" %>
+                    <% end %>
+                  </td>
+                  <td class="tmp-p-3">
+                    <% if customer.locked_at.present? %>
+                      <%= render(Primer::Beta::Label.new(scheme: :danger)) do %>
+                        <%= render(Primer::Beta::Octicon.new(icon: "lock", classes: "tmp-mr-1")) %>
+                        Locked
+                      <% end %>
+                    <% else %>
+                      <%= render(Primer::Beta::Label.new(scheme: :success)) do %>
+                        <%= render(Primer::Beta::Octicon.new(icon: "unlock", classes: "tmp-mr-1")) %>
+                        Active
+                      <% end %>
+                    <% end %>
+                  </td>
+                  <td class="tmp-p-3 color-fg-muted text-small text-no-wrap">
+                    <% time_ago = Time.current - customer.created_at %>
+                    <% if time_ago < 1.hour %>
+                      <%= render(Primer::Beta::Octicon.new(icon: "flame", color: :attention, classes: "tmp-mr-1")) %><%= (time_ago / 60).floor %>m ago
+                    <% elsif time_ago < 1.day %>
+                      <%= (time_ago / 3600).floor %>h ago
+                    <% elsif time_ago < 7.days %>
+                      <%= (time_ago / 86400).floor %>d ago
+                    <% else %>
+                      <%= customer.created_at.to_fs(:short) %>
+                    <% end %>
+                  </td>
+                  <td class="tmp-p-3 text-no-wrap">
+                    <%= render(Primer::Beta::Button.new(
+                      tag: :a,
+                      href: stafftools_billing_customer_path(customer),
+                      size: :small,
+                      scheme: :primary,
+                    )) do %>
+                      <%= render(Primer::Beta::Octicon.new(icon: "eye", classes: "tmp-mr-1")) %>
+                      Inspect
+                    <% end %>
+                  </td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        <% end %>
+      <% end %>
+    <% else %>
+      <%= render(Primer::Alpha::Banner.new(scheme: :warning, icon: "search", classes: "tmp-mb-3")) do %>
+        No customer found for "<strong><%= params[:query] %></strong>". Try a customer ID, user/org login, or business slug.
+      <% end %>
+    <% end %>
+  <% else %>
+    <%# Landing page — stats + recent customers %>
+    <div class="d-flex flex-wrap gap-3 tmp-mb-4">
+      <%# Quick stat cards %>
+      <div class="flex-1">
+        <%= render(Primer::Beta::BorderBox.new) do |box| %>
+          <% box.with_body(classes: "tmp-p-3") do %>
+            <div class="d-flex flex-items-center gap-2 tmp-mb-1">
+              <%= render(Primer::Beta::Octicon.new(icon: "credit-card", color: :success)) %>
+              <span class="text-small text-bold color-fg-muted text-uppercase">Card Billing</span>
+            </div>
+            <span class="f1 text-bold"><%= recent_card_count.to_fs(:delimited) %></span>
+            <span class="d-block text-small color-fg-muted">Last 30 days</span>
+          <% end %>
+        <% end %>
+      </div>
+
+      <div class="flex-1">
+        <%= render(Primer::Beta::BorderBox.new) do |box| %>
+          <% box.with_body(classes: "tmp-p-3") do %>
+            <div class="d-flex flex-items-center gap-2 tmp-mb-1">
+              <%= render(Primer::Beta::Octicon.new(icon: "file", color: :attention)) %>
+              <span class="text-small text-bold color-fg-muted text-uppercase">Invoice Billing</span>
+            </div>
+            <span class="f1 text-bold"><%= recent_invoice_count.to_fs(:delimited) %></span>
+            <span class="d-block text-small color-fg-muted">Last 30 days</span>
+          <% end %>
+        <% end %>
+      </div>
+
+      <div class="flex-1">
+        <%= render(Primer::Beta::BorderBox.new) do |box| %>
+          <% box.with_body(classes: "tmp-p-3") do %>
+            <div class="d-flex flex-items-center gap-2 tmp-mb-1">
+              <%= render(Primer::Beta::Octicon.new(icon: "lock", color: :danger)) %>
+              <span class="text-small text-bold color-fg-muted text-uppercase">Locked</span>
+            </div>
+            <span class="f1 text-bold"><%= recent_locked_count.to_fs(:delimited) %></span>
+            <span class="d-block text-small color-fg-muted">Last 30 days</span>
+          <% end %>
+        <% end %>
+      </div>
+    </div>
+
+    <%# Recently created customers %>
+    <% if recent_customers.any? %>
+      <%= render(Primer::Beta::BorderBox.new) do |box| %>
+        <% box.with_header do %>
+          <div class="d-flex flex-items-center flex-justify-between width-full">
+            <h3 class="Box-title">
+              <%= render(Primer::Beta::Octicon.new(icon: "clock", classes: "tmp-mr-2")) %>
+              🆕 Recently Created Customers
+            </h3>
+            <%= render(Primer::Beta::Label.new(scheme: :accent)) do %>
+              Last <%= recent_customers.size %>
+            <% end %>
+          </div>
+        <% end %>
+        <% box.with_body(classes: "tmp-p-0") do %>
+          <table class="stafftools-table width-full">
+            <thead>
+              <tr>
+                <th class="tmp-p-3">ID</th>
+                <th class="tmp-p-3">Owner Type</th>
+                <th class="tmp-p-3">Billable Entity</th>
+                <th class="tmp-p-3">Billing</th>
+                <th class="tmp-p-3">Status</th>
+                <th class="tmp-p-3">Created</th>
+                <th class="tmp-p-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% recent_customers.each do |customer| %>
+                <% owner = customer.billable_owner %>
+                <tr>
+                  <td class="tmp-p-3">
+                    <strong>#<%= customer.id %></strong>
+                  </td>
+                  <td class="tmp-p-3">
+                    <% if owner.is_a?(Business) %>
+                      <%= render(Primer::Beta::Label.new(scheme: :accent)) do %>
+                        <%= render(Primer::Beta::Octicon.new(icon: "briefcase", classes: "tmp-mr-1")) %>
+                        Enterprise
+                      <% end %>
+                    <% elsif owner.is_a?(Organization) %>
+                      <%= render(Primer::Beta::Label.new(scheme: :accent)) do %>
+                        <%= render(Primer::Beta::Octicon.new(icon: "organization", classes: "tmp-mr-1")) %>
+                        Organization
+                      <% end %>
+                    <% elsif owner.is_a?(User) %>
+                      <%= render(Primer::Beta::Label.new(scheme: :accent)) do %>
+                        <%= render(Primer::Beta::Octicon.new(icon: "person", classes: "tmp-mr-1")) %>
+                        User
+                      <% end %>
+                    <% else %>
+                      <span class="color-fg-muted">—</span>
+                    <% end %>
+                  </td>
+                  <td class="tmp-p-3">
+                    <% if owner.is_a?(Business) %>
+                      <%= customer.business&.name || "—" %>
+                    <% elsif owner.respond_to?(:login) %>
+                      @<%= owner.login %>
+                    <% else %>
+                      <span class="color-fg-muted">—</span>
+                    <% end %>
+                  </td>
+                  <td class="tmp-p-3">
+                    <%= render(Primer::Beta::Label.new(scheme: :accent)) do %>
+                      <%= customer.billing_type == "invoice" ? "Invoice" : "Card" %>
+                    <% end %>
+                  </td>
+                  <td class="tmp-p-3">
+                    <% if customer.locked_at.present? %>
+                      <%= render(Primer::Beta::Label.new(scheme: :danger)) do %>
+                        <%= render(Primer::Beta::Octicon.new(icon: "lock", classes: "tmp-mr-1")) %>
+                        Locked
+                      <% end %>
+                    <% else %>
+                      <%= render(Primer::Beta::Label.new(scheme: :success)) do %>
+                        <%= render(Primer::Beta::Octicon.new(icon: "unlock", classes: "tmp-mr-1")) %>
+                        Active
+                      <% end %>
+                    <% end %>
+                  </td>
+                  <td class="tmp-p-3 color-fg-muted text-small text-no-wrap">
+                    <% time_ago = Time.current - customer.created_at %>
+                    <% if time_ago < 1.hour %>
+                      <%= render(Primer::Beta::Octicon.new(icon: "flame", color: :attention, classes: "tmp-mr-1")) %><%= (time_ago / 60).floor %>m ago
+                    <% elsif time_ago < 1.day %>
+                      <%= (time_ago / 3600).floor %>h ago
+                    <% elsif time_ago < 7.days %>
+                      <%= (time_ago / 86400).floor %>d ago
+                    <% else %>
+                      <%= customer.created_at.to_fs(:short) %>
+                    <% end %>
+                  </td>
+                  <td class="tmp-p-3 text-no-wrap">
+                    <%= render(Primer::Beta::Button.new(
+                      tag: :a,
+                      href: stafftools_billing_customer_path(customer),
+                      size: :small,
+                      scheme: :primary,
+                    )) do %>
+                      <%= render(Primer::Beta::Octicon.new(icon: "eye", classes: "tmp-mr-1")) %>
+                      Inspect
+                    <% end %>
+                  </td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

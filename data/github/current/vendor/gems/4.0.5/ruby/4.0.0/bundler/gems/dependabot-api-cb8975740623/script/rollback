@@ -1,0 +1,24 @@
+#!/bin/sh
+
+appdir=$(cd $(dirname "$0")/.. && pwd)
+[ -f /etc/app-env ] || exec "$appdir/script/app-env" $0 $@
+
+set -e
+
+script/install-skeema
+
+test -z "$RACK_ENV" 
+  RACK_ENV='development'
+
+bin/rails db:rollback:primary
+
+# Guard against running skeema and recursive script calls
+# when ENTERPRISE=1
+[ "${ENTERPRISE:-""}" = "1" ] && exit 0
+ENTERPRISE=1 script/rollback "$@"
+
+cd "${appdir}/schema"
+
+skeema_env="development"; [ "${CODESPACES:-}" = "true" ] && skeema_env="development-codespaces"
+../bin/skeema pull $skeema_env
+../bin/skeema lint $skeema_env

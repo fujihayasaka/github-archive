@@ -1,0 +1,2 @@
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[72242],{608457(t,e,i){var u=i(331635),s=i(651135);class a extends HTMLElement{editOrCancelClicked(){document.querySelector('input[data-target*="team-sync-okta-config-form.sswsTokenInput"]')?.toggleAttribute("disabled")}}(0,u.Cg)([(0,s.p_)("team-sync-okta-config-form")],a)}}]);
+//# sourceMappingURL=chunk-72242-d2feaee8c182b02c-9c72adfcf3a105a4.js.map

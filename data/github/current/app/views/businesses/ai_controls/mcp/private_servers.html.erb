@@ -1,0 +1,288 @@
+<% page_info(title: title, selected_link: :businesses_ai_controls_mcp, sidebar: :ai_controls) %>
+
+<% search_query = params[:q].to_s.strip.downcase %>
+<% current_page = [params.fetch(:page, 1).to_i, 1].max %>
+<% per_page = local_assigns.fetch(:per_page, 10) %>
+<% filtered_servers = servers.select { |server| search_query.blank? || server[:name].downcase.include?(search_query) } %>
+<% paginated_servers = WillPaginate::Collection.create(current_page, per_page, filtered_servers.length) do |pager| %>
+  <% pager.replace(filtered_servers[((current_page - 1) * per_page), per_page] || []) %>
+<% end %>
+
+<%= render(Businesses::AiControls::ReadOnlyBannerComponent.new(is_admin: is_admin)) %>
+
+<%= render(Primer::Box.new(mt: 2)) do %>
+  <% flash_rendered! %>
+  <% if flash[:success] %>
+    <%= render(Primer::Alpha::Banner.new(
+      scheme: :success,
+      icon: :"check-circle",
+      dismiss_scheme: :remove,
+      data: { test_selector: "private-servers-success-banner" },
+      id: "private-servers-success-banner",
+      classes: "tmp-mb-3",
+    )) do %>
+      <%= flash[:success] %>
+    <% end %>
+  <% end %>
+
+  <% if flash[:error] %>
+    <%= render(Primer::Alpha::Banner.new(
+      scheme: :danger,
+      icon: :"alert",
+      dismiss_scheme: :remove,
+      data: { test_selector: "private-servers-error-banner" },
+      id: "private-servers-error-banner",
+      classes: "tmp-mb-3",
+    )) do %>
+      <%= flash[:error] %>
+    <% end %>
+  <% end %>
+
+  <%= render(Primer::Beta::Link.new(href: mcp_enterprise_ai_controls_enterprise_path(business), test_selector: "mcp-settings-back-link")) do |component| %>
+    <% component.with_leading_visual_icon(icon: :"arrow-left") %>
+    MCP
+  <% end %>
+
+  <header class="tmp-mb-6">
+    <div class="d-flex gap-2 flex-items-center flex-justify-between border-bottom pb-2 tmp-mt-3">
+      <%= render(Primer::Beta::Heading.new(tag: :h1)) { title } %>
+
+      <% if can_write %>
+        <%= render(Primer::Box.new(ml: :auto)) do %>
+          <%= render(Primer::Alpha::ActionMenu.new(test_selector: "publish-private-server-menu")) do |menu| %>
+            <% menu.with_show_button(scheme: :primary, test_selector: "publish-private-server-button") do |button| %>
+              Create server
+              <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+            <% end %>
+            <% menu.with_item(
+              label: "Create manually",
+              href: new_mcp_private_server_enterprise_ai_controls_enterprise_path(business),
+              content_arguments: { data: { test_selector: "create-server-manually-button" } }
+            ) do |item| %>
+              <% item.with_leading_visual_icon(icon: :pencil) %>
+            <% end %>
+            <% menu.with_item(
+              label: "Create from URL",
+              content_arguments: {
+                data: {
+                  show_dialog_id: "create-server-from-url-dialog",
+                  test_selector: "create-server-from-url-button",
+                }
+              }
+            ) do |item| %>
+              <% item.with_leading_visual_icon(icon: :link) %>
+            <% end %>
+          <% end %>
+
+          <%= render(Primer::Alpha::Dialog.new(title: "Create from URL", id: "create-server-from-url-dialog", position: :center, size: :medium)) do |dialog| %>
+            <% dialog.with_header(show_divider: true) do %>
+              <strong>Create from URL</strong>
+            <% end %>
+            <% dialog.with_body do %>
+              <div class="d-flex flex-column gap-3" data-create-server-dialog data-fetch-server-json-path="<%= mcp_private_servers_fetch_server_json_enterprise_ai_controls_enterprise_path(business) %>" data-new-server-path="<%= new_mcp_private_server_enterprise_ai_controls_enterprise_path(business) %>">
+                <%= render(Primer::Beta::Text.new(tag: :p, color: :muted, mb: 2)) do %>
+                  Fetch server configuration from a URL to prepopulate the form.
+                <% end %>
+                <input
+                  type="text"
+                  name="server_json_url"
+                  class="form-control width-full"
+                  placeholder="https://example.com/server.json"
+                  data-create-server-url-input
+                  <%= test_selector("create-server-url-input") %>
+                >
+                <p class="color-fg-danger text-small mt-2" hidden data-create-server-url-error></p>
+                <div class="d-flex flex-items-center flex-justify-center text-small mt-2" hidden data-create-server-url-loading>
+                  <%= render(Primer::Beta::Spinner.new(size: :small, mr: 1)) %>
+                  <span>Fetching server configuration...</span>
+                </div>
+                <div class="d-flex flex-items-center flex-justify-center gap-2 tmp-mt-3" hidden data-create-server-url-success>
+                  <%= render(Primer::Beta::Octicon.new(icon: :check, color: :success)) %>
+                  <span class="text-small" data-create-server-url-preview-name></span>
+                </div>
+                <div class="tmp-mt-3 text-center">
+                  <%= render(Primer::Beta::Button.new(
+                    scheme: :primary,
+                    disabled: true,
+                    data: { create_server_url_create: "" },
+                    test_selector: "create-server-url-create-button",
+                  )) { "Create" } %>
+                </div>
+              </div>
+              <%# Hidden form for POST submission to avoid 414 URI Too Large %>
+              <%= form_with url: new_mcp_private_server_from_json_enterprise_ai_controls_enterprise_path(business), method: :post, local: true, data: { create_server_post_form: true }, style: "display:none" do %>
+                <input type="hidden" name="server_json" value="" data-create-server-json-field>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    </div>
+    <%= render(Primer::Beta::Text.new(tag: :p, mb: 0, pt: 2, color: :muted)) do %>
+      Publish and manage private MCP servers for your enterprise.
+    <% end %>
+  </header>
+
+  <% if paginated_servers.any? %>
+    <%= render(Primer::Box.new(classes: "tmp-mb-3")) do %>
+      <%= form_with url: mcp_private_servers_enterprise_ai_controls_enterprise_path(business), method: :get, local: true do %>
+        <%= render(Primer::Beta::Text.new(tag: :p, font_weight: :semibold, mb: 2)) do %>
+          Search <%= servers.length %> published servers
+        <% end %>
+        <%= render(Primer::Alpha::TextField.new(
+          name: "q",
+          label: "Search published servers",
+          visually_hide_label: true,
+          placeholder: "Search",
+          leading_visual: { icon: :search },
+          full_width: true,
+          test_selector: "private-servers-search",
+          value: params[:q],
+        )) %>
+      <% end %>
+    <% end %>
+
+    <%# Published servers table %>
+    <div aria-live="polite">
+      <%= render(Primer::Beta::BorderBox.new(test_selector: "private-servers-list", data: { "private-servers-target": "servers-table" })) do |component| %>
+        <% component.with_header(py: 2, px: 3) do %>
+          <div class="d-flex flex-row width-full">
+            <div class="col-3">
+              <%= render(Primer::Beta::Text.new(font_weight: :semibold, font_size: :small)) { "Name" } %>
+            </div>
+            <div class="col-1">
+              <%= render(Primer::Beta::Text.new(font_weight: :semibold, font_size: :small)) { "Version" } %>
+            </div>
+            <div class="col-2">
+              <%= render(Primer::Beta::Text.new(font_weight: :semibold, font_size: :small)) { "Allowlists" } %>
+            </div>
+            <div class="col-2">
+              <%= render(Primer::Beta::Text.new(font_weight: :semibold, font_size: :small)) { "Last updated" } %>
+            </div>
+            <div class="col-3">
+              <%= render(Primer::Beta::Text.new(font_weight: :semibold, font_size: :small)) { "Updated by" } %>
+            </div>
+            <div class="col-1"></div>
+          </div>
+        <% end %>
+
+        <% paginated_servers.each do |server| %>
+          <% component.with_row(py: 3, px: 3, data: { private_server_name: server[:name] }) do %>
+            <div class="d-flex flex-row width-full flex-items-center">
+              <div class="col-3">
+                <%= render(Primer::Beta::Text.new(font_weight: :semibold)) { server[:name] } %>
+              </div>
+              <div class="col-1">
+                <%= render(Primer::Beta::Text.new(color: :muted)) { "v#{server[:version]}" } %>
+              </div>
+              <div class="col-2">
+                <% if server[:allowlist_count].to_i > 0 %>
+                  <%= render(Primer::Beta::Text.new(color: :muted)) { pluralize(server[:allowlist_count], "allowlist") } %>
+                <% else %>
+                  <%= render(Primer::Beta::Text.new(color: :muted)) { "None" } %>
+                <% end %>
+              </div>
+              <div class="col-2">
+                <% if server[:updated_at].present? %>
+                  <%= render(Primer::Beta::RelativeTime.new(datetime: server[:updated_at], tense: :past)) %>
+                <% end %>
+              </div>
+              <div class="col-3">
+                <% if server[:updated_by].present? && server[:updated_by]["login"].present? %>
+                  <div class="d-flex flex-items-center">
+                    <% if server[:updated_by]["avatar_url"].present? %>
+                      <%= render(Primer::Beta::Avatar.new(
+                        src: server[:updated_by]["avatar_url"],
+                        alt: server[:updated_by]["login"],
+                        size: 20,
+                      )) %>
+                    <% end %>
+                    <%= render(Primer::Beta::Text.new(ml: 2)) { server[:updated_by]["login"] } %>
+                  </div>
+                <% end %>
+              </div>
+              <div class="col-1 d-flex flex-justify-end">
+                <% if can_write %>
+                  <%= render(Primer::Alpha::ActionMenu.new(test_selector: "private-server-actions-menu")) do |menu| %>
+                    <% menu.with_show_button(
+                      icon: :"kebab-horizontal",
+                      scheme: :invisible,
+                      size: :small,
+                      "aria-label": "More options for #{server[:name]}"
+                    ) %>
+                    <% menu.with_item(
+                      label: "Edit",
+                      href: edit_mcp_private_server_enterprise_ai_controls_enterprise_path(business, id: server[:id]),
+                      content_arguments: {}
+                    ) do |item| %>
+                      <% item.with_leading_visual_icon(icon: :pencil) %>
+                    <% end %>
+                    <% menu.with_item(
+                      label: "Delete",
+                      scheme: :danger,
+                      content_arguments: {
+                        data: {
+                          show_dialog_id: "delete-private-server-dialog-#{server[:id]}"
+                        }
+                      }
+                    ) do |item| %>
+                      <% item.with_leading_visual_icon(icon: :trash) %>
+                    <% end %>
+                  <% end %>
+                <% end %>
+              </div>
+            </div>
+          <% end %>
+        <% end %>
+      <% end %>
+    </div>
+
+    <% if can_write %>
+      <% paginated_servers.each do |server| %>
+        <% delete_dialog_id = "delete-private-server-dialog-#{server[:id]}" %>
+        <%= render(Primer::Alpha::Dialog.new(title: "Delete private server", id: delete_dialog_id, position: :center, size: :small)) do |dialog| %>
+          <% dialog.with_header(show_divider: true) %>
+          <% dialog.with_body do %>
+            <div class="d-flex flex-column gap-3">
+              <%= render(Primer::Beta::Text.new) do %>
+                Are you sure you want to delete <strong><%= server[:name] %></strong>?
+              <% end %>
+              <%= render(Primer::Beta::Text.new(color: :muted)) do %>
+                This action cannot be undone.
+              <% end %>
+            </div>
+          <% end %>
+          <% dialog.with_footer(show_divider: true) do %>
+            <div class="d-flex flex-justify-end gap-2">
+              <%= render(Primer::Beta::Button.new(
+                scheme: :default,
+                data: { "close-dialog-id": delete_dialog_id },
+              )) { "Cancel" } %>
+              <%= render(Primer::Beta::Button.new(
+                scheme: :danger,
+                type: :button,
+                data: { "close-dialog-id": delete_dialog_id },
+              )) { "Delete server" } %>
+            </div>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <div class="paginate-container" data-pjax data-html-cleaner-suppress-children>
+      <%= will_paginate(paginated_servers, params: { q: params[:q] }) %>
+    </div>
+  <% else %>
+    <%= render Primer::Beta::Blankslate.new do |c| %>
+      <% c.with_visual_icon(icon: "search") %>
+      <% c.with_heading(tag: :h2) do %>
+        No published servers
+      <% end %>
+      <% c.with_description do %>
+        <%= search_query.present? ? "No servers matched your search." : "No private servers published yet." %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+<% end %>
+

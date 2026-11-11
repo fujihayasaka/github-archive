@@ -1,0 +1,2 @@
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[31777],{156632(o,e,i){var t=i(331635),u=i(651135);class c extends HTMLElement{toggleCouponCode(o){let e=o.target;this.couponCodeSection&&(this.couponCodeSection.hidden=!e.checked)}}(0,t.Cg)([u.aC],c.prototype,"couponCodeSection",void 0),(0,t.Cg)([(0,u.p_)("licensing-apply-coupon-code")],c)}}]);
+//# sourceMappingURL=chunk-31777-d8b77978a57d4f2b-65520eb2eb046d67.js.map

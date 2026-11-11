@@ -1,0 +1,1 @@
+function e(e){return e?/rel="next"/.test(e):null}export{e as t};

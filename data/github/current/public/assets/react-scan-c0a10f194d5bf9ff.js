@@ -1,0 +1,3 @@
+performance.mark("js-parse-end:react-scan-c0a10f194d5bf9ff.js");
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[84027],{388123(u,i,n){var t=n(239219);"u">typeof window&&(0,t.scan)({dangerouslyForceRunInProduction:!0})}},function(u){u.O(0,[49328,98131],function(){return u(u.s=388123)}),u.O()}]);
+//# sourceMappingURL=react-scan-c0a10f194d5bf9ff-caecbd87e879f28e.js.map

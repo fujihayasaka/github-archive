@@ -1,0 +1,2 @@
+"use strict";(globalThis.rspackChunk_github_ui_github_ui=globalThis.rspackChunk_github_ui_github_ui||[]).push([[20035],{514958(i,t,e){e.r(t);var o=e(331635),r=e(651135);class s extends HTMLElement{connectedCallback(){this.displayFirstPopover()}displayFirstPopover(){let i=document.querySelector("copilot-marketing-popover");this&&i&&this.isEqualNode(i)&&this.removeAttribute("hidden")}}s=(0,o.Cg)([(0,r.p_)("copilot-marketing-popover")],s),e.d(t,{CopilotMarketingPopoverElement:()=>s})}}]);
+//# sourceMappingURL=chunk-20035-af889f717c26ae68-ffdf87e115125cc7.js.map

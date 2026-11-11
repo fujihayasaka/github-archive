@@ -1,0 +1,34 @@
+#!/usr/bin/env ruby
+
+require_relative "../../config/environment"
+require_relative "../ruby_processor_wrappers"
+
+require "stackprof"
+
+profiling_active = false
+trap("USR2") do
+  if profiling_active
+    StackProf.stop
+    begin
+      data = StackProf.results
+      if data
+        path = "/tmp/stackprof-#{Process.pid}-#{Time.now.strftime('%Y%m%d-%H%M%S')}.dump"
+        File.binwrite(path, Marshal.dump(data))
+        $stderr.puts "[stackprof] Stopped profiling, saved to #{path}"
+      else
+        $stderr.puts "[stackprof] Stopped profiling, but no data collected"
+      end
+    rescue => e
+      $stderr.puts "[stackprof] Error saving profile: #{e.message}"
+    end
+    profiling_active = false
+  else
+    StackProf.start(mode: :wall, interval: 1000, raw: true)
+    profiling_active = true
+    $stderr.puts "[stackprof] Started profiling (wall mode, 1ms interval)"
+  end
+end
+
+handle_common_processor_errors do
+  Ingest::PackageProcessor.run
+end

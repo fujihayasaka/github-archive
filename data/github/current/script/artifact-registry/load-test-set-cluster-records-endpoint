@@ -1,0 +1,262 @@
+#!/bin/bash
+#
+# Script to set cluster deployment records via the GitHub API on the local development server in Codespaces
+# Usage: ./load-test-set-cluster-records-endpoint <number_of_deployments> [options]
+#
+# This script creates a request to the "Set cluster deployment records" endpoint
+# with the specified number of deployment entries.
+#
+# If you do not specify an organization or repository, the script will default to using the
+# development github organization and "public-server" repository. These test orgs and repos
+# are created when you run script/server.
+#
+# Required environment variables:
+#   CLUSTER      - The cluster name
+#   GITHUB_TOKEN - GitHub personal access token
+#
+# Optional environment variables:
+#   ORG          - The organization name (default: github)
+#   GITHUB_REPOSITORY  - Repository name used in load test records (default: public-server)
+#   LOGICAL_ENV  - Logical environment (default: prod)
+#   PHYSICAL_ENV - Physical environment (default: us-east-1)
+#
+
+set -euo pipefail
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Check if running in a Codespace
+if [[ "${CODESPACES:-}" != "true" ]]; then
+    echo -e "${RED}Error: This script must be run in a GitHub Codespace.${NC}"
+    echo "The CODESPACES environment variable is not set to 'true'."
+    exit 1
+fi
+
+usage() {
+    echo "Usage: $0 <number_of_deployments> [options]"
+    echo ""
+    echo "Arguments:"
+    echo "  number_of_deployments  Number of deployment entries to include in the request (required)"
+    echo ""
+    echo "Options:"
+    echo "  -h, --help             Show this help message"
+    echo "  -d, --dry-run          Print the request without executing it"
+    echo "  -v, --verbose          Enable verbose output"
+    echo ""
+    echo "Environment variables:"
+    echo "  GITHUB_TOKEN           GitHub personal access token (required)"
+    echo "  CLUSTER                Cluster name (required)"
+    echo "  LOGICAL_ENV            Logical environment (default: prod)"
+    echo "  PHYSICAL_ENV           Physical environment (default: us-east-1)"
+    echo "  ORG                    Organization name (default: github)"
+    echo "  REPO_NAME      Repository name used in load test records (default: public-server)"
+    echo ""
+    echo "Example:"
+    echo "  GITHUB_TOKEN=ghp_xxx ORG=github CLUSTER=moda-1 $0 5"
+    exit 1
+}
+
+log_info() {
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1" >&2
+}
+
+# Parse arguments
+DRY_RUN=false
+VERBOSE=false
+NUM_DEPLOYMENTS=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            usage
+            ;;
+        -d|--dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        -v|--verbose)
+            VERBOSE=true
+            shift
+            ;;
+        -*)
+            log_error "Unknown option: $1"
+            usage
+            ;;
+        *)
+            if [[ -z "$NUM_DEPLOYMENTS" ]]; then
+                NUM_DEPLOYMENTS="$1"
+            else
+                log_error "Unexpected argument: $1"
+                usage
+            fi
+            shift
+            ;;
+    esac
+done
+
+# Validate number of deployments
+if [[ -z "$NUM_DEPLOYMENTS" ]]; then
+    log_error "Number of deployments is required"
+    usage
+fi
+
+if ! [[ "$NUM_DEPLOYMENTS" =~ ^[0-9]+$ ]] || [[ "$NUM_DEPLOYMENTS" -lt 1 ]]; then
+    log_error "Number of deployments must be a positive integer"
+    exit 1
+fi
+
+# Validate required environment variables
+if [[ -z "${GITHUB_TOKEN:-}" ]]; then
+    log_error "GITHUB_TOKEN environment variable is required"
+    exit 1
+fi
+
+if [[ -z "${CLUSTER:-}" ]]; then
+    log_error "CLUSTER environment variable is required"
+    exit 1
+fi
+
+# Set defaults
+API_BASE_URL="http://api.github.localhost"
+LOGICAL_ENV="${LOGICAL_ENV:-prod}"
+PHYSICAL_ENV="${PHYSICAL_ENV:-us-east-1}"
+ORG="${ORG:-github}"
+REPO_NAME="${REPO_NAME:-public-server}"
+
+# Generate a random SHA256 digest
+generate_digest() {
+    local seed="$1"
+    echo "sha256:$(echo -n "artifact-$seed-$(date +%s%N)" | sha256sum | cut -d' ' -f1)"
+}
+
+# Build the deployments array
+build_deployments_json() {
+    local deployments="["
+    local runtime_risks=("critical-resource" "internet-exposed" "lateral-movement" "sensitive-data")
+
+    for ((i = 1; i <= NUM_DEPLOYMENTS; i++)); do
+        local digest=$(generate_digest "$i")
+        local runtime_risk="${runtime_risks[$((i % 4))]}"
+        local version="1.0.$i"
+        local random_suffix=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 8)
+        local deployment_name="deployment-pod-${random_suffix}"
+        local artifact_name="artifact-image-$i"
+
+        if [[ $i -gt 1 ]]; then
+            deployments+=","
+        fi
+
+        deployments+=$(cat <<EOF
+{
+    "name": "$artifact_name",
+    "digest": "$digest",
+    "version": "$version",
+    "status": "deployed",
+    "deployment_name": "$deployment_name",
+    "tags": {
+        "environment": "$LOGICAL_ENV",
+        "index": "$i"
+    },
+    "runtime_risks": ["$runtime_risk"],
+    "github_repository": "$REPO_NAME"
+}
+EOF
+)
+    done
+
+    deployments+="]"
+    echo "$deployments"
+}
+
+# Build the full request body
+build_request_body() {
+    local deployments_json=$(build_deployments_json)
+
+    cat <<EOF
+{
+    "logical_environment": "$LOGICAL_ENV",
+    "physical_environment": "$PHYSICAL_ENV",
+    "deployments": $deployments_json
+}
+EOF
+}
+
+# Main execution
+main() {
+    local url="$API_BASE_URL/orgs/$ORG/artifacts/metadata/deployment-record/cluster/$CLUSTER"
+    local request_body=$(build_request_body)
+
+    if [[ "$VERBOSE" == "true" ]] || [[ "$DRY_RUN" == "true" ]]; then
+        log_info "API URL: $url"
+        log_info "Request body:"
+        echo "$request_body" | jq '.' 2>/dev/null || echo "$request_body"
+        echo ""
+    fi
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "Dry run mode - not executing request"
+        log_info "Would send POST request with $NUM_DEPLOYMENTS deployment(s)"
+        return 0
+    fi
+
+    log_info "Sending request with $NUM_DEPLOYMENTS deployment(s) to cluster '$CLUSTER' in org '$ORG'..."
+
+    local response
+    local http_code
+    local start_time
+    local end_time
+    local elapsed_time
+    local body_file
+    body_file=$(mktemp)
+    echo "$request_body" > "$body_file"
+    trap "rm -f '$body_file'" EXIT
+
+    start_time=$(date +%s%3N)
+
+    response=$(curl -s -w "\n%{http_code}" \
+        -X POST \
+        -H "Accept: application/vnd.github+json" \
+        -H "Authorization: Bearer $GITHUB_TOKEN" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        "$url" \
+        -d "@$body_file")
+
+    end_time=$(date +%s%3N)
+    elapsed_time=$((end_time - start_time))
+
+    http_code=$(echo "$response" | tail -n1)
+    response=$(echo "$response" | sed '$d')
+
+    # Convert to seconds with milliseconds
+    local elapsed_seconds=$((elapsed_time / 1000))
+    local elapsed_ms=$((elapsed_time % 1000))
+
+    if [[ "$http_code" == "200" ]]; then
+        log_info "Success! Deployment records created/updated successfully."
+        log_info "Request completed in ${elapsed_seconds}.$(printf '%03d' $elapsed_ms)s"
+        if [[ "$VERBOSE" == "true" ]]; then
+            log_info "Response:"
+            echo "$response" | jq '.' 2>/dev/null || echo "$response"
+        fi
+    else
+        log_error "Request failed with HTTP status code: $http_code"
+        log_error "Request completed in ${elapsed_seconds}.$(printf '%03d' $elapsed_ms)s"
+        log_error "Response:"
+        echo "$response" | jq '.' 2>/dev/null || echo "$response"
+        exit 1
+    fi
+}
+
+main

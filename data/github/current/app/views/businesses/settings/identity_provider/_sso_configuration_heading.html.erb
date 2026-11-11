@@ -1,0 +1,109 @@
+<% is_oidc = sso_label == "OIDC" %>
+<%= render Primer::Box.new(display: :flex) do %>
+  <%= render Primer::Box.new(w: :full) do %>
+    <%= render Primer::Beta::Heading.new(tag: :h3, font_size: 4) do %>
+      <%= sso_label %> single sign-on
+    <% end %>
+
+    <%= render Primer::Box.new(mt: 1, color: :subtle) do %>
+      <% if is_oidc %>
+        Supported IdPs include Microsoft Entra ID (previously known as Azure AD).
+        <%= render(Primer::Beta::Link.new(
+            underline: true,
+            href: "#{GitHub.help_url}/admin/managing-iam/configuring-authentication-for-enterprise-managed-users/configuring-oidc-for-enterprise-managed-users"
+          )) { "Learn more about OpenID Connect (OIDC)" }
+        %>.
+      <% else %>
+        Supported IdPs include Azure, Okta, OneLogin, Ping Identity, or a custom SAML 2.0 provider.
+        <%= render(Primer::Beta::Link.new(
+            underline: true,
+            href: "#{GitHub.help_url}/admin/managing-iam/configuring-authentication-for-enterprise-managed-users/configuring-saml-single-sign-on-for-enterprise-managed-users"
+          )) { "Learn more about SAML single sign-on" }
+        %>.
+      <% end %>
+
+      <% unless can_user_disable_emu_sso?(user: current_user, business: this_business) %>
+        <%= render Primer::Box.new(mt: 2, test_selector: "disable_sso_setup_user_message") do %>
+          <%= render(Primer::Beta::Octicon.new(icon: :"alert-fill", size: :xsmall, color: :subtle)) %>
+          <%= render(Primer::Beta::Text.new(vertical_align: :middle)) { "Disabling #{sso_label} single sign-on for your enterprise is only allowed if you are logged in as the setup user." } %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <div>
+    <%= render Primer::Alpha::ToggleSwitch.new(
+      aria: { label: "#{sso_label} single sign-on status" },
+      size: :small,
+      checked: is_oidc ? this_business.oidc_enabled? : this_business.saml_sso_enabled?,
+      csrf_token: "",
+      enabled: can_user_disable_emu_sso?(user: current_user, business: this_business),
+      mt: 1,
+      test_selector: "sso_toggle_switch",
+      classes: "js-business-sso-configuration-status",
+    ) %>
+    <% if can_user_disable_emu_sso?(user: current_user, business: this_business) %>
+      <% dialog_id = "sso-configuration-status" %>
+      <%= render Primer::Alpha::Dialog.new(
+        id: dialog_id,
+        header_variant: :medium,
+        size: :large,
+        title: "Are you sure you want to disable single-sign on with #{sso_label}?",
+        style: "--overlay-height: fit-content;",
+        test_selector: "disable_sso_confirmation"
+      ) do |d| %>
+        <% d.with_body do %>
+          <%= render Primer::Alpha::Banner.new(scheme: :danger, full: true, classes: "tmp-mb-3") do %>
+            This action is destructive and cannot be undone.
+          <% end %>
+          <p class="tmp-mb-2 color-fg-muted">
+            <strong>Only disable SSO if you are switching to a different identity provider.</strong>
+            Review the <%= link_to(
+              "documentation",
+              "#{GitHub.help_url}/enterprise-cloud@latest/admin/managing-iam/configuring-authentication-for-enterprise-managed-users/disabling-authentication-and-provisioning-for-enterprise-managed-users#about-disabled-authentication-for-enterprise-managed-users",
+              class: "Link--inTextBlock",
+              target: "_blank",
+              rel: "noopener noreferrer"
+            ) %> and irreversible changes below, and make sure you understand the impact before proceeding. For large enterprises, removing external provider data may take several hours or days.
+          </p>
+          <p class="tmp-mb-2">
+            Disabling <%= sso_label %> single sign-on for the <strong><%= this_business.name %></strong> enterprise will trigger the following irreversible changes:
+          </p>
+          <ul class="tmp-ml-3 tmp-mb-3">
+            <li>All enterprise managed user accounts will be <strong>suspended</strong></li>
+            <li>All external identities will be <strong>permanently deleted</strong></li>
+            <li>All personal access tokens, user SSH keys, and GPG keys will be <strong>permanently deleted</strong></li>
+            <li>All external groups provisioned by SCIM will be <strong>deleted</strong>, along with their team mappings</li>
+            <li>Avatar data for managed user accounts will be <strong>permanently removed</strong></li>
+          </ul>
+          <p class="tmp-mb-3 color-fg-muted">
+            The identity provider configuration will be removed. To restore access, you will need to reconfigure authentication and re-provision all users, groups, and group memberships via SCIM.
+          </p>
+          <% path = is_oidc ? settings_oidc_provider_enterprise_path(this_business.slug) : settings_saml_provider_enterprise_path(this_business.slug) %>
+          <%= form_tag path, method: :delete do %>
+            <dl class="form-group tmp-mb-3">
+              <dt><label for="confirm-disable-sso">To confirm, type the enterprise name <strong><%= this_business.name %></strong></label></dt>
+              <dd>
+                <input class="form-control input-block"
+                  type="text"
+                  name="verify"
+                  id="confirm-disable-sso"
+                  pattern="<%= case_insensitive_pattern(this_business.name) %>"
+                  required
+                  autofocus
+                  autocomplete="off"
+                  <%= test_selector "confirm_disable_sso_input" %>>
+              </dd>
+            </dl>
+            <%= render Primer::Beta::Button.new(scheme: :danger, type: :submit, block: true, data: { disable_with: "Disabling #{sso_label} single sign-on..." }) do %>
+              I understand, disable <%= sso_label %> single sign-on
+            <% end %>
+          <% end %>
+          <%= render Primer::Beta::Button.new(type: :button, scheme: :default, block: true, mt: 2, data: { "close-dialog-id": dialog_id }) do %>
+            Cancel
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  </div>
+<% end %>

@@ -1,0 +1,1 @@
+import{n as e}from"./use-app-payload-CiE89ryJ.js";var t=()=>e()?.enabled_features??{},n=e=>!!t()[e];export{n as t};

@@ -1,0 +1,85 @@
+# rubocop:todo GitHub/EnforcePackageAppStructure
+# typed: true
+# frozen_string_literal: true
+
+class BusinessTrialCancellationCleanupJob < ApplicationJob
+  queue_as :business_trial_cancellation_cleanup
+
+  retry_on_dirty_exit
+
+  DELETE_BATCH_SIZE = 1000
+
+  resolve_tenant_context do |business|
+    business
+  end
+
+  # Public - job to trigger cleanup after the business trial was cancelled
+  def perform(business)
+    invited_organization_ids = business.organization_invitations.with_status(:confirmed).distinct.pluck(:invitee_id)
+    invited_organization_ids.each_slice(DELETE_BATCH_SIZE) do |organization_ids|
+      Organization.where(id: organization_ids).find_each do |organization|
+        with_write do
+          T.must(business).remove_organization(organization) if business == organization.business
+        end
+      end
+    end
+
+    business.reload
+    with_write do
+      if business.upgraded_from.present? && business.upgraded_from.business_membership.present? && business.upgraded_from.business_membership.business_id == business.id
+        business.remove_organization(business.upgraded_from)
+      end
+      business.organization_invitations.where(confirmed_at: nil).destroy_all
+      reason = "Trial cancelled"
+      first_emu_owner = business.enterprise_managed? ? business.find_first_emu_owner : nil
+      first_emu_owner&.suspend(reason)
+      owners = business.owners.where.not(id: first_emu_owner&.id)
+      owners.each do |owner|
+        business.remove_owner(owner, actor: nil, reason: reason, allow_removal_of_last_owner: true)
+      end
+      business.remove_billing_managers
+      user_ids = business.user_accounts.pluck(:user_id).compact
+      business.cleanup_removed_users(user_ids, force: true) unless business.enterprise_managed?
+    end
+
+    # Capture write time after org removals are committed to primary (invited orgs and
+    # upgraded_from above). We'll wait for replicas to catch up to this point before
+    # reading business.organizations, so removed orgs are not visible there.
+    org_removal_written_at = Time.now
+
+    business.business_teams.find_each do |team|
+      team.members.each_slice(DELETE_BATCH_SIZE) do |users|
+        with_write do
+          team.bulk_remove_members(users:, caller_type: :business_team)
+        end
+      end
+    end
+
+    # Wait for replicas to catch up to when orgs were removed (upgraded_from and invited),
+    # so business.organizations no longer includes them here — avoiding incorrect member removal.
+    # https://github.com/github/enterprise-primitives/issues/5062
+    WaitForReplication.new(org_removal_written_at, max_wait_seconds: 5, job_name: self.class.name).wait!
+
+    business.organizations.each do |organization|
+      organization.members.each do |member|
+        with_write do
+          organization.remove_member(member, allow_last_admin_removal: true)
+        end
+      end
+
+      organization.outside_collaborators.each do |outside_collaborator|
+        with_write do
+          organization.remove_outside_collaborator(outside_collaborator)
+        end
+      end
+    end
+
+    locked_organization_ids = business.organization_memberships.pluck(:organization_id)
+    locked_organization_ids.each_slice(DELETE_BATCH_SIZE) do |slice|
+      with_write do
+        OrganizationInvitation.where(organization_id: slice).destroy_all
+        RepositoryInvitation.for_organization_ids(slice).destroy_all
+      end
+    end
+  end
+end
