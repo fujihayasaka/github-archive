@@ -1,0 +1,52 @@
+#!/bin/bash
+#
+# Expected to execute inside the docker container built from config/tools/generate-typescript/Dockerfile
+#
+set -e
+
+echo "Cleaning older version..."
+
+rm -rf gen/typescript
+
+echo "Applying template..."
+
+cp -r _template/typescript gen
+
+echo "Generating proto files..."
+
+typescript_out=./gen/typescript/src/github/proto/secret_scanning/
+
+# Create output directory
+mkdir -p $typescript_out
+
+packages=('api/v1'
+'api/v2'
+'blobs/v1'
+'businesses/v1'
+'repositories/v1'
+'organizations/v1'
+'scans/v1'
+'users/v1'
+'api/v3'
+'scans/v2'
+'metrics/v1'
+'types/v1'
+'issues/v1'
+'pull_requests/v1'
+'discussions/v1'
+'tenant/v1'
+'secretverification/v1'
+'publicmonitoring/v1'
+)
+
+for p in "${packages[@]}"; do
+  set -x
+  protoc --proto_path=proto \
+    --ts_out=$typescript_out \
+    --ts_opt=generate_dependencies \
+    --ts_opt=long_type_string \
+    --ts_opt=force_disable_services \
+    --twirp_ts_out=$typescript_out \
+    ./proto/"${p}"/*.proto
+    { set +x; } 2>/dev/null
+done

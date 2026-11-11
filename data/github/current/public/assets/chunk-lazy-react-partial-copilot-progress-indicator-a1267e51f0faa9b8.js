@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["96773"],{825723(i,u,h){var t=h(705468),b=h(503073);(0,t.k)("copilot-progress-indicator",{Component:b.v})}}]);
+//# sourceMappingURL=chunk-lazy-react-partial-copilot-progress-indicator-a1267e51f0faa9b8-df3f5cf1e1ee330d.js.map

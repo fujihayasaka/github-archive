@@ -1,0 +1,114 @@
+name: "Test Copilot Coding Agent PR Comment"
+
+on:
+  workflow_call:
+    secrets:
+      token:
+        required: true
+      datadog_api_key:
+        required: true
+    inputs:
+      repo_name:
+        required: true
+        type: string
+      reporting_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Create Job
+        id: create-job
+        run: |
+          set -e
+          response=$(curl --fail-with-body https://api.githubcopilot.com/agents/swe/v1/jobs/github/${{ inputs.repo_name }} -X POST -H "Authorization: Bearer $GH_TOKEN" -d '{"problem_statement": "create a file titled \"Test PR Comment: Run ${{ github.run_id }}\", and in it write \"initial content\""}')
+          session_id=$(echo "$response" | jq -r '.session_id')
+          echo "Created coding agent session $session_id"
+          echo "session_id=$session_id" >> $GITHUB_ENV
+        env:
+          GH_TOKEN: ${{ secrets.token }}
+      - id: wait_for_cca
+        timeout-minutes: 15
+        uses: ./.github/actions/wait_for_cca
+        with:
+          token: ${{ secrets.token }}
+          session_id: $session_id
+      - id: validate_initial_session
+        uses: ./.github/actions/validate_session
+        with:
+          token: ${{ secrets.token }}
+          session_id: ${{ env.session_id }}
+      - name: Get PR number and post comment
+        id: post_comment
+        run: |
+          set -e
+          response=$(curl -s --fail-with-body https://api.githubcopilot.com/agents/sessions/$session_id -H "Authorization: Bearer ${{ secrets.token }}" -H "Copilot-Integration-Id: playground-dev")
+          pull_request_id=$(echo "$response" | jq -r '.resource_id')
+          echo "pull_request_id=$pull_request_id" >> $GITHUB_ENV
+
+          all_prs=$(curl -s -H "Authorization: Bearer ${{ secrets.token }}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/github/${{ inputs.repo_name }}/pulls?state=open)
+          for pr in $(jq -r '.[] | @base64' <<< "$all_prs")
+          do
+            decoded_pr=$(echo "$pr" | base64 --decode)
+            if [ "$(jq '.id' <<< "$decoded_pr")" -eq "$pull_request_id" ]
+            then
+              pr_number=$(jq '.number' <<< "$decoded_pr")
+              break
+            fi
+          done
+
+          if [ -z "$pr_number" ]; then
+            echo "Error: no pull request number found"
+            exit 1
+          fi
+
+          curl -s --fail-with-body -X POST -H "Authorization: Bearer ${{ secrets.token }}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/github/${{ inputs.repo_name }}/issues/$pr_number/comments -d '{"body": "@copilot please update the file content to say \"updated via PR comment\" instead"}'
+      - name: Wait for comment session
+        id: wait_for_comment_session
+        timeout-minutes: 3
+        run: |
+          set -e
+          while true; do
+            sessions=$(curl -s --fail-with-body https://api.githubcopilot.com/agents/sessions/resource/pull/$pull_request_id -H "Authorization: Bearer ${{ secrets.token }}" -H "Copilot-Integration-Id: playground-dev")
+            comment_session_id=$(echo "$sessions" | jq -r --arg sid "$session_id" '.sessions | map(select(.id != $sid)) | .[0].id // empty')
+            if [ -n "$comment_session_id" ]; then
+              echo "Found comment session $comment_session_id"
+              echo "comment_session_id=$comment_session_id" >> $GITHUB_ENV
+              break
+            fi
+            echo "Comment session not yet created, sleeping for 10 seconds..."
+            sleep 10
+          done
+      - id: wait_for_comment_cca
+        timeout-minutes: 15
+        uses: ./.github/actions/wait_for_cca
+        with:
+          token: ${{ secrets.token }}
+          session_id: ${{ env.comment_session_id }}
+      - id: validate_session
+        uses: ./.github/actions/validate_session
+        with:
+          token: ${{ secrets.token }}
+          session_id: ${{ env.comment_session_id }}
+      - id: cleanup_pr
+        uses: ./.github/actions/cleanup_pr
+        if: steps.create-job.outcome == 'success'
+        with:
+          token: ${{ secrets.token }}
+          session_id: $session_id
+          repo_name: ${{ inputs.repo_name }}
+      - id: notify_datadog
+        if: ${{ always() && github.event_name == 'schedule' }}
+        uses: ./.github/actions/notify_datadog
+        with:
+          datadog_api_key: ${{ secrets.datadog_api_key }}
+          job_status: ${{ job.status }}
+          test_type: ${{ inputs.reporting_id }}
+          test_name: "PR Comment Integration Test"

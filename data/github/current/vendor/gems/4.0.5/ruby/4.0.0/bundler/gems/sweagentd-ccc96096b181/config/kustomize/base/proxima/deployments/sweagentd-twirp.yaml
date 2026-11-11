@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sweagentd-twirp
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: sweagentd-twirp
+  template:
+    metadata:
+      labels:
+        app: sweagentd-twirp
+      annotations:
+        fluentbit.io/parser: logfmt
+        observability.github.com/splunk_index: sweagentd
+    spec:
+      dnsPolicy: ClusterFirst
+      containers:
+        - name: sweagentd-twirp
+          image: sweagentd
+          command: ["/app/bin/sweagentd-twirp"] # override the default command
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 200m
+              memory: 200Mi
+            limits:
+              cpu: 500m
+              memory: 500Mi
+          envFrom:
+            - configMapRef:
+                name: application-config
+            - configMapRef:
+                name: kube-cluster-metadata
+            - secretRef:
+                name: vault-secrets
+          env:
+            # Moda metadata
+            - name: KUBE_CONTAINER_NAME
+              value: "sweagentd-twirp"
+            - name: KUBE_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: KUBE_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: APP_SHA
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['heaven.githubapp.com/sha']
+            - name: APP_REF
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['heaven.githubapp.com/ref']
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  containerName: sweagentd-twirp
+                  resource: limits.cpu
+            - name: STATS_ADDR
+              value: "$(KUBE_NODE_HOSTNAME):28125"
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          readinessProbe:
+            initialDelaySeconds: 5
+            httpGet:
+              path: /_ping
+              port: http

@@ -1,0 +1,3 @@
+performance.mark("js-parse-end:marketing-signup-5c5da7ab7db2c4b9.js");
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["57567"],{78813(t,i,u){(0,u(221403).lB)(".js-octocaptcha-parent",function(t){let i=t.querySelector(".js-octocaptcha-form-submit");t.addEventListener("input",()=>e(t,i)),t.addEventListener("change",()=>e(t,i))});function e(t,i){t.checkValidity()?i.disabled=!1:i.disabled=!0}}},function(t){t.O(0,["96232"],function(){return t(t.s=78813)}),t.O()}]);
+//# sourceMappingURL=marketing-signup-5c5da7ab7db2c4b9-0eaba66f985d5404.js.map

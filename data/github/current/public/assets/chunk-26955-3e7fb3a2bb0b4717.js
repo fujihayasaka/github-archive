@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["26955"],{873862(i,t,s){s.r(t);var n=s(331635),e=s(194571);class o extends HTMLElement{showPaymentOptions(){this.paymentOptions.hidden=!1}hidePaymentOptions(){this.paymentOptions.hidden=!0}}(0,n.Cg)([e.aC],o.prototype,"paymentOptions",void 0),(0,n.Cg)([(0,e.p_)("stafftools-invoiced-sponsorship-payment-options")],o)}}]);
+//# sourceMappingURL=chunk-26955-3e7fb3a2bb0b4717-1173f9188be41ed4.js.map

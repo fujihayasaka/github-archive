@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["4696"],{37387(e,t,i){i.r(t);var o=i(331635),s=i(194571);class a extends HTMLElement{async connectedCallback(){this.closeDetailsPopover();let e=this.getAttribute("data-codespace-url");e&&(window.location.href=encodeURI(e))}closeDetailsPopover(){let e=document.querySelector(".js-codespaces-details-container");e&&(e.open=!1)}}(0,o.Cg)([(0,s.p_)("editor-forwarder")],a)}}]);
+//# sourceMappingURL=chunk-4696-6b8a7cc5e0882498-75ba7c115542b2d2.js.map

@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["29982"],{712653(i,u,t){t.d(u,{a:()=>n,createPurifier:()=>r,sanitizeWithPurifier:()=>a});var e=t(599418);function n(i,u){return e.A.sanitize(i,u)}function r(i){let u=(0,e.A)();return i&&i(u),u}function a(i,u,t){return u.sanitize(i,t)}}}]);
+//# sourceMappingURL=chunk-29982-8920f9ecdbcddc2e-0dc1efe7334ae630.js.map

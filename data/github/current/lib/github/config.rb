@@ -6666,6 +6666,9 @@ module GitHub
     # Agent Secrets (for Copilot Coding Agent)
     attr_accessor :agent_secrets_app_key
 
+    # ELM Exporter Secrets
+    attr_accessor :elm_exporter_secrets_app_key
+
     # Classroom
     attr_accessor :classroom_api_service_url
     attr_accessor :classroom_hmac_key

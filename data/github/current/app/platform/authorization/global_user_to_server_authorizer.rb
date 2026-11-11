@@ -85,7 +85,34 @@ module Platform
           else
             owner = T.must(repository.owner)
             granular_actor = GlobalIntegrationInstallation.new(auth_context.current_integration, owner)
-            Repository::Resources.filter(granular_actor.permissions).any? ? granular_actor : nil
+
+            if Repository::Resources.filter(granular_actor.permissions).none?
+              nil
+            else
+              # Verify the installation has permissions on this specific repository.
+              # This prevents u2s tokens from accessing repositories outside their installation scope.
+              # See: https://github.com/github/authorization-platform/issues/6700
+              scoped_to_repo = granular_actor.repository_ids(repository_ids: [repository.id]).any?
+
+              GitHub.dogstats.increment(
+                "platform.authorization.global_u2s_authorizer.granular_actor_on_repository",
+                tags: ["scoped_to_repo:#{scoped_to_repo}"]
+              )
+
+              unless scoped_to_repo
+                GitHub.logger.info(
+                  "granular actor not on repository", {
+                    "code.namespace" => "Platform::Authorization::GlobalUserToServerAuthorizer",
+                    "code.function" => "granular_actor_on_repository",
+                    "gh.integration_id" => auth_context.current_integration&.id,
+                    "gh.repo.id" => repository.id,
+                    "gh.repo.owner.id" => owner.id
+                  }
+                )
+              end
+
+              scoped_to_repo ? granular_actor : nil
+            end
           end
         end
       end

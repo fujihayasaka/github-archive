@@ -1,0 +1,637 @@
+#! /usr/bin/env ruby
+
+# Usage:
+#   script/esb-breakdown <support-bundle-path>
+#
+# Generates a markdown report by default. Use --debug or -d to drop into pry for interactive exploration.
+
+# Recommended usage:
+#   script/esb-breakdown ~/Downloads/github-support-bundle > summary.md
+#
+# Read summary.md to get a rough idea of what you want to investigate, then call again with --debug to explore further:
+#   script/esb-breakdown ~/Downloads/github-support-bundle --debug
+#
+# For example, to see exceptions that match a given regex:
+#   match_exceptions(/DependencyGraph/)
+
+# Development notes:
+#  - This script was originally written to investigate dependency-graph/issues/1828, so it's not comprehensive. Feel free to add
+#    whatever you think is useful for whatever you're investigating, it will likely come in handy later on.
+#  - Methods that are useful within a pry session should have `@commands` entries.
+#  - Always memoize expensive operations, like parsing the dependency-graph-api.log file, by assigning the result to an instance variable.
+#  - Use your judgment when adding new sections to the summary, but don't be shy about it. If you think it's useful, add it.
+#  - Remember that the output of this script is markdown, so you can use markdown syntax to make it more readable. Make use of tables whenever possible.
+
+require "json"
+require "time"
+require "active_support/core_ext/hash/indifferent_access"
+require "active_support/core_ext/numeric/time"
+require "pry"
+
+DG_JOB_NAMES = ["VulnerabilitySyncWithDotcom", "RepositoryDependencyManifestChangedJob", "SecurityCenterReconciliationJob", "SecurityCenterUpdateJob", "UpdateRepositoryVulnerabilityAlertsJob"]
+
+# Hacky, but I'll use this map to summarize useful methods for pry interaction
+@commands = {}
+
+def env_check!
+    required_bins = %w(zgrep jq)
+    required_bins.each do |bin|
+        raise "Missing #{bin} in PATH" unless system("which #{bin} > /dev/null")
+    end
+end
+
+# Returns true if the current directory appears to be an ESB
+def inside_esb?
+    File.directory?('docker') && File.directory?('docker/container-logs') && 
+      File.directory?('metadata') && File.file?('metadata/github.conf')
+end
+
+@commands[:nomad_job_status] = "nomad_job_status:\n\tReturns a hash of job names to statuses. Can tell you whether certain jobs (like dg-api) are running."
+def nomad_job_status
+    diagnostics_path = 'metadata/diagnostics.txt'
+    if !File.file?(diagnostics_path)
+        return "No metadata/diagnostics.txt file found."
+    end
+    lines = `cat #{diagnostics_path}`.split("\n")
+    job_status = lines.drop_while { |l| !l.include?("NOMAD JOB STATUS") }.drop(3).take_while{ |l| !l.empty? }
+    if job_status.empty?
+        return "No NOMAD JOB STATUS found in metadata/diagnostics.txt"
+    end
+    statuses = {}
+    job_status.each do |line|
+        job, _type, _priority, status, _time  = line.split(" ")
+        statuses[job] = status
+    end
+    statuses
+end
+
+# some log lines have a "log_message" field that is really hard to parse within the context of a larger reggex, so we cheat here.
+def parse_log_message(str)
+    str.scan(/log_message="(.+)"(\Z| (\w+=))/).flatten.first
+end
+
+# parses lines containing pairs like `key="value"` or `key=value` into a hash
+def parse_keyvals(str)
+  result = str.scan(/(\w+)=(?:"([^"]+)"|(\S+))/).map do |key, quoted_value, unquoted_value|
+    value = quoted_value || unquoted_value
+    [key.to_sym, value]
+  end.to_h.with_indifferent_access
+  if result.has_key?(:log_message)
+    result[:log_message] = parse_log_message(str)
+  end
+  result
+end
+
+# parse a line from the dependency-graph-api.log
+# example: Jun 05 17:29:25 git-juxtin-com-primary dependency-graph-api[2435]: app=dependency-graph-api env=production now="2023-06-05T17:29:25+00:00" remote_address=127.0.0.1 request_method=post request_host=dependency-graph-api path_info="/HasManifests" content_length=0 content_type=application/json user_agent="Faraday v0.17.6" accept=*/* status=404 elapsed=0.002 url="http://dependency-graph-api/twirp/repository-dependencies/DependencyGraphAPI.v1.RepositoryDependenciesAPI/HasManifests"
+def parse_dg_log_line(line)
+    date_s = line.split(' ')[0..2].join(' ')
+    date = DateTime.parse(date_s)
+    node = line.split(' ')[3]
+    process = line.split(' ')[4].delete_suffix(':')
+    keyvals = parse_keyvals(line)
+
+    { time: date, node: node, process: process }.merge(keyvals).with_indifferent_access
+end
+
+# parses a line from the haproxy.log file into something relatively human-readable.
+def parse_haproxy_log_line(line)
+    # example: Jun  5 00:31:58 git-juxtin-com-primary haproxy[17830]: 10.32.71.203:41070 [05/Jun/2023:00:31:58.631] http_protocol web_unicorns/localhost 0/0/1/38/39 200 1427 - - ---- 356/2/3/3/0 0/0 "GET /status HTTP/1.1"
+    date_s = line.split(' ')[0..2].join(' ')
+    date = DateTime.parse(date_s)
+    host = line.split(' ')[3]
+    process = line.split(' ')[4].delete_suffix(':')
+    source = line.scan(/([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}:[0-9]+)/).flatten.first
+    accepted_at = line.scan(/ \[(.+)\] /).flatten.first # TODO: parse
+    front_end = line.scan(/\] (\S+) /).flatten.first
+    target = line.scan(/ ([a-z_]+\/[a-z_]+) /).flatten.first
+    status = line.scan(/[0-9]+\/[0-9]+\/[0-9]+\/[0-9]+\/[0-9]+ ([0-9]+) [0-9]+/).flatten.first
+    operation = line.scan(/"([A-Z]+ [^"]+)"/).flatten.first
+    bytes = line.scan(/ ([0-9]+) -/).flatten.first
+    connection_stats = line.scan(/-- (\d+)\/(\d+)\/(\d+)\/(\d+)\/(\d+) /).first
+    queue_stats = line.scan(/ (\d+)\/(\d+)\Z/).first
+    result = {
+        time: date,
+        host: host,
+        process: process,
+        source: source,
+        accepted_at: accepted_at,
+        front_end: front_end,
+        target: target,
+        bytes: bytes,
+        status: status,
+        operation: operation,
+        connection_stats: {
+            active: connection_stats[0],
+            front_end: connection_stats[1],
+            back_end: connection_stats[2],
+            server: connection_stats[3],
+            retries: connection_stats[4]
+        }.compact.transform_values { |s| s.to_i }
+    }.with_indifferent_access
+
+    if queue_stats 
+        result[:queue_stats] = {
+            server_queue_size: queue_stats[0],
+            back_end_queue_size: queue_stats[1]
+        }.compact.transform_values {|s| s.to_i }
+    end
+
+    if line.include? "] ssh_protocol "
+        timings = line.scan(/ ([0-9]+)\/([0-9]+)\/([0-9]+) /).first
+        result[:timings] = {
+            queued: timings[0],
+            establishing_connection: timings[1],
+            total: timings[2]
+        }.compact.transform_values { |s| s.to_i }
+    elsif line.include? "] https_protocol"
+        timings = line.scan(/ ([0-9]+)\/([0-9]+)\/([0-9]+)\/([0-9]+)\/([0-9]+) /).first
+        result[:timings] = {
+            waiting_for_full_request: timings[0],
+            queued: timings[1],
+            establishing_connection: timings[2],
+            waiting_for_response: timings[3],
+            total: timings[4]
+        }.compact.transform_values { |s| s.to_i }
+    end
+    result
+end
+
+# parses a line representing an ActiveJob event from production.log
+def parse_activejob_line(line)
+    # example: "[ActiveJob] [AddToSearchIndexJob] [f73cdb99-bfb4-449e-8c30-27dae3a08a14] Performing AddToSearchIndexJob (Job ID: f73cdb99-bfb4-449e-8c30-27dae3a08a14) from Aqueduct(index_high) enqueued at 2023-06-08T05:39:11.248666869Z with arguments: \"enterprise\", 1, {\"submitted_at\"=>1686202751228, \"guid\"=>\"733cde5ef7e4a27d64c0260da0957006e249ae86\"}"
+    status, job_name, job_id = line.scan(/ ([A-Za-z]+) ([A-Za-z]+Job) \(Job ID: ([a-z0-9\-]+)\)/).flatten
+    started_time_s = line.scan(/enqueued at ([0-9\-T:Z\.]+)/).flatten.first
+    started_time = started_time_s ? DateTime.parse(started_time_s) : nil
+    time_taken = line.scan(/in ([0-9\.]+)ms/).flatten.first.to_f
+    arguments = line.include?("with arguments") ? line.scan(/with arguments: (.*)/).flatten.first : nil
+    {
+        job: job_name,
+        status: status,
+        job_id: job_id,
+        started_time: started_time,
+        time: started_time,
+        time_taken: time_taken,
+        arguments: arguments
+    }.with_indifferent_access
+end
+
+@commands[:match_haproxy_logs] = "match_haproxy_logs(substring):\n\tReturns an array of hashes for haproxy log lines containing the substring."
+def match_haproxy_logs(substring)
+    lines = `zgrep -F '#{substring}' system-logs/haproxy.log*`.split("\n")
+    lines.map do |line|
+        begin
+            parse_haproxy_log_line(line)
+        rescue StandardError => e
+            puts "Error parsing line: #{line}"
+        end
+    end.compact
+end
+
+@commands[:haproxy_logs] = "haproxy_logs:\n\tReturns an array of hashes representing haproxy events. This takes a long time to populate, but results are cached. Use match_haproxy_logs if you don't need every single line."
+def haproxy_logs
+    return @haproxy_logs if @haproxy_logs
+    lines = `zgrep -F 'haproxy' system-logs/haproxy.log*`.split("\n")
+    @haproxy_logs = lines.map do |line|
+        begin
+            parse_haproxy_log_line(line)
+        rescue StandardError => e
+            puts "Error parsing line: #{line}"
+        end
+    end.compact
+end
+
+@commands[:activejob_logs] = "activejob_logs:\n\tReturns an array of hashes representing activejob events."
+def activejob_logs
+    return @activejob_logs if @activejob_logs
+    lines = `zgrep -F '\[ActiveJob\]' github-logs/production.log*`.split("\n")
+    @activejob_logs = lines.map do |line|
+        begin
+            parse_activejob_line(line)
+        rescue StandardError => e
+            puts "Error parsing line: #{line}"
+        end
+    end.compact
+end
+
+def parse_migration_log_line(file_path, line)
+    begin
+        # path example: "./configuration-logs/dbmigration/3.8.5/20230629-132041/dependency-graph-api.log"
+        version = file_path.split("/")[3] || "unknown"
+        service = file_path.split("/")[5].split(".")[0] || "unknown"
+
+        # line example: "2023/07/13 13:14:03 Completed database migrations [name=dependency-snapshots-api status=success exitcode=0 elapsed=0.246s]"
+        date_s = line.split(" ")[0..1].join(" ")
+        date = DateTime.parse(date_s)
+        message = line.scan(/\] (.*)/).flatten.first
+        kvs_s = line.scan(/\[([^\]]+)\]/).flatten.first
+        kvs = parse_keyvals(kvs_s)
+        {
+            version: version,
+            service: service,
+            file_path: file_path,
+            time: date,
+            **kvs
+        }.with_indifferent_access
+    rescue StandardError => e
+        puts "Error parsing #{file_path} (#{e}):\n\t#{line}"
+        raise
+    end
+end
+
+@commands[:migration_logs] = "migration_logs:\n\tReturns an array of hashes representing migration events. Limited to dependency-graph-api.log and dependency-snapshots-api.log files."
+def migration_logs
+    return @migration_logs if @migration_logs
+    files = `find ./configuration-logs/dbmigration -name "dependency-graph-api.log*" -o -name "dependency-snapshots-api.log*"`.split("\n")
+    @migration_logs = files.map { |file|
+        lines = `cat #{file}`.split("\n")
+        summary = parse_migration_log_line(file, lines.last)
+        summary[:logs] = lines.join("\n")
+        summary
+    }.flatten.compact
+end
+
+@commands[:migration_failures] = "migration_failures:\n\tReturns an array of hashes representing migration failures. Limited to dependency-graph-api.log and dependency-snapshots-api.log files."
+def migration_failures
+    migration_logs.filter { |log| log[:status] != "success" }
+end
+
+# note: this probably shouldn't be called interactively because passing patterns to grep is messy.
+def grep_exceptions(substring)
+    # return an array of the json payloads matching the pattern
+    log_files = `ls github-logs/exceptions.log*`.split("\n")
+    logs = log_files.map { |file| `zgrep -iF "#{substring}" #{file} |  jq 'del(.worker)' -c`.split("\n").map { |line| JSON.parse(line) } }.flatten
+    logs.map { |log|
+        log["created_at"] = DateTime.parse(log["created_at"]) if log["created_at"]
+        # let's make sure every event has a "time" key for convenience
+        log["time"] = log["created_at"] if log["created_at"]
+        log.with_indifferent_access
+    }
+end
+
+@commands[:all_exceptions] = "all_exceptions:\n\tReturns an array of hashes representing exceptions."
+def all_exceptions
+    @all_exceptions ||= grep_exceptions('')
+end
+
+@commands[:match_exceptions] = "match_exceptions(<pattern>):\n\tReturns exception hashes matching the given pattern. Probably the most useful method here."
+def match_exceptions(pattern)
+    all_exceptions.select { |log| log.to_s =~ pattern }
+end
+
+@commands[:grep_production_log] = "grep_production_log(<substring>):\n\tReturns a hash of job names to arrays of lines containing the substring."
+def grep_production_log(pattern)
+    files = `ls github-logs/production.log*`.split("\n")
+    results = []
+    files.each do |file|
+        results += `zgrep #{pattern} #{file}`.split("\n")
+    end
+    results.group_by { |r| r.split(' ')[1].delete_prefix('[').delete_suffix(']') }
+end
+
+@commands[:job_enqueues] = "job_enqueues:\n\tReturns a hash of job names to hashes representing enqueued jobs."
+def job_enqueues
+    @job_enqueues ||= grep_production_log('Enqueued')
+end
+
+@commands[:job_starts] = "timeouts:\n\tReturns an array of hashes representing jobs that were started."
+def job_starts
+    @job_starts ||= grep_production_log('Performing')
+end
+
+@commands[:job_completions] = "job_completions:\n\tReturns a hash of job names to hashes representing completed jobs."
+def job_completions
+    @job_completions ||= grep_production_log('Performed')
+end
+
+@commands[:job_stats] = "job_stats(<job_name>):\n\tReturns a hash of stats for the given job name."
+def job_stats(job_name)
+    starts = job_starts[job_name]
+    completions = job_completions[job_name]
+    enqueues = job_enqueues[job_name]
+    job_timeouts = timeouts.select { |t| t["job"] == job_name }
+    summary = {
+        enqueues: enqueues&.count || 0,
+        starts: starts&.count || 0,
+        completions: completions&.count || 0,
+        timeouts: job_timeouts&.count || 0,
+        success_rate: 0 # will be updated below
+    }
+    if summary[:starts] == 0 || summary[:completions] == 0
+        return summary
+    end
+    summary[:success_rate] = summary[:starts] == 0 ? 0 : ((summary[:completions].to_f / summary[:starts].to_f)*100).round(4)
+    summary.with_indifferent_access
+end
+
+@commands[:all_job_stats] = "all_job_stats:\n\tReturns a hash of job names to hashes representing stats for each ActiveJob."
+def all_job_stats
+    return @all_job_stats if @all_job_stats
+    jobs = job_starts.keys
+    @all_job_stats = jobs.map { |job_name| [job_name, job_stats(job_name)] }.to_h.with_indifferent_access
+end
+
+@commands[:timeouts] = "timeouts:\n\tReturns an array of hashes representing exceptions containing 'read timeout reached'."
+def timeouts
+    @timeouts ||= grep_exceptions("read timeout reached")
+end
+
+@commands[:events_within] = "events_within(<target>, <candidates>, <duration>):\n\tReturns an array of events within duration of target.\n\tEx: events_within(successes(\"HasManifests\").first, failures(\"HasManifests\"), 5.minutes)"
+def events_within(target, candidates, duration)
+    candidates.select { |c| 
+        diff_secs = (c["time"] - target["time"]).to_f * 86400
+        diff_secs.seconds.abs <= duration
+    }.map{ |m|
+        m["delta_sec"] = (m["time"] - target["time"]).to_f * 86400 # convert to seconds
+        m
+    }.sort_by { |m| m["delta_sec"].abs }
+end
+
+@commands[:group_by_hour] = "group_by_hour(<events>):\n\tReturns a hash of arrays of events grouped by hour. Useful for seeing coarse time-based patterns."
+def group_by_hour(events)
+    # group events together which happened in the same clock hour
+    events.group_by { |e| e["time"].strftime("%Y-%m-%d %H") }
+end
+
+@commands[:group_by_minute] = "group_by_minute(<events>):\n\tReturns a hash of arrays of events grouped by minute. Useful for seeing fine-grained time-based patterns."
+def group_by_minute(events)
+    # group events together which happened in the same clock minute
+    events.group_by { |e| e["time"].strftime("%Y-%m-%d %H:%M") }
+end
+
+# Pass empty string for all events
+@commands[:starts] = "starts(<pattern>):\n\tReturns an array of hashes representing API request starts matching the pattern. Use '' for all events."
+def starts(pattern)
+    `grep -i '#{pattern}' docker/container-logs/dependency-graph-api.log | grep -v 'status=' | grep 'Started '`.split("\n").map { |line| parse_dg_log_line(line) }
+end
+
+# Pass empty string for all events
+@commands[:successes] = "successes(<pattern>):\n\tReturns an array of hashes representing API request successes matching the pattern. Use '' for all events."
+def successes(pattern)
+    `grep -i '#{pattern}' docker/container-logs/dependency-graph-api.log | grep 'status=[24]'`.split("\n").map { |line| parse_dg_log_line(line) }
+end
+
+# Pass empty string for all events
+@commands[:failures] = "failures(<pattern>):\n\tReturns an array of hashes representing API request failures matching the pattern. Use '' for all events."
+def failures(pattern)
+    `grep -i '#{pattern}' docker/container-logs/dependency-graph-api.log | grep 'status=5'`.split("\n").map { |line| parse_dg_log_line(line) }
+end
+
+@commands[:dg_api_5xx] = "dg_api_5xx:\n\tReturns an array of hashes representing API request failures with status 5xx."
+def dg_api_5xx
+    failures("")
+end
+
+# i.e., how many times was each exception class raised in each job?
+@commands[:error_classes] = "error_classes:\n\tReturns a map of class => { job => count }"
+def error_classes
+    @error_classes ||= all_exceptions.group_by { |e| e["class"] }.transform_values { |grouped_exceptions|
+        grouped_exceptions.group_by {|e|
+            # Trying to make sure we get _something_ identifiable from every exception
+            e["job"] || e["controller"] || e["controller_action"] || e["argv"]&.strip || "unknown"
+        }.transform_values(&:count)
+    }
+end
+
+def print_error_classes_summary
+    hrule
+    puts "## Exception classes summary:"
+    puts ""
+    ordered = error_classes.transform_values { |v| v.values.sum }.sort_by { |k, v| v }.reverse.map(&:first)
+    ordered.each do |class_name|
+        exceptions = error_classes[class_name]
+        puts "### #{class_name} (#{exceptions.values.sum} total)"
+        puts ""
+        puts format_table(exceptions, key_label: "Job/Controller", value_label: "Count")
+        puts ""
+    end
+    puts "Total exceptions: #{error_classes.values.map(&:values).flatten.sum}"
+end
+
+def print_endpoint_stats(pattern)
+    s = successes(pattern)
+    st = starts(pattern)
+    f = failures(pattern)
+    avg_success_time = s.length > 0 ? s.map { |e| e["elapsed"].to_f }.sum / s.length : 0
+    max_success_time = s.map { |e| e["elapsed"].to_f }.max || 0
+    puts "### #{pattern} calls:\n"
+    puts ""
+    puts format_table({
+        "Started" => st.length,
+        "Succeeded" => s.length,
+        "Failed" => f.length,
+        "Average success time" => "#{avg_success_time.round(4)}s",
+        "Maximum success time" => "#{max_success_time.round(4)}s",
+        "Success rate" => "#{(s.length.to_f / st.length * 100).round(2)}%"
+    }, key_label: "Status", value_label: "Count")
+    puts ""
+end
+
+def print_api_timeout_stats
+    total = starts("*").length
+    timed_out = timeouts.length
+    hrule
+    puts "## API timeouts:\n"
+    puts format_table({
+        "Total" => total,
+        "Timed out" => timed_out,
+        "Percentage" => "#{(timed_out.to_f / total * 100).round(2)}%"
+    }, key_label: "Status", value_label: "Count")
+end
+
+def print_api_stats
+    hrule
+    print "## API stats:"
+    puts ""
+    print_endpoint_stats("HasManifest")
+    print_endpoint_stats("_ping")
+    print_endpoint_stats("/query")
+    print_endpoint_stats("GetDependenciesForRepository")
+end
+
+def dg_job_names
+    job_starts.select { |s| s["app"] == "github-dependency-graph" }.map { |s| s["job"] }.uniq
+end
+
+def high_level_timeout_data
+    # the total number of ActiveJob timeouts
+    stats = all_job_stats
+    dg_events = stats.select { |k,v| DG_JOB_NAMES.include?(k) }
+    non_dg_events = stats.select { |k,v| !DG_JOB_NAMES.include?(k) }
+    {
+        dg_job_timeouts: dg_events.map { |k,v| v[:timeouts] }.sum,
+        non_dg_job_timeouts: non_dg_events.map { |k,v| v[:timeouts] }.sum,
+    }
+end
+
+def print_job_stats
+    puts "## Dependency Graph ActiveJob Stats:"
+    puts ""
+    DG_JOB_NAMES.each do |job|
+        stats = job_stats(job)
+        stats[:success_rate] = "#{stats[:success_rate].round(2)}%" if stats[:success_rate]
+        next if stats[:starts] == 0 && stats[:enqueues] == 0
+        puts "### #{job}:"
+        puts ""
+        puts format_table(stats.transform_keys { |k| k.to_s.gsub("_", " ").capitalize }, key_label: "Event type", value_label: "Count")
+        puts ""
+    end
+    hrule
+end
+
+def print_other_jobs_with_timeouts
+    stats = all_job_stats.select { |k,v| !DG_JOB_NAMES.include?(k) }.select { |k,v| v[:timeouts] > 0 }
+    if stats.empty?
+        puts "No non-Dependency Graph jobs with timeouts"
+        return
+    end
+    hrule
+    puts "## Non-Dependency Graph Jobs With Timeouts:"
+    puts ""
+    stats.each do |job, stats|
+        puts "### #{job}:"
+        puts ""
+        puts format_table(stats.transform_keys { |k| k.to_s.gsub("_", " ").capitalize }, key_label: "Event type", value_label: "Count")
+        puts ""
+    end
+    hrule
+end
+
+@commands[:commands] = "help:\n\tPrints this help message"
+def commands
+    @commands.each do |k, v|
+        puts v
+    end
+    puts
+end
+
+def print_nomad_job_status
+    puts "## Nomad Job Status:"
+    puts ""
+    # all the jobs we're likely to care about start with "depend*"
+    # if you want to see the rest, use debug mode and inspect the nomad_job_status hash
+    depend_nomad_jobs = nomad_job_status.select { |k,v| k.start_with?("depend") }
+    puts format_table(depend_nomad_jobs, key_label: "Job", value_label: "Status")
+    puts ""
+    hrule
+end
+
+def esb_metadata
+    metadata_contents = File.read("metadata/github.conf")
+    name = metadata_contents.scan(/\s+name\s+=\s+(.*)/).flatten.first
+    version = metadata_contents.scan(/\s+package-version\s+=\s+(.*)/).flatten.first
+    from = all_exceptions.first['time']
+    to = all_exceptions.last['time']
+    {
+        customer_name: name,
+        version: version,
+        from: from,
+        to: to
+    }
+end
+
+def pessimistic_json_parse(file)
+    unless File.file?(file)
+        puts "File not found: #{file}"
+        return {}
+    end
+    begin
+        JSON.parse(File.read(file))
+    rescue JSON::ParserError => e
+        puts "Error parsing #{file}: #{e}"
+        {}
+    end
+end
+
+def config_highlights
+    config = pessimistic_json_parse("metadata/configapply.json")
+    replication_role = File.read("metadata/diagnostics.txt").scan(/repl\-state: ([a-z]+)/).flatten.first || "unknown"
+    {
+        "Dependency graph enabled?" => (config["is_dependency_graph_enabled"] || "malformed or missing configapply.json"),
+        "Replication role" => replication_role,
+    }
+end
+
+def print_header
+    puts "# DG Support Bundle Analysis"
+    puts
+    puts "Customer: #{esb_metadata[:customer_name]}"
+    puts
+    puts "Version: #{esb_metadata[:version]}"
+    puts
+    puts "Includes data from #{esb_metadata[:from]} to #{esb_metadata[:to]}."
+    puts
+    puts format_table(config_highlights, key_label: "Config", value_label: "Value")
+    hrule
+end
+
+def hrule
+    puts "\n---\n"
+end
+
+def format_table(data, key_label: "", value_label: "")
+    return "" if data.empty?
+    # Determine the maximum width of each column
+    left_column_width = [key_label.length, data.keys.map{ |k| k.to_s.length }].flatten.max
+    right_column_width = [value_label.length, data.values.map{ |v| v.to_s.length }].flatten.max
+    
+    # Build the table header
+    header = "| #{key_label.ljust(left_column_width)} | #{value_label.ljust(right_column_width)} |"
+    
+    # Build the separator row
+    separator = "|" + "-" * (left_column_width + 2) + "|" + "-" * (right_column_width + 2) + "|"
+    
+    # Build the table rows
+    rows = data.map do |k, v|
+      "| #{k.ljust(left_column_width)} | #{v.to_s.ljust(right_column_width)} |"
+    end
+    
+    # Combine the header, separator, and rows into a single string
+    [header, separator, rows].flatten.join("\n")
+end
+
+def get_target_dir
+    path = ARGV[0]
+    dir = File.expand_path(path)
+    raise "#{dir} does not exist" unless File.directory?(dir)
+    dir
+end
+
+def set_debug_mode
+    if ARGV.include?("--debug") || ARGV.include?("-d")
+        ARGV.delete("--debug")
+        ARGV.delete("-d")
+        @debug = true
+    end
+end
+
+def main
+    env_check!
+    set_debug_mode
+    dir = get_target_dir
+    FileUtils.cd(dir)
+    raise "#{dir} does not appear to be a support bundle" unless inside_esb?
+    if @debug
+        # Use 'commands' to see useful methods that are now in scope.
+        # control-d to exit
+        require "pry"; binding.pry
+        exit
+    end
+
+    print_header
+    print_nomad_job_status
+    print_job_stats
+    print_other_jobs_with_timeouts
+    print_error_classes_summary
+    print_api_stats
+end
+
+def debug!
+    binding.pry unless defined(@stop)
+end
+
+def stop!
+    @stop = true
+end
+
+main

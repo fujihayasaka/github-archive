@@ -1,0 +1,77 @@
+# For end-to-end tests, build blackbird in Docker instead of downloading an image from ghcr.
+# Used by `script/setup` when `$BLACKBIRD_SRCDIR` is set.
+services:
+  blackbird-1:
+    pull_policy: ${BLACKBIRD_BUILD_OVERRIDE:-build}
+    platform: ${BLACKBIRD_PLATFORM:-}
+    build:
+      context: ${BLACKBIRD_SRCDIR}
+      dockerfile: Dockerfile.dev
+      secrets:
+        - git_credentials
+    # If a service has both `image` and `build` keys, docker compose builds it
+    # and tags it locally with the given name.
+    image: blackbird-dev-build
+
+  blackbird-2:
+    pull_policy: never
+    depends_on:
+      - blackbird-1
+    image: blackbird-dev-build
+
+  blackbird-cache-1:
+    pull_policy: never
+    depends_on:
+      - blackbird-1
+    image: blackbird-dev-build
+
+  blackbird-mw-semantic:
+    pull_policy: never
+    depends_on:
+      - blackbird-1
+    image: blackbird-dev-build
+
+  blackbird-mw-admin:
+    pull_policy: build
+    platform: ${BLACKBIRD_PLATFORM:-}
+    build:
+      context: ${BLACKBIRD_MW_SRCDIR}
+      dockerfile: Dockerfile
+      args:
+        BLACKBIRD_IMAGE: ${BLACKBIRD_IMAGE:-ghcr.io/github/blackbird/blackbird:main}
+        BLACKBIRD_BUILDER_IMAGE: ${BLACKBIRD_BUILDER_IMAGE:-}
+        BLACKBIRD_CLIB_IMAGE: ${BLACKBIRD_CLIB_IMAGE:-blackbird-dev-build}
+        FRONTEND_MODE: without-frontend
+    depends_on:
+      - blackbird-1
+    image: blackbird-mw-dev-build
+
+  blackbird-mw-ingest:
+    pull_policy: never
+    build:
+      context: ${BLACKBIRD_MW_SRCDIR}
+      dockerfile: Dockerfile
+      args:
+        BLACKBIRD_IMAGE: ${BLACKBIRD_IMAGE:-ghcr.io/github/blackbird/blackbird:main}
+        BLACKBIRD_BUILDER_IMAGE: ${BLACKBIRD_BUILDER_IMAGE:-}
+        BLACKBIRD_CLIB_IMAGE: ${BLACKBIRD_CLIB_IMAGE:-blackbird-dev-build}
+    depends_on:
+      - blackbird-mw-admin
+    image: blackbird-mw-dev-build
+
+  blackbird-mw-query:
+    pull_policy: never
+    build:
+      context: ${BLACKBIRD_MW_SRCDIR}
+      dockerfile: Dockerfile
+      args:
+        BLACKBIRD_IMAGE: ${BLACKBIRD_IMAGE:-ghcr.io/github/blackbird/blackbird:main}
+        BLACKBIRD_BUILDER_IMAGE: ${BLACKBIRD_BUILDER_IMAGE:-}
+        BLACKBIRD_CLIB_IMAGE: ${BLACKBIRD_CLIB_IMAGE:-blackbird-dev-build}
+    depends_on:
+      - blackbird-mw-admin
+    image: blackbird-mw-dev-build
+
+secrets:
+  git_credentials:
+    file: ${GIT_CREDENTIALS}

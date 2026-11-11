@@ -12,6 +12,7 @@ module Secrets::AppsHelper
   BYOK_CUSTOM_MODELS_APP_NAME = "byok_custom_models"
   COPILOT_BYOK_APP_NAME = "copilot_byok"
   AGENTS_APP_NAME = "agents"
+  ELM_EXPORTER_APP_NAME = "elm_exporter"
 
   # A list of apps that are enabled and visible to the current user.
   def self.enabled_app_names(user, org: nil)
@@ -92,6 +93,11 @@ module Secrets::AppsHelper
         app: Apps::Privileged.integration(:agent_secrets),
         enabled: agents_enabled?(user, org),
         key_name: Platform::EncryptionKeys::AGENT_SECRETS,
+      },
+      ELM_EXPORTER_APP_NAME => {
+        app: Apps::Privileged.integration(:elm_exporter_secrets),
+        enabled: false, # We do not want to show this in the generic secrets settings page
+        key_name: Platform::EncryptionKeys::ELM_EXPORTER_SECRETS,
       },
     }
   end

@@ -1,0 +1,87 @@
+# frozen_string_literal: true
+
+# rubocop:disable Lint/AssignmentInCondition
+
+require_relative "probe"
+require_relative 'el'
+
+module Datadog
+  module DI
+    # Creates Probe instances from remote configuration payloads.
+    #
+    # Due to the dynamic instrumentation product evolving over time,
+    # it is possible that the payload corresponds to a type of probe that the
+    # current version of the library does not handle.
+    # For now ArgumentError is raised in such cases (by ProbeBuilder or
+    # Probe constructor), since generally DI is meant to rescue all exceptions
+    # internally and not propagate any exceptions to applications.
+    # A dedicated exception could be added in the future if there is a use case
+    # for it.
+    #
+    # @api private
+    module ProbeBuilder
+      # Steep: https://github.com/soutaro/steep/issues/363
+      PROBE_TYPES = { # steep:ignore IncompatibleAssignment
+        'LOG_PROBE' => :log,
+      }.freeze
+
+      module_function
+
+      def build_from_remote_config(config)
+        # The validations here are not yet comprehensive.
+        type = config.fetch('type')
+        type_symbol = PROBE_TYPES[type] or raise ArgumentError, "Unrecognized probe type: #{type}"
+        cond = if cond_spec = config['when']
+          unless cond_spec['dsl'] && cond_spec['json']
+            raise ArgumentError, "Malformed condition specification for probe: #{config}"
+          end
+          compiled = EL::Compiler.new.compile(cond_spec['json'])
+          EL::Expression.new(cond_spec['dsl'], compiled)
+        end
+        Probe.new(
+          id: config.fetch("id"),
+          type: type_symbol,
+          file: config["where"]&.[]("sourceFile"),
+          # Sometimes lines are sometimes received as an array of nil
+          # for some reason.
+          line_no: config["where"]&.[]("lines")&.compact&.map(&:to_i)&.first,
+          type_name: config["where"]&.[]("typeName"),
+          method_name: config["where"]&.[]("methodName"),
+          # We should not be using the template for anything - we instead
+          # use +segments+ - but keep the template for debugging.
+          template: config["template"],
+          template_segments: build_template_segments(config['segments']),
+          capture_snapshot: !!config["captureSnapshot"],
+          max_capture_depth: config["capture"]&.[]("maxReferenceDepth"),
+          max_capture_attribute_count: config["capture"]&.[]("maxFieldCount"),
+          rate_limit: config["sampling"]&.[]("snapshotsPerSecond"),
+          condition: cond,
+        )
+      rescue KeyError => exc
+        raise ArgumentError, "Malformed remote configuration entry for probe: #{exc.class}: #{exc}: #{config}"
+      end
+
+      def build_template_segments(segments)
+        segments&.map do |segment|
+          if Hash === segment
+            if str = segment['str']
+              str
+            elsif ast = segment['json']
+              unless dsl = segment['dsl']
+                raise ArgumentError, "Missing dsl for json in segment: #{segment}"
+              end
+              compiled = EL::Compiler.new.compile(ast)
+              EL::Expression.new(dsl, compiled)
+            else
+              # TODO report to telemetry?
+            end
+          else
+            # TODO report to telemetry?
+          end
+        end&.compact
+      end
+    end
+  end
+end
+
+# rubocop:enable Lint/AssignmentInCondition

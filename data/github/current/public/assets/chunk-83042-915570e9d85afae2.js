@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["83042"],{291769(o,e,i){var t=i(331635),u=i(194571);class c extends HTMLElement{toggleCouponCode(o){let e=o.target;this.couponCodeSection&&(this.couponCodeSection.hidden=!e.checked)}}(0,t.Cg)([u.aC],c.prototype,"couponCodeSection",void 0),(0,t.Cg)([(0,u.p_)("licensing-apply-coupon-code")],c)}}]);
+//# sourceMappingURL=chunk-83042-915570e9d85afae2-ac8ccf855a90ebb6.js.map

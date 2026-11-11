@@ -1,0 +1,45 @@
+#!/bin/bash
+set -e
+
+# Start kafka-lite for integration testing
+echo "Starting kafka-lite for integration testing..."
+
+# Check if Docker is running
+if ! docker info >/dev/null 2>&1; then
+    echo "❌ Docker is not running. Please start Docker first."
+    exit 1
+fi
+
+# Check if kafka is already running
+if docker ps | grep -q kafka-lite; then
+    echo "✅ kafka-lite is already running"
+else
+    echo "🚀 Starting kafka-lite..."
+    docker compose up -d kafka
+
+    echo "⏳ Waiting for kafka-lite to be ready..."
+    # Wait for kafka-lite to be healthy using a simple timeout approach
+    for i in {1..30}; do
+        if timeout 1 bash -c "echo > /dev/tcp/localhost/9092" 2>/dev/null; then
+            echo "✅ kafka-lite is ready!"
+            break
+        fi
+
+        if [ "$i" -eq 30 ]; then
+            echo "❌ kafka-lite failed to start within 30 seconds"
+            echo "Showing kafka-lite logs:"
+            docker compose logs kafka
+            exit 1
+        fi
+
+        echo "Waiting... ($i/30)"
+        sleep 1
+    done
+fi
+
+echo ""
+echo "🎉 kafka-lite is ready for integration testing!"
+echo "   - Broker: localhost:9092"
+echo "   - Topic: github.repositories.v1.Created (pre-seeded)"
+echo "   - To stop: docker compose stop kafka"
+echo ""

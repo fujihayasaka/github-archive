@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["32729"],{761024(t,e,u){function i(t,e){let u=t.closest(".js-write-bucket");u&&u.classList.toggle("focused",e)}function n(t){let e=t.currentTarget;e instanceof Element&&i(e,!1)}u.r(e),(0,u(163557).uE)(".js-comment-field",function(t){i(t,!0),t.addEventListener("blur",n,{once:!0})})}}]);
+//# sourceMappingURL=chunk-32729-322331add664ff91-de22bd69f583fc86.js.map

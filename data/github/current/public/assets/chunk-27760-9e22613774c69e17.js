@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["27760"],{417619(a,i,t){t.r(i);var e=t(821744);(0,t(740893).JW)("form.js-ajax-pagination, .js-ajax-pagination form",async function(a,i){let t,s=a.closest(".js-ajax-pagination");try{t=await i.html()}catch(a){if(a.response&&404===a.response.status)return void s.remove();throw a}s.replaceWith(t.html),(0,e.h)(a,"page:loaded")})}}]);
+//# sourceMappingURL=chunk-27760-9e22613774c69e17-533ae9a5e4d13429.js.map

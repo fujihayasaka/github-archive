@@ -1,0 +1,1 @@
+import{Oc as e,lm as t}from"./main-Czp8eV6A.js";var n={userSelectNone:`ScreenReaderHeading-module_JpekQq_userSelectNone`},r=t();function i({as:t,text:i,...a}){return(0,r.jsx)(e,{as:t,className:`sr-only ${n.userSelectNone}`,"data-testid":`screen-reader-heading`,...a,children:i})}i.displayName=`ScreenReaderHeading`;export{i as t};

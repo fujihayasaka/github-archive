@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["251"],{901110(t,e,u){u.r(e),(0,u(821744).on)("details-menu-selected",".js-sync-select-menu-text",function(t){let e=document.querySelector(".js-sync-select-menu-button");e.textContent=t.detail.relatedTarget.querySelector("span[data-menu-button-text]").textContent,e.focus()},{capture:!0})}}]);
+//# sourceMappingURL=chunk-251-33325afdbb68693a-d9bd3ff47ae20a5c.js.map

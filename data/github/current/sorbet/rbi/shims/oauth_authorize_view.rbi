@@ -1,7 +1,7 @@
 # typed: true
+# frozen_string_literal: true
 
 class Oauth::AuthorizeView
-
   # dynamically defined scope reader methods
 
   sig { returns(T::Boolean) }
@@ -80,7 +80,13 @@ class Oauth::AuthorizeView
   def org_read_access?; end
 
   sig { returns(T::Boolean) }
+  def org_manage_runners_access?; end
+
+  sig { returns(T::Boolean) }
   def org_write_access?; end
+
+  sig { returns(T::Boolean) }
+  def packages_delete_access?; end
 
   sig { returns(T::Boolean) }
   def packages_read_access?; end

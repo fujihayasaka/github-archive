@@ -1,0 +1,143 @@
+name: "Test Copilot Coding Agent Agent-Task CLI"
+
+on:
+  workflow_call:
+    secrets:
+      token:
+        required: true
+      datadog_api_key:
+        required: true
+    inputs:
+      reporting_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update gh
+        run: |
+          wget https://github.com/cli/cli/releases/download/v${cli_version}/gh_${cli_version}_linux_amd64.tar.gz
+          tar xzf gh_${cli_version}_linux_amd64.tar.gz
+          sudo rsync -av --ignore-existing gh_${cli_version}_linux_amd64/* /usr/local/
+        env:
+          cli_version: "2.81.0"
+
+      - name: Checkout sweagentd (for actions)
+        uses: actions/checkout@v5
+        with:
+          path: sweagentd
+
+      - name: Checkout cca-automated-testing
+        uses: actions/checkout@v5
+        with:
+          repository: github/cca-automated-testing
+          path: cca-automated-testing
+          token: ${{ secrets.token }}
+
+      - name: Create issue
+        id: create_issue
+        run: |
+          cd cca-automated-testing
+          output=$(/usr/local/bin/gh issue create --title "Create file for ${{ github.run_id }}" --body "create a file titled \"Test Job API: Run ${{ github.run_id }}\", and in it write \"run successful\"" --assignee @copilot)
+          issue_number=$(echo "$output" | grep -oE '[^/]+$')
+          echo "Created issue number $issue_number"
+          echo "issue_number=$issue_number" >> $GITHUB_ENV
+        env:
+          GH_TOKEN: ${{ secrets.token }}
+
+      - name: Wait for session creation
+        id: wait_for_session_creation
+        timeout-minutes: 3
+        run: |
+          echo "Finding session for issue number $issue_number"
+          while true; do
+            issue_timeline=$(curl -s --fail-with-body -H "Authorization: Bearer ${{ secrets.token }}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/github/cca-automated-testing/issues/$issue_number/timeline)
+
+            # Hack: Issues probably contain newline characters in descriptions, comments, etc, so we encode it as base64 to get through the loop
+            for event in $(jq -r '.[] | @base64' <<< "$issue_timeline")
+            do
+              decoded_event=$(echo "$event" | base64 --decode)
+              if [ $(jq -r '.event' <<< "$decoded_event") != "cross-referenced" ]
+              then
+                continue
+              fi
+
+              url=$(jq -r '.source.issue.pull_request.html_url // ""' <<< "$decoded_event")
+              if [ -z "$url" ]
+              then
+                continue
+              fi
+
+              pr_number=$(echo "$url" | grep -oE '[^/]+$') 
+              break
+            done
+
+            if [ -n "$pr_number" ]
+            then
+              break
+            fi
+
+            echo "PR not yet created, sleeping for 10 seconds..."
+            sleep 10
+          done
+
+          echo "Found PR number $pr_number"
+
+          pr_id=$(curl -s --fail-with-body -H "Authorization: Bearer ${{ secrets.token }}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/github/cca-automated-testing/pulls/${pr_number} | jq -r '.id')
+          echo "Found PR ID $pr_id"
+
+          while true; do
+            sessions=$(curl -s --fail-with-body https://api.githubcopilot.com/agents/sessions/resource/pull/$pr_id -H "Authorization: Bearer ${{ secrets.token }}" -H "Copilot-Integration-Id: playground-dev")
+            echo $sessions
+
+            if [[ -n $(jq -r '.sessions.[]' <<< "$sessions") ]]; then
+              session_id=$(jq -r '.sessions.[0].id' <<< "$sessions")
+              echo "Found Session ID $session_id"
+              echo "session_id=$session_id" >> $GITHUB_ENV
+              break
+            fi
+
+            echo "Session not yet created, sleeping for 10 seconds..."
+            sleep 10
+          done
+      - id: wait_for_cca
+        timeout-minutes: 15
+        uses: ./sweagentd/.github/actions/wait_for_cca
+        with:
+          token: ${{ secrets.token }}
+          session_id: $session_id
+
+      - id: validate_session
+        uses: ./sweagentd/.github/actions/validate_session
+        with:
+          token: ${{ secrets.token }}
+          session_id: $session_id
+
+      - name: Cleanup issue
+        id: cleanup_issue
+        if: steps.create_issue.outcome == 'success'
+        run: |
+          echo "Cleaning up issue number $issue_number"
+          
+          curl -s --fail-with-body -X PATCH -H "Authorization: Bearer ${{ secrets.token }}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/github/cca-automated-testing/issues/$issue_number -d '{"state": "closed"}'
+
+      - id: cleanup_pr
+        uses: ./sweagentd/.github/actions/cleanup_pr
+        if: ${{ steps.wait_for_session_creation.outcome }} == "success"
+        with:
+          token: ${{ secrets.token }}
+          session_id: $session_id
+          repo_name: cca-automated-testing
+      - id: notify_datadog
+        if: ${{ always() && github.event_name == 'schedule' }}
+        uses: ./sweagentd/.github/actions/notify_datadog
+        with:
+          datadog_api_key: ${{ secrets.datadog_api_key }}
+          job_status: ${{ job.status }}
+          test_type: ${{ inputs.reporting_id }}
+          test_name: "Issue Assignment CLI Integration Test"

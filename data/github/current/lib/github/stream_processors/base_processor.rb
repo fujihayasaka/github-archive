@@ -672,6 +672,7 @@ module GitHub
         GitHub.context.clear
         ::Audit.context.clear
         SensitiveData.context.clear
+        Failbot.reset_context
         GitHub.context.push(from: self.class.name)
         push_service_mapping_context
       end

@@ -6,6 +6,7 @@
 # consumption.
 class Api::Policies < Api::App
   include Api::App::CodeScanningHelpers
+  include Api::App::CopilotSweAgentDeny
   include VariantAnalysis::RepositoryResolutionHelper
 
   ROUTES_EXCLUDED_FROM_CAP_CHECKS = [
@@ -44,6 +45,8 @@ class Api::Policies < Api::App
     record_or_404(repo)
 
     control_access :edit_release, repo: repo, resource: rel, allow_integrations: true, allow_user_via_granular_actor: true
+
+    deny_copilot_swe_agent!
 
     if release.immutable
       deliver_error! 422, message: "Cannot upload assets to an immutable release."

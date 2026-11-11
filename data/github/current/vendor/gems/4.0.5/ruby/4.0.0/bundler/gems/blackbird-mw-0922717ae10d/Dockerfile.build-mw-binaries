@@ -1,0 +1,68 @@
+# syntax=docker/dockerfile:1.19.0
+
+# This Dockerfile is used to build Blackbird's Go code. It is used:
+# * As part of the e2e tests
+
+ARG FRONTEND_MODE=with-frontend
+
+# The builder image must have all necessary tools installed for building our
+# Rust binaries, and ideally has a prior copy of the build artifacts to reduce
+# the build time.
+ARG BUILDER_IMAGE="ghcr.io/github/blackbird/blackbird-build-image:main-focal-release"
+
+# The image that contains the Rust clibs
+ARG BLACKBIRD_CLIB_IMAGE=ghcr.io/github/blackbird/blackbird:sha-ced68fef
+
+# The final image needs to hold the binaries. We normally use a gh-base image,
+# but this needs to be customizable for Mac, which those are not built for.
+ARG FINAL_IMAGE="ghcr.io/github/gh-base-image/gh-base-focal:20250929-093120-g65a62eb8c@sha256:ffbdcdf8a427a5f26bf5c7b28fa472a8ee93936078a237698c78a85526e71bb4"
+
+FROM $BLACKBIRD_CLIB_IMAGE AS clibs
+
+FROM $BUILDER_IMAGE AS setup
+
+# This must be set because it is used by the create-docker-build-image.sh
+# script. It is autopopulated by Docker to something like 'linux/amd64' or
+# 'linux/arm64'.
+ARG TARGETPLATFORM
+
+WORKDIR /workspace/target/blackbird-mw
+
+COPY --chown=builder:builder script/install-tools script/install-tools
+
+RUN script/install-tools
+
+COPY --chown=builder:builder --exclude="lib/*" --exclude=".jj/*" --exclude=".git/*" --exclude="admin-frontend/node_modules" . .
+
+FROM setup AS builder
+
+COPY --from=clibs /usr/local/lib/libblackbird_core.a /usr/local/lib/libblackbird_core.a
+COPY --from=clibs /usr/local/lib/libblackbird_client.a /usr/local/lib/libblackbird_client.a
+COPY --from=clibs /usr/local/lib/liblinguist.a /usr/local/lib/liblinguist.a
+
+RUN --mount=type=secret,id=netrc,target=/home/builder/.netrc,uid=5000,required=true script/vendor
+
+ENV CGO_LDFLAGS="-g -O2 -ldl -lm"
+RUN go version \
+    && go install ./...
+
+# TODO also build the admin frontend
+
+FROM $FINAL_IMAGE AS final
+
+USER root
+RUN apt-get -qq update && apt-get -qq install -y --no-install-recommends curl
+
+USER builder
+
+# Copy over go binaries and config
+COPY --from=builder /home/builder/go/bin/* /
+COPY --from=builder --chown=builder:builder /workspace/target/blackbird-mw/config/blackbird/production/blackbird-client.toml /etc/blackbird/production/blackbird-client.toml
+COPY --from=builder --chown=builder:builder /workspace/target/blackbird-mw/config/blackbird/proxima/blackbird-client.toml /etc/blackbird/proxima/blackbird-client.toml
+
+EXPOSE 8080
+
+HEALTHCHECK --start-period=30s --interval=5s --timeout=1s --retries=10 \
+  CMD curl --fail http://localhost:8080/ready || exit 1
+
+CMD ["echo", "WARNING: An entrypoint for each binary must be set in its deployment YAML"]

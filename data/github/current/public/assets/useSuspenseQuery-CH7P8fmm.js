@@ -1,0 +1,1 @@
+import{f as e,n as t,t as n}from"./useBaseQuery-BKJx3Dit.js";function r(r,i){return n({...r,enabled:!0,suspense:!0,throwOnError:t,placeholderData:void 0},e,i)}export{r as t};

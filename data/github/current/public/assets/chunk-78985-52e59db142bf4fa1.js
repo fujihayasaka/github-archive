@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["78985"],{301552(e,i,s){s.r(i);var r=s(331635),a=s(194571);class n extends HTMLElement{saveCodes(){this.warning.classList.remove("flash-error"),this.warning.classList.add("flash-info");let e=document.querySelector(".inline-recovery-codes-banner");e&&(e.hidden=!0)}}(0,r.Cg)([a.aC],n.prototype,"warning",void 0),(0,r.Cg)([(0,a.p_)("recovery-codes")],n)}}]);
+//# sourceMappingURL=chunk-78985-52e59db142bf4fa1-bdcdea5d5fdd93e5.js.map

@@ -1,0 +1,118 @@
+#!/usr/bin/env ruby
+
+# Delete package releases during a certain period
+
+require "optparse"
+require_relative "../../config/environment"
+
+options = { delete: false }
+OptionParser.new do |opts|
+  opts.on("-w", "--write", "Write changes") do
+    options[:delete] = true
+  end
+  opts.on("-e", "--ecosystem ECOSYSTEM", "Ecosystem to process") do |ecosystem|
+    options[:ecosystem] = ecosystem
+  end
+end.parse!
+
+class DeletePackageReleases
+  BATCH_SIZE = 100
+  OSPO_START_DATE = DateTime.new(2023, 06, 23)
+  OSPO_END_DATE = DateTime.new(2023, 07, 21)
+
+  def initialize(options:)
+    @delete = options[:delete]
+    @ecosystem = options[:ecosystem]
+  end
+
+  def execute
+    unless ecosystem
+      DependencyGraph.logger.error("Ecosystem is required. Please pass an ecosystem using the -e or --ecosystem flag")
+      return
+    end
+
+    DependencyGraph.logger.info("Running transiton!",
+      "gh.dryrun" => !delete,
+    )
+
+    clear_package_versions
+  end
+
+  private
+  attr_reader :delete, :ecosystem
+
+  def query_for_bad_package_versions
+    <<~SQL
+        select pv.id
+        from dg_package_versions pv
+        join (
+        select distinct unscoped.id
+        from dg_packages unscoped
+        join dg_packages scoped on
+            unscoped.name = SUBSTRING_INDEX(scoped.name, '#{namespace_delimiter}', -1) and
+            scoped.name like '%#{namespace_delimiter}%'
+        where
+        unscoped.package_manager = #{package_manager} and
+        scoped.package_manager = #{package_manager}
+        ) p on p.id = pv.package_id
+        left join dg_dependency_specifications ds on
+            ds.dependent_id = pv.id
+        where
+        pv.created_at > timestamp '#{OSPO_START_DATE.to_formatted_s(:db)}' and
+        pv.created_at < timestamp '#{OSPO_END_DATE.to_formatted_s(:db)}' and
+        ds.id is null
+    SQL
+  end
+
+  def clear_package_versions
+    enable_query_logging
+    releases_count = 0
+
+    ActiveRecord::Base.connected_to(role: :analytics) do
+      ids_raw = ActiveRecord::Base.connection.execute(query_for_bad_package_versions)
+      ids_raw.rows.each_slice(BATCH_SIZE) do |rows|
+        rows_sql = rows.flatten.join(", ")
+        delete_query = "delete from dg_package_versions where id in (#{rows_sql})"
+        if delete
+          ActiveRecord::Base.connected_to(role: :writing) do
+            throttler.throttle(:"dependency-graph") do
+              ActiveRecord::Base.connection.execute(delete_query)
+            end
+          end
+        else
+          DependencyGraph.logger.info(delete_query)
+        end
+        releases_count += BATCH_SIZE
+      end
+    rescue => error
+      DependencyGraph.logger.error("exeption.message" => error)
+      raise error
+    ensure
+      DependencyGraph.logger.info("dg_package_versions deleted",
+        "gh.batch.total" => releases_count,
+        "gh.dependency_graph.package_manager" => package_manager,
+      )
+    end
+  end
+
+  def package_manager
+    Types::PackageManager.coerce(ecosystem).id
+  end
+
+  def namespace_delimiter
+    case ecosystem
+    when "maven"
+      ":"
+    when "npm"
+      "/"
+    else
+      raise "Unsupported ecosystem"
+    end
+  end
+
+  def throttler
+    Freno::Throttler.new(client: Freno.client, app: :dependency_graph)
+  end
+end
+
+DeletePackageReleases.new(options: options).execute

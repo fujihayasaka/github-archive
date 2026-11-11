@@ -1,0 +1,1 @@
+import{lm as e,wp as t}from"./main-Czp8eV6A.js";var n={fadeIn:`WithShimmerEffect-module_fRS1ua_fadeIn`,shimmerText:`WithShimmerEffect-module_fRS1ua_shimmerText`},r=e();const i=({children:e,className:i,innerClassName:a})=>(0,r.jsx)(`div`,{className:t(n.fadeIn,i),children:(0,r.jsx)(`div`,{className:t(n.shimmerText,a),children:e})});i.displayName=`WithShimmerEffect`;export{i as t};

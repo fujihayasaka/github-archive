@@ -1,0 +1,47 @@
+name: "Cleanup open pull request"
+description: "Cleanup the open pull request copilot created"
+inputs:
+  token:
+    description: "The GitHub token to use for API calls"
+    required: true
+  session_id:
+    description: "The id of the session for this CCA run"
+    required: true
+  repo_name:
+    description: "The name of the repo that has the pull request"
+    required: true
+    type: string
+
+runs:
+  using: "composite"
+  steps:
+    - name: Cleanup open pull request
+      shell: bash
+      run: |
+        echo "Cleaning up pull request associated with session ${{ inputs.session_id }}"
+        pull_request_id=$(curl -s --fail-with-body https://api.githubcopilot.com/agents/sessions/${{ inputs.session_id }} -H "Authorization: Bearer ${{ inputs.token }}" -H "Copilot-Integration-Id: playground-dev" | jq -r '.resource_id')
+
+        echo "Found pull request ID $pull_request_id"
+
+        # Annoying: We have PR ID, not number. So, use the GitHub API to look at all pulls to find the correct one
+        all_prs=$(curl -s -H "Authorization: Bearer ${{ inputs.token }}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/github/${{ inputs.repo_name }}/pulls?state=open)
+
+        # Hack: Prs probably contain newline characters in descriptions, comments, etc, so we encode it as base64 to get through the loop
+        for pr in $(jq -r '.[] | @base64' <<< "$all_prs")
+        do
+          decoded_pr=$(echo "$pr" | base64 --decode)
+          if [ $(jq '.id' <<< "$decoded_pr") = "$pull_request_id" ]
+          then
+            pull_request_number=$(jq '.number' <<< "$decoded_pr")
+            echo "Found pull request number $pull_request_number"
+            break
+          fi
+        done
+
+        if [ -z "$pull_request_number" ]
+        then
+          echo "Error: no pull request number found for id $pull_request_id"
+          exit 1
+        fi
+
+        curl -s -X PATCH -H "Authorization: Bearer ${{ inputs.token }}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/github/${{ inputs.repo_name }}/pulls/$pull_request_number -d '{"state": "closed"}'

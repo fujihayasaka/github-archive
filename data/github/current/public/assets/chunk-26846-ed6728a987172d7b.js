@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["26846"],{887405(i,s,e){e.r(s);var t=e(331635),a=e(194571);class u extends HTMLElement{dismissBanner(){this.bannerDismissal.toggleAttribute("hidden")}}(0,t.Cg)([a.aC],u.prototype,"bannerDismissal",void 0),(0,t.Cg)([(0,a.p_)("dependabot-updates-paused")],u)}}]);
+//# sourceMappingURL=chunk-26846-ed6728a987172d7b-492885c090833cc7.js.map

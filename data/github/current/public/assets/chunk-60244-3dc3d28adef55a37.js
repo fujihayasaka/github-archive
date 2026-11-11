@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["60244"],{281439(i,u,t){t.r(u);var b=t(468349);function a(i){i.preventDefault(),i.stopPropagation()}(0,t(221403).lB)("a.btn.disabled",{subscribe:i=>(0,b.Rt)(i,"click",a)})}}]);
+//# sourceMappingURL=chunk-60244-3dc3d28adef55a37-c5b121ba2c88d8fc.js.map

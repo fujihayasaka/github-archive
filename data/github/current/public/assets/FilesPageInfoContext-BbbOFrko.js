@@ -1,0 +1,1 @@
+import{n as e}from"./use-app-payload-kaB603Zk.js";function t(){return e()}export{t};

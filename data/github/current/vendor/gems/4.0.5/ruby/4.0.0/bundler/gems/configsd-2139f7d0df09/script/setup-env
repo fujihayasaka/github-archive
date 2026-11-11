@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+#/ Usage: included in other scripts
+#/
+#/ Ensure dev development environment (vars) and dependencies are setup
+#/ Should be fast (no-op) on subsequent runs
+#/
+
+SCRIPT_DIR="$( cd "$( dirname "$0" )" && pwd )"
+
+# ----------------------------------------
+# Set default runtime environment
+# ----------------------------------------
+export RUNTIME_ENV="${RUNTIME_ENV:-development}"
+
+# ----------------------------------------
+# Load environment vars for runtime environment if it exists. test|development
+# ----------------------------------------
+if [ -f "${SCRIPT_DIR}/../.env.${RUNTIME_ENV}" ]; then
+    set -a  # automatically export all variables
+    # shellcheck disable=SC1091
+    # shellcheck disable=SC1090
+    source "${SCRIPT_DIR}/../.env.${RUNTIME_ENV}"
+    set +a
+fi
+
+# ----------------------------------------
+# Load local development environment if it exists
+# ----------------------------------------
+if [ -f "${SCRIPT_DIR}/../.env.local" ]; then
+    set -a  # automatically export all variables
+    # shellcheck disable=SC1091  # .env.local is user-created and may not exist during static analysis
+    source "${SCRIPT_DIR}/../.env.local"
+    set +a
+fi
+
+export OUTPUT_DIR="bin"
+
+# ----------------------------------------
+# Setup common variables
+# ----------------------------------------
+# shellcheck disable=SC2155 # git is required at runtime to determine REPO_ROOT
+export REPO_ROOT=$(git rev-parse --show-toplevel)
+export APP_NAME="configsd"
+export DD_SERVICE="${APP_NAME}"
+export CATALOG_SERVICE="github/${APP_NAME}"
+export DATABASE_CONFIG_PATH="${REPO_ROOT}/config/db.yaml"
+
+# Set defaults only if not already set (allows .env.local to override)
+export PORT=${APP_PORT:-8080} # This needs to be set as PORT as other packages reference it
+
+# ----------------------------------------
+# Setup build and runtime directories
+# ----------------------------------------
+export BIN_DIR
+mkdir -p "$SCRIPT_DIR/../${OUTPUT_DIR}"
+BIN_DIR=$(realpath "$SCRIPT_DIR/../${OUTPUT_DIR}")
+mkdir -p "$BIN_DIR"
+
+export APP_PID
+# Find processes running our binary specifically (not tee, grep, etc.)
+# Use pgrep -x with just the binary name to match only the actual executable
+APP_PID=$(pgrep -x "${BIN_DIR}/server" || true)
+
+if [ -n "$APP_PID" ] && [ "$(echo "$APP_PID" | wc -l)" -gt 1 ]; then
+  echo "Error: Multiple processes matching 'server' found."
+  echo "Exiting; preconditions for other scripts violated. Matching PIDs: ($APP_PID)"
+  exit 1
+fi

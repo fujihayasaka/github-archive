@@ -1,0 +1,54 @@
+name: "Build and test"
+
+on:
+  pull_request:
+  workflow_dispatch:
+  merge_group:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      packages: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.2
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: './go.mod'
+
+      - name: OIDC Setup for goproxy
+        uses: github/setup-goproxy@v1.1.0
+
+      - name: Lint Code
+        uses: github/go-linter@main
+        with:
+          go-version-file: './go.mod'
+          strict: true
+          lint-version: v2.8.0
+          cache: "false" # go-linter includes its own setup-go action so we get tons of File exists errors if we use the cache again
+
+      - name: Check Go source files are properly formatted
+        run: "! go fmt ./... | grep . || { echo 'Go not formatted'; exit 1; }"
+
+      - name: Build program
+        run: make build
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: osslicensecompliance
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Start Azure blob
+        run: docker compose up -d azurite kafka-lite
+
+      - name: Run tests
+        run: make test

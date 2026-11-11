@@ -25,5 +25,8 @@ module Platform
 
     # Used for encrypting/decrypting agent secrets.
     AGENT_SECRETS = "agent-secrets-key".freeze
+
+    # Used for encrypting/decrypting ELM exporter secrets.
+    ELM_EXPORTER_SECRETS = "elm-exporter-secrets-key".freeze
   end
 end

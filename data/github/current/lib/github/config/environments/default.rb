@@ -221,6 +221,9 @@ GitHub.copilot_byok_app_key = "Iv23ctXeLyQmO2Auu7KX"
 # Agent Secrets (for Copilot Coding Agent)
 GitHub.agent_secrets_app_key = "Iv23ctS17qs0qSLbfURX"
 
+# ELM Exporter Secrets
+GitHub.elm_exporter_secrets_app_key = "Iv23ctehy9m6mzmux8hy"
+
 # Copilot
 GitHub.copilot_jetbrains_language_server_auth_app_key = "Iv23ctfURkiMfJ4xr5mv"
 GitHub.copilot_language_server_auth_app_key = "Ov23liV9UpD7Rnfnskm3"

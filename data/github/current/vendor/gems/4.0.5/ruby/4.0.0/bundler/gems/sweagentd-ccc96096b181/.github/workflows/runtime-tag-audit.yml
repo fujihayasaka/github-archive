@@ -1,0 +1,32 @@
+name: Runtime Tag Audit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  list-stale-runtime-tags:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out action repository
+        uses: actions/checkout@v4
+        with:
+          repository: github/copilot-developer-action
+          token: ${{ secrets.COPILOT_DEVELOPER_ACTION_PAT }}
+          path: copilot-developer-action
+          fetch-depth: 0
+
+      - name: List runtime tags older than 30 days
+        working-directory: copilot-developer-action
+        run: |
+          threshold=$(date -u -d '30 days ago' +%s)
+
+          # Use read with a tab delimiter so tag names and ISO timestamps stay intact.
+          while IFS=$'\t' read -r tag_name date_str; do
+            tag_epoch=$(date -u -d "$date_str" +%s)
+            if [ "$tag_epoch" -lt "$threshold" ]; then
+              echo "$tag_name"
+            fi
+          done < <(git for-each-ref --sort=creatordate --format=$'%(refname:strip=2)\t%(creatordate:iso8601)' refs/tags/runtime-* || true)

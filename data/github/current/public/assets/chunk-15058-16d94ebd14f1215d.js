@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["15058"],{265961(t,u,e){e.r(u);var i=e(331635),a=e(194571);class b extends HTMLElement{connectedCallback(){this.button.click()}}(0,i.Cg)([a.aC],b.prototype,"button",void 0),(0,i.Cg)([(0,a.p_)("feature-preview-auto-enroll")],b)}}]);
+//# sourceMappingURL=chunk-15058-16d94ebd14f1215d-a6f28fceb1c4fa17.js.map

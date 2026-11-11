@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["47647"],{221954(e,t,i){i.r(t);var n=i(331635),a=i(194571);class l extends HTMLElement{handleSelection(e){let t=e.detail.relatedTarget.querySelector("[data-close-reason-icon]");this.selectedIconContainer.innerHTML=t.innerHTML}}(0,n.Cg)([a.aC],l.prototype,"selectedIconContainer",void 0),(0,n.Cg)([(0,a.p_)("close-reason-selector")],l)}}]);
+//# sourceMappingURL=chunk-47647-de2e424346217930-efbe57498fe8d9ba.js.map

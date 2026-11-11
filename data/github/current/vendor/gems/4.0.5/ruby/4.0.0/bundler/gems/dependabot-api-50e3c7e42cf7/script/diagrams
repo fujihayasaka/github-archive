@@ -1,0 +1,17 @@
+#!/bin/bash
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+echo "Generating database schema diagram..."
+# The digram tool doesn't understand utf8mb3 character sets which is the mysql8
+# name for the old "utf8" charset which is deprecated.
+# Replace utf8mb3 with utf8 for now to let the diagram tool work until it's fixed:
+# https://github.com/pingcap/parser/issues/1339
+cat schema/deltaforce_schema/*.sql | sed 's/utf8mb3/utf8/g' | docker run --pull=missing --rm -i ghcr.io/simon-engledew/sqljson@sha256:1b127a6935d9635d52ec2dd8cd62dade5042a3d28e433005dba8217f6fea5f58 > docs/schema.svg
+
+if [[ -n "${CI+x}" && -n "$(git ls-files --exclude-standard --others --deleted --modified docs/schema.svg)" ]]; then
+  >&2 echo "Please update the database schema diagram by running script/diagrams and committing the changes."
+  exit 1
+fi

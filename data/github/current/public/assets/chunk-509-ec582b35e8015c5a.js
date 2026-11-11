@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["509"],{199596(e,t,n){n.r(t);var i=n(740893),u=n(350937);(0,i.JW)(".js-immediate-updates",async function(e,t){let n;try{n=(await t.json()).json.updateContent}catch(e){e.response.json&&(n=e.response.json.updateContent)}if(n)for(let e in n){let t=n[e],i=document.querySelector(e);i instanceof HTMLElement&&(0,u.Uv)(i,t)}})}}]);
+//# sourceMappingURL=chunk-509-ec582b35e8015c5a-5f65865e693483ff.js.map
