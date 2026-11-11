@@ -51,11 +51,12 @@ class Organization::InviteStatus
     end
   end
 
-  def initialize(org, invitee = nil, email: nil, inviter:, teams: [], role: nil, external_identity: nil)
+  def initialize(org, invitee = nil, email: nil, inviter:, authorization_actor: inviter, teams: [], role: nil, external_identity: nil)
     @organization      = org
     @invitee           = invitee
     @email             = email
     @inviter           = inviter
+    @authorization_actor = authorization_actor
     @teams             = teams
     @role              = role
     @external_identity = external_identity
@@ -157,7 +158,7 @@ class Organization::InviteStatus
   end
 
   def sufficient_inviter_permissions?
-    inviter.can_send_invitations_for?(organization, teams: teams, role: @role)
+    @authorization_actor.can_send_invitations_for?(organization, teams: teams, role: @role)
   end
 
   def invalid_teams?

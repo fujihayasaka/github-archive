@@ -121,11 +121,19 @@ class Businesses::SecurityCenter::SecretScanningController < Businesses::Securit
       })
     end
 
+    # The alert count and default query checks are redundant with what happens in `alert_centric_view_blankslate()`.
+    # But we need the short-circuiting to prevent a slow query from happening.
+    no_alerts_enable_on_all_repos =
+      open_alert_count == 0 &&
+      params[:query] == default_query &&
+      current_user_can_manage_settings(this_business) &&
+      # TODO: Investigate slow query for checking repo without secret scanning
+      !has_secret_scanning_enabled_on_all_repos_in_enterprise?
     blankslate_in_table = alert_centric_view_blankslate(
       alerts_present: alerts.present?,
       closed_alert_count: closed_alert_count,
       default_query: default_query,
-      no_alerts_enable_on_all_repos: current_user_can_manage_settings(this_business) && !has_secret_scanning_enabled_on_all_repos_in_enterprise?,
+      no_alerts_enable_on_all_repos: no_alerts_enable_on_all_repos,
       open_alert_count: open_alert_count,
       query: params[:query],
     )

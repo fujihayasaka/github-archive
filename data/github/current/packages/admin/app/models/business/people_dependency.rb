@@ -222,6 +222,15 @@ module Business::PeopleDependency
       false
   end
 
+  def members_eligible_for_organization_add(user_ids:)
+    Admin.domain.business_user_accounts.by_business_and_users(id, user_ids).filter_map(&:user_id).uniq
+  end
+
+  def member_ids_for_organization_owner_assignment(user_ids:)
+    admin_and_organization_member_ids(actor_ids: user_ids) |
+      members_eligible_for_organization_add(user_ids: user_ids)
+  end
+
   # Public: Returns filtered members of the enterprise.
   #
   # viewer - required - the user requesting a list of filtered enterprise members

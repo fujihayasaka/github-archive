@@ -56,7 +56,8 @@ module SecurityOverviewAnalytics
           GitHub.dogstats.increment("security_overview_analytics.fanout_throttler.throttle", tags: job.all_stats_tags + [
             *job_queue_over_limit.map { |q| "job_queue_over_limit:#{q}" }
           ])
-          job.class.perform_later(*job.arguments)
+          # Delay the source job to let fanout queues drain.
+          job.class.set(wait: 5.minutes).perform_later(*job.arguments)
         else
           block.call
         end

@@ -10,6 +10,7 @@ module Organization::InvitationsDependency
   # user    - User to invite to join the organization.
   # email   - Email to invite to join the organization.
   # inviter - User sending the invitation.
+  # authorization_actor - User authorizing the invitation.
   # teams   - Array of teams to invite the user to join.
   # role    - Symbol representing the role the invitee is being invited into.
   #           Can be :direct_member, :admin, :billing_manager or :reinstate.
@@ -21,7 +22,7 @@ module Organization::InvitationsDependency
   # Raises TradeControlsError when inviter or invitee have been trade controls restricted
   # Raises NoAvailableSeatsError when there are no seats available
   # Raises NoAvailableSeatsError when no available seats because of pending cycle
-  def invite(user = nil, email: nil, inviter:, teams: [], role: nil, external_identity: nil, invitation_source: :unknown)
+  def invite(user = nil, email: nil, inviter:, authorization_actor: inviter, teams: [], role: nil, external_identity: nil, invitation_source: :unknown)
     role = :direct_member unless OrganizationInvitation.valid_role?(role)
     email = email.presence # force "falsey" values to nil
 
@@ -51,7 +52,16 @@ module Organization::InvitationsDependency
 
     ApplicationRecord::Domain::Users.transaction do
       GitHub.dogstats.distribution_time("organization.time", tags: ["action:invite"]) do
-        Organization::InviteStatus.new(self, user, email: email, inviter: inviter, teams: teams, role: role, external_identity: external_identity).validate!
+        Organization::InviteStatus.new(
+          self,
+          user,
+          email: email,
+          inviter: inviter,
+          authorization_actor: authorization_actor,
+          teams: teams,
+          role: role,
+          external_identity: external_identity,
+        ).validate!
 
         previous_invitation = pending_invitation_for(user, email: email, include_private_emails: false)
         invitation.save! unless previous_invitation.present?

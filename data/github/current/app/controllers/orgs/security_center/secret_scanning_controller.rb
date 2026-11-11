@@ -112,11 +112,19 @@ class Orgs::SecurityCenter::SecretScanningController < Orgs::SecurityCenter::Abs
       return render_alerts_secret_scanning_with_loading_secrets_failed_component
     end
 
+    # The alert count and default query checks are redundant with what happens in `alert_centric_view_blankslate()`.
+    # But we need the short-circuiting to prevent a slow query from happening.
+    no_alerts_enable_on_all_repos =
+      open_alert_count == 0 &&
+      params[:query] == default_query &&
+      can_manage_security_products? &&
+      # TODO: Investigate slow query for checking repo without secret scanning
+      !has_secret_scanning_enabled_on_all_repos?
     blankslate_in_table ||= alert_centric_view_blankslate(
       alerts_present: alerts.present?,
       closed_alert_count: closed_alert_count,
       default_query: default_query,
-      no_alerts_enable_on_all_repos: can_manage_security_products? && !has_secret_scanning_enabled_on_all_repos?,
+      no_alerts_enable_on_all_repos: no_alerts_enable_on_all_repos,
       open_alert_count: open_alert_count,
       query: params[:query],
     )

@@ -11,13 +11,15 @@ class OrganizationInviter
 
   attr_reader :invitation, :error, :return_path
 
-  def initialize(organization, actor:, role: nil, team_ids: nil, invitee: nil, email: nil)
+  def initialize(organization, actor:, authorization_actor: actor, role: nil, team_ids: nil, invitee: nil, email: nil, invitation_source: :member)
     @organization = organization
     @actor = actor
+    @authorization_actor = authorization_actor
     @role = role
     @team_ids = team_ids
     @invitee = invitee
     @email = email&.strip
+    @invitation_source = invitation_source
   end
 
   def email_invitation?
@@ -27,9 +29,10 @@ class OrganizationInviter
   def invite_user
     invite_options = {
       inviter: actor,
+      authorization_actor: authorization_actor,
       teams: teams,
       role: role,
-      invitation_source: :member,
+      invitation_source: invitation_source,
     }
 
     if User.valid_email?(email)
@@ -59,6 +62,7 @@ class OrganizationInviter
     end
   rescue OrganizationInvitation::AlreadyAcceptedError,
     OrganizationInvitation::InvalidError,
+    OrganizationInvitation::NoAvailableSeatsError,
     ActiveRecord::RecordInvalid => error
 
     @error = error.message
@@ -86,7 +90,7 @@ class OrganizationInviter
 
   private
 
-  attr_reader :organization, :actor, :role, :team_ids, :invitee, :email, :volume_licensing
+  attr_reader :organization, :actor, :authorization_actor, :role, :team_ids, :invitee, :email, :volume_licensing, :invitation_source
 
   def teams
     @_teams ||= if role == "reinstate" || team_ids.blank?

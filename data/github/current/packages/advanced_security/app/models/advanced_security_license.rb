@@ -67,15 +67,21 @@ class AdvancedSecurityLicense
     customer_id = entity.customer&.id if !entity.is_a?(User) && entity.advanced_security_metered_for_entity?
     additional_user_ids = entity.advanced_security_business_user_ids(sku:) if entity.is_a?(Business)
 
-    response = GitHub::Turboghas.client.get_summary(Turboghas::Proto::GetSummaryRequest.new(
-      entity_id: entity.id,
-      entity_type:,
-      repository_ids:,
-      customer_id:,
-      additional_user_ids:,
-      **sku.to_proto,
-    ))
-    raise TurboghasError.new(response.error) if response.error.present?
+    begin
+      response = GitHub::Turboghas.summary_client.get_summary(Turboghas::Proto::GetSummaryRequest.new(
+        entity_id: entity.id,
+        entity_type:,
+        repository_ids:,
+        customer_id:,
+        additional_user_ids:,
+        **sku.to_proto,
+      ))
+      raise TurboghasError.new(response.error.to_s) if response.error.present?
+    rescue TurboghasError, Faraday::Error
+      raise
+    rescue StandardError => e
+      raise TurboghasError, e.message
+    end
 
     response.data.tap do |data|
       # if the customer is bundled we leave these values alone so the ghas chatop command can show speculative figures

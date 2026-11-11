@@ -192,12 +192,17 @@ class Api::OrganizationCodeSecurityConfigurations < Api::App
       if configuration.secret_scanning_delegated_bypass_enabled?
         bypassers = data.dig(DELEGATED_BYPASS_OPTIONS_LABEL, "reviewers")
         if bypassers && bypassers.any?
-          bypassers.each do |bypasser|
-            bypasser["security_configuration_id"] = configuration.id
-            bypasser["owner_scope"] = "ORGANIZATION_SCOPE"
-            bypasser["owner_id"] = org.id
+          bypasser_protos = bypassers.map do |bypasser|
+            GitHub::Proto::SecretScanning::Bypassers::V1::Bypasser.new(
+              bypasser_id: bypasser["reviewer_id"],
+              bypasser_type: bypasser["reviewer_type"],
+              security_configuration_id: configuration.id,
+              mode: bypasser["mode"] ? bypasser["mode"] : "ALWAYS",
+              owner_scope: GitHub::Proto::SecretScanning::Types::V1::OwnerScope::ORGANIZATION_SCOPE,
+              owner_id: org.id
+            )
           end
-          SecretScanning::Services::DelegatedBypassService.update_bypassers_for_source(org, configuration.id, bypassers, current_user)
+          SecretScanning::Services::DelegatedBypassService.update_bypassers_for_source(org, configuration.id, bypasser_protos, current_user)
         end
       end
 

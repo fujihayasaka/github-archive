@@ -32,7 +32,7 @@ module EnablementAdvancedSecurityLicenseDependency
         payload.delete(:bundled) # remove fallback info
       end
     rescue AdvancedSecurityLicense::TurboghasError => e
-      Failbot.report(e)
+      Failbot.report(e, catalog_service: "github/licensing")
       payload[:failedToFetchLicenses] = true
     end
 
