@@ -1,0 +1,145 @@
+name: Update Archive
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: 'Space- or comma-separated major versions to track (e.g. "3.18 3.19 3.20 3.21 3.22")'
+        required: false
+        default: '3.18 3.19 3.20 3.21 3.22'
+        type: string
+
+env:
+  DEFAULT_TRACKED_VERSIONS: '3.18 3.19 3.20 3.21 3.22'
+
+permissions:
+  contents: write
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Determine tracked versions
+        id: set-matrix
+        run: |
+          raw="${{ github.event.inputs.versions || env.DEFAULT_TRACKED_VERSIONS }}"
+          matrix=$(printf '%s\n' "$raw" | tr ',' ' ' | xargs -n1 | jq -R . | jq -sc .)
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  update:
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJson(needs.setup.outputs.matrix) }}
+    steps:
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebase on master, check RSS feed, and update branch (${{ matrix.version }})
+        env:
+          SERIES: ${{ matrix.version }}
+          TZ: UTC
+          GIT_AUTHOR_EMAIL: 'null'
+          GIT_AUTHOR_NAME: 'null'
+          GIT_COMMITTER_NAME: 'null'
+          GIT_COMMITTER_EMAIL: 'null'
+        run: |
+          set -euo pipefail
+
+          git config push.default current
+          git config commit.gpgsign false
+
+          # Checkout existing version branch and rebase onto origin/master, or create new branch from origin/master
+          rebased=false
+          if git show-ref --verify --quiet "refs/remotes/origin/${SERIES}"; then
+            git checkout -B "${SERIES}" "origin/${SERIES}"
+            latest_commit_msg=$(git log -1 --format=%s)
+
+            if ! git merge-base --is-ancestor origin/master HEAD; then
+              echo "Rebasing ${SERIES} onto origin/master..."
+              git rebase --committer-date-is-author-date --no-gpg-sign origin/master
+              rebased=true
+            fi
+          else
+            git checkout -B "${SERIES}" origin/master
+            latest_commit_msg=""
+          fi
+
+          # Determine last committed patch number on this branch
+          if [[ "$latest_commit_msg" =~ ^${SERIES//./\.}\.([0-9]+)$ ]]; then
+            last_patch="${BASH_REMATCH[1]}"
+          else
+            last_patch=-1
+          fi
+
+          # Poll the GHES releases RSS feed
+          rss=$(curl -fsSL "https://enterprise.github.com/releases.rss")
+          rss_versions=$(printf '%s\n' "$rss" \
+            | grep -Eo "(^|[^0-9.])${SERIES//./\.}\.[0-9]+([^0-9.]|$)" \
+            | grep -Eo "${SERIES//./\.}\.[0-9]+" \
+            | sort -t. -k3,3n -u || true)
+
+          if [ -z "$rss_versions" ]; then
+            echo "No releases found in RSS feed for ${SERIES}."
+            if [ "$rebased" = true ]; then
+              git push --force-with-lease -u origin @
+            fi
+            exit 0
+          fi
+
+          latest_rss_version=$(printf '%s\n' "$rss_versions" | tail -n 1)
+          latest_rss_patch="${latest_rss_version##*.}"
+
+          echo "Branch ${SERIES}: latest committed='${latest_commit_msg:-none}' (patch ${last_patch}), latest in RSS='${latest_rss_version}' (patch ${latest_rss_patch})"
+
+          if (( last_patch >= latest_rss_patch )); then
+            echo "Branch ${SERIES} is already up to date."
+            if [ "$rebased" = true ]; then
+              git push --force-with-lease -u origin @
+            fi
+            exit 0
+          fi
+
+          # Find the next single missing release (walking one patch at a time)
+          next_version=""
+          for (( p = last_patch + 1; p <= latest_rss_patch; p++ )); do
+            candidate="${SERIES}.${p}"
+
+            # Skip if this version is already in the branch commit history
+            if git log --format=%s | grep -Fxq "$candidate"; then
+              continue
+            fi
+
+            # Verify the release exists in the RSS feed or on S3 (handles skipped patch numbers)
+            pkg_url="https://github-enterprise.s3.amazonaws.com/ami/updates/github-enterprise-ami-${candidate}.pkg"
+            if printf '%s\n' "$rss_versions" | grep -Fxq "$candidate" || curl -fsSI "$pkg_url" >/dev/null 2>&1; then
+              next_version="$candidate"
+              break
+            else
+              echo "Release ${candidate} does not exist (skipped upstream), checking next patch..."
+            fi
+          done
+
+          if [ -z "$next_version" ]; then
+            echo "No new release to download for ${SERIES}."
+            if [ "$rebased" = true ]; then
+              git push --force-with-lease -u origin @
+            fi
+            exit 0
+          fi
+
+          echo "Next missing release for ${SERIES} is ${next_version}. Running extraction..."
+          ./script.sh "$next_version"
