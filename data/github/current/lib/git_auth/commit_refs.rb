@@ -261,7 +261,7 @@ module GitAuth
     # We'll only keep quarantine around and clear it async for normal repos.
     # Wikis and gists will have quarantine cleared when it is committed.
     def preserve_quarantine?
-      target.normal_repo?
+      target.normal_repo? && GitHub.persistent_commit_signature_verification_enabled?
     end
 
     def not_found_payload

@@ -97,10 +97,11 @@ module Api::Internal::Twirp::Elm
             "/#{repository.owner_display_login}/#{repository.name}/issues/#{issue_number}"
           end
           event_url_path = "#{url_path}#event-#{issue_event.id}"
+          actor = issue_event.actor
 
           event_args = {
             url: "#{GitHub.url}#{event_url_path}",
-            actor_url: GitHub::Resources::UrlForModel.new(issue_event.actor).url,
+            actor_url: actor.nil? ? "" : actor_url_for_issue_event_actor(actor),
             event: issue_event.event,
             created_at: Google::Protobuf::Timestamp.new(seconds: issue_event.created_at.to_i),
             issue_event_metadata_json: build_issue_event_metadata_json(issue_event),
@@ -115,6 +116,15 @@ module Api::Internal::Twirp::Elm
         sig { params(issue_event: IssueEvent).returns(String) }
         def build_issue_event_metadata_json(issue_event)
           Api::Serializer.serialize(:issue_event_detail, issue_event).to_json
+        end
+
+        sig { params(actor: User).returns(String) }
+        def actor_url_for_issue_event_actor(actor)
+          return actor.permalink if actor.is_a?(Bot)
+          GitHub::Resources::UrlForModel.new(actor).url
+        rescue ActionController::UrlGenerationError
+          # Fallback if route generation fails for an otherwise valid actor.
+          "#{GitHub.url}/#{actor.display_login}"
         end
       end
     end

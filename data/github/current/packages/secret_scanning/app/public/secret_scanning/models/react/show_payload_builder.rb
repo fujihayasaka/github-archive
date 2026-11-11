@@ -71,8 +71,6 @@ module SecretScanning
             self_serve_banner: SecretScanning::Util::SelfServeBanner.banner_properties(@user, SecretScanning::Constants::SelfServeBannerSlugs::SECRET_PROTECTION_FEEDBACK_SURVEY),
             user_feedback_notice: UserNotice::SECRET_SCANNING_FEEDBACK_NOTICE,
             show_user_feedback_link: show_user_feedback_link?,
-            generic_secrets_feedback_notice: UserNotice::AI_DETECTED_SECRET_SCANNING_FEEDBACK_NOTICE,
-            show_generic_secrets_feedback_notice: SecretScanning::Features::Repo::GenericSecrets.new(@repo).show_user_feedback_link?(@user) && alert.llm_detected,
 
             # Settings
             automatic_partner_validity_checks_enabled: validity_feature.enabled?,

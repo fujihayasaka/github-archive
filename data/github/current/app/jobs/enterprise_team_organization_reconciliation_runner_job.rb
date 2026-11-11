@@ -14,6 +14,8 @@ class EnterpriseTeamOrganizationReconciliationRunnerJob < ApplicationJob
 
   queue_as :enterprise_team_organization_reconciliation_runner
 
+  discard_on ActiveJob::DeserializationError
+
   retry_on_dirty_exit
   retry_on_recoverable_exceptions
   retry_on GitHub::Restraint::UnableToLock, wait: ->(_executions) { (rand(30..300)).seconds }, attempts: :unlimited
