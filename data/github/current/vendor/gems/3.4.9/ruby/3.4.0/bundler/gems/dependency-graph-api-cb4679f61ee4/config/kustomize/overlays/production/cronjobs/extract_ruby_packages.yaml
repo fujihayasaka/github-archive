@@ -1,0 +1,122 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: extract-ruby-packages
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "extract-ruby-packages"
+        heaven.githubapp.com/image-placeholder: "dependency-graph-api"
+spec:
+    schedule: "0 0 * * *" # Every day at Midnight
+    concurrencyPolicy: Forbid # Do not allow multiple instances of the same job to run, at the same time.
+    successfulJobsHistoryLimit: 2
+    failedJobsHistoryLimit: 2
+    jobTemplate:
+        spec:
+            template:
+                spec:
+                    dnsPolicy: ClusterFirst
+                    volumes:
+                        - name: graveyard
+                          emptyDir:
+                            medium: Memory
+                        - name: kubexit
+                          emptyDir: {}
+                        - name: github-metadata
+                          hostPath:
+                            path: /etc/github/metadata.json
+                    restartPolicy: Never
+                    # k8s can't coordinate shutdown signals across sidecar containers in a pod
+                    # so we're using this: https://github.com/karlkfi/kubexit
+                    initContainers:
+                        - name: kubexit
+                          image: karlkfi/kubexit:latest
+                          command: ["bin/sh"]
+                          args: ['-c', 'cp /bin/kubexit /kubexit/kubexit']
+                          volumeMounts:
+                            - mountPath: /kubexit
+                              name: kubexit
+                    containers:
+                        - name: ruby-pma-db
+                          image: postgres:15@sha256:ae64346505d68bcd3aab66983f84c1dff7d862e3713bf4c86cfd9006a86d397a
+                          imagePullPolicy: "IfNotPresent"
+                          resources:
+                            requests:
+                                cpu: "1"
+                                memory: "1Gi"
+                            limits:
+                                cpu: "2"
+                                memory: "4Gi"
+                          command: ['/bin/sh']
+                          args: ['-c', 'cp /kubexit/kubexit /usr/local/bin/ && chmod +x /usr/local/bin/kubexit && kubexit docker-entrypoint.sh postgres']
+                          ports:
+                            - containerPort: 5432
+                          env:
+                            - name: POSTGRES_DB
+                              value: rubygems
+                            - name: POSTGRES_USER
+                              value: postgres
+                            - name: POSTGRES_PASSWORD
+                              value: ruby-pma-pg
+                            - name: KUBEXIT_NAME
+                              value: ruby-pma-db
+                            - name: KUBEXIT_GRAVEYARD
+                              value: /graveyard
+                            - name: KUBEXIT_DEATH_DEPS
+                              value: extract-ruby-packages
+                          volumeMounts:
+                            - mountPath: /kubexit
+                              name: kubexit
+                            - mountPath: /graveyard
+                              name: graveyard
+                        - name: extract-ruby-packages
+                          image: dependency-graph-api
+                          workingDir: "/src/app/package_manager_adapters"
+                          resources:
+                            requests:
+                                cpu: "1"
+                                memory: "1Gi"
+                            limits:
+                                cpu: "2"
+                                memory: "4Gi"
+                          command: ["/usr/bin/tools/istio-job-wrapper"]
+                          args: ['/bin/sh', '-c', 'cp /kubexit/kubexit /src/app/package_manager_adapters/ && chmod +x /src/app/package_manager_adapters/kubexit && /src/app/package_manager_adapters/kubexit script/start_kube rubygems']
+                          envFrom:
+                            - configMapRef:
+                                name: environment
+                            - secretRef:
+                                name: vault-secrets
+                          env:
+                            - name: POSTGRES_MODA_SIDECAR_ENABLED
+                              value: "TRUE"
+                            - name: POSTGRES_USER
+                              value: postgres
+                            - name: POSTGRES_PASSWORD
+                              value: ruby-pma-pg
+                            - name: DOGSTATSD_HOST
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: spec.nodeName
+                            - name: KUBEXIT_NAME
+                              value: extract-ruby-packages
+                            - name: KUBEXIT_GRAVEYARD
+                              value: /graveyard
+                            - name: KUBEXIT_BIRTH_DEPS
+                              value: ruby-pma-db
+                            - name: KUBEXIT_BIRTH_TIMEOUT
+                              value: "90s"
+                            - name: KUBEXIT_POD_NAME
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: metadata.name
+                            - name: KUBEXIT_NAMESPACE
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: metadata.namespace
+                          volumeMounts:
+                            - mountPath: /graveyard
+                              name: graveyard
+                            - mountPath: /kubexit
+                              name: kubexit
+                            - mountPath: /etc/github/metadata.json
+                              name: github-metadata
+                              readOnly: true

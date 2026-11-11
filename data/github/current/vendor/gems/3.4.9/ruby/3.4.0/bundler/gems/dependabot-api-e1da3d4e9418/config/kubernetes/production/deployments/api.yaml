@@ -1,0 +1,79 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    annotations:
+        heaven.githubapp.com/image-placeholder: dependabot-api
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: api
+        moda.github.net/canary-label: canary
+        moda.github.net/canary-replicas: "4"
+        moda.github.net/canary-v2: "true"
+        moda.github.net/vpa-updater-enabled: "true"
+    name: api
+spec:
+    replicas: 8
+    selector:
+        matchLabels:
+            app: dependabot-api
+            canary: production
+            role: api
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt_sloppy
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: dependabot
+            labels:
+                app: dependabot-api
+                canary: production
+                role: api
+        spec:
+            containers:
+                - env:
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  image: dependabot-api
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command:
+                                - sleep
+                                - "5"
+                  name: api
+                  ports:
+                    - containerPort: 3000
+                      name: http
+                      protocol: TCP
+                  readinessProbe:
+                    failureThreshold: 5
+                    httpGet:
+                        path: /_ping
+                        port: http
+                    initialDelaySeconds: 10
+                    periodSeconds: 10
+                    timeoutSeconds: 1
+                  resources:
+                    limits:
+                        cpu: 2500m
+                        memory: 6Gi
+                    requests:
+                        cpu: 650m
+                        memory: 4Gi
+                  volumeMounts:
+                    - mountPath: /etc/github/metadata.json
+                      name: github-metadata
+                      readOnly: true
+            dnsPolicy: ClusterFirst
+            volumes:
+                - hostPath:
+                    path: /etc/github/metadata.json
+                  name: github-metadata

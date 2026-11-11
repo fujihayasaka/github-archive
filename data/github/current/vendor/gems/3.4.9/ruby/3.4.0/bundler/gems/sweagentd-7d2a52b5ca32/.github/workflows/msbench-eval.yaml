@@ -1,0 +1,167 @@
+name: "MSBench Run"
+
+env:
+  HUSKY: 0
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Model"
+        required: true
+        default: "claude-sonnet-4.5"
+        type: string
+      benchmark:
+        description: "Benchmark"
+        required: true
+        default: "swebench.matplotlib__matplotlib-13989"
+        type: string
+      workers:
+        description: "Number of workers (max 30 per person across jobs)"
+        required: false
+        default: "20"
+        type: string
+      tags:
+        description: "Additional tags (comma-separated key=value pairs)"
+        required: false
+        default: ""
+        type: string
+      runOnGithubActionsVM:
+        description: "Run on GitHub Actions VM"
+        required: false
+        default: true
+        type: boolean
+      useSetupInstructions:
+        description: "Use setup instructions (dual execution mode)"
+        required: false
+        default: false
+        type: boolean
+      disableMcpBlackbird:
+        description: "Disable MCP and Blackbird"
+        required: false
+        default: false
+        type: boolean
+      extraFeatureFlags:
+        description: |
+          Additional feature flags to enable for the run (comma-separated).
+        required: false
+        default: ""
+        type: string
+  schedule:
+    - cron: "0 0 * * 1-5" # Run Monday through Friday at midnight UTC
+    - cron: "0 0 * * 6" # Run Saturday at midnight UTC
+    - cron: "0 0 * * 0" # Run Sunday at midnight UTC
+
+jobs:
+  msbench:
+    env:
+      AUTOFIND_DOWNLOAD_GITHUB_TOKEN: ${{ secrets.AUTOFIND_DOWNLOAD_GITHUB_TOKEN }}
+      # Benchmark selection based on schedule:
+      # - Sunday-Friday: 'swebench'
+      # - Saturday: benchmark suite
+      # - Manual runs: use input or default to 'swebench.matplotlib__matplotlib-13989'
+      # - Special case: if input is "run-suite", run the full benchmark suite
+      BENCHMARK: ${{ github.event_name == 'schedule' && (github.event.schedule == '0 0 * * 6' && 'run-suite' || 'swebench') || (inputs.benchmark || 'swebench.matplotlib__matplotlib-13989') }}
+      MODEL: ${{ matrix.model }}
+      # Worker count: 30 for all scheduled runs, configurable for manual runs (default 20, max 30)
+      WORKERS: ${{ github.event_name == 'schedule' && '30' || (fromJson(inputs.workers || '20') <= 30 && fromJson(inputs.workers || '20') > 0 && inputs.workers || '20') }}
+      TAGS: ${{ github.event_name == 'schedule' && format('run=workflow-scheduled,branch={0},workers={1},endpoint={2}-workflow-{3}', github.ref_name, '30', vars.CAPI_INTEGRATION_ID, format('{0}-{1}-{2}', github.run_id, github.run_attempt, strategy.job-index)) || format('run=workflow-trigger,branch={0},workers={1},triggeredBy={2},endpoint={3}-workflow-{0}', github.ref_name, (fromJson(inputs.workers || '20') <= 30 && fromJson(inputs.workers || '20') > 0 && inputs.workers || '20'), github.actor, vars.CAPI_INTEGRATION_ID) }}
+      # Runner image selection:
+      # - Sunday scheduled runs: use msbench image (--runner-no-custom-image, setup requires msbench image)
+      # - Other scheduled runs: use Github Actions VM (default behavior)
+      # - Manual runs: based on runOnGithubActionsVM input (default Github Actions VM)
+      RUNNER_IMAGE_FLAG: ${{ ((github.event_name == 'schedule' && github.event.schedule == '0 0 * * 0') || (github.event_name != 'schedule' && inputs.runOnGithubActionsVM == false)) && '--runner-no-custom-image' || '' }}
+      # Setup instructions (dual execution mode) - only applies to manual runs
+      USE_SETUP_INSTRUCTIONS: ${{ github.event_name != 'schedule' && inputs.useSetupInstructions == true && '--use-setup-instructions true' || '' }}
+      # Disable MCPs and Blackbird for Sunday runs or manual runs with flag
+      DISABLE_FLAGS: ${{ ((github.event_name == 'schedule' && github.event.schedule == '0 0 * * 0') || (github.event_name != 'schedule' && inputs.disableMcpBlackbird == true)) && '--disable-mcps --disable-blackbird' || '' }}
+      # Feature flags to enable (comma-separated) use "<none>" to disable all feature flags
+      EXTRA_FEATURE_FLAGS: ${{ inputs.extraFeatureFlags }}
+    runs-on: ubuntu-latest
+    environment: msbench
+    strategy:
+      fail-fast: false
+      matrix:
+        model: ${{ github.event_name == 'schedule' && fromJson('["claude-sonnet-4", "claude-sonnet-4.5"]') || fromJson(format('["{0}"]', inputs.model || 'claude-sonnet-4.5')) }}
+    permissions:
+      id-token: write # for azure/login
+      contents: read # for actions/checkout
+      packages: read # for autofind and package downloads
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: |
+            runtime/package-lock.json
+            runtime/benchmarks/msbench/agent_pkg/cpd-msbench-runner/package-lock.json
+      - name: Build runtime and cpd-msbench-runner
+        working-directory: ./script
+        run: ./build-all
+      - name: Azure Login
+        uses: azure/login@a65d910e8af852a8061c627c456678983e180302 #v2.2.0
+        with:
+          client-id: "${{ vars.CPD_ID_CLIENT_ID }}" # id-cpd-ci
+          tenant-id: "${{ vars.CPD_ID_TENANT_ID }}"
+          subscription-id: "${{ vars.CPD_ID_SUBSCRIPTION_ID }}"
+      - name: Configure pip authentication for Azure Artifacts
+        run: |
+          # Get access token for Azure DevOps/Artifacts
+          ACCESS_TOKEN=$(az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv)
+
+          # Configure pip to use Azure Artifacts feed with authentication
+          mkdir -p ~/.pip
+          cat > ~/.pip/pip.conf << EOF
+          [global]
+          extra-index-url = https://build:${ACCESS_TOKEN}@pkgs.dev.azure.com/devdiv/_packaging/MicrosoftSweBench/pypi/simple/
+          trusted-host = pkgs.dev.azure.com
+
+          [install]
+          trusted-host = pkgs.dev.azure.com
+          EOF
+
+          # Set environment variables for pip authentication
+          echo "PIP_EXTRA_INDEX_URL=https://build:${ACCESS_TOKEN}@pkgs.dev.azure.com/devdiv/_packaging/MicrosoftSweBench/pypi/simple/" >> $GITHUB_ENV
+          echo "PIP_TRUSTED_HOST=pkgs.dev.azure.com" >> $GITHUB_ENV
+
+          # Alternative: Create .netrc file for authentication
+          cat > ~/.netrc << EOF
+          machine pkgs.dev.azure.com
+          login build
+          password ${ACCESS_TOKEN}
+          EOF
+          chmod 600 ~/.netrc
+
+          # Verify configuration
+          echo "Testing pip configuration..."
+          pip config list
+
+      - name: Setup msbench-cli
+        working-directory: ./runtime/benchmarks/msbench
+        run: ./setup.sh
+      - name: Run ${{ env.BENCHMARK }} - ${{ env.MODEL }}
+        working-directory: ./runtime/benchmarks/msbench
+        run: |
+          # - Scheduled runs: Tagged with 'run=workflow-scheduled' and branch name
+          # - Manual runs: Tagged with 'run=workflow-trigger' and branch name
+          #
+          # The --endpoint parameter queues runs on a dedicated workflow-specific endpoint+model
+          # to avoid throttling the LLM with too many concurrent runs for the same branch.
+          #
+          # Concatenate input tags with environment tags
+          if [ -n "${{ inputs.tags }}" ]; then
+              TAGS="${TAGS},${{ inputs.tags }}"
+          fi
+          EXTRA_FEATURE_FLAGS="$(echo $EXTRA_FEATURE_FLAGS | xargs)" # trim whitespace
+          if [ -n "$EXTRA_FEATURE_FLAGS" ]; then
+            FEATURE_FLAG_TAGS="$(echo $EXTRA_FEATURE_FLAGS | sed 's/,/=true,/g')=true"
+            TAGS="${TAGS},${FEATURE_FLAG_TAGS}"
+            EXTRA_FEATURE_FLAGS="--extra-feature-flags $EXTRA_FEATURE_FLAGS"
+          fi
+
+          ./run-suite-cpd.sh "$BENCHMARK" ${{ vars.CAPI_INTEGRATION_ID }} --copilot-key-vault ${{ vars.CAPI_CI_AZURE_KEY_VAULT_URI }} --agent-model sweagent-capi:$MODEL --tags $TAGS --workers $WORKERS $RUNNER_IMAGE_FLAG $USE_SETUP_INSTRUCTIONS $DISABLE_FLAGS $EXTRA_FEATURE_FLAGS
+          # msbench-cli cancel --run_id <run_id>

@@ -1,0 +1,80 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: sweagentd
+spec:
+    replicas: 2
+    selector:
+        matchLabels:
+            app: sweagentd
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt
+                moda.github.net/opt-out-resource-quotas: "true"
+                observability.github.com/splunk_index: sweagentd
+            labels:
+                app: sweagentd
+        spec:
+            containers:
+                - env:
+                    - name: KUBE_CONTAINER_NAME
+                      value: sweagentd
+                    - name: STATS_ADDR
+                      value: $(KUBE_NODE_HOSTNAME):28125
+                    - name: KUBE_NAMESPACE
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.namespace
+                    - name: KUBE_POD_NAME
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.name
+                    - name: APP_SHA
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.annotations['heaven.githubapp.com/sha']
+                    - name: APP_REF
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.annotations['heaven.githubapp.com/ref']
+                    - name: GOMAXPROCS
+                      valueFrom:
+                        resourceFieldRef:
+                            containerName: sweagentd
+                            resource: limits.cpu
+                  envFrom:
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                    - configMapRef:
+                        name: application-config
+                  image: sweagentd
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command:
+                                - sleep
+                                - "5"
+                  name: sweagentd
+                  ports:
+                    - containerPort: 8080
+                      name: http
+                      protocol: TCP
+                  readinessProbe:
+                    exec:
+                        command:
+                            - cat
+                            - /tmp/consumer_healthy
+                    initialDelaySeconds: 5
+                    periodSeconds: 5
+                  resources:
+                    limits:
+                        cpu: 500m
+                        memory: 500Mi
+                    requests:
+                        cpu: 200m
+                        memory: 200Mi
+            dnsPolicy: Default

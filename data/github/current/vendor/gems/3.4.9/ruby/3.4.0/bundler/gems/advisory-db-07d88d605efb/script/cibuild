@@ -1,0 +1,53 @@
+#!/bin/bash
+
+set -eu
+
+# docker-compose uses this to decide which config file(s) to use
+# If another script sets COMPOSE_FILE already we will use that one
+export COMPOSE_FILE=${COMPOSE_FILE:-docker-compose.yml:docker-compose.cibuild.yml}
+
+function cleanup() {
+  echo
+  echo "%%%FOLD {Shutting down services...}%%%"
+  docker-compose down
+  echo "%%%END FOLD%%%"
+}
+
+trap cleanup EXIT
+
+echo "%%%FOLD {Setting environment...}%%%"
+export FAIL_FOCUSED_TESTS=true
+export RACK_ENV=test
+export JSON_TEST_FAILURE_OUTPUT=true
+echo "TEST_VAR:"
+echo ${BUILD_CI_TEST_VAR:-}
+echo "FAILBOT_SHA:"
+echo ${FAILBOT_SHA:-}
+set -ex
+. "$(dirname $0)/../script/bintools"
+echo "%%%END FOLD%%%"
+
+if [ ${FAILBOT_SHA:-} ]
+then
+  script/vendor-gem -r $FAILBOT_SHA -n failbot git@github.com:github/failbot.git
+fi
+
+export CI_MODE=true
+
+output_fold "Bootstrapping container..." docker-compose build
+output_fold "Installing dependencies..." script/install-dependencies
+output_fold "Bringing up services..." docker-compose up -d
+output_fold "Waiting for database..." script/poll-for-db
+
+echo "%%%FOLD {Setting up clean database...}%%%"
+script/app-env bin/rake db:create db:test:prepare RAILS_ENV=test
+script/app-env bin/rails db:environment:set RAILS_ENV=test || true
+echo "%%%END FOLD%%%"
+
+if [ ${JANKY_ENV_TEST_SUBSET:-} ]; then
+  tests=$JANKY_ENV_TEST_SUBSET
+else
+  tests=""
+fi
+output_fold "Running tests..." script/test $tests
+

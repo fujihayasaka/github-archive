@@ -562,8 +562,7 @@ class Repos::SecretScanning::ReactAlertsController < AbstractRepositoryControlle
   def available_assignees # rubocop:todo GitHub/UseRestfulActions
     # Get user IDs with write access
     write_user_ids = repo.user_ids_with_privileged_access(min_action: :write)
-    # Apply limit and remove suspended users
-    write_user_ids = write_user_ids.take(GitHub.assignees_list_limit) if GitHub.assignees_list_limit.present?
+    # Remove suspended users
     final_user_ids = write_user_ids - repo.suspended_user_ids(write_user_ids)
 
     scope = User.where(id: final_user_ids)
@@ -571,6 +570,9 @@ class Repos::SecretScanning::ReactAlertsController < AbstractRepositoryControlle
     if query.present?
       scope = scope.like_login_or_profile_name(query)
     end
+
+    # Apply limit AFTER search filter
+    scope = scope.limit(GitHub.assignees_list_limit) if GitHub.assignees_list_limit.present?
 
     render json: {
       users: scope.map do |user|

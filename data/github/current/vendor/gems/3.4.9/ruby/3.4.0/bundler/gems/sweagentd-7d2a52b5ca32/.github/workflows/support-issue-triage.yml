@@ -1,0 +1,119 @@
+name: Support Issue Triage Automation
+
+on:
+  issues:
+    types: [labeled, reopened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  # Step 1: When support issue is opened or labeled, add needs-product-triage label and comment
+  traige-product:
+    if: github.event.action == 'labeled' && (github.event.label.name == 'support-escalation' || github.event.label.name == 'support-issue:needs-product-triage')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+
+      - name: Add needs-product-triage label
+        uses: actions-ecosystem/action-add-labels@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          labels: support-issue:needs-product-triage
+
+      - name: Comment on issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COMMENT_BODY=$(./.github/scripts/support-issues/get-comment.sh product-triage)
+          ./.github/scripts/support-issues/post-comment.sh "${{ github.event.issue.number }}" "$COMMENT_BODY"
+          ./.github/scripts/support-issues/remove-label.sh "${{ github.event.issue.number }}" "support-issue:needs-engineering-triage"
+
+  # Step 2: When known-feature-gap label is added, close the issue
+  close-feature-gap:
+    if: github.event.action == 'labeled' && github.event.label.name == 'support-issue:known-feature-gap'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+
+      - name: Add comment explaining closure
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COMMENT_BODY=$(./.github/scripts/support-issues/get-comment.sh feature-gap)
+          ./.github/scripts/support-issues/post-comment.sh "${{ github.event.issue.number }}" "$COMMENT_BODY"
+
+      - name: Close issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./.github/scripts/support-issues/close-issue.sh "${{ github.event.issue.number }}"
+
+  # Step 3: When needs-more-info label is added, post a comment
+  request-more-info:
+    if: github.event.action == 'labeled' && github.event.label.name == 'support-issue:needs-more-info'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+
+      - name: Comment requesting more information
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COMMENT_BODY=$(./.github/scripts/support-issues/get-comment.sh more-info "${{ github.event.issue.user.login }}")
+          ./.github/scripts/support-issues/post-comment.sh "${{ github.event.issue.number }}" "$COMMENT_BODY"
+
+  # Step 4: When needs-engineering-triage label is added, mention on-call
+  # Note: Dynamically looks up the on-call person from PagerDuty escalation policy P29A2BN
+  triage-engineering:
+    if: github.event.action == 'labeled' && github.event.label.name == 'support-issue:needs-engineering-triage'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+
+      - name: Get on-call engineer from PagerDuty
+        id: oncall
+        env:
+          # This is a user token from `@ritchxu` that doesn't expire
+          PAGERDUTY_API_KEY: ${{ secrets.PAGERDUTY_API_KEY }}
+        run: |
+          ONCALL_HANDLE=$(./.github/scripts/support-issues/get-oncall.sh "$PAGERDUTY_API_KEY" "P29A2BN")
+          echo "oncall_handle=${ONCALL_HANDLE}" >> $GITHUB_OUTPUT
+
+      - name: Comment mentioning on-call engineer
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COMMENT_BODY=$(./.github/scripts/support-issues/get-comment.sh engineering-triage "${{ steps.oncall.outputs.oncall_handle }}")
+          ./.github/scripts/support-issues/post-comment.sh "${{ github.event.issue.number }}" "$COMMENT_BODY"
+          ./.github/scripts/support-issues/remove-label.sh "${{ github.event.issue.number }}" "support-issue:needs-product-triage"
+
+  # Step 5: When issue is re-opened, check which triage label is present and notify accordingly
+  handle-reopened:
+    if: github.event.action == 'reopened'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+
+      - name: Check labels and notify
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PAGERDUTY_API_KEY: ${{ secrets.PAGERDUTY_API_KEY }}
+        run: |
+          ./.github/scripts/support-issues/handle-reopened.sh "${{ github.event.issue.number }}"

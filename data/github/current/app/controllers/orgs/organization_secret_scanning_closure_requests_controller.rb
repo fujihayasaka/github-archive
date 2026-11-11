@@ -17,7 +17,7 @@ class Orgs::OrganizationSecretScanningClosureRequestsController < Orgs::Security
   ApplicationRecord::Configurations,
   ApplicationRecord::Spokes,
   ApplicationRecord::Iam,
-  only: [:index, :closure_request_requesters, :closure_request_approvers, :counts]
+  only: [:index, :closure_request_requesters, :closure_request_approvers, :counts, :repo_suggestions]
 
   depends_on_clusters  ApplicationRecord::SecurityOverviewAnalytics,
   ApplicationRecord::Notify,
@@ -87,6 +87,15 @@ class Orgs::OrganizationSecretScanningClosureRequestsController < Orgs::Security
         render json: response
       end
     end
+  end
+
+  sig { void }
+  def repo_suggestions # rubocop:todo GitHub/UseRestfulActions
+    render json: RulesEngine::Suggestions.repos_for(
+      current_organization,
+      params[:q].to_s,
+      ActiveModel::Type::Boolean.new.cast(params[:excludePublicRepos]) || false,
+    )
   end
 
   private

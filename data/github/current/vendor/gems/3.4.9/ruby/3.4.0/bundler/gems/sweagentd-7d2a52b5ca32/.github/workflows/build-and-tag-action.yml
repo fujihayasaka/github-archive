@@ -1,0 +1,67 @@
+name: Build and Publish Runtime Action
+
+env:
+  HUSKY: 0
+
+on:
+  workflow_dispatch:
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: runtime-build-${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-push-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: sweagentd
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+
+      - run: npm ci
+        working-directory: ./sweagentd/runtime
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_DEVELOPER_ACTION_PAT }}
+          repository: github/copilot-developer-action
+          path: copilot-developer-action
+          ref: main
+
+      - run: ./sweagentd/runtime/script/action-build ./copilot-developer-action
+        working-directory: ./
+        env:
+          EBPF_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.EBPF_DOWNLOAD_GITHUB_TOKEN }}"
+          BLACKBIRD_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.BLACKBIRD_DOWNLOAD_GITHUB_TOKEN }}"
+          AUTOFIND_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.AUTOFIND_DOWNLOAD_GITHUB_TOKEN }}"
+
+      - name: Commit changes
+        working-directory: ./copilot-developer-action
+        run: |
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+
+          SOURCE_SHA="${{ github.sha }}"
+
+          # Create orphan branch (isolated history)
+          git checkout --orphan build-${SOURCE_SHA}
+
+          # Stage all changes from the build
+          git add .
+          git commit -m "Runtime build from ${SOURCE_SHA}"
+
+          # Create and push the SHA-based tag
+          git tag runtime-${SOURCE_SHA}
+          git push origin runtime-${SOURCE_SHA}
+
+          # Create and push the latest tag (force push to overwrite existing)
+          git tag -f latest
+          git push -f origin latest

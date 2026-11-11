@@ -1,0 +1,33 @@
+#!/bin/sh
+
+echo "==> Running migrations gems..."
+appdir=$(cd "$(dirname "$0")"/.. && pwd)
+[ -f /etc/app-env ] || exec "$appdir/script/app-env" "$0" "$@"
+
+set -e
+
+script/install-skeema
+
+if [ -n "$RACK_ENV" ] && [ "${RACK_ENV:-}" != "development" ] ; then
+  echo "Can only be executed in development!"
+  exit 1
+fi
+
+export BUNDLE_IGNORE_CONFIG=1
+# For whatever reason, `bin/rails db:migrate` dumps a schema where any newly
+# added string columns don't contain `CHARACTER SET` directives.
+# Forcing a schema load and schema dump forces the `CHARACTER SET` change to
+# the schema dumps.
+bin/rails db:migrate db:schema:load db:schema:dump
+bin/rails db:test:prepare
+
+# Guard against running skeema and recursive script calls
+# when ENTERPRISE=1
+[ "${ENTERPRISE:-""}" = "1" ] && exit 0
+ENTERPRISE=1 script/migrate "$@"
+
+cd "$(dirname "$0")/../schema"
+
+skeema_env="development"; [ "${CODESPACES:-}" = "true" ] && skeema_env="development-codespaces"
+../bin/skeema pull $skeema_env
+../bin/skeema lint $skeema_env

@@ -1,0 +1,38 @@
+#!/bin/bash
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}/.."
+
+# Source environment setup to get PORT variable
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/setup-env"
+
+max_retries=10
+retry_interval=1
+
+check_endpoint() {
+    local endpoint=$1
+    local status_code
+    status_code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${PORT}${endpoint}" 2>/dev/null || echo "000")
+    [ "$status_code" = "200" ]
+}
+
+retry_count=0
+while true; do
+    # Check both ping and readiness endpoints
+    if check_endpoint "/_ping" && check_endpoint "/_ready"; then
+        echo "✅ Server is ready and responding (both _ping and _ready endpoints)"
+        exit 0
+    fi
+    
+    if (( retry_count >= max_retries )); then
+        echo "❌ Max retry limit of $max_retries reached. Server failed to start"
+        echo "   Checked endpoints: /_ping and /_ready on port ${PORT}"
+        exit 1
+    fi
+
+    retry_count=$(( retry_count + 1 ))
+    echo "⏳ Waiting for server... attempt $retry_count/$max_retries"
+    sleep $retry_interval
+done

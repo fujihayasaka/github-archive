@@ -44,6 +44,7 @@ module Elastomer::Indexes
             actor: { type: "text" },
             title: { type: "text" },
             lab: { type: "boolean" },
+            archived: { type: "boolean" },
             rank: { type: "double" },
             actor_id: { type: "long" },
             user_hidden: { type: "boolean" }

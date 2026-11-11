@@ -1006,7 +1006,7 @@ GitHub::Application.routes.draw do
     org.get "/security/bypass-requests/secret-scanning", to: "orgs/organization_secret_scanning_bypass_requests#index", as: :organization_secret_scanning_bypass_requests
     org.get "/security/bypass-requests/secret-scanning/requesters", to: "orgs/organization_secret_scanning_bypass_requests#bypass_request_requesters", as: :organization_secret_scanning_bypass_request_requesters
     org.get "/security/bypass-requests/secret-scanning/approvers", to: "orgs/organization_secret_scanning_bypass_requests#bypass_request_approvers", as: :organization_secret_scanning_bypass_request_approvers
-    org.get "/security/bypass-requests/secret-scanning/repo_suggestions", to: "orgs/code_rulesets#ruleset_repo_suggestions"
+    org.get "/security/bypass-requests/secret-scanning/repo_suggestions", to: "orgs/organization_secret_scanning_bypass_requests#repo_suggestions"
     # OrganizationSecretScanningBypassRequestsCountsController
     org.get "/security/bypass-requests/secret-scanning/count", to: "orgs/organization_secret_scanning_bypass_requests_counts#index", as: :organization_secret_scanning_bypass_requests_counts
 
@@ -1014,13 +1014,13 @@ GitHub::Application.routes.draw do
     org.get "/security/closure-requests/secret-scanning", to: "orgs/organization_secret_scanning_closure_requests#index", as: :organization_secret_scanning_closure_requests
     org.get "/security/closure-requests/secret-scanning/requesters", to: "orgs/organization_secret_scanning_closure_requests#closure_request_requesters", as: :organization_secret_scanning_closure_request_requesters
     org.get "/security/closure-requests/secret-scanning/approvers", to: "orgs/organization_secret_scanning_closure_requests#closure_request_approvers", as: :organization_secret_scanning_closure_request_approvers
-    org.get "/security/closure-requests/secret-scanning/repo_suggestions", to: "orgs/code_rulesets#ruleset_repo_suggestions"
+    org.get "/security/closure-requests/secret-scanning/repo_suggestions", to: "orgs/organization_secret_scanning_closure_requests#repo_suggestions"
     org.get "/security/closure-requests/secret-scanning/count", to: "orgs/organization_secret_scanning_closure_requests#counts", as: :organization_secret_scanning_closure_requests_counts
 
     # OrganizationCodeScanningAlertDismissalRequestsController
     org.get "/security/bypass-requests/code-scanning", to: "orgs/security_center/code_scanning_alert_dismissal_requests#index", as: :organization_code_scanning_alert_dismissal_requests
     org.get "/security/bypass-requests/code-scanning/requesters", to: "orgs/security_center/code_scanning_alert_dismissal_requests#bypass_request_requesters", as: :organization_code_scanning_alert_dismissal_request_requesters
-    org.get "/security/bypass-requests/code-scanning/repo_suggestions", to: "orgs/code_rulesets#ruleset_repo_suggestions"
+    org.get "/security/bypass-requests/code-scanning/repo_suggestions", to: "orgs/security_center/code_scanning_alert_dismissal_requests#repo_suggestions"
     org.get "/security/bypass-requests/code-scanning/approvers", to: "orgs/security_center/code_scanning_alert_dismissal_requests#bypass_request_approvers", as: :organization_code_scanning_alert_dismissal_request_approvers
 
     # OrganizationDependabotAlertDismissalRequestsController
@@ -5021,7 +5021,6 @@ GitHub::Application.routes.draw do
 
     # Secret Scanning Delegated Bypass Reviewer Suggestions (points to repositories controller method)
     get      "settings/security_analysis/bypass_suggestions", to: "repos/secret_scanning/push_protection/delegated_bypass_reviewers#bypass_suggestions", as: :secret_scanning_bypass_reviewer_suggestions
-    get      "settings/security_analysis/bypass_reviewers", to: "repos/secret_scanning/push_protection/delegated_bypass_reviewers#index", as: :repository_secret_scanning_get_bypass_reviewers
     post     "settings/security_analysis/bypass_reviewers", to: "repos/secret_scanning/push_protection/delegated_bypass_reviewers#create", as: :repository_secret_scanning_add_bypass_reviewer
     delete   "settings/security_analysis/bypass_reviewers", to: "repos/secret_scanning/push_protection/delegated_bypass_reviewers#destroy", as: :repository_secret_scanning_remove_bypass_reviewer
 

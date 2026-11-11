@@ -1,0 +1,1 @@
+The inspiration for the redis package is largely taken from https://github.com/github/copilot-api/tree/main/pkg/redis

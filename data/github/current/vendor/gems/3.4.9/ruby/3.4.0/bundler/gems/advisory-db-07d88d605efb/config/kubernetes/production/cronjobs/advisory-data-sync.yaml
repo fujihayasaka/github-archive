@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: advisory-data-sync
+    annotations:
+        heaven.githubapp.com/image-placeholder: "advisory-db"
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "advisory-data-sync"
+spec:
+    schedule: "0 5 * * *" # Daily at 5am UTC
+    successfulJobsHistoryLimit: 8
+    failedJobsHistoryLimit: 8
+    jobTemplate:
+        spec:
+            activeDeadlineSeconds: 3600
+            template:
+                spec:
+                    restartPolicy: Never
+                    containers:
+                        - name: advisory-data-sync
+                          image: advisory-db
+                          command:
+                            - bin/rake
+                            - advisory_db:sync_advisory_data
+                          envFrom:
+                            - configMapRef:
+                                name: rails
+                            - secretRef:
+                                name: vault-secrets
+                          env:
+                            - name: ADVISORY_DB_ROLE
+                              value: "cron"
+                            - name: DOGSTATSD_HOST
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: spec.nodeName
+    concurrencyPolicy: Forbid

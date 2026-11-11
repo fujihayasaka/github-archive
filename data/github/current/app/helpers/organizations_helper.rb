@@ -102,8 +102,8 @@ module OrganizationsHelper
     T.unsafe(self).render_404 unless org_billing_manageable?
   end
 
-  def org_code_security_or_ref_rules_manager_only
-    T.unsafe(self).render_404 unless can_manage_code_security_or_ref_rules?
+  def org_ref_rules_manager_only
+    T.unsafe(self).render_404 unless org_ref_rules_manager?
   end
 
   def org_custom_properties_manager_or_editor_only
@@ -232,10 +232,6 @@ module OrganizationsHelper
 
   def can_manage_code_security_settings?
     T.unsafe(self).logged_in? && current_organization && current_organization.org_settings_permissions_hash(T.unsafe(self).current_user)[:is_code_security_manager]
-  end
-
-  def can_manage_code_security_or_ref_rules?
-    can_manage_code_security_settings? || org_ref_rules_manager?
   end
 
   def org_apps_manager?

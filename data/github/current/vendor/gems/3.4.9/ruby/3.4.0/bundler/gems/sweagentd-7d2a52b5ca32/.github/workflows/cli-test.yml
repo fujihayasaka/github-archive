@@ -1,0 +1,76 @@
+name: "Build and test CLI"
+
+env:
+  HUSKY: 0
+
+on:
+  push:
+  workflow_dispatch:
+  merge_group:
+
+permissions:
+  id-token: write # for setup-goproxy
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      cli: ${{ steps.filter.outputs.cli }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36
+        id: filter
+        with:
+          filters: |
+            cli:
+              - 'runtime/**'
+  cli:
+    needs: changes
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest-xl]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read # push gets disabled if not set
+      packages: read # allow downloading the codeql CLI as part of the tests.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+        if: needs.changes.outputs.cli != 'false'
+      - uses: actions/setup-node@v4
+        if: needs.changes.outputs.cli != 'false'
+        with:
+          node-version-file: runtime/.nvmrc
+          cache: "npm"
+          cache-dependency-path: runtime/package-lock.json
+
+      - name: Build CLI (via npm)
+        if: needs.changes.outputs.cli != 'false'
+        working-directory: ./runtime
+        run: npm ci && npm run build:package
+
+      - name: Execute CLI tests
+        if: needs.changes.outputs.cli != 'false'
+        working-directory: ./runtime
+        run: |
+          git config --global user.name "$COPILOT_AGENT_COMMIT_LOGIN"
+          git config --global user.email "$COPILOT_AGENT_COMMIT_EMAIL"
+          # Run CLI-specific tests only
+          npm run test:cli
+        env:
+          TEST_CI: true
+          COPILOT_AGENT_RUNNER_TYPE: STANDALONE
+          GIT_HANDLER_TEST_REPO: ghcpd/runtime-git-test-repo
+          GIT_HANDLER_TEST_GITHUB_TOKEN: ${{ secrets.COPILOT_DEVLOPER_AGENT_USER_PAT }}
+          COPILOT_AGENT_COMMIT_LOGIN: "CloudColonel"
+          COPILOT_AGENT_COMMIT_EMAIL: "175728472+Copilot@users.noreply.github.com"
+          COPILOT_HMAC_KEY: ${{ secrets.COPILOT_HMAC_KEY }}
+          GITHUB_COPILOT_INTEGRATION_ID: ${{ vars.CAPI_INTEGRATION_ID }}
+          DISABLE_CAPI_TESTS: ${{ vars.DISABLE_CAPI_TESTS }}

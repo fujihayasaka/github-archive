@@ -1,0 +1,79 @@
+#!/bin/bash
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+PACKAGE_MANAGER=$1
+shift
+
+usage() {
+  echo "Usage: script/generate PACKAGE_MANAGER"
+  echo
+  echo "Scaffold a new package manager adapter"
+}
+
+if [ -z ${PACKAGE_MANAGER-} ]; then
+  echo "Error: Missing PACKAGE_MANAGER"
+  usage
+  exit 1
+fi
+
+if [ -d $PACKAGE_MANAGER ]; then
+  echo "$PACKAGE_MANAGER already exists!"
+  exit 1
+fi
+
+mkdir $PACKAGE_MANAGER $PACKAGE_MANAGER/lib $PACKAGE_MANAGER/test
+
+cat > $PACKAGE_MANAGER/README.md << EOF
+## The $PACKAGE_MANAGER package manager adapter
+
+### Running the adapter
+
+Run the adapter with \`package_manager_adapters/script/start $PACKAGE_MANAGER\`
+
+### Running the tests
+
+Run adapter tests with \`package_manager_adapters/script/test $PACKAGE_MANAGER\`
+EOF
+
+cat > $PACKAGE_MANAGER/Dockerfile << EOF
+# Replace with your base image
+FROM alpine:3.2
+
+ENV APP_PATH /adapter
+RUN mkdir -p \$APP_PATH
+WORKDIR \$APP_PATH
+
+# Copy files and install dependencies
+
+COPY wrapper .
+
+ENTRYPOINT ["./wrapper"]
+EOF
+
+cat > $PACKAGE_MANAGER/wrapper << EOF
+#!/bin/bash
+
+usage() {
+  echo "Usage: \$0 {run|test|console}"
+}
+
+case "\$1" in
+  run)
+    echo "Running adapter..."
+    ;;
+  test)
+    echo "Running adapter tests..."
+    ;;
+  console)
+    /bin/bash
+    ;;
+  *)
+    usage
+    exit 1
+esac
+EOF
+
+chmod +x $PACKAGE_MANAGER/wrapper

@@ -40,6 +40,7 @@ class AtomFeedsController < ApplicationController
     ApplicationRecord::Authnd,
     ApplicationRecord::Collab,
     ApplicationRecord::RepositoriesPushes,
+    ApplicationRecord::Profiles,
     only: [:user_show]
 
   def org_show # rubocop:todo GitHub/UseRestfulActions

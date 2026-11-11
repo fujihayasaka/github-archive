@@ -1,0 +1,68 @@
+name: Moda CI
+
+# More info on CI actions setup can be found here:
+# https://github.com/github/ops/blob/master/docs/playbooks/build-systems/moving-moda-apps-from-bp-to-actions.md
+
+on:
+  workflow_dispatch:
+  push:
+    reuse-previous-outcome: true
+    branches-ignore:
+      - 'gh-readonly-queue/**'
+  merge_group:
+    # reuse-previous-outcome doesn't work with heaven, since the artifacts can't be resolved
+    # for reused jobs and deployment will fail
+    # reuse-previous-outcome: true
+    types: [checks_requested]
+
+jobs:
+  moda-config-bundle:
+    name: ${{ matrix.ci_job.job}}
+    strategy:
+      fail-fast: false
+      matrix:
+        ci_job: [{'job': 'configsd-moda-config-bundle'}]
+    uses: github/internal-actions/.github/workflows/moda.yml@main
+    with:
+      ci-formatted-job-name: ${{ matrix.ci_job.job}}
+      vault-keys: ${{ vars.VAULT_KEYS}}
+    secrets:
+      dx-bot-token: ${{ secrets.INTERNAL_ACTIONS_DX_BOT_ACCOUNT_TOKEN}}
+      datadog-api-key: ${{ secrets.DATADOG_API_KEY}}
+
+  docker-image:
+    name: ${{ matrix.ci_job.job}}
+    strategy:
+      fail-fast: false
+      matrix:
+        ci_job: [{'job': 'configsd-docker-image'}]
+    uses: github/internal-actions/.github/workflows/kube.yml@main
+    with:
+      ci-formatted-job-name: ${{ matrix.ci_job.job}}
+      vault-keys: ${{ vars.VAULT_KEYS}}
+      attest: true
+    secrets:
+      dx-bot-token: ${{ secrets.INTERNAL_ACTIONS_DX_BOT_ACCOUNT_TOKEN}}
+      datadog-api-key: ${{ secrets.DATADOG_API_KEY}}
+
+  docker-security:
+    name: ${{ matrix.ci_job.job}}
+    strategy:
+      fail-fast: false
+      matrix:
+        ci_job: [{'job': 'configsd-docker-security'}]
+    uses: github/internal-actions/.github/workflows/docker_security.yml@main
+    with:
+      ci-formatted-job-name: ${{ matrix.ci_job.job}}
+      vault-keys: ${{ vars.VAULT_KEYS}}
+    secrets:
+      dx-bot-token: ${{ secrets.INTERNAL_ACTIONS_DX_BOT_ACCOUNT_TOKEN}}
+      datadog-api-key: ${{ secrets.DATADOG_API_KEY}}
+
+permissions:
+  actions: read
+  attestations: write
+  checks: read
+  contents: read
+  statuses: read
+  id-token: write

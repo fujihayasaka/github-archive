@@ -16,7 +16,7 @@ class Orgs::SecurityCenter::CodeScanningAlertDismissalRequestsController < Orgs:
   ApplicationRecord::Configurations,
   ApplicationRecord::Spokes,
   ApplicationRecord::Iam,
-  only: [:index, :bypass_request_requesters, :bypass_request_approvers]
+  only: [:index, :bypass_request_requesters, :bypass_request_approvers, :repo_suggestions]
 
   depends_on_clusters  ApplicationRecord::SecurityOverviewAnalytics,
   ApplicationRecord::Notify,
@@ -71,6 +71,15 @@ class Orgs::SecurityCenter::CodeScanningAlertDismissalRequestsController < Orgs:
   sig { void }
   def bypass_request_approvers # rubocop:todo GitHub/UseRestfulActions
     render json: helpers.filter_suggestions(RulesEngine::Suggestions.bypass_requests_approvers_for(current_organization, CodeScanning::AlertDismissalService::EXEMPTION_REQUEST_TYPE))
+  end
+
+  sig { void }
+  def repo_suggestions # rubocop:todo GitHub/UseRestfulActions
+    render json: RulesEngine::Suggestions.repos_for(
+      current_organization,
+      params[:q].to_s,
+      ActiveModel::Type::Boolean.new.cast(params[:excludePublicRepos]) || false,
+    )
   end
 
   private

@@ -1,0 +1,188 @@
+name: "Runtime build and test"
+
+env:
+  HUSKY: 0
+
+on:
+  push:
+  workflow_dispatch:
+  merge_group:
+
+permissions:
+  id-token: write # for setup-goproxy
+  contents: read
+  packages: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      runtime: ${{ steps.filter.outputs.runtime }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36
+        id: filter
+        with:
+          filters: |
+            runtime:
+              - 'runtime/**'
+  runtime:
+    needs: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # push gets disabled if not set
+      packages: read # allow downloading the codeql CLI as part of the tests.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: runtime/package-lock.json
+
+      - name: Build runtime (via npm)
+        working-directory: ./runtime
+        # We have to build all of the distributions since we'll run unbundled-dependencies.test.ts.
+        run: npm ci && npm run build && npm run build:package && npm run build:msbench
+        env:
+          AUTOFIND_DOWNLOAD_GITHUB_TOKEN: ${{ secrets.AUTOFIND_DOWNLOAD_GITHUB_TOKEN }}
+
+      - name: Lint runtime (via npm)
+        working-directory: ./runtime
+        run: npm run lint
+
+      - name: Check formatting (via npm)
+        working-directory: ./runtime
+        run: npm run format:check
+
+      - name: Execute Build Dependent Tests
+        working-directory: ./runtime
+        # Run only tests that depend on the runtime being built
+        run: |
+          # Exit early unless runtime code has changed
+          if [ "${{ needs.changes.outputs.runtime }}" == "false" ]; then
+            echo "No changes in runtime code, skipping tests."
+            exit 0
+          fi
+          git config --global user.name "$COPILOT_AGENT_COMMIT_LOGIN"
+          git config --global user.email "$COPILOT_AGENT_COMMIT_EMAIL"
+          npm run test:build-dependent
+        env:
+          RUN_BUILD_DEPENDENT_TESTS: true
+          TEST_CI: true
+          COPILOT_AGENT_RUNNER_TYPE: STANDALONE
+          GIT_HANDLER_TEST_REPO: ghcpd/runtime-git-test-repo
+          GIT_HANDLER_TEST_GITHUB_TOKEN: ${{ secrets.COPILOT_DEVLOPER_AGENT_USER_PAT }}
+          COPILOT_AGENT_COMMIT_LOGIN: "CloudColonel"
+          COPILOT_AGENT_COMMIT_EMAIL: "175728472+Copilot@users.noreply.github.com"
+          CAPI_HMAC_KEY: ${{ secrets.CAPI_HMAC_KEY }}
+          GITHUB_COPILOT_INTEGRATION_ID: ${{ vars.CAPI_INTEGRATION_ID }}
+          DISABLE_CAPI_TESTS: ${{ vars.DISABLE_CAPI_TESTS }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  runtime-test:
+    needs: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # push gets disabled if not set
+      packages: read # allow downloading the codeql CLI as part of the tests.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: runtime/package-lock.json
+
+      - run: npm ci
+        working-directory: ./runtime
+
+      - name: Execute runtime tests
+        working-directory: ./runtime
+        run: |
+          # Exit early unless runtime code has changed
+          if [ "${{ needs.changes.outputs.runtime }}" == "false" ]; then
+            echo "No changes in runtime code, skipping tests."
+            exit 0
+          fi
+          git config --global user.name "$COPILOT_AGENT_COMMIT_LOGIN"
+          git config --global user.email "$COPILOT_AGENT_COMMIT_EMAIL"
+          npm run test:ci
+        env:
+          TEST_CI: true
+          COPILOT_AGENT_RUNNER_TYPE: STANDALONE
+          GIT_HANDLER_TEST_REPO: ghcpd/runtime-git-test-repo
+          GIT_HANDLER_TEST_GITHUB_TOKEN: ${{ secrets.COPILOT_DEVLOPER_AGENT_USER_PAT }}
+          COPILOT_AGENT_COMMIT_LOGIN: "CloudColonel"
+          COPILOT_AGENT_COMMIT_EMAIL: "175728472+Copilot@users.noreply.github.com"
+          CAPI_HMAC_KEY: ${{ secrets.CAPI_HMAC_KEY }}
+          GITHUB_COPILOT_INTEGRATION_ID: ${{ vars.CAPI_INTEGRATION_ID }}
+          DISABLE_CAPI_TESTS: ${{ vars.DISABLE_CAPI_TESTS }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-coverage-report
+          path: runtime/coverage/
+          retention-days: 3
+
+      - name: Upload test timing summary
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: runtime-test-timing
+          path: runtime/reports/test-timing.json
+          retention-days: 3
+
+  tools:
+    needs: changes
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest-xl]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read # push gets disabled if not set
+      packages: read # allow downloading the codeql CLI as part of the tests.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: runtime/.nvmrc
+          cache: "npm"
+          cache-dependency-path: runtime/package-lock.json
+
+      - run: npm ci
+        working-directory: ./runtime
+
+      - name: Execute tools tests
+        working-directory: ./runtime
+        if: needs.changes.outputs.runtime != 'false'
+        run: |
+          git config --global user.name "$COPILOT_AGENT_COMMIT_LOGIN"
+          git config --global user.email "$COPILOT_AGENT_COMMIT_EMAIL"
+          npm run test:tools
+        env:
+          TEST_CI: true
+          COPILOT_AGENT_RUNNER_TYPE: STANDALONE
+          GIT_HANDLER_TEST_REPO: ghcpd/runtime-git-test-repo
+          GIT_HANDLER_TEST_GITHUB_TOKEN: ${{ secrets.COPILOT_DEVLOPER_AGENT_USER_PAT }}
+          COPILOT_AGENT_COMMIT_LOGIN: "CloudColonel"
+          COPILOT_AGENT_COMMIT_EMAIL: "175728472+Copilot@users.noreply.github.com"
+          CAPI_HMAC_KEY: ${{ secrets.CAPI_HMAC_KEY }}
+          GITHUB_COPILOT_INTEGRATION_ID: ${{ vars.CAPI_INTEGRATION_ID }}
+          DISABLE_CAPI_TESTS: ${{ vars.DISABLE_CAPI_TESTS }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

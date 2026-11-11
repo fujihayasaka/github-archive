@@ -63,6 +63,19 @@ class Memex::ProjectList::ActionMenuComponent < ApplicationComponent
   end
 
   sig { returns(T::Boolean) }
+  memoize def viewer_can_copy?
+    @project.public? || @viewer_can_write
+  end
+
+  sig { returns(T::Boolean) }
+  memoize def viewer_can_copy_as_template?
+    return false unless org_project? && viewer_is_org_member_or_manager?
+    return false unless @viewer_can_write
+
+    true
+  end
+
+  sig { returns(T::Boolean) }
   memoize def viewer_is_org_member_or_manager?
     current_user.member_or_billing_manager_for_any_organization?
   end

@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: configsd
+    annotations:
+        moda.github.net/inject-unified-service-tag-env-var: configsd
+spec:
+    replicas: 2
+    selector:
+        matchLabels:
+            app: configsd
+            role: production
+    template:
+        metadata:
+            labels:
+                app: configsd
+                role: production
+            annotations:
+                # If you emit structured logs, you can specify a parser to use so your logs are parsed
+                # properly and are much nicer to query in splunk. For more details, see
+                # https://thehub.github.com/engineering/development-and-ops/observability/logging/fluent-bit/
+                fluentbit.io/parser: logfmt
+                observability.github.com/splunk_index: configsd
+        spec:
+            dnsPolicy: ClusterFirst
+            containers:
+                - name: configsd
+                  image: configsd
+                  ports:
+                    - name: http
+                      containerPort: 8080
+                      protocol: TCP
+                  envFrom:
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - configMapRef:
+                        name: observability-config
+                    - configMapRef:
+                        name: shared-config
+                    - configMapRef:
+                        name: application-config
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: APP_NAME
+                      value: configsd
+                    - name: PORT
+                      value: "8080"
+                    # Enable metrics reporting; KUBE_NODE_HOSTNAME is injected by heaven
+                    - name: STATS_ADDR
+                      value: $(KUBE_NODE_HOSTNAME):28125
+                    - name: GOMAXPROCS
+                      valueFrom:
+                        resourceFieldRef:
+                          containerName: configsd
+                          resource: limits.cpu
+                  resources:
+                    limits:
+                      cpu: "500m"
+                  # Zero-downtime deploys
+                  # https://thehub.github.com/engineering/products-and-services/internal/moda/feature-documentation/pod-lifecycle/#required-prestop-hook
+                  # https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#container-hooks
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command: ["sleep", "5"]
+                  readinessProbe:
+                    initialDelaySeconds: 5
+                    httpGet:
+                        # WARNING: This should be updated to a meaningful endpoint for your application which will return a 200 once the app is fully started.
+                        # See: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#define-readiness-probes
+                        path: /_ready
+                        port: http

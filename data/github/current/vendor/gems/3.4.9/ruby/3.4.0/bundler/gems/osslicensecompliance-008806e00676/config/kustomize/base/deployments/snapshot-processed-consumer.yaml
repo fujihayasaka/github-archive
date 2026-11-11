@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: osslicensecompliance-snapshot-processed-consumer
+spec:
+    replicas: 2
+    selector:
+        matchLabels:
+            app: osslicensecompliance-snapshot-processed-consumer
+    template:
+        metadata:
+            labels:
+                app: osslicensecompliance-snapshot-processed-consumer
+            annotations:
+                observability.github.com/logger: fluent-bit
+                fluentbit.io/parser: logfmt
+                observability.github.com/splunk_index: osslicensecompliance
+                proxy.istio.io/config: |
+                  terminationDrainDuration: 25s
+        spec:
+            dnsPolicy: ClusterFirst
+            terminationGracePeriodSeconds: 30
+            containers:
+                - name: osslicensecompliance-snapshot-processed-consumer
+                  image: osslicensecompliance
+                  command: ["/app/bin/snapshot-processed-consumer"]
+                  env:
+                    - name: script
+                      value: build
+                    - name: STATS_PERIOD
+                      value: "5s"
+                    - name: STATS_ADDR
+                      value: "$(KUBE_NODE_HOSTNAME):28125"
+                    - name: APP_SHA
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.annotations['heaven.githubapp.com/sha']
+                    - name: APP_REF
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.annotations['heaven.githubapp.com/ref']
+                    - name: GOMAXPROCS
+                      valueFrom:
+                        resourceFieldRef:
+                          containerName: osslicensecompliance-snapshot-processed-consumer
+                          resource: limits.cpu
+                  envFrom:
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - configMapRef:
+                        name: environment
+                    - secretRef:
+                        name: vault-secrets
+                  resources:
+                    requests:
+                        cpu: "50m"
+                    limits:
+                        cpu: "1.0"
+                  lifecycle: # Required to deal with k8s bug as per validation rule
+                    preStop:
+                        exec:
+                            command: ["sleep", "5"]

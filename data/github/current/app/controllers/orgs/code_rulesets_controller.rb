@@ -9,7 +9,7 @@ class Orgs::CodeRulesetsController < Orgs::Controller
 
   include RepositoryRulesets::HashBuilder
 
-  before_action :org_code_security_or_ref_rules_manager_only
+  before_action :org_ref_rules_manager_only
   before_action :ensure_trade_restrictions_allows_org_settings_access
 
   include ApplicationController::VerifiedFetchDependency

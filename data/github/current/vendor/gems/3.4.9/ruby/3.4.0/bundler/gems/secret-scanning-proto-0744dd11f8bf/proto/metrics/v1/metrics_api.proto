@@ -1,0 +1,263 @@
+syntax = "proto3";
+
+package github.secretscanning.metrics.v1;
+
+option go_package = "github.com/github/secret-scanning-proto/gen/go/v1/metrics";
+option ruby_package = "GitHub::Proto::SecretScanning::Metrics::V1";
+
+import "google/protobuf/timestamp.proto";
+
+import "types/v1/token.proto";
+import "types/v1/token_metadata.proto";
+import "api/v1/shared.proto";
+import "scans/v1/api.proto";
+
+service MetricsAPI {
+  // Insights
+
+  rpc GetAlertsForInsightsBackfill(GetAlertsForInsightsBackfillRequest) returns (GetAlertsForInsightsBackfillRequestResponse);
+
+  // Dotcom APIs
+
+  rpc GetTokenAlertMetrics(GetTokenAlertMetricsRequest) returns (GetTokenAlertMetricsResponse);
+  rpc GetTokenPushProtectionMetrics(GetTokenPushProtectionMetricsRequest) returns (GetTokenPushProtectionMetricsResponse);
+  rpc GetPushProtectionMetrics(GetPushProtectionMetricsRequest) returns (GetPushProtectionMetricsResponse);
+  rpc GetPushProtectionMetricsForRepos(GetPushProtectionMetricsForReposRequest) returns (GetPushProtectionMetricsForReposResponse);
+  rpc GetBlockCountsByTokenType(GetBlockCountsByTokenTypeRequest) returns (GetBlockCountsByTokenTypeResponse);
+  rpc GetBlockCountsByRepo(GetBlockCountsByRepoRequest) returns (GetBlockCountsByRepoResponse);
+  rpc GetBypassCountsByTokenType(GetBypassCountsByTokenTypeRequest) returns (GetBypassCountsByTokenTypeResponse);
+  rpc GetBypassCountsByRepo(GetBypassCountsByRepoRequest) returns (GetBypassCountsByRepoResponse);
+}
+
+message GetAlertsForInsightsBackfillRequest {
+  oneof selector {
+    RepoSelector repo_selector = 1;
+  }
+
+  // Represents an opaque object to be used to request the next page of results.
+  bytes next_cursor = 2;
+
+  // Filter to only include alerts with a later `updated_at` timestamp.
+  // This filter forces API to page through alert records with a timestamp cursor on `updated_at` column
+  // and it is ignored when next_cursor is not nil.
+  google.protobuf.Timestamp updated_after = 3;
+
+  // Whether the response should include alerts with low confidence
+  bool include_low_confidence = 4;
+}
+
+message GetAlertsForInsightsBackfillRequestResponse {
+  repeated Alert Alerts = 1;
+  // next_cursor is an opaque paging token; request for next page should get records immediately following (exclusive)
+  bytes next_cursor = 2;
+}
+
+message Alert {
+  uint64 number = 1;
+  uint64 repository_id = 2;
+  google.protobuf.Timestamp created_at = 3;
+  // The time when alert was resolved - either by manually dismissing, or location disappearing
+  google.protobuf.Timestamp resolved_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+  // Reflects that alert is generally resolved - either because location is not available, or because it was manually resolved
+  bool resolved = 6;
+  github.secretscanning.types.v1.TokenResolution resolution = 7;
+  string token_type_provider = 8;
+  string slug = 9;
+  string token_type = 10;
+  bool has_valid_locations = 11;
+  bool low_confidence = 12;
+  bool bypassed = 13;
+  github.secretscanning.types.v1.TokenValidity validity = 14;
+}
+
+message RepoSelector {
+  uint64 repository_id = 1;
+}
+
+message GetTokenAlertMetricsRequest {
+    uint64 owner_id = 1;
+    github.secretscanning.v1.OwnerScope owner_scope = 2;
+    string token_type = 3;
+}
+
+message GetTokenAlertMetricsResponse {
+  uint64 open_alerts = 1;
+  uint64 closed_alerts = 2;
+  uint64 false_positive_alerts = 3;
+}
+
+message GetTokenPushProtectionMetricsRequest {
+    uint64 owner_id = 1;
+    github.secretscanning.v1.OwnerScope owner_scope = 2;
+    string token_type = 3;
+}
+
+message GetTokenPushProtectionMetricsResponse {
+    uint64 total_blocks = 1;
+    uint64 successful_blocks = 2;
+    uint64 bypassed_alerts = 3;
+}
+
+// Represents a count metric grouped by token type
+message TokenTypeCount {
+  string token_type = 1;  // actual token type, (ex: CLOJARS_DEPLOY_TOKEN, cp_1234)
+  uint64 count = 2;
+  github.secretscanning.types.v1.TokenMetadata token_metadata = 3;
+}
+
+// Represents a count metric grouped by repository ID
+message RepoCount {
+  uint64 repo_id = 1;
+  uint64 count = 2;
+}
+
+// Represents a count metric grouped by bypass reason
+message BypassReasonCount {
+  github.secretscanning.scans.v1.BypassReason bypass_reason = 1;
+  uint64 count = 2;
+}
+
+message GetPushProtectionMetricsRequest {
+  uint64 owner_id = 1;
+  github.secretscanning.v1.OwnerScope owner_scope = 2;
+  google.protobuf.Timestamp start_date = 3;
+  google.protobuf.Timestamp end_date = 4;
+  repeated uint64 repo_ids = 5;
+  github.secretscanning.v1.RepositoryOwners repo_owners = 6;
+  repeated string token_types = 7;
+  repeated string token_providers = 8;
+  repeated github.secretscanning.types.v1.TokenValidity token_validities = 9;
+  repeated uint64 exclude_repo_ids = 10;
+  repeated string exclude_token_types = 11;
+  repeated string exclude_token_providers = 12;
+  repeated github.secretscanning.types.v1.TokenValidity exclude_token_validities = 13;
+  github.secretscanning.v1.RepositoryArchivedState repo_archived_state = 14;
+}
+
+message GetPushProtectionMetricsResponse {
+  uint64 total_blocks_count = 1;
+  uint64 successful_blocks_count = 2;
+  uint64 bypassed_alerts_count = 3;
+  repeated TokenTypeCount blocks_by_token_type_counts = 4;
+  repeated RepoCount blocks_by_repository_counts = 5;
+  repeated TokenTypeCount bypasses_by_token_type_counts = 6;
+  repeated RepoCount bypasses_by_repository_counts = 7;
+  repeated BypassReasonCount bypasses_by_reason_counts = 8;
+  repeated uint64 bypass_request_ids = 9;
+}
+
+message GetPushProtectionMetricsForReposRequest {
+  uint64 owner_id = 1;
+  github.secretscanning.v1.OwnerScope owner_scope = 2;
+  repeated uint64 repo_ids = 3;
+  google.protobuf.Timestamp start_date = 4;
+  google.protobuf.Timestamp end_date = 5;
+  repeated string token_types = 6;
+  repeated string token_providers = 7;
+  repeated github.secretscanning.types.v1.TokenValidity token_validities = 8;
+  repeated uint64 exclude_repo_ids = 9;
+  repeated string exclude_token_types = 10;
+  repeated string exclude_token_providers = 11;
+  repeated github.secretscanning.types.v1.TokenValidity exclude_token_validities = 12;
+  github.secretscanning.v1.RepositoryArchivedState repo_archived_state = 13;
+  github.secretscanning.v1.RepositoryOwners repo_owners = 14;
+}
+
+message GetPushProtectionMetricsForReposResponse {
+  uint64 total_blocks_count = 1;
+  uint64 successful_blocks_count = 2;
+  uint64 bypassed_alerts_count = 3;
+}
+
+message GetBlockCountsByTokenTypeRequest {
+  uint64 owner_id = 1;
+  github.secretscanning.v1.OwnerScope owner_scope = 2;
+  bytes cursor = 3;
+  google.protobuf.Timestamp start_date = 4;
+  google.protobuf.Timestamp end_date = 5;
+  repeated uint64 repo_ids = 6;
+  github.secretscanning.v1.RepositoryOwners repo_owners = 7;
+  repeated string token_types = 8;
+  repeated string token_providers = 9;
+  repeated uint64 exclude_repo_ids = 10;
+  repeated string exclude_token_types = 11;
+  repeated string exclude_token_providers = 12;
+  github.secretscanning.v1.RepositoryArchivedState repo_archived_state = 13;
+}
+
+message GetBlockCountsByTokenTypeResponse {
+  repeated TokenTypeCount counts = 1;
+  bytes previous_cursor = 2;
+  bytes next_cursor = 3;
+}
+
+message GetBlockCountsByRepoRequest {
+  uint64 owner_id = 1;
+  github.secretscanning.v1.OwnerScope owner_scope = 2;
+  bytes cursor = 3;
+  google.protobuf.Timestamp start_date = 4;
+  google.protobuf.Timestamp end_date = 5;
+  repeated uint64 repo_ids = 6;
+  github.secretscanning.v1.RepositoryOwners repo_owners = 7;
+  repeated string token_types = 8;
+  repeated string token_providers = 9;
+  repeated uint64 exclude_repo_ids = 10;
+  repeated string exclude_token_types = 11;
+  repeated string exclude_token_providers = 12;
+  github.secretscanning.v1.RepositoryArchivedState repo_archived_state = 13;
+}
+
+message GetBlockCountsByRepoResponse {
+  repeated RepoCount counts = 1;
+  bytes previous_cursor = 2;
+  bytes next_cursor = 3;
+}
+
+message GetBypassCountsByTokenTypeRequest {
+  uint64 owner_id = 1;
+  github.secretscanning.v1.OwnerScope owner_scope = 2;
+  bytes cursor = 3;
+  google.protobuf.Timestamp start_date = 4;
+  google.protobuf.Timestamp end_date = 5;
+  repeated uint64 repo_ids = 6;
+  github.secretscanning.v1.RepositoryOwners repo_owners = 7;
+  repeated string token_types = 8;
+  repeated string token_providers = 9;
+  repeated github.secretscanning.types.v1.TokenValidity token_validities = 10;
+  repeated uint64 exclude_repo_ids = 11;
+  repeated string exclude_token_types = 12;
+  repeated string exclude_token_providers = 13;
+  repeated github.secretscanning.types.v1.TokenValidity exclude_token_validities = 14;
+  github.secretscanning.v1.RepositoryArchivedState repo_archived_state = 15;
+}
+
+message GetBypassCountsByTokenTypeResponse {
+  repeated TokenTypeCount counts = 1;
+  bytes previous_cursor = 2;
+  bytes next_cursor = 3;
+}
+
+message GetBypassCountsByRepoRequest {
+  uint64 owner_id = 1;
+  github.secretscanning.v1.OwnerScope owner_scope = 2;
+  bytes cursor = 3;
+  google.protobuf.Timestamp start_date = 4;
+  google.protobuf.Timestamp end_date = 5;
+  repeated uint64 repo_ids = 6;
+  github.secretscanning.v1.RepositoryOwners repo_owners = 7;
+  repeated string token_types = 8;
+  repeated string token_providers = 9;
+  repeated github.secretscanning.types.v1.TokenValidity token_validities = 10;
+  repeated uint64 exclude_repo_ids = 11;
+  repeated string exclude_token_types = 12;
+  repeated string exclude_token_providers = 13;
+  repeated github.secretscanning.types.v1.TokenValidity exclude_token_validities = 14;
+  github.secretscanning.v1.RepositoryArchivedState repo_archived_state = 15;
+}
+
+message GetBypassCountsByRepoResponse {
+  repeated RepoCount counts = 1;
+  bytes previous_cursor = 2;
+  bytes next_cursor = 3;
+}

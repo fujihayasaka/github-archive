@@ -36,6 +36,7 @@ module GitHub
     end
 
     def allowlisted?(stat)
+      stat = stat.to_s
       @allowlist.any? { |pattern| File.fnmatch(pattern, stat, File::FNM_EXTGLOB) }
     end
   end

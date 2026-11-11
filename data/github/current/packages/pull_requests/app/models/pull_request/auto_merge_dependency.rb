@@ -125,6 +125,12 @@ module PullRequest::AutoMergeDependency
       return CanEnableAutoMergeNotAllowedResult.new(reason: "Pull request is already merged")
     end
 
+    if FeatureFlag.vexi.enabled?(:auto_merge_fork_bug_fix, default: false)
+      unless repository.async_pushable_by?(actor).sync && base_repository&.async_pushable_by?(actor)&.sync
+        return CanEnableAutoMergeNotAllowedResult.new(reason: "User is not allowed to push to this repository")
+      end
+    end
+
     pr_merge_state = cached_merge_state(viewer: actor)
 
     if pr_merge_state.blocked_by_workflow_updates?
@@ -147,8 +153,10 @@ module PullRequest::AutoMergeDependency
       return CanEnableAutoMergeNotAllowedResult.new(reason: "User is not authorized for this protected branch")
     end
 
-    unless repository.async_pushable_by?(actor).sync
-      return CanEnableAutoMergeNotAllowedResult.new(reason: "User is not allowed to push to this repository")
+    unless FeatureFlag.vexi.enabled?(:auto_merge_fork_bug_fix, default: false)
+      unless repository.async_pushable_by?(actor).sync
+        return CanEnableAutoMergeNotAllowedResult.new(reason: "User is not allowed to push to this repository")
+      end
     end
 
     if pr_merge_state.blocked_by_invalid_merge_queue_config?

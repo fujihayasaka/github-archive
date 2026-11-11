@@ -59,13 +59,23 @@ module ApplicationController::EventsDependency
   end
 
   def load_stratocaster_events(timeline_name)
-    timeline = Stratocaster::Timeline.for(timeline_name, current_user)
+    normalized_name = normalize_stratocaster_timeline_key(timeline_name)
+    timeline = Stratocaster::Timeline.for(normalized_name, current_user)
 
     if request.format && (request.format.atom? || request.format.json?)
       timeline.preload_events
     end
 
     timeline
+  end
+
+  # The ":private" suffix on timeline keys (e.g., "user:123:private") is a
+  # Conduit-specific convention introduced for atom feed integration. Stratocaster
+  # does not recognize this suffix and would classify the key as UNKNOWN, routing
+  # it to an empty index. Stripping it maps the key back to "user:123" which
+  # Stratocaster correctly handles as HOMEPAGE_ALL.
+  def normalize_stratocaster_timeline_key(timeline_name)
+    timeline_name.delete_suffix(":private")
   end
 
   def load_conduit_events(timeline_name)

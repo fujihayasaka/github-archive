@@ -1,0 +1,118 @@
+name: "MSBench Run for CLI"
+
+env:
+  HUSKY: 0
+
+on:
+  workflow_dispatch:
+    inputs:
+      benchmark:
+        description: "Benchmark"
+        required: true
+        default: "terminalbench"
+        type: string
+      workers:
+        description: "Number of workers (max 30 per person across jobs)"
+        required: false
+        default: "20"
+        type: string
+      model:
+        description: "Model to use"
+        required: false
+        default: "claude-sonnet-4.5"
+        type: string
+      tags:
+        description: "Additional tags (comma-separated key=value pairs)"
+        required: false
+        default: ""
+        type: string
+  schedule:
+    - cron: "0 22 * * *" # Run nightly at 10 PM UTC
+
+jobs:
+  msbench:
+    env:
+      BENCHMARK: ${{ matrix.benchmark }}
+      # Worker count: 30 for all scheduled runs, configurable for manual runs (default 20, max 30)
+      WORKERS: ${{ github.event_name == 'schedule' && '30' || (fromJson(inputs.workers || '20') <= 30 && fromJson(inputs.workers || '20') > 0 && inputs.workers || '20') }}
+      TAGS: ${{ github.event_name == 'schedule' && format('run=workflow-scheduled,branch={0},workers={1},endpoint={2}-workflow-{3},benchmark={4}', github.ref_name, '30', vars.CAPI_INTEGRATION_ID, format('{0}-{1}-{2}', github.run_id, github.run_attempt, strategy.job-index), matrix.benchmark) || format('run=workflow-trigger,branch={0},workers={1},triggeredBy={2},endpoint={3}-workflow-{4},benchmark={5}', github.ref_name, (fromJson(inputs.workers || '20') <= 30 && fromJson(inputs.workers || '20') > 0 && inputs.workers || '20'), github.actor, vars.CAPI_INTEGRATION_ID, github.ref_name, matrix.benchmark) }}
+      MODEL: ${{ matrix.model }}
+    runs-on: ubuntu-latest
+    environment: msbench
+    strategy:
+      fail-fast: false
+      matrix:
+        benchmark: ${{ fromJson(github.event_name == 'schedule' && '["terminalbench"]' || format('["{0}"]', inputs.benchmark || 'terminalbench')) }}
+        model: ${{ fromJson(github.event_name == 'schedule' && '["claude-sonnet-4","gpt-5", "claude-sonnet-4.5"]' || format('["{0}"]', inputs.model || 'claude-sonnet-4.5')) }}
+    permissions:
+      id-token: write # for azure/login
+      contents: read # for actions/checkout
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: |
+            runtime/package-lock.json
+            runtime/benchmarks/msbench/agent_pkg/cpd-msbench-runner/package-lock.json
+      - name: Azure Login
+        uses: azure/login@a65d910e8af852a8061c627c456678983e180302 #v2.2.0
+        with:
+          client-id: "${{ vars.CPD_ID_CLIENT_ID }}" # id-cpd-ci
+          tenant-id: "${{ vars.CPD_ID_TENANT_ID }}"
+          subscription-id: "${{ vars.CPD_ID_SUBSCRIPTION_ID }}"
+      - name: Configure pip authentication for Azure Artifacts
+        run: |
+          # Get access token for Azure DevOps/Artifacts
+          ACCESS_TOKEN=$(az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv)
+
+          # Configure pip to use Azure Artifacts feed with authentication
+          mkdir -p ~/.pip
+          cat > ~/.pip/pip.conf << EOF
+          [global]
+          extra-index-url = https://build:${ACCESS_TOKEN}@pkgs.dev.azure.com/devdiv/_packaging/MicrosoftSweBench/pypi/simple/
+          trusted-host = pkgs.dev.azure.com
+
+          [install]
+          trusted-host = pkgs.dev.azure.com
+          EOF
+
+          # Set environment variables for pip authentication
+          echo "PIP_EXTRA_INDEX_URL=https://build:${ACCESS_TOKEN}@pkgs.dev.azure.com/devdiv/_packaging/MicrosoftSweBench/pypi/simple/" >> $GITHUB_ENV
+          echo "PIP_TRUSTED_HOST=pkgs.dev.azure.com" >> $GITHUB_ENV
+
+          # Alternative: Create .netrc file for authentication
+          cat > ~/.netrc << EOF
+          machine pkgs.dev.azure.com
+          login build
+          password ${ACCESS_TOKEN}
+          EOF
+          chmod 600 ~/.netrc
+
+          # Verify configuration
+          echo "Testing pip configuration..."
+          pip config list
+
+      - name: Setup msbench-cli
+        working-directory: ./runtime/benchmarks/msbench
+        run: ./setup.sh
+      - name: Run ${{ env.BENCHMARK }}
+        working-directory: ./runtime/benchmarks/msbench
+        run: |
+          # - Scheduled runs: Tagged with 'run=workflow-scheduled' and branch name
+          # - Manual runs: Tagged with 'run=workflow-trigger' and branch name
+          #
+          # The --endpoint parameter queues runs on a dedicated workflow-specific endpoint+model
+          # to avoid throttling the LLM with too many concurrent runs for the same branch.
+          #
+          # Concatenate input tags with environment tags
+          if [ -n "${{ inputs.tags }}" ]; then
+              TAGS="${TAGS},${{ inputs.tags }}"
+          fi
+
+          ./10-update-and-run-cli.sh "$BENCHMARK" ${{ vars.CAPI_INTEGRATION_ID }} --copilot-key-vault ${{ vars.CAPI_CI_AZURE_KEY_VAULT_URI }} --agent-model "sweagent-capi:${MODEL}" --tags $TAGS --workers $WORKERS --no-wait
+          # msbench-cli cancel --run_id <run_id>

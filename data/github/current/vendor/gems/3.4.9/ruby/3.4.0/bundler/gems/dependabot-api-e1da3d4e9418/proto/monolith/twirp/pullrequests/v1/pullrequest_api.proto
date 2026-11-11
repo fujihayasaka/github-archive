@@ -1,0 +1,187 @@
+// proto/monolith/twirp/pullrequests/v1/pullrequest.proto
+syntax = "proto3";
+
+package dependabot.pullrequests.v1;
+
+option go_package = "pullrequests/v1";
+option ruby_package = "MonolithTwirp::Dependabot::PullRequests::V1";
+
+service PullRequestAPI {
+  rpc PublishChanges(PublishChangesRequest)
+    returns (PublishChangesResponse);
+  rpc CreatePullRequest(CreatePullRequestRequest)
+    returns (CreatePullRequestResponse);
+  rpc CheckPullRequestEligibility(CheckPullRequestEligibilityRequest)
+    returns (CheckPullRequestEligibilityResponse);
+  rpc GetPullRequests(GetPullRequestsRequest)
+    returns (GetPullRequestsResponse);
+  rpc GetCiStatus(GetCiStatusRequest)
+    returns (GetCiStatusResponse);
+}
+
+message DependencyFile {
+  enum ContentEncoding {
+    CONTENT_ENCODING_INVALID = 0;
+    CONTENT_ENCODING_UTF8 = 1;
+    CONTENT_ENCODING_BASE64 = 2;
+  }
+
+  enum Type {
+    TYPE_INVALID = 0;
+    TYPE_FILE = 1;
+    TYPE_SUBMODULE = 2;
+    TYPE_SYMLINK = 3;
+  }
+
+  string name = 1;
+  string content = 2;
+  string directory = 3;
+  Type type = 4;
+  bool support_file = 5;
+  ContentEncoding content_encoding = 6;
+  bool deleted = 7;
+  reserved 8; // operation enum
+  reserved 9; // mode enum, replaced by mode string (11)
+  optional string symlink_target = 10;
+  optional string mode = 11;
+}
+
+message PublishChangesRequest {
+  uint64 repository_id = 1;
+  string dependabot_branch_name = 2;
+  string base_commit_sha = 3;
+  string commit_message = 4;
+  repeated DependencyFile dependency_files = 5;
+}
+
+message PublishChangesResponse {
+  uint64 repository_id = 1;
+  string commit_sha = 2;
+  Error error = 3;
+  string branch_name = 4;
+}
+
+message Reviewers {
+  repeated string users = 1;
+  repeated string teams = 2;
+}
+
+message Label {
+  string name = 1;
+  bool is_custom = 2;
+  optional string description = 3;
+  optional string color = 4;
+}
+
+message CreatePullRequestRequest {
+  uint64 repository_id = 1;
+  optional string base_branch_name = 2;
+  string head_branch_name = 3;
+  string pr_name = 4;
+  string pr_description = 5;
+  repeated Label labels = 6;
+  Reviewers reviewers = 7;
+  repeated string assignees = 8;
+  uint64 milestone_number = 9;
+  optional uint64 dependabot_update_id = 10;
+}
+
+message CreatePullRequestResponse {
+  PullRequest pull_request = 1;
+  Error error = 2;
+}
+
+message PullRequest {
+  uint64 github_number = 1;
+  uint64 repository_id = 2;
+  string state = 3;
+  string head_sha = 4;
+  string head_ref = 5;
+  string base_sha = 6;
+  string base_ref = 7;
+  bool has_user_commits = 8;
+}
+
+// Possible errors:
+// - Dependabot::PullRequestCreator::RepoNotFound,
+// - Dependabot::PullRequestCreator::RepoArchived,
+// - Dependabot::PullRequestCreator::RepoDisabled,
+// - Dependabot::PullRequestCreator::NoHistoryInCommon
+// - Dependabot::PullRequestCreator::UnexpectedError
+// - Dependabot::PullRequestCreator::AnnotationError
+enum ErrorType {
+  ERROR_TYPE_INVALID = 0;
+  ERROR_TYPE_REPO_NOT_FOUND = 1;
+  ERROR_TYPE_REPO_ARCHIVED = 2;
+  ERROR_TYPE_REPO_DISABLED = 3;
+  ERROR_TYPE_REPO_LOCKED = 4;
+  ERROR_TYPE_REPO_EMPTY = 5;
+  ERROR_TYPE_REPO_RULE_VIOLATION = 10;
+  ERROR_TYPE_REPO_OVER_SIZE_QUOTA = 11;
+  ERROR_TYPE_RECORD_INVALID = 6;
+  ERROR_TYPE_DEPENDABOT_NOT_INSTALLED = 8;
+  ERROR_TYPE_DEPENDABOT_CANNOT_WRITE = 9;
+  ERROR_TYPE_GIT = 12;
+  ERROR_TYPE_PROTECTED_BRANCH_UPDATE = 13;
+  ERROR_TYPE_RATE_LIMITED = 14;
+  ERROR_TYPE_REQUEST_TOO_LARGE = 15;
+  ERROR_TYPE_UNEXPECTED_ERROR = 7;
+}
+
+message Error {
+  ErrorType type = 1;
+  string message = 2;
+}
+
+message CheckPullRequestEligibilityRequest {
+  uint64 repository_id = 1;
+  string base_commit_sha = 2;
+  string dependabot_branch_name = 3;
+  optional string base_branch_name = 4;
+  bool require_up_to_date_base = 5;
+}
+
+message CheckPullRequestEligibilityResponse {
+  enum Result {
+    RESULT_INVALID = 0;
+    RESULT_OK = 1;
+    RESULT_USER_EDITED_BRANCH_EXISTS = 2;
+    RESULT_EXISTING_BRANCH_HAS_MULTIPLE_COMMITS = 3;
+    RESULT_UNMERGED_PR_EXISTS = 4;
+    RESULT_BASE_NOT_UP_TO_DATE = 5;
+  }
+
+  Result result = 1;
+  Error error = 2;
+}
+
+message GetPullRequestsRequest {
+  uint64 repository_id = 1;
+  repeated uint64 github_pr_numbers = 2;
+  optional string state = 3;
+  bool include_skipped_commits = 4;
+}
+
+message GetPullRequestsResponse {
+  repeated PullRequest pull_requests = 1;
+
+  Error error = 2;
+}
+
+enum CiStatus {
+  CI_STATUS_INVALID = 0;
+  CI_STATUS_PENDING = 1;
+  CI_STATUS_FAILURE = 2;
+  CI_STATUS_SUCCESS = 3;
+}
+
+message GetCiStatusRequest {
+  uint64 repository_id = 1;
+  repeated string shas = 2;
+}
+
+message GetCiStatusResponse {
+  uint64 repository_id = 1;
+  map<string, CiStatus> statuses = 2;
+  Error error = 3;
+}
