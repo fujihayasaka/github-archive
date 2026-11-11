@@ -1,0 +1,40 @@
+<div>
+  <% if Codespaces::Survey.show_survey_prompt_for_user_repository_page?(current_user, current_repository) %>
+    <div class="clearfix tmp-mb-3 tmp-mt-3">
+      <%= render_react_partial name: "codespaces-survey", props: {
+        surveyLink: Codespaces::Survey.survey_url(current_user),
+        surveyOpenCallbackPath: codespaces_survey_open_path,
+        surveyDismissCallbackPath: codespaces_survey_dismiss_path
+      } %>
+    </div>
+  <% elsif (survey_type = ["copilot-feedback-survey", "copilot-plg-survey", "copilot-create-issue-feedback"].find { |type|
+    Copilot::FeedbackSurvey.show_survey_for_user_repository_page?(current_user, type)
+  }) %>
+    <div class="clearfix tmp-mb-3 tmp-mt-3">
+      <% banner = Copilot::FeedbackSurvey.self_serve_banner(survey_type) %>
+      <%= render_react_partial name: "copilot-survey", props: {
+        bannerText: banner&.body,
+        bannerTitle: banner&.title,
+        ctaUrl: banner&.cta_url,
+        ctaText: banner&.cta_text,
+        bannerSlug: banner&.slug,
+        surveyOpenCallbackPath: copilot_feedback_survey_open_path,
+        surveyDismissCallbackPath: copilot_feedback_survey_dismiss_path
+      } %>
+    </div>
+  <% end %>
+
+  <% if view.blocked_contributors.any? %>
+    <%= render partial: "files/blocked_contributors", locals: { view: view } %>
+  <% end %>
+  <%= render(Primer::Alpha::Layout.new(first_in_source: :main, stacking_breakpoint: :md, style: "max-width: 100%", classes: "react-repos-overview-margin" )) do |component| %>
+    <% component.with_sidebar(col_placement: :end, row_placement: :end) do %>
+      <%= render partial: "repository/overview_sidebar", locals: { view: view, commit: commit } %>
+    <% end %>
+    <% component.with_main do %>
+      <%= render_react_partial name: "repos-overview", props: { initialPayload: payload, appPayload: app_payload }, disable_ssr: !user_or_global_feature_enabled?(:react_overview_ssr) && !FeatureFlag.vexi.enabled?(:react_overview_ssr, current_repository, default: false) %>
+      <%# TODO remove this once we can get csrf tokens from the app payload %>
+      <%= csrf_hidden_input_for codespaces_path, method: :post, id: "react-codespace-csrf" %>
+    <% end %>
+  <% end %>
+</div>

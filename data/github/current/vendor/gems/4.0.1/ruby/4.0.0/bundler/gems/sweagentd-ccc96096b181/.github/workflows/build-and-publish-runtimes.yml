@@ -1,0 +1,96 @@
+name: Build and Publish Runtime Releases
+
+env:
+  HUSKY: 0
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version override (defaults to workflow commit SHA)"
+        required: false
+        type: string
+  merge_group:
+    types: [checks_requested]
+
+concurrency:
+  group: runtime-build-${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ inputs.version || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: sweagentd
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+
+      - run: npm ci
+        working-directory: ./sweagentd/runtime
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_DEVELOPER_ACTION_PAT }}
+          repository: github/copilot-developer-action
+          path: copilot-developer-action
+          ref: main
+
+      - name: Build action
+        run: ./sweagentd/runtime/script/action-build ./copilot-developer-action
+        env:
+          EBPF_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.EBPF_DOWNLOAD_GITHUB_TOKEN }}"
+          BLACKBIRD_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.BLACKBIRD_DOWNLOAD_GITHUB_TOKEN }}"
+          AUTOFIND_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.AUTOFIND_DOWNLOAD_GITHUB_TOKEN }}"
+
+      - name: Package and release all runtimes
+        working-directory: ./copilot-developer-action
+        env:
+          GH_TOKEN: ${{ secrets.COPILOT_DEVELOPER_ACTION_PAT }}
+        run: |
+          declare -A runtimes=(
+            ["cca"]="dist-cca|CCA|CCA v2 runtime"
+            ["codex"]="dist-codex|Codex|Codex runtime"
+            ["claude"]="dist-claude|Claude|Claude runtime"
+            ["copilot"]="dist|Copilot|Copilot runtime"
+          )
+
+          for name in "${!runtimes[@]}"; do
+            IFS='|' read -r dist title notes <<< "${runtimes[$name]}"
+            echo "Packaging ${title} runtime..."
+
+            rm -rf ../release
+            mkdir -p ../release/copilot-developer-action-main
+
+            cp -r ./${dist} ../release/copilot-developer-action-main/${dist}
+            cp -r ./script ../release/copilot-developer-action-main/script
+            cp -r ./ebpf ../release/copilot-developer-action-main/ebpf
+            cp -r ./mcp ../release/copilot-developer-action-main/mcp
+            cp -r ./autofind ../release/copilot-developer-action-main/autofind
+            cp -r ./blackbird-mcp-server ../release/copilot-developer-action-main/blackbird-mcp-server
+            cp -r ./github-mcp-server ../release/copilot-developer-action-main/github-mcp-server
+            cp ./package.json ../release/copilot-developer-action-main/
+            cp ./package-lock.json ../release/copilot-developer-action-main/
+            cp ./LICENSE.md ../release/copilot-developer-action-main/
+            cp ./action.yml ../release/copilot-developer-action-main/
+            cp ./node-req.env ../release/copilot-developer-action-main/
+            cp ./version ../release/copilot-developer-action-main/
+
+            tar -czf ../copilot-developer-action.tar.gz -C ../release .
+
+            RELEASE_TAG="runtime-${name}-${RELEASE_VERSION}"
+            echo "Creating release ${RELEASE_TAG}..."
+            gh release create "${RELEASE_TAG}" \
+              --title "${title} Runtime ${RELEASE_VERSION}" \
+              --notes "${notes} build from sweagentd commit ${{ github.sha }}" \
+              ../copilot-developer-action.tar.gz
+          done

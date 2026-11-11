@@ -1,0 +1,68 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    annotations:
+        heaven.githubapp.com/deploy-requirement: "true"
+        heaven.githubapp.com/image-placeholder: dependency-snapshots-api
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: dependency-snapshots-api
+    name: activation-lifecycle-consumer
+spec:
+    replicas: 2
+    selector:
+        matchLabels:
+            app: dependency-snapshots-api
+            role: activation-lifecycle-consumer
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser_stderr: json
+                fluentbit.io/parser_stdout: logfmt
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: dependency-snapshots-api
+            labels:
+                app: dependency-snapshots-api
+                role: activation-lifecycle-consumer
+        spec:
+            containers:
+                - command:
+                    - ./bin/ds-hydro-consumer
+                    - --consumer=activation-lifecycle
+                  env:
+                    - name: STATS_ADDR
+                      value: $(KUBE_NODE_HOSTNAME):28125
+                    - name: GOMAXPROCS
+                      valueFrom:
+                        resourceFieldRef:
+                            containerName: dependency-snapshots-api
+                            resource: limits.cpu
+                    - name: KAFKA_CONSUMER_GROUP
+                      value: dsapi-activation-lifecycle-consumer-v1
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  image: dependency-snapshots-api
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command:
+                                - sleep
+                                - "5"
+                  name: dependency-snapshots-api
+                  readinessProbe:
+                    exec:
+                        command:
+                            - "true"
+                    initialDelaySeconds: 10
+                  resources:
+                    limits:
+                        cpu: 2000m
+                        memory: 4Gi
+                    requests:
+                        cpu: 1000m
+                        memory: 1Gi
+            dnsPolicy: ClusterFirst

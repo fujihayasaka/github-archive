@@ -1,0 +1,93 @@
+<% if view.show_sso_lockdown? %>
+  <%= render Primer::Beta::Subhead.new(mb: 0, border_bottom: 0, test_selector: "sso-lockdown-danger-zone", classes: "tmp-mt-5") do |subhead| %>
+    <% subhead.with_heading(tag: :h3, color: :danger, mt: 4, mb: 0, font_size: 4) do %>
+      Danger zone
+    <% end %>
+  <% end %>
+
+  <%= render(Primer::Beta::BorderBox.new(border_color: :danger, test_selector: "sso-lockdown-setting")) do |box| %>
+    <% box.with_row do %>
+      <div class="d-flex flex-items-center">
+        <div class="flex-auto width-full">
+          <span class="text-bold color-fg-default">
+            Single sign-on lockdown
+          </span>
+          <div class="color-fg-muted mt-1 f5">
+            If enabled, all authentication via single sign-on (SSO) will be blocked except for enterprise owners.
+          </div>
+        </div>
+        <% if this_business.actor_can_write_sso?(current_user) %>
+          <%= render(Primer::Alpha::Dialog.new(
+            size: :medium_portrait,
+            id: "sso-lockdown-confirmation-dialog",
+            title: this_business.sso_lockdown_enabled? ? "Disable SSO lockdown?" : "Enable SSO lockdown?",
+            test_selector: "sso-lockdown-confirmation-dialog",
+          )) do |dialog| %>
+            <% dialog.with_show_button(scheme: :danger, test_selector: "sso-lockdown-toggle-button") do %>
+              <%= this_business.sso_lockdown_enabled? ? "Disable" : "Enable" %>
+            <% end %>
+            <%= render(Primer::Alpha::Dialog::Body.new) do %>
+              <%= render(Primer::Alpha::Banner.new(
+                icon: :stop,
+                scheme: :danger,
+              )) do %>
+                This change has consequences, please be certain.
+              <% end %>
+            <% end %>
+            <%= form_tag enterprise_sso_lockdown_enabled_path(this_business), method: :post do %>
+              <%= hidden_field_tag :value, this_business.sso_lockdown_enabled? ? "0" : "1" %>
+              <%= render(Primer::Alpha::Dialog::Body.new) do %>
+                <% if this_business.sso_lockdown_enabled? %>
+                  <p>
+                    Disabling SSO lockdown will allow all users to authenticate via SSO again.
+                  </p>
+                <% else %>
+                  <p>
+                    Enabling SSO lockdown will <strong>block all users except enterprise owners</strong> from authenticating via SSO.
+                  </p>
+                  <ul class="tmp-ml-3">
+                    <li>Members will not be able to SSO into this enterprise</li>
+                    <li>Only enterprise owners will be able to authenticate</li>
+                  </ul>
+                <% end %>
+                <p>
+                  <label>
+                    <span class="d-block mb-1">
+                      Type enterprise slug "<%= this_business.slug %>" to confirm
+                    </span>
+                    <input type="text"
+                      class="form-control input-block"
+                      name="verify"
+                      pattern="<%= case_insensitive_pattern(this_business.slug) %>"
+                      aria-label="Type in the enterprise slug '<%= this_business.slug %>' to confirm that you want to change the SSO lockdown setting"
+                      required
+                      autofocus>
+                  </label>
+                </p>
+              <% end %>
+              <%= render(Primer::Alpha::Dialog::Footer.new(show_divider: true)) do %>
+                <%= render(Primer::Beta::Button.new(
+                  type: :button,
+                  data: { "close-dialog-id": "sso-lockdown-confirmation-dialog" }
+                )) { "Cancel" } %>
+                <%= render(Primer::Beta::Button.new(
+                  type: :submit,
+                  scheme: :danger,
+                  test_selector: "sso-lockdown-confirm-button",
+                  "data-disable-invalid": "",
+                  "data-disable-with": ""
+                )) do %>
+                  <%= this_business.sso_lockdown_enabled? ? "Disable SSO lockdown" : "Enable SSO lockdown" %>
+                <% end %>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% else %>
+          <%= render(Primer::Beta::Label.new(scheme: this_business.sso_lockdown_enabled? ? :danger : :secondary)) do %>
+            <%= this_business.sso_lockdown_enabled? ? "Enabled" : "Disabled" %>
+          <% end %>
+        <% end %>
+      </div>
+    <% end %>
+  <% end %>
+<% end %>

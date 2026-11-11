@@ -1,0 +1,305 @@
+#!/usr/bin/env safe-ruby
+# typed: true
+# frozen_string_literal: true
+
+require_relative "../../config/environment"
+require "optparse"
+
+abort "This can only be run in development" unless Rails.env.development?
+
+class CreateArtifactRecords
+  DEFAULT_ARTIFACTS_PER_REPO = 1
+  DEFAULT_CLUSTERS = %w[moda-1 moda-2 moda-3 us-east-1 us-west-2 eu-west-1]
+  DEFAULT_ENVIRONMENTS = %w[production staging development qa]
+  ARTIFACT_TYPES = %w[api worker frontend backend service lambda container]
+  TEAMS = %w[platform security infrastructure backend]
+  RUNTIME_RISKS = [
+    ArtifactDeploymentRecord::CRITICAL_RESOURCE,
+    ArtifactDeploymentRecord::INTERNET_EXPOSED,
+    ArtifactDeploymentRecord::SENSITIVE_DATA,
+    ArtifactDeploymentRecord::LATERAL_MOVEMENT
+  ]
+
+  # Hardcoded digest to match the attestation fixtures (used for first artifact only)
+  FIXTURE_DIGEST = "sha256:3e9409b2abaea0f8d85cca96c9938e4445213024db38050b3572c4903c2ade8b"
+
+  DEFAULT_REPOS = {
+    "github/artifact-ui" => { storage: true, deployment: true, attestations: %w[provenance sbom] },
+    "github/artifact-metadata-only" => { storage: false, deployment: false, attestations: [] }
+  }.freeze
+
+  def initialize(repository_names, options = {})
+    @repository_names = repository_names
+    @artifacts_per_repo = options[:count] || DEFAULT_ARTIFACTS_PER_REPO
+    @clean = options[:clean] || false
+    @repositories = []
+    @repo_configs = {}
+  end
+
+  def call
+    find_or_create_repositories
+    clean_existing_records if @clean
+    create_records
+    display_results
+  end
+
+  private
+
+  def find_or_create_repositories
+    @repository_names.each do |repo_name|
+      repository = Repository.nwo(repo_name) || create_repository(repo_name)
+      next unless repository
+
+      @repositories << repository
+      @repo_configs[repository] = DEFAULT_REPOS[repo_name] || { storage: true, deployment: true, attestations: [] }
+    end
+
+    abort "Error: No valid repositories found or created" if @repositories.empty?
+  end
+
+  def clean_existing_records
+    count = ArtifactMetadata.count
+    if count > 0
+      ArtifactMetadata.destroy_all
+      puts "Cleaned #{count} artifact record(s)\n\n"
+    end
+  end
+
+  def create_repository(repo_name)
+    owner_name, repo_name_only = repo_name.split("/", 2)
+    return puts "Error: Invalid format '#{repo_name}'. Use OWNER/REPO." unless owner_name && repo_name_only
+
+    owner = find_or_create_owner(owner_name)
+    return nil unless owner
+
+    repository = ::Repository.handle_creation(
+      owner.organization? ? owner.admins.first : owner,
+      owner.login,
+      { name: repo_name_only, public: true, template: false },
+      synchronous: true
+    ).repository
+
+    repository.reset_memoized_attributes
+    repository.setup_git_repository
+    repository
+  rescue => e
+    puts "Error creating repository '#{repo_name}': #{e.message}"
+    nil
+  end
+
+  def find_or_create_owner(owner_name)
+    User.find_by(login: owner_name) ||
+      Organization.find_by(login: owner_name) ||
+      User.create!(login: owner_name, email: "#{owner_name}@example.com")
+  rescue => e
+    puts "Error with owner '#{owner_name}': #{e.message}"
+    nil
+  end
+
+  def create_records
+    puts "Creating #{@artifacts_per_repo} artifact(s) per repository...\n\n"
+
+    @repositories.each do |repository|
+      config = @repo_configs[repository]
+      print "#{repository.nwo}: "
+
+      @artifacts_per_repo.times do |i|
+        metadata = create_artifact_metadata(repository, i + 1)
+        create_artifact_storage_record(repository, metadata) if config[:storage]
+        create_artifact_deployment_record(metadata, i) if config[:deployment]
+        print "." if (i + 1) % 10 == 0
+      end
+
+      puts " ✓ #{@artifacts_per_repo} artifact(s) created"
+    end
+  end
+
+  def create_artifact_metadata(repository, index)
+    created_at = Time.now - (index * 60)
+    # First artifact uses fixture digest for attestation testing, rest are unique
+    digest = index == 1 ? FIXTURE_DIGEST : "sha256:#{SecureRandom.hex(32)}"
+
+    ArtifactMetadata.create!(
+      tenant_id: repository.tenant_id || 1,
+      owner_id: repository.owner_id,
+      repository_id: repository.id,
+      attestation_id: index,
+      digest: digest,
+      name: "#{repository.name}-#{ARTIFACT_TYPES[index % ARTIFACT_TYPES.length]}",
+      version: "#{(index / 100) + 1}.#{(index / 10) % 10}.#{index % 10}",
+      status: "active",
+      created_at: created_at,
+      updated_at: created_at
+    )
+  end
+
+  def create_artifact_storage_record(repository, metadata)
+    source_registry = ArtifactStorageRecord::SOURCE_REGISTRY_ARTIFACTORY
+    registry_url = "https://#{source_registry}.example.com"
+
+    ArtifactStorageRecord.create!(
+      artifact_metadata: metadata,
+      registry_url: registry_url,
+      artifact_url: "#{registry_url}/#{repository.owner.login}/#{metadata.name}",
+      registry_repository_name: repository.owner.login,
+      source_registry: source_registry
+    )
+  end
+
+  def create_artifact_deployment_record(metadata, index)
+    deployment_record = ArtifactDeploymentRecord.create!(
+      artifact_metadata_id: metadata.id,
+      owner_id: metadata.owner_id,
+      cluster: DEFAULT_CLUSTERS[index % DEFAULT_CLUSTERS.length],
+      deployment_name: "deploy-#{DEFAULT_ENVIRONMENTS[index % DEFAULT_ENVIRONMENTS.length]}-#{index}",
+      logical_environment: DEFAULT_ENVIRONMENTS[index % DEFAULT_ENVIRONMENTS.length],
+      physical_environment: DEFAULT_CLUSTERS[index % DEFAULT_CLUSTERS.length]
+    )
+
+    create_deployment_tags(deployment_record, metadata, index)
+  end
+
+  def create_deployment_tags(deployment_record, metadata, index)
+    # Add 0-3 random runtime risk tags
+    RUNTIME_RISKS.sample([0, 1, 2, 3][index % 4]).each do |risk|
+      ArtifactDeploymentRecordTag.create!(
+        deployment_record_id: deployment_record.id,
+        tag_name: "runtime-risk",
+        tag_value: risk
+      )
+    end
+
+    # Add custom tags
+    [
+      ["environment", DEFAULT_ENVIRONMENTS[index % DEFAULT_ENVIRONMENTS.length]],
+      ["team", TEAMS[index % TEAMS.length]],
+      ["version", metadata.version]
+    ].each do |name, value|
+      ArtifactDeploymentRecordTag.create!(
+        deployment_record_id: deployment_record.id,
+        tag_name: name,
+        tag_value: value
+      )
+    end
+  end
+
+  def display_results
+    puts "\n#{'=' * 60}"
+    puts "Summary"
+    puts "=" * 60
+
+    @repositories.each do |repo|
+      config = @repo_configs[repo]
+      owner = repo.owner
+      org_login = owner.login
+      total = ArtifactMetadata.where(owner_id: owner.id).count
+      metadata = ArtifactMetadata.find_by(repository_id: repo.id)
+
+      puts "\n#{repo.nwo}"
+      puts "  Repository: http://github.localhost/#{repo.nwo}"
+      puts "  Artifacts:  http://github.localhost/orgs/#{org_login}/artifacts"
+      puts "  Total: #{total} | Pages: #{(total / 25.0).ceil}"
+
+      print_attestation_commands(repo, metadata, config) if config[:attestations].any? && metadata
+    end
+
+    puts "\n#{'=' * 60}"
+  end
+
+  def print_attestation_commands(repo, metadata, config)
+    puts "\n  ⚠️  Before creating attestations, ensure TMA (Trust Metadata API) is running:"
+    puts "     1. In your dotcom codespace, run: script/setup-codespaces-trust-metadata-api"
+    puts "     2. Within the TMA workspace, run:"
+    puts "        make dev-start"
+    puts "        make dev-server"
+    puts "\n  Docs: https://github.com/github/trust-metadata-api/blob/main/docs/dev-dotcom.md#viewing-attestations-ui-in-dotcom-codespaces"
+    puts "\n  Create attestations via API (run each block separately):"
+
+    if config[:attestations].include?("provenance")
+      puts <<~CMD
+
+        # Create provenance attestation:
+
+        provenance_bundle=$(cat test/fixtures/attestations/github-attest-demo-provenance.sigstore.json)
+        curl -L -X POST \\
+          -H "Accept: application/vnd.github+json" \\
+          -H "Authorization: Bearer ghp_MonalisaTheOctoPatMonalisaTheOctoPat" \\
+          -H "X-GitHub-Api-Version: 2022-11-28" \\
+          http://api.github.localhost/repositories/#{repo.id}/attestations \\
+          --data "{\\"subject_digest\\": \\"#{metadata.digest}\\", \\"bundle\\": $provenance_bundle}"
+      CMD
+    end
+
+    if config[:attestations].include?("sbom")
+      puts <<~CMD
+
+        # Create SBOM attestation:
+
+        sbom_bundle=$(cat test/fixtures/attestations/github-attest-demo-sbom.sigstore.json)
+        curl -L -X POST \\
+          -H "Accept: application/vnd.github+json" \\
+          -H "Authorization: Bearer ghp_MonalisaTheOctoPatMonalisaTheOctoPat" \\
+          -H "X-GitHub-Api-Version: 2022-11-28" \\
+          http://api.github.localhost/repositories/#{repo.id}/attestations \\
+          --data "{\\"subject_digest\\": \\"#{metadata.digest}\\", \\"bundle\\": $sbom_bundle}"
+      CMD
+    end
+  end
+end
+
+if __FILE__ == $0
+  options = { count: CreateArtifactRecords::DEFAULT_ARTIFACTS_PER_REPO }
+
+  parser = OptionParser.new do |opts|
+    opts.banner = "Usage: #{$0} [options] OWNER/REPO [OWNER/REPO2 ...]"
+    opts.separator "\nCreate artifact metadata records for testing Artifact UI\n\nOptions:"
+
+    opts.on("-c", "--count N", Integer, "Artifacts per repo (default: #{CreateArtifactRecords::DEFAULT_ARTIFACTS_PER_REPO})") do |n|
+      options[:count] = n
+    end
+
+    opts.on("--clean", "Delete existing artifact records before creating new ones") do
+      options[:clean] = true
+    end
+
+    opts.on("-h", "--help", "Show help with usage") do
+      puts opts
+      puts <<~EXAMPLES
+
+        Examples:
+          #{$0}                           # Use default repos (github/artifact-ui, github/artifact-metadata-only)
+          #{$0} --clean                   # Delete existing records, then create default repos with artifacts
+          #{$0} myorg/myrepo              # 1 artifact (default) in custom repo
+          #{$0} -c 150 myorg/myrepo       # 150 artifacts (6 pages at 25/page)
+          #{$0} -c 50 org1/repo1 org2/repo2  # 50 artifacts in multiple repos
+
+        Default repositories:
+          github/artifact-ui              # Full setup: storage, deployment, attestations (provenance, sbom)
+          github/artifact-metadata-only   # Metadata only: no storage, no deployment, no attestations
+
+        Notes:
+          - Artifacts are paginated at 25 per page
+          - First artifact uses a fixture digest for attestation testing
+          - Repositories are created if they don't exist
+          - Run with --clean to reset artifact data between tests
+      EXAMPLES
+      exit
+    end
+  end
+
+  parser.parse!
+
+  repo_names = ARGV.empty? ? CreateArtifactRecords::DEFAULT_REPOS.keys : ARGV
+
+  if ARGV.empty?
+    puts "Using default repositories:"
+    CreateArtifactRecords::DEFAULT_REPOS.each do |name, config|
+      features = ["metadata", config[:storage] ? "storage" : nil, config[:deployment] ? "deployment" : nil].compact
+      features << "attestations: #{config[:attestations].join(", ")}" if config[:attestations].any?
+      puts "  #{name}: #{features.join(", ")}"
+    end
+    puts
+  end
+
+  CreateArtifactRecords.new(repo_names, options).call
+end

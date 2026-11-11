@@ -1,0 +1,33 @@
+name: "Wait for CCA to complete"
+description: "Cleanup the open pull request copilot created"
+inputs:
+  token:
+    description: "The GitHub token to use for API calls"
+    required: true
+  session_id:
+    description: "The id of the session for this CCA run"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Wait for CCA to complete
+      shell: bash
+      run: |
+        echo "Polling session: ${{ inputs.session_id }}"
+
+        while true; do
+          response=$(curl -s --fail-with-body https://api.githubcopilot.com/agents/sessions/${{ inputs.session_id }} -H "Authorization: Bearer ${{ inputs.token }}" -H "Copilot-Integration-Id: playground-dev")
+          
+          state=$(echo "$response" | jq -r '.state')
+
+          if [ "$state" = "completed" ]; then
+            echo "Agent task completed successfully"
+            exit 0
+          elif [ "$state" = "failed" ]; then
+            echo "Agent task failed"
+            exit 1
+          fi
+
+          echo "Agent task still in progress (state: $state), sleeping for 30 seconds..."
+          sleep 30
+        done

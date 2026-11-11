@@ -1,0 +1,86 @@
+# typed: true
+# frozen_string_literal: true
+
+class RevokeOrgAppsManagementGrantsJob < ApplicationJob
+  include IntegrationManagerHelper
+
+  queue_as :revoke_org_apps_management_grants
+
+  discard_on ActiveJob::DeserializationError
+
+  RevocationError = Class.new(StandardError)
+  retry_on RevocationError
+  retry_on_dirty_exit
+
+  resolve_tenant_context do |org|
+    org&.business
+  end
+
+  attr_reader :org, :user
+
+  def perform(org, user)
+    @org = org
+    @user = user
+
+    revoke_all_apps_grant
+    revoke_single_apps_grants
+  end
+
+  private
+
+  def revoke_all_apps_grant
+    result = with_write do
+      revoke_management_of_all_organization_integrations(
+        user: user,
+        organization: org,
+      )
+    end
+
+    unless result.success?
+      raise RevocationError.new(result.reason)
+    end
+  end
+
+  def revoke_single_apps_grants
+    failed = []
+    org.integrations.find_each do |integration|
+      # consider creating a separate job for revoking individual apps grants
+      # to not retry revocations for grants that were already revoked
+      result = with_write { revoke_single_app_grant(integration) }
+      failed << result unless result.success?
+    end
+
+    if failed.any?
+      exception_message = failed.first(5).map(&:reason).to_sentence
+      raise RevocationError.new(exception_message)
+    end
+  end
+
+  def revoke_single_app_grant(integration)
+    with_write do
+      revoke_management_of_integration(
+        user: user,
+        integration: integration,
+        entry_point: :manage_integrations_revoke_job
+      )
+    end
+  end
+
+  def revoke_management_of_all_organization_integrations(user:, organization:)
+    role_result = Permissions::Granters::RoleGranter.new(
+      actor: user,
+      target: organization,
+      role: Role.app_manager_role,
+    ).revoke_if_exists!
+
+    role_result
+  rescue Permissions::Granters::RoleGranter::GrantFailure => role_granter_error
+    GitHub.logger.info(
+      "Failed to revoke app manager role of user",
+      "gh.granter_error.message" => role_granter_error.message,
+      "gh.organization_id" => organization.id,
+      "gh.user_id" => user.id,
+    )
+    Permissions::Granters::RoleGrantResult.failure!(reason: role_granter_error.message)
+  end
+end

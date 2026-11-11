@@ -1,0 +1,162 @@
+---
+summary: Set the source organization for custom agents in an enterprise
+description: |-
+  Sets an organization as the source for custom agent definitions in the enterprise.
+  The organization must have a `.github-private` repository containing agent definitions.
+
+  By default, this endpoint also creates an enterprise-level ruleset to protect
+  agent definition files (agents/*.md and .github/agents/*.md). You can opt out
+  of ruleset creation by setting `create_ruleset` to `false`.
+
+  Enterprise owners with write access to AI Controls can use this endpoint.
+
+  OAuth app tokens and personal access tokens (classic) need the `admin:enterprise` scope to use this endpoint.
+tags:
+- copilot
+operationId: copilot/set-copilot-custom-agents-source-for-enterprise
+externalDocs:
+  description: API method documentation
+  url: '${externalDocsUrl}/rest/copilot/copilot-custom-agents#set-the-source-organization-for-custom-agents-in-an-enterprise'
+x-github-internal:
+  path: /enterprises/{enterprise}/copilot/custom-agents/source
+  http-method: put
+  published: true
+  owner: '@github/agent-control-plane'
+x-github-releases:
+- ghec
+parameters:
+- $ref: '../../components/parameters/enterprise.yaml'
+requestBody:
+  description: The source organization configuration
+  required: true
+  content:
+    application/json:
+      schema:
+        type: object
+        required:
+          - organization_id
+        properties:
+          organization_id:
+            type: integer
+            description: The ID of the organization to use as the custom agents source.
+          create_ruleset:
+            type: boolean
+            default: true
+            description: Whether to create a ruleset to protect agent definition files. Defaults to true.
+      examples:
+        default:
+          summary: Set source organization with default ruleset creation
+          value:
+            organization_id: 123
+        without_ruleset:
+          summary: Set source organization without creating a ruleset
+          value:
+            organization_id: 123
+            create_ruleset: false
+responses:
+  '200':
+    description: Success
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            organization:
+              type: object
+              properties:
+                id:
+                  type: integer
+                  description: The ID of the organization.
+                login:
+                  type: string
+                  description: The login name of the organization.
+                avatar_url:
+                  type: string
+                  description: The avatar URL of the organization.
+            repository:
+              type: object
+              properties:
+                id:
+                  type: integer
+                  description: The ID of the .github-private repository.
+                name:
+                  type: string
+                  description: The name of the repository.
+                full_name:
+                  type: string
+                  description: The full name of the repository (owner/name).
+            ruleset:
+              type: object
+              description: The created or existing ruleset (if create_ruleset was true).
+              properties:
+                id:
+                  type: integer
+                  description: The ID of the ruleset.
+                name:
+                  type: string
+                  description: The name of the ruleset.
+                enforcement:
+                  type: string
+                  description: The enforcement level of the ruleset.
+        examples:
+          with_ruleset:
+            summary: Response with ruleset
+            value:
+              organization:
+                id: 123
+                login: my-org
+                avatar_url: https://avatars.githubusercontent.com/u/123
+              repository:
+                id: 456
+                name: .github-private
+                full_name: my-org/.github-private
+              ruleset:
+                id: 10783894
+                name: Enterprise Custom Agent Configuration
+                enforcement: enabled
+          without_ruleset:
+            summary: Response without ruleset
+            value:
+              organization:
+                id: 123
+                login: my-org
+                avatar_url: https://avatars.githubusercontent.com/u/123
+              repository:
+                id: 456
+                name: .github-private
+                full_name: my-org/.github-private
+  '500':
+    $ref: '../../components/responses/internal_error.yaml'
+  '401':
+    $ref: '../../components/responses/requires_authentication.yaml'
+  '403':
+    $ref: '../../components/responses/forbidden.yaml'
+  '404':
+    $ref: '../../components/responses/not_found.yaml'
+  '422':
+    description: Validation failed
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+        examples:
+          missing_org_id:
+            summary: Missing organization_id
+            value:
+              message: organization_id is required
+          org_not_found:
+            summary: Organization not in enterprise
+            value:
+              message: Organization not found in this enterprise
+          missing_repo:
+            summary: Missing .github-private repository
+            value:
+              message: Organization must have a .github-private repository
+x-github:
+  githubCloudOnly: true
+  enabledForGitHubApps: true
+  category: copilot
+  subcategory: copilot-custom-agents

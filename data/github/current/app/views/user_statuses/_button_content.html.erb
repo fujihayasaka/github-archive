@@ -1,0 +1,53 @@
+<%
+  status = local_assigns[:status] || current_user.user_status_when_not_expired
+  truncate = false unless local_assigns.key?(:truncate)
+  link_mentions = true unless local_assigns.key?(:link_mentions)
+  compact = false unless local_assigns.key?(:compact)
+  circle = false unless local_assigns.key?(:circle)
+  show_org = status&.organization.present?
+  org_limit = status&.limited_availability? ? 10 : 14
+  emoji_only_header = !show_org && !status&.limited_availability?
+  message_html = status&.message_html(viewer: current_user, link_mentions: link_mentions)
+  emoji_html = status&.emoji_html
+  tone = local_assigns[:tone] ||  0
+%>
+
+
+<div class="d-flex flex-items-center flex-items-stretch">
+  <div class="<%= class_names(
+    "f6 lh-condensed user-status-header",
+    "d-flex": compact && emoji_only_header,
+    "d-inline-flex": !(compact && emoji_only_header),
+    "user-status-emoji-only-header circle": emoji_only_header,
+    ) %>">
+    <div class="user-status-emoji-container flex-shrink-0 mr-2 d-flex flex-items-center flex-justify-center <%= "lh-condensed-ultra v-align-bottom" if compact && emoji_only_header %>">
+      <%= render_user_status_emoji_or_placeholder(emoji_html, status&.message, tone, status) %>
+    </div>
+  </div>
+  <div class="<%= class_names(
+    "user-status-message-wrapper f6 min-width-0",
+    "ws-normal": !compact
+  ) %>" <% if compact || mobile? %> style="line-height: 20px;" <% end %>>
+    <div class="css-truncate css-truncate-target width-fit color-fg-default<%= " text-left" if compact %>">
+      <% if status&.limited_availability? || show_org %>
+        <div class="color-fg-default text-bold f6">
+          <% if show_org %>
+            <%= truncate(status.organization.name, length: org_limit) %>
+          <% end %>
+        </div>
+      <% end %>
+      <% if message_html %>
+        <% if truncate %>
+          <span><%= truncate_html(message_html, 40) %></span>
+        <% else %>
+          <span><%= message_html %></span>
+        <% end %>
+      <% elsif emoji_html %>
+        <span class="color-fg-muted">Edit status</span>
+      <% else %>
+        <span class="color-fg-muted">Set status</span>
+      <% end %>
+    </div>
+  </div>
+</div>
+

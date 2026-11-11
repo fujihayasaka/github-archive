@@ -1,0 +1,331 @@
+#!/bin/bash
+# Setup script for Memex Agent Tasks development using Fauxpilot
+#
+# This is a LIGHTWEIGHT alternative to script/setup-memex-e2e-agent.
+# Instead of cloning and running CAPI, sweagentd, and Mission Control,
+# it uses the built-in Fauxpilot server (a Sinatra app that mocks CAPI)
+# which is already started by overmind via the Procfile.
+#
+# Use this when you:
+#   - Need to develop/test Memex Projects UI with agent tasks & agent_assignments
+#   - Want to see how agent task items appear in project boards
+#   - Don't need a real agent to actually process issues end-to-end
+#   - Want a fast, reliable setup without external service dependencies
+#
+# What this does NOT support:
+#   - Actually running an agent (no sweagentd, no Docker containers)
+#   - Real LLM responses (Fauxpilot returns mock/fake data)
+#   - End-to-end "assign Copilot → agent works → PR created" flow
+#
+# For full e2e testing, use script/setup-memex-e2e-agent instead.
+#
+# Prerequisites:
+#   - github/github codespace (standard devcontainer is fine, no 32-core needed)
+#   - Rails server running or will be started by this script
+#
+# Services used:
+#   1. Fauxpilot API server on port 2206 (started by overmind as 'copilot-api')
+#   2. github/github (Rails + React) on port 3000
+#   3. Elasticsearch on port 9400 (already running from devcontainer)
+#
+# Usage:
+#   script/setup-memex-fauxpilot-agent          # Full setup + start services
+#   script/setup-memex-fauxpilot-agent --setup  # Setup only (configure DB, flags)
+#   script/setup-memex-fauxpilot-agent --start  # Start services only (assumes setup done)
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+GITHUB_DIR="/workspaces/github"
+
+# --- Utility functions ---
+
+# Start fauxpilot directly (bypasses copilot-fauxpilot-api-server which
+# incorrectly detects /workspaces/copilot-api and starts the real CAPI).
+start_fauxpilot() {
+  # Kill anything on port 2206 first (real CAPI, stale fauxpilot, etc.)
+  if is_port_listening 2206; then
+    log_warn "Port 2206 in use — stopping existing process"
+    lsof -t -i:2206 2>/dev/null | xargs -r kill -15 2>/dev/null || true
+    sleep 2
+    lsof -t -i:2206 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+    sleep 1
+  fi
+
+  cd "$GITHUB_DIR"
+  # Force fauxpilot via --fake so it never picks up the real copilot-api.
+  # The copilot-fauxpilot-api-server script detects /workspaces/copilot-api
+  # and starts the real Go server, which fails without proper env/build.
+  overmind stop copilot-api 2>/dev/null || true
+  sleep 1
+  FAUXPILOT_FORCE_FAKE=1 nohup bin/safe-ruby packages/copilot_sessions/app/lib/fauxpilot_api_server.rb 2206 > /tmp/fauxpilot.log 2>&1 &
+  wait_for_port 2206 "Fauxpilot API" 60
+}
+
+# Verify fauxpilot is actually responding to agent endpoints.
+verify_fauxpilot() {
+  local status
+  status=$(curl -sf -o /dev/null -w "%{http_code}" "http://localhost:2206/models" 2>/dev/null || echo "000")
+  if [ "$status" = "200" ]; then
+    log_success "Fauxpilot health check passed (GET /models → $status)"
+    return 0
+  else
+    log_error "Fauxpilot health check failed (GET /models → $status)"
+    log_error "Check logs: tail -f /tmp/fauxpilot.log"
+    return 1
+  fi
+}
+
+log_step() {
+  echo -e "\n${BLUE}-->  $1${NC}"
+}
+
+log_success() {
+  echo -e "${GREEN}OK  $1${NC}"
+}
+
+log_warn() {
+  echo -e "${YELLOW}!!  $1${NC}"
+}
+
+log_error() {
+  echo -e "${RED}ERR $1${NC}"
+}
+
+wait_for_port() {
+  local port=$1
+  local name=$2
+  local timeout=${3:-120}
+  local elapsed=0
+
+  echo -n "   Waiting for $name (port $port)..."
+  while ! lsof -Pi ":$port" -sTCP:LISTEN -t >/dev/null 2>&1; do
+    sleep 2
+    elapsed=$((elapsed + 2))
+    if [ "$elapsed" -ge "$timeout" ]; then
+      echo ""
+      log_error "$name did not start within ${timeout}s"
+      return 1
+    fi
+    echo -n "."
+  done
+  echo ""
+  log_success "$name is ready"
+}
+
+is_port_listening() {
+  lsof -Pi ":$1" -sTCP:LISTEN -t >/dev/null 2>&1
+}
+
+# --- Parse arguments ---
+
+MODE="all"
+if [ "${1:-}" = "--setup" ]; then
+  MODE="setup"
+elif [ "${1:-}" = "--start" ]; then
+  MODE="start"
+fi
+
+# =============================================================================
+# PHASE 1: SETUP (configure database, feature flags, seed apps)
+# =============================================================================
+
+run_setup() {
+  log_step "Phase 1: Setup & Configuration"
+
+  # --- 1a. Ensure github/github server is running (needed for setup scripts) ---
+  log_step "Ensuring github/github server is running"
+  if is_port_listening 3000; then
+    log_success "Rails server already running"
+  else
+    log_step "Starting Rails server (with local github-ui)"
+    cd "$GITHUB_DIR"
+    script/dx/server-start --ui
+    wait_for_port 3000 "Rails web server" 180
+  fi
+
+  # --- 1b. Start Fauxpilot directly (bypass real CAPI detection) ---
+  log_step "Starting Fauxpilot API server (forced mock mode)"
+  start_fauxpilot
+
+  # --- 1c. Run the SWE agent setup (seeds app, policies, flags) ---
+  # We run WITHOUT --capi so it doesn't try to clone copilot-api or mission-control.
+  # This seeds the copilot-swe-agent GitHub App, installs it, enables policies, etc.
+  # NOTE: This calls enable-copilot-chat → toggle-global-flags --enable which
+  # mirrors ALL production global flags. Flags set below override any prod flags.
+  log_step "Running Copilot SWE Agent setup (seeds apps, policies, feature flags)"
+  cd "$GITHUB_DIR"
+  script/setup-codespaces-copilot-swe-agent-v2 --no-capi
+
+  # --- IMPORTANT: All flag overrides below MUST come AFTER step 1c ---
+  # The SWE agent setup mirrors production flags, which can re-enable flags
+  # that break local development. Every flag set below intentionally overrides
+  # whatever production state was mirrored.
+
+  # --- 1d. Configure agent routing ---
+  # The routing code uses issue_cca_visualization to decide between
+  # create_task (mission control tasks API, which Fauxpilot handles) vs
+  # create_swe_agent_job (old CAPI path). Enable it so we consistently
+  # use the tasks API path.
+  log_step "Configuring agent routing flags"
+  cd "$GITHUB_DIR"
+  bin/toggle-feature-flag disable issues_copilot_use_twirp_api
+  bin/toggle-feature-flag enable issue_cca_visualization          # Routes to create_task API (handled by Fauxpilot)
+
+  # --- 1e. Enable Memex Projects feature flags ---
+  log_step "Running Memex setup (Projects feature flags)"
+  cd "$GITHUB_DIR"
+  script/setup-memex
+
+  # --- 1f. Enable Memex Agent Tasks flags ---
+  log_step "Enabling Memex Agent Tasks feature flags"
+  cd "$GITHUB_DIR"
+  bin/toggle-feature-flag enable memex_agent_tasks              # Agent Tasks as memex project item type
+  bin/toggle-feature-flag enable projects_copilot_tasks_status  # Copilot task status in projects
+  bin/toggle-feature-flag enable memex_multi_agent_assignments  # Multi-agent assignments in project assignee field
+
+  # --- 1g. Enable additional Copilot agent experience flags ---
+  log_step "Enabling Copilot agent experience flags"
+  cd "$GITHUB_DIR"
+  bin/toggle-feature-flag enable copilot_swe_agent_close_reference 2>/dev/null || true
+  bin/toggle-feature-flag enable copilot_swe_agent_skip_agent_job_concurrency_limit 2>/dev/null || true
+
+  # --- 1h. Disable flags that require real CAPI/Mission Control ---
+  # These flags MUST be disabled after step 1c because toggle-global-flags
+  # may re-enable them from production state.
+  log_step "Disabling flags that require real CAPI/Mission Control"
+  cd "$GITHUB_DIR"
+  bin/toggle-feature-flag disable copilot_mission_control_service_proxy 2>/dev/null || true
+  bin/toggle-feature-flag disable copilot_api_combined_usage_store 2>/dev/null || true
+  bin/toggle-feature-flag disable copilot_api_agent_sessions 2>/dev/null || true
+
+  # --- 1i. Restart background workers to pick up flag changes ---
+  log_step "Restarting background workers (resqued)"
+  cd "$GITHUB_DIR"
+  overmind restart resqued
+  sleep 5
+  log_success "Workers restarted"
+
+  # --- 1j. Verify Fauxpilot is still healthy after setup ---
+  log_step "Verifying Fauxpilot health"
+  verify_fauxpilot || {
+    log_warn "Fauxpilot went down during setup — restarting"
+    start_fauxpilot
+    verify_fauxpilot
+  }
+
+  log_success "Setup complete!"
+  echo ""
+}
+
+# =============================================================================
+# PHASE 2: START SERVICES
+# =============================================================================
+
+run_start() {
+  log_step "Phase 2: Starting Services"
+  echo ""
+  echo "   This uses Fauxpilot (mock CAPI) — no external services needed."
+  echo ""
+
+  # --- 2a. Ensure Fauxpilot is running ---
+  # Start fauxpilot directly instead of via overmind to avoid the
+  # copilot-fauxpilot-api-server script detecting /workspaces/copilot-api
+  # and launching the real Go CAPI server.
+  log_step "Ensuring Fauxpilot API server is running on port 2206"
+  if is_port_listening 2206; then
+    # Verify it's actually fauxpilot, not the real CAPI
+    if verify_fauxpilot; then
+      log_success "Fauxpilot already running and healthy"
+    else
+      log_warn "Port 2206 in use but not responding — restarting Fauxpilot"
+      start_fauxpilot
+    fi
+  else
+    start_fauxpilot
+  fi
+
+  # --- 2b. Ensure github/github is running ---
+  log_step "Ensuring github/github is running"
+  if is_port_listening 3000; then
+    log_success "github/github already running"
+  else
+    cd "$GITHUB_DIR"
+    script/dx/server-start --ui
+    wait_for_port 3000 "github/github" 180
+  fi
+
+  # --- 2c. Restart resqued (fresh workers with all services up) ---
+  log_step "Restarting background workers"
+  cd "$GITHUB_DIR"
+  overmind restart resqued
+  sleep 3
+
+  echo ""
+  log_success "All services are running!"
+  echo ""
+  echo "============================================================"
+  echo ""
+  echo "  Services:"
+  echo "    GitHub:     http://github.localhost  (port 3000)"
+  echo "    Fauxpilot:  http://localhost:2206    (mock CAPI)"
+  echo ""
+  echo "  Fauxpilot serves mock responses for:"
+  echo "    - POST /agents/repos/:owner/:repo/tasks  (create task)"
+  echo "    - GET  /agents/tasks/batch                (batch fetch)"
+  echo "    - GET  /agents/repos/:owner/:repo/tasks   (list tasks)"
+  echo "    - GET  /agents/sessions                   (list sessions)"
+  echo "    - POST /agents/sessions/:id/commands      (steering)"
+  echo "    ...and all other CAPI agent endpoints"
+  echo ""
+  echo "  Test agent assignments:"
+  echo "    1. Go to http://github.localhost/github/private-server/issues/new"
+  echo "    2. Create an issue (e.g. 'Add a hello.py')"
+  echo "    3. Assign 'copilot-swe-agent[bot]' to the issue"
+  echo "    4. Fauxpilot will create a mock task with a real PR"
+  echo "    5. The agent task will appear in the issue sidebar"
+  echo ""
+  echo "  Test agent tasks in Projects:"
+  echo "    1. Create a project at http://github.localhost/users/monalisa/projects"
+  echo "    2. Add an issue that has a Copilot agent assignment"
+  echo "    3. Agent task state appears as a column in the project"
+  echo ""
+  echo "  Logs:"
+  echo "    Fauxpilot:    overmind echo copilot-api"
+  echo "    github/github: script/dx/server-logs"
+  echo ""
+  echo "============================================================"
+}
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+echo ""
+echo "============================================================"
+echo "  Memex Agent Tasks Setup (Fauxpilot Mode)"
+echo "  Mode: $MODE"
+echo ""
+echo "  This uses Fauxpilot (mock CAPI) instead of real CAPI,"
+echo "  sweagentd, and Mission Control. No external repos needed."
+echo "============================================================"
+
+case "$MODE" in
+  setup)
+    run_setup
+    echo ""
+    echo "Setup complete. Run with --start to start services."
+    ;;
+  start)
+    run_start
+    ;;
+  all)
+    run_setup
+    run_start
+    ;;
+esac

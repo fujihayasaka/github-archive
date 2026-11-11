@@ -1,0 +1,1 @@
+import{Op as e,gm as t,lh as n}from"./main-BChbnewi.js";var r=e(),i=n(t());function a(e){let t=(0,r.c)(3),n,a;t[0]===e?(n=t[1],a=t[2]):(n=()=>{if(!e)return;let t=document.querySelector(`.footer`);if(t)return t.hidden=!0,()=>{t.hidden=!1}},a=[e],t[0]=e,t[1]=n,t[2]=a),(0,i.useEffect)(n,a)}export{a as t};

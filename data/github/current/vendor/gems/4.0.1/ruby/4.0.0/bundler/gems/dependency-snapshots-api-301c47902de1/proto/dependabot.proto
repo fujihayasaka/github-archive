@@ -1,0 +1,110 @@
+syntax = "proto3";
+
+package github.dependency_snapshots_api;
+
+import "buf/validate/validate.proto";
+import "entities/dependabot_event.proto";
+import "entities/snapshot.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "./proto";
+
+// This service is similar to snapshots.proto but will only be used internally and is specific for Dependabot snapshots.
+service DependabotService {
+  rpc CreateDependabotSnapshot(CreateDependabotSnapshotRequest) returns (CreateDependabotSnapshotResponse);
+  // Check the state of a specific event by ref+sha(+push_id)
+  rpc CheckRepositoryEventReadiness(CheckRepositoryEventReadinessRequest) returns (CheckRepositoryEventReadinessResponse);
+  // Check the state of the repository by most recent event, optionally filtered by type
+  rpc CheckRepositoryReadiness(CheckRepositoryReadinessRequest) returns (CheckRepositoryReadinessResponse);
+  // Check the state of a specific event by its ID
+  rpc CheckEventReadiness(CheckEventReadinessRequest) returns (CheckEventReadinessResponse);
+}
+
+message CreateDependabotSnapshotRequest {
+  // Github repository_id
+  uint64 repository_id = 1 [(buf.validate.field).required = true];
+
+  // Snapshot submission request payload
+  entities.Snapshot payload = 2 [(buf.validate.field).required = true];
+}
+
+message CreateDependabotSnapshotResponse {
+  // unique lookup ID from DS-API backend
+  uint64 snapshot_id = 1;
+
+  // time the snapshot was successfully stored by DS-API backend
+  google.protobuf.Timestamp created_at = 2;
+
+  // There are three possible result outcomes which correspond to the following HTTP status codes and scenarios.
+  // INVALID  - 400 - error deserializing snapshot.
+  // INVALID  - 400 - invalid purl.
+  // ACCEPTED - 201 - snapshot is submitted for the non-default branch.
+  // ACCEPTED - 201 - snapshot is submitted for the default branch and there's already a snapshot with a newer commit SHA.
+  // SUCCESS  - 201 - snapshot is submitted for the default branch and it's the snapshot with the latest commit SHA.
+  // Dependency results for the repo will be successfully updated only in SUCCESS scenario.
+  enum Result {
+    RESULT_UNKNOWN = 0;
+    RESULT_INVALID = 1;
+    RESULT_ACCEPTED = 2;
+    RESULT_SUCCESS = 3;
+    RESULT_REMOVED = 4;
+  }
+  Result result = 3;
+
+  // Additional information about the result
+  string message = 4;
+}
+
+message CheckRepositoryEventReadinessRequest {
+  // Github repository_id
+  uint64 repository_id = 1 [(buf.validate.field).required = true];
+
+  // The type of event
+  entities.DependabotEventType event_type = 2 [(buf.validate.field).required = true];
+
+  // The git ref for the event
+  string ref = 3 [(buf.validate.field).required = true];
+
+  // The commit SHA for the event
+  string sha = 4 [(buf.validate.field).required = true];
+
+  // The push_id, only expected for push event types
+  optional uint64 push_id = 5;
+}
+
+message CheckRepositoryEventReadinessResponse {
+  // Whether the data for this event is considered complete and ready for processing
+  bool ready = 1;
+
+  // The reason for the readiness determination
+  entities.DependabotReadinessReason reason = 2;
+}
+
+message CheckRepositoryReadinessRequest {
+  // Github repository_id
+  uint64 repository_id = 1 [(buf.validate.field).required = true];
+
+  // The type of event
+  entities.DependabotEventType event_type = 2 [(buf.validate.field).required = false];
+}
+
+message CheckRepositoryReadinessResponse {
+  // Whether the data for this repository is considered ready for processing or not
+  bool ready = 1;
+
+  // The reason for the readiness determination
+  entities.DependabotReadinessReason reason = 2;
+}
+
+message CheckEventReadinessRequest {
+  // The dependabot event ID
+  uint64 dependabot_event_id = 1 [(buf.validate.field).required = true];
+}
+
+message CheckEventReadinessResponse {
+  // Whether the data for this event is considered complete and ready for processing
+  bool ready = 1;
+
+  // The reason for the readiness determination
+  entities.DependabotReadinessReason reason = 2;
+}

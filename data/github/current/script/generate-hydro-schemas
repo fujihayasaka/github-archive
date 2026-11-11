@@ -1,0 +1,69 @@
+#!/bin/bash
+
+set -e
+
+BRANCH="main"
+POSITIONAL_ARGS=()
+
+usage() {
+  echo "Usage: $0 <path prefix> [--branch <branch>]"
+  echo ""
+  echo "Example:"
+  echo "  $0 orca/v0"
+  echo "  $0 orca/v0 --branch my-feature"
+  echo ""
+  echo "Options:"
+  echo "  -b, --branch <branch> The branch to use from hydro-schemas (defaults to main otherwise)"
+}
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -b|--branch)
+      BRANCH="$2"
+      shift
+      shift
+      ;;
+    -*|--*)
+      echo "Unknown option $1"
+      usage
+      exit 1
+      ;;
+    *)
+      POSITIONAL_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+set -- "${POSITIONAL_ARGS[@]}"
+
+HYDRO_SCHEMA_PREFIX="proto/hydro/schemas/$1"
+
+# note: the Gem version may not match the appropriate protoc version
+# to apply here. Check the Hub link below for the right one:
+# https://thehub.github.com/epd/engineering/products-and-services/internal/hydro/guides/adding-a-new-event/#githubgithub
+PROTOC_VERSION=$(bundle exec gem list | grep google-protobuf | grep -oP '\d+\.\d+\.\d+')
+echo "Using protoc version: ${PROTOC_VERSION}"
+
+(
+  cd /workspaces
+  if [ ! -d "hydro-schemas" ]; then
+    git clone https://github.com/github/hydro-schemas.git
+  fi
+
+  cd hydro-schemas
+  git fetch
+  git checkout "${BRANCH}"
+  git pull
+
+  echo
+  echo "Generating Ruby files from Hydro schemas matching $@..."
+  find "${HYDRO_SCHEMA_PREFIX}" -name '*.proto'
+  echo
+
+  set -x
+  script/generate \
+    --protoc-version="${PROTOC_VERSION}" \
+    --ruby-out="/workspaces/github/lib" \
+    "${HYDRO_SCHEMA_PREFIX}"
+)

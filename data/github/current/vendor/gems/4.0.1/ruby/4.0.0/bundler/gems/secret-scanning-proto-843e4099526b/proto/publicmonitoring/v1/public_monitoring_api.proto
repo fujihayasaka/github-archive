@@ -1,0 +1,109 @@
+syntax = "proto3";
+
+package github.secretscanning.publicmonitoring.v1;
+
+option go_package = "github.com/github/secret-scanning-proto/gen/go/v1/publicmonitoring";
+option ruby_package = "GitHub::Proto::SecretScanning::PublicMonitoring::V1";
+
+import "google/protobuf/timestamp.proto";
+import "types/v1/token.proto";
+
+// PublicMonitoringAPI provides access to enterprise public monitoring alerts.
+// These alerts represent secrets authored by enterprise members that were
+// detected in public repositories outside the enterprise.
+service PublicMonitoringAPI {
+  // ListAlerts returns a paginated list of public monitoring alerts for an enterprise.
+  rpc ListAlerts(ListAlertsRequest) returns (ListAlertsResponse);
+
+  // CountAlerts returns the total number of public monitoring alerts for an enterprise.
+  // Separated from ListAlerts so callers can avoid re-counting on every page.
+  rpc CountAlerts(CountAlertsRequest) returns (CountAlertsResponse);
+}
+
+// PublicMonitoringAlert represents a secret detected in a public repository
+// that was authored by a member of the requesting enterprise.
+message PublicMonitoringAlert {
+  // The ID of the public repository where the secret was detected.
+  uint64 repository_id = 1;
+
+  // The GitHub user ID of the secret author.
+  uint64 secret_author_id = 2;
+
+  // The token type slug (e.g., "github_personal_access_token").
+  string slug = 3;
+
+  // The human-readable label for the token type (e.g., "GitHub Personal Access Token").
+  string label = 4;
+
+  // The token provider (e.g., "github", "aws").
+  string token_type_provider = 5;
+
+  // The number of the token scan result in `repository_id` that corresponds to this public monitoring alert.
+  uint64 alert_number = 6;
+
+  // When the alert was first created in TSS.
+  google.protobuf.Timestamp created_at = 7;
+
+  // The current validity status of the token.
+  // For public alerts, most tokens (except GitHub tokens) will be unknown.
+  github.secretscanning.types.v1.TokenValidity validity = 8;
+
+  // The current resolution status of the token.
+  github.secretscanning.types.v1.TokenResolution resolution = 9;
+
+  // The encrypted token value, re-encrypted for transit.
+  // Dotcom decrypts this and truncates it for display.
+  bytes encrypted_token = 10;
+
+  // The method by which this alert was attributed to the enterprise.
+  AttributionHeuristic attribution_heuristic = 11;
+}
+
+// AttributionHeuristic describes how a public monitoring alert was
+// attributed to an enterprise member.
+enum AttributionHeuristic {
+  ATTRIBUTION_HEURISTIC_UNSPECIFIED = 0;
+  ATTRIBUTION_HEURISTIC_COMMIT_AUTHOR_EMAIL = 1;
+}
+
+message ListAlertsRequest {
+  // The enterprise (business) ID. (required)
+  uint64 business_id = 1;
+
+  // Sort order for results. Defaults to most recent first.
+  AlertSortOrder sort_order = 2;
+
+  // Maximum number of results to return per page. Defaults to 25, max 100.
+  uint32 limit = 3;
+
+  // Opaque cursor for pagination. Pass the next_cursor or previous_cursor
+  // from a previous ListAlertsResponse. The cursor encodes direction internally.
+  bytes cursor = 4;
+}
+
+enum AlertSortOrder {
+  ALERT_SORT_ORDER_UNSPECIFIED = 0;
+  ALERT_SORT_ORDER_CREATED_DESC = 1;
+  ALERT_SORT_ORDER_CREATED_ASC = 2;
+}
+
+message ListAlertsResponse {
+  // The list of public monitoring alerts.
+  repeated PublicMonitoringAlert alerts = 1;
+
+  // Opaque cursor for requesting the next page. Empty if no more results.
+  bytes next_cursor = 2;
+
+  // Opaque cursor for requesting the previous page. Empty if on first page.
+  bytes previous_cursor = 3;
+}
+
+message CountAlertsRequest {
+  // The enterprise (business) ID. (required)
+  uint64 business_id = 1;
+}
+
+message CountAlertsResponse {
+  // Total number of public monitoring alerts for the enterprise.
+  uint64 total_count = 1;
+}

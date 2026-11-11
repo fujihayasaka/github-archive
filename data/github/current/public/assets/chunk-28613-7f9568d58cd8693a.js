@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["28613"],{99172(i,t,e){e.r(t);var n=e(239423);(0,e(821744).on)("navigation:keydown",".js-commits-list-item",function(i){!(0,n.$$)(i.detail.originalEvent)||i.target instanceof Element&&"c"===i.detail.hotkey&&i.target.querySelector(".js-navigation-open").click()})}}]);
+//# sourceMappingURL=chunk-28613-7f9568d58cd8693a-84ad5bf00bc1af30.js.map

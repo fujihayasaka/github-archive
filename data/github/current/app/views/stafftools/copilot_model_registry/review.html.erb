@@ -1,0 +1,242 @@
+<%# erblint:counter ButtonComponentMigrationCounter 4 %>
+<%
+  page_info(title: "Review Change - #{pending_change[:reference_id]}", description: "Review model configuration change")
+  status = pending_change[:status].to_s
+  is_pending = status == "pending"
+  is_new = is_new_model
+  ai_reviews = pending_change[:ai_reviews] || []
+%>
+<%= render layout: "stafftools/stafftools" do %>
+
+  <div class="site-admin-subhead ruleless">
+    <%# Back link %>
+    <div class="tmp-mb-3">
+      <%= render(Primer::Beta::Link.new(href: pending_changes_stafftools_copilot_model_registry_index_path, classes: "Link--inTextBlock")) do %>
+        <%= render(Primer::Beta::Octicon.new(:"arrow-left", size: :small, mr: 1)) %>
+        Back to Pending Changes
+      <% end %>
+    </div>
+
+    <%# Header %>
+    <div class="d-flex flex-items-center flex-justify-between tmp-mb-4">
+      <div>
+        <h2 class="site-admin-subhead-heading mb-1">
+          <%= render(Primer::Beta::Octicon.new(:"git-pull-request", size: :medium, mr: 2)) %>
+          Review: <%= pending_change[:reference_id].presence || "(new model)" %>
+        </h2>
+        <div class="d-flex flex-items-center flex-wrap" style="gap: 8px;">
+          <% status_scheme = case status; when "pending" then :attention; when "approved" then :success; when "rejected" then :danger; else :secondary; end %>
+          <%= render(Primer::Beta::Label.new(scheme: status_scheme)) { status.capitalize } %>
+          <% if is_new %>
+            <%= render(Primer::Beta::Label.new(scheme: :success)) { "New Model" } %>
+          <% end %>
+          <%= render(Primer::Beta::Label.new(scheme: :accent)) { "→ #{pending_change[:target_state]}" } %>
+          <span class="text-small color-fg-muted">
+            Submitted by <strong><%= pending_change[:submitted_by].presence || "unknown" %></strong>
+            <% if pending_change[:created_at] %>
+              &middot; <%= time_ago_in_words(pending_change[:created_at]) %> ago
+            <% end %>
+          </span>
+        </div>
+      </div>
+      <% if is_pending %>
+        <div class="d-flex" style="gap: 8px;">
+          <%= button_to request_ai_review_stafftools_copilot_model_registry_path(pending_change[:id]),
+            method: :post,
+            class: "btn btn-sm" do %>
+            <%= render(Primer::Beta::Octicon.new(:copilot, size: :small, mr: 1)) %>
+            Request AI Review
+          <% end %>
+        </div>
+      <% end %>
+    </div>
+
+    <%# Review status banner %>
+    <% if pending_change[:reviewed_by].present? %>
+      <% banner_scheme = status == "approved" ? :success : :danger %>
+      <%= render Primer::Alpha::Banner.new(
+        icon: status == "approved" ? :check : :x,
+        scheme: banner_scheme,
+        classes: "tmp-mb-4") do %>
+        <strong><%= status.capitalize %></strong> by <strong><%= pending_change[:reviewed_by] %></strong>
+        <% if pending_change[:reviewed_at] %>
+          &middot; <%= time_ago_in_words(pending_change[:reviewed_at]) %> ago
+        <% end %>
+        <% if pending_change[:review_comment].present? %>
+          <br><em>"<%= pending_change[:review_comment] %>"</em>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <%# Diff Stats %>
+    <div class="d-flex flex-items-center tmp-mb-3" style="gap: 12px;">
+      <span class="text-small">
+        <strong class="color-fg-success">+<%= diff_stats[:additions] %></strong>
+        <strong class="color-fg-danger ml-1">-<%= diff_stats[:deletions] %></strong>
+        <% if diff_stats[:changes] > 0 %>
+          <strong class="color-fg-attention ml-1">~<%= diff_stats[:changes] %></strong>
+        <% end %>
+      </span>
+    </div>
+
+    <%# Diff View Toggle %>
+    <div class="d-flex tmp-mb-3" style="gap: 4px;">
+      <button type="button" class="btn btn-sm selected" id="btn-side-by-side" onclick="showView('side-by-side')">
+        <%= render(Primer::Beta::Octicon.new(:columns, size: :small, mr: 1)) %>
+        Full YAML
+      </button>
+      <button type="button" class="btn btn-sm" id="btn-diff-only" onclick="showView('diff-only')">
+        <%= render(Primer::Beta::Octicon.new(:diff, size: :small, mr: 1)) %>
+        Diff Only
+      </button>
+    </div>
+
+    <%# Side-by-Side View %>
+    <div id="view-side-by-side" class="Box tmp-mb-4">
+      <div class="Box-header d-flex">
+        <div class="flex-1 text-center text-bold p-2" style="border-right: 1px solid var(--borderColor-default);">
+          <% if is_new %>
+            <span class="color-fg-muted">(New Model)</span>
+          <% else %>
+            Current
+          <% end %>
+        </div>
+        <div class="flex-1 text-center text-bold p-2">
+          Proposed
+        </div>
+      </div>
+      <div class="Box-body p-0" style="overflow-x: auto;">
+        <table class="width-full" style="border-collapse: collapse; font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5;">
+          <% diff_lines.each do |line| %>
+            <%
+              bg_old = case line[:type]
+                when :removed then "var(--diffBlob-deletion-bgColor-line, #ffebe9)"
+                when :changed then "var(--diffBlob-deletion-bgColor-line, #ffebe9)"
+                else "transparent"
+              end
+              bg_new = case line[:type]
+                when :added then "var(--diffBlob-addition-bgColor-line, #dafbe1)"
+                when :changed then "var(--diffBlob-addition-bgColor-line, #dafbe1)"
+                else "transparent"
+              end
+            %>
+            <tr>
+              <td class="color-fg-muted text-right px-2" style="width: 1%; white-space: nowrap; user-select: none; border-right: 1px solid var(--borderColor-muted); background: var(--bgColor-muted);">
+                <%= line[:old_line_num] %>
+              </td>
+              <td style="width: 49%; padding: 0 8px; white-space: pre-wrap; word-break: break-all; background: <%= bg_old %>; border-right: 1px solid var(--borderColor-default);">
+                <% if line[:type] == :removed || line[:type] == :changed || line[:type] == :unchanged %>
+                  <%= line[:old_text] %>
+                <% end %>
+              </td>
+              <td class="color-fg-muted text-right px-2" style="width: 1%; white-space: nowrap; user-select: none; border-right: 1px solid var(--borderColor-muted); background: var(--bgColor-muted);">
+                <%= line[:new_line_num] %>
+              </td>
+              <td style="width: 49%; padding: 0 8px; white-space: pre-wrap; word-break: break-all; background: <%= bg_new %>;">
+                <% if line[:type] == :added || line[:type] == :changed || line[:type] == :unchanged %>
+                  <%= line[:new_text] %>
+                <% end %>
+              </td>
+            </tr>
+          <% end %>
+        </table>
+      </div>
+    </div>
+
+    <%# Diff-Only View (hidden by default) %>
+    <div id="view-diff-only" class="Box tmp-mb-4" style="display: none;">
+      <div class="Box-header">
+        <strong><%= render(Primer::Beta::Octicon.new(:diff, size: :small, mr: 1)) %> Unified Diff</strong>
+      </div>
+      <div class="Box-body p-0">
+        <pre style="margin: 0; padding: 16px; font-size: 12px; line-height: 1.5; overflow-x: auto; background: var(--bgColor-muted);"><% unified_diff.each_line do |line| %><% color = if line.start_with?("+"); "color-fg-success" elsif line.start_with?("-"); "color-fg-danger" elsif line.start_with?("@@"); "color-fg-accent" else "color-fg-default" end %><span class="<%= color %>"><%= line %></span>
+<% end %></pre>
+      </div>
+    </div>
+
+    <%# AI Review Section %>
+    <% if ai_reviews.any? %>
+      <div class="Box tmp-mb-4">
+        <div class="Box-header d-flex flex-items-center flex-justify-between">
+          <strong>
+            <%= render(Primer::Beta::Octicon.new(:copilot, size: :small, mr: 1)) %>
+            AI Review Feedback
+          </strong>
+          <span class="text-small color-fg-muted"><%= ai_reviews.size %> <%= ai_reviews.size == 1 ? "review" : "reviews" %></span>
+        </div>
+        <% ai_reviews.each do |review| %>
+          <div class="Box-row">
+            <div class="d-flex flex-items-center flex-justify-between tmp-mb-2">
+              <span class="text-small color-fg-muted">
+                Requested by <strong><%= review[:requested_by].presence || "unknown" %></strong>
+                <% if review[:created_at] %>
+                  &middot; <%= time_ago_in_words(review[:created_at]) %> ago
+                <% end %>
+              </span>
+            </div>
+            <div class="markdown-body">
+              <%= GitHub::Goomba::MarkdownPipeline.to_html(review[:ai_feedback].to_s) %>
+            </div>
+            <% if review[:prompt_used].present? %>
+              <details class="tmp-mt-2">
+                <summary class="text-small Link--secondary" style="cursor: pointer;">View prompt used</summary>
+                <pre class="p-2 color-bg-subtle rounded-2 tmp-mt-2" style="font-size: 11px; max-height: 300px; overflow: auto; white-space: pre-wrap;"><%= review[:prompt_used] %></pre>
+              </details>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
+
+    <%# Approve / Reject Actions %>
+    <% if is_pending %>
+      <div class="Box tmp-mb-4">
+        <div class="Box-header">
+          <strong><%= render(Primer::Beta::Octicon.new(:"check-circle", size: :small, mr: 1)) %> Review Actions</strong>
+        </div>
+        <div class="Box-body">
+          <% if is_submitter %>
+            <%= render Primer::Alpha::Banner.new(icon: :info, scheme: :warning, classes: "tmp-mb-3") do %>
+              You submitted this change. A <strong>different user</strong> must review and approve it.
+            <% end %>
+          <% end %>
+
+          <div class="tmp-mb-3">
+            <label for="review-comment" class="text-bold d-block tmp-mb-1">Comment</label>
+            <textarea id="review-comment" class="form-control width-full" rows="3" placeholder="Optional for approval, required for rejection..." form="approve-form"></textarea>
+          </div>
+
+          <div class="d-flex flex-justify-end" style="gap: 8px;">
+            <%= form_with(url: reject_stafftools_copilot_model_registry_path(pending_change[:id]), method: :patch, local: true, id: "reject-form") do %>
+              <input type="hidden" name="comment" id="reject-comment-input">
+              <button type="submit" class="btn btn-danger" <%= "disabled" if is_submitter %> onclick="document.getElementById('reject-comment-input').value = document.getElementById('review-comment').value;">
+                <%= render(Primer::Beta::Octicon.new(:x, size: :small, mr: 1)) %>
+                Reject
+              </button>
+            <% end %>
+
+            <%= form_with(url: approve_stafftools_copilot_model_registry_path(pending_change[:id]), method: :patch, local: true, id: "approve-form") do %>
+              <input type="hidden" name="comment" id="approve-comment-input">
+              <button type="submit" class="btn btn-primary" <%= "disabled" if is_submitter %> onclick="document.getElementById('approve-comment-input').value = document.getElementById('review-comment').value;">
+                <%= render(Primer::Beta::Octicon.new(:check, size: :small, mr: 1)) %>
+                Approve
+              </button>
+            <% end %>
+          </div>
+        </div>
+      </div>
+    <% end %>
+
+    <%# History Timeline %>
+    <%= render partial: "stafftools/copilot_model_registry/history_timeline", locals: { history_entries: history_entries } %>
+  </div>
+
+  <script type="text/javascript" nonce="<%= content_security_policy_nonce %>">
+    function showView(view) {
+      document.getElementById('view-side-by-side').style.display = view === 'side-by-side' ? '' : 'none';
+      document.getElementById('view-diff-only').style.display = view === 'diff-only' ? '' : 'none';
+      document.getElementById('btn-side-by-side').classList.toggle('selected', view === 'side-by-side');
+      document.getElementById('btn-diff-only').classList.toggle('selected', view === 'diff-only');
+    }
+  </script>
+<% end %>

@@ -1,0 +1,727 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# ELM Schema Validator
+# Detects data drift between database schema and ELM import API protobuf definitions
+# Used in CI to catch schema compatibility issues before they reach production
+#
+# This validator loads the Rails environment and compares actual model definitions
+# with the imported protobuf message structures to detect breaking changes.
+
+require "pathname"
+require "set"
+require "yaml"
+
+class ElmSchemaValidator
+  attr_accessor :errors, :warnings
+
+  def initialize(quiet: false, strict: false)
+    @workspace_root = Pathname.new(__dir__).parent.parent  # Go up two levels from script/elm to workspace root
+    @errors = []
+    @warnings = []
+    @quiet = quiet
+    @strict = strict  # When true, ignore all suppression configurations
+    @config = load_configuration
+    @skipped_known_gaps = 0
+    @skipped_missing_fields = 0
+    @skipped_dag_fields = 0
+  end
+
+  def validate!
+    log "🔍 ELM Schema Validator: validating protobuf ↔ database schema alignment"
+
+    # Load Rails environment to access models
+    load_rails_environment
+
+    # Check for ELM import and export APIs
+    import_apis = find_elm_import_apis
+    export_apis = find_elm_export_apis
+
+    if import_apis.empty? && export_apis.empty?
+      @errors << "validator: No ELM APIs found - this indicates a configuration issue with gem loading or search patterns"
+      return report_validation_results
+    end
+
+    log "📁 Found #{import_apis.length} import APIs, #{export_apis.length} export APIs"
+    log ""
+
+    # Validate each import API against database schema (existing functionality)
+    import_apis.each do |api_info|
+      validate_api_against_database(api_info)
+    end
+
+    # Validate each export API against database schema (same as import validation)
+    export_apis.each do |api_info|
+      validate_export_api_against_database(api_info)
+    end
+
+    # Validate export → import flow compatibility
+    validate_export_import_compatibility(export_apis, import_apis)
+
+    # Validate that all discovered API types have model mappings
+    validate_model_mappings(import_apis + export_apis)
+
+    # Report results
+    report_validation_results
+  end
+
+  private
+
+  def log(message)
+    puts message unless @quiet
+  end
+
+  def load_rails_environment
+    log "=> Loading Rails environment..."
+    require_relative "../../config/environment"
+
+    # Load ELM gem modules
+    Gem::Specification.each do |spec|
+      require spec.name if spec.name.start_with?("monolith-twirp-elm-")
+    end
+  rescue => e
+    @errors << "Failed to load Rails environment: #{e.message}"
+  end
+
+  def find_elm_import_apis
+    import_apis = []
+
+    # Find ELM import API protobuf files
+    elm_import_pattern = @workspace_root / "vendor" / "gems" / "**" / "monolith-twirp-elm-*" / "lib" / "**" / "import_*_api_pb.rb"
+
+    # Use a Set to avoid duplicates
+    found_files = Set.new
+
+    Dir.glob(elm_import_pattern.to_s).each do |file|
+      relative_path = Pathname.new(file).relative_path_from(@workspace_root)
+      filename = relative_path.basename.to_s      # Skip if we've already seen this filename (avoid duplicates from different gem versions)
+      next if found_files.include?(filename)
+      found_files.add(filename)
+
+      # Extract API type from filename (e.g., "import_commit_status_check_api_pb.rb" -> "commit_status_check")
+      if filename =~ /import_(.+)_api_pb\.rb$/
+        api_type = $1
+        import_apis << {
+          path: relative_path,
+          filename: filename,
+          api_type: api_type,
+          full_path: file
+        }
+      end
+    end
+
+    import_apis
+  end
+
+  def find_elm_export_apis
+    export_apis = []
+
+    # Find ELM export API protobuf files in the same gem structure as imports
+    elm_export_pattern = @workspace_root / "vendor" / "gems" / "**" / "monolith-twirp-elm-*" / "lib" / "**" / "export_*_api_pb.rb"
+
+    # Use a Set to avoid duplicates
+    found_files = Set.new
+
+    Dir.glob(elm_export_pattern.to_s).each do |file|
+      relative_path = Pathname.new(file).relative_path_from(@workspace_root)
+      filename = relative_path.basename.to_s
+
+      # Skip if we've already seen this filename (avoid duplicates from different gem versions)
+      next if found_files.include?(filename)
+      found_files.add(filename)
+
+      # Extract API type from filename (e.g., "export_commit_status_check_api_pb.rb" -> "commit_status_check")
+      if filename =~ /export_(.+)_api_pb\.rb$/
+        api_type = $1
+        export_apis << {
+          path: relative_path,
+          filename: filename,
+          api_type: api_type,
+          full_path: file
+        }
+      end
+    end
+
+    export_apis
+  end
+
+  def validate_api_against_database(api_info)
+    # Load the protobuf file to understand the expected structure
+    content = File.read(api_info[:full_path])
+
+    # Extract protobuf message definitions
+    import_fields = extract_import_message_fields(content, api_info[:api_type], api_info)
+
+    if import_fields.empty?
+      @warnings << "#{api_info[:filename]}: Could not extract import message fields"
+      return
+    end
+
+    # Map API type to ActiveRecord model
+    model_class = map_api_type_to_model(api_info[:api_type])
+
+    if model_class.nil?
+      @warnings << "#{api_info[:filename]}: Skipping validation - no corresponding ActiveRecord model found for '#{api_info[:api_type]}' (will be reported in model mapping validation)"
+      return
+    end
+
+    log "� #{api_info[:api_type]} (import) → #{model_class.name}"
+    validate_model_field_compatibility(api_info, model_class, import_fields)
+  end
+
+  def validate_export_api_against_database(api_info)
+    # Load the protobuf file to understand the expected structure
+    content = File.read(api_info[:full_path])
+
+    # Extract protobuf message definitions (using export version)
+    export_fields = extract_export_message_fields(content, api_info[:api_type], api_info)
+
+    if export_fields.empty?
+      @warnings << "#{api_info[:filename]}: Could not extract export message fields"
+      return
+    end
+
+    # Map API type to ActiveRecord model (same as import)
+    model_class = map_api_type_to_model(api_info[:api_type])
+
+    if model_class.nil?
+      @warnings << "#{api_info[:filename]}: Skipping validation - no corresponding ActiveRecord model found for '#{api_info[:api_type]}' (will be reported in model mapping validation)"
+      return
+    end
+
+    log "� #{api_info[:api_type]} (export) → #{model_class.name}"
+    validate_model_field_compatibility(api_info, model_class, export_fields)
+  end
+
+  def extract_import_message_fields(content, api_type, api_info = nil)
+    fields = []
+
+    # Generate both singular and plural message names from the API type using proper inflection
+    api_base = api_type.split("_").map(&:capitalize).join("")
+    singular_message_name = api_base.singularize
+    plural_message_name = api_base.pluralize
+
+    # Try both singular and plural patterns without preference
+    patterns = [
+      /add_message "elm\.\w+\.v\d+\.Import#{singular_message_name}" do(.*?)end/m,
+      /add_message "elm\.\w+\.v\d+\.Import#{plural_message_name}" do(.*?)end/m
+    ]
+
+    patterns.each do |pattern|
+      match = content.match(pattern)
+      if match
+        message_body = match[1]
+        # Extract field definitions: optional :field_name, :type, number
+        field_matches = message_body.scan(/optional\s+:(\w+),\s+:\w+,\s+\d+/)
+        fields.concat(field_matches.flatten)
+        # Also extract repeated fields: repeated :field_name, :type, number
+        repeated_matches = message_body.scan(/repeated\s+:(\w+),\s+:\w+,\s+\d+/)
+        fields.concat(repeated_matches.flatten)
+        break # Found a match, no need to try other patterns
+      end
+    end
+
+    # If no specific patterns matched, try a generic fallback
+    if fields.empty?
+      generic_pattern = /add_message.*Import.*#{api_type.gsub('_', '.*')}.*do(.*?)end/mi
+      generic_match = content.match(generic_pattern)
+
+      if generic_match
+        message_body = generic_match[1]
+        field_matches = message_body.scan(/(?:optional|repeated)\s+:(\w+),/)
+        fields = field_matches.flatten.map(&:to_s)
+      else
+        filename = api_info ? api_info[:filename] : "unknown_file"
+        @warnings << "#{filename}: Could not find matching import message pattern for #{api_type}"
+      end
+    end
+
+    fields.map(&:to_s).uniq
+  end
+
+  def extract_export_message_fields(content, api_type, api_info = nil)
+    fields = []
+
+    # Generate both singular and plural message names from the API type using proper inflection
+    api_base = api_type.split("_").map(&:capitalize).join("")
+    singular_message_name = api_base.singularize
+    plural_message_name = api_base.pluralize
+
+    # Try both singular and plural patterns without preference
+    patterns = [
+      /add_message "elm\.\w+\.v\d+\.Export#{singular_message_name}" do(.*?)end/m,
+      /add_message "elm\.\w+\.v\d+\.Export#{plural_message_name}" do(.*?)end/m
+    ]
+
+    patterns.each do |pattern|
+      match = content.match(pattern)
+      if match
+        message_body = match[1]
+        # Extract field definitions: optional :field_name, :type, number
+        field_matches = message_body.scan(/optional\s+:(\w+),\s+:\w+,\s+\d+/)
+        fields.concat(field_matches.flatten)
+        # Also extract repeated fields: repeated :field_name, :type, number
+        repeated_matches = message_body.scan(/repeated\s+:(\w+),\s+:\w+,\s+\d+/)
+        fields.concat(repeated_matches.flatten)
+        break # Found a match, no need to try other patterns
+      end
+    end
+
+    # If no specific patterns matched, try a generic fallback
+    if fields.empty?
+      generic_pattern = /add_message.*Export.*#{api_type.gsub('_', '.*')}.*do(.*?)end/mi
+      generic_match = content.match(generic_pattern)
+
+      if generic_match
+        message_body = generic_match[1]
+        field_matches = message_body.scan(/(?:optional|repeated)\s+:(\w+),/)
+        fields = field_matches.flatten.map(&:to_s)
+      else
+        filename = api_info ? api_info[:filename] : "unknown_file"
+        @warnings << "#{filename}: Could not find matching export message pattern for #{api_type}"
+      end
+    end
+
+    fields.map(&:to_s).uniq
+  end
+
+  def validate_export_import_compatibility(export_apis, import_apis)
+    return if export_apis.empty? || import_apis.empty?
+
+    log "\n📊 Export → Import Flow Compatibility:"
+
+    # Group APIs by type for comparison
+    export_by_type = export_apis.group_by { |api| api[:api_type] }
+    import_by_type = import_apis.group_by { |api| api[:api_type] }
+
+    # Filter out import-only APIs from compatibility checking
+    import_only_types = @config.dig("import_only_apis") || []
+    import_apis_requiring_export = import_by_type.reject { |api_type, _| import_only_types.include?(api_type) }
+
+    # Find API types that have both export and import definitions (excluding import-only)
+    common_types = export_by_type.keys & import_apis_requiring_export.keys
+
+    # Log import-only APIs for visibility
+    unless import_only_types.empty?
+      found_import_only = import_by_type.keys & import_only_types
+      if found_import_only.any?
+        log "   ℹ️  Import-only APIs (no export required): #{found_import_only.join(', ')}"
+      end
+    end
+
+    if common_types.empty? && import_apis_requiring_export.any?
+      # Only treat as error if there are import APIs that should have exports but don't
+      @errors << "No matching export/import API pairs found for flow validation. This likely indicates a misconfiguration or missing API definitions."
+      return
+    end
+
+    common_types.each do |api_type|
+      export_api = export_by_type[api_type].first
+      import_api = import_by_type[api_type].first
+
+      # Extract fields from both APIs
+      export_content = File.read(export_api[:full_path])
+      import_content = File.read(import_api[:full_path])
+
+      export_fields = extract_export_message_fields(export_content, api_type, export_api)
+      import_fields = extract_import_message_fields(import_content, api_type, import_api)
+
+      # Check if export provides what import expects
+      missing_in_export = import_fields - export_fields
+      extra_in_export = export_fields - import_fields
+
+      # Remove documented compatibility issues from missing fields
+      documented_missing = get_documented_compatibility_issues(api_type)
+      missing_in_export -= documented_missing
+
+      if missing_in_export.empty?
+        log "   ✅ #{api_type}"
+      else
+        log "   ❌ #{api_type}: Missing #{missing_in_export.join(', ')}"
+        @errors << "#{api_type}: Export API missing fields that Import API expects: #{missing_in_export.join(', ')}"
+      end
+
+      unless extra_in_export.empty?
+        @warnings << "#{api_type}: Export API has extra fields not used by Import API: #{extra_in_export.join(', ')}"
+      end
+    end
+  end
+
+  def validate_model_mappings(all_apis)
+    # Get all unique API types from discovered APIs
+    discovered_api_types = all_apis.map { |api| api[:api_type] }.uniq.sort
+
+    # Check each API type for model mapping
+    unmapped_types = []
+    mapped_types = []
+
+    discovered_api_types.each do |api_type|
+      model_class = map_api_type_to_model(api_type)
+
+      if model_class.nil?
+        unmapped_types << api_type
+      else
+        mapped_types << "#{api_type} → #{model_class.name}"
+      end
+    end
+  end
+
+  def map_api_type_to_model(api_type)
+    # Only use YAML configuration for model mappings - no fallbacks
+    if @config["model_mappings"] && @config["model_mappings"][api_type]
+      model_name = @config["model_mappings"][api_type]
+      begin
+        candidate = model_name.constantize
+        return candidate if is_activerecord_model?(candidate)
+      rescue NameError => e
+        log "⚠️  Model mapping error: #{model_name} not found for #{api_type}"
+        return nil
+      end
+    end
+
+    # No model mapping found in configuration
+    log "⚠️  No model mapping found for API type: #{api_type}"
+    log "   💡 Add to model_mappings section in field_mappings.yml"
+    nil
+  end
+
+  def is_activerecord_model?(constant)
+    # Check if the constant is an ActiveRecord model (class that inherits from ActiveRecord::Base)
+    constant.is_a?(Class) && constant < ActiveRecord::Base
+  rescue
+    false
+  end
+
+  def validate_model_field_compatibility(api_info, model_class, import_fields)
+    # Filter out DAG infrastructure fields that shouldn't be validated
+    filtered_import_fields = filter_dag_fields(import_fields)
+
+    # Log what DAG fields were filtered out (in strict mode or when fields were actually filtered)
+    filtered_dag_fields = import_fields - filtered_import_fields
+    if filtered_dag_fields.any? && (@strict || filtered_dag_fields.length > 0)
+      log "   🔧 Filtered DAG fields: #{filtered_dag_fields.join(', ')}"
+    end
+
+    # Map protobuf field names to database column names
+    mapped_import_fields = map_protobuf_fields_to_db_columns(filtered_import_fields, api_info[:api_type])
+
+    # Remove known gaps that are documented as acceptable
+    final_import_fields = remove_known_gaps(mapped_import_fields, api_info[:api_type])
+
+    # Get database column information
+    db_columns = model_class.column_names
+    required_fields = get_required_fields(model_class)
+
+    # Remove documented missing required fields that are known gaps
+    filtered_required_fields = remove_known_missing_required_fields(required_fields, api_info[:api_type])
+
+    # Check for fields in import API that don't exist in database
+    missing_in_db = final_import_fields - db_columns
+    missing_in_import = filtered_required_fields - final_import_fields
+
+    # Log issues in a concise format
+    has_issues = false
+
+    if missing_in_db.any?
+      @errors << "#{api_info[:filename]}: Import API references fields not in database: #{missing_in_db.join(', ')}"
+      log "   ❌ Missing in DB: #{missing_in_db.join(', ')}"
+      has_issues = true
+    end
+
+    if missing_in_import.any?
+      @errors << "#{api_info[:filename]}: Import API missing required database fields: #{missing_in_import.join(', ')}"
+      log "   ⚠️  Missing in API: #{missing_in_import.join(', ')}"
+      has_issues = true
+    end
+
+    unless has_issues
+      # In normal mode, just show compatible; in strict mode, show all the details
+      if @strict
+        log "   ✅ Schema compatible"
+      else
+        log "   ✅"
+      end
+    end
+  end
+
+  def filter_dag_fields(fields)
+    # Remove DAG infrastructure fields that shouldn't be validated against database schema
+    # Configuration is read from field_mappings.yml dag_filtering section
+    filtered_fields = fields.dup
+
+    # Get DAG filtering configuration
+    dag_config = @config["dag_filtering"] || {}
+    ignore_suffixes = dag_config["ignore_suffixes"] || []
+    ignore_fields = dag_config["ignore_fields"] || []
+
+    # Filter out fields based on configuration
+    filtered_fields = fields.reject do |field|
+      # Check if field ends with any ignored suffix
+      matches_suffix = ignore_suffixes.any? { |suffix| field.end_with?(suffix) }
+
+      # Check if field is in the ignored fields list
+      matches_field = ignore_fields.include?(field)
+
+      matches_suffix || matches_field
+    end
+
+    # Track what was filtered for summary
+    filtered_out = fields - filtered_fields
+    @skipped_dag_fields += filtered_out.length
+
+    filtered_fields
+  end
+
+  def map_protobuf_fields_to_db_columns(fields, api_type)
+    # Map protobuf field names to database column names using YAML configuration only
+    mapped_fields = []
+
+    fields.each do |field|
+      # Check for specific field mapping in configuration
+      if @config["field_mappings"] &&
+         @config["field_mappings"][api_type] &&
+         @config["field_mappings"][api_type][field]
+
+        mapped_fields << @config["field_mappings"][api_type][field]
+      else
+        # Use field name as-is if no mapping configured
+        mapped_fields << field
+      end
+    end
+
+    mapped_fields
+  end
+
+  def remove_known_gaps(fields, api_type)
+    # In strict mode, don't remove any known gaps - show all errors
+    return fields if @strict
+
+    # Remove fields that are documented as known gaps requiring explicit decisions
+    filtered_fields = fields.dup
+
+    if @config["known_gaps"] && @config["known_gaps"][api_type]
+      known_gap_fields = @config["known_gaps"][api_type].keys
+      filtered_fields -= known_gap_fields
+
+      # Track the gaps we're skipping for summary
+      gap_fields = fields & known_gap_fields
+      @skipped_known_gaps += gap_fields.length
+    end
+
+    filtered_fields
+  end
+
+  def remove_known_missing_required_fields(required_fields, api_type)
+    # In strict mode, don't remove any known missing required fields - show all errors
+    return required_fields if @strict
+
+    # Remove required fields that are documented as known missing required fields
+    filtered_fields = required_fields.dup
+
+    if @config["missing_required_fields"] && @config["missing_required_fields"][api_type]
+      known_missing_fields = @config["missing_required_fields"][api_type]
+      filtered_fields -= known_missing_fields
+
+      # Track the missing fields we're skipping for summary
+      missing_fields = required_fields & known_missing_fields
+      @skipped_missing_fields += missing_fields.length
+    end
+
+    filtered_fields
+  end
+
+  def get_documented_compatibility_issues(api_type)
+    # In strict mode, don't skip any compatibility issues - show all errors
+    return [] if @strict
+
+    # Get documented compatibility issues that should be skipped
+    if @config["compatibility_issues"] && @config["compatibility_issues"][api_type] && @config["compatibility_issues"][api_type]["missing_in_export"]
+      @config["compatibility_issues"][api_type]["missing_in_export"]
+    else
+      []
+    end
+  end
+
+  def get_required_fields(model_class)
+    # Get fields that have presence validators or NOT NULL constraints
+    required_fields = []
+
+    # Check ActiveRecord validations
+    model_class.validators.each do |validator|
+      if validator.is_a?(ActiveRecord::Validations::PresenceValidator)
+        required_fields.concat(validator.attributes.map(&:to_s))
+      end
+    end
+
+    # Check database NOT NULL constraints
+    model_class.columns.each do |column|
+      if !column.null && column.name != "id" && !column.name.end_with?("_at")
+        required_fields << column.name unless required_fields.include?(column.name)
+      end
+    end
+
+    required_fields.uniq
+  end
+
+  def validate_field_types(api_info, model_class, import_fields)
+    # Basic type validation - can be expanded
+    model_class.columns.each do |column|
+      if import_fields.include?(column.name)
+        # Check for common type mismatches that would cause import failures
+        case column.type
+        when :integer, :bigint
+          # These should be mapped to int32/int64 in protobuf
+        when :string, :text
+          # These should be mapped to string in protobuf
+        when :boolean
+          # These should be mapped to bool in protobuf
+        when :datetime, :timestamp
+          # These should be mapped to google.protobuf.Timestamp or string
+        end
+      end
+    end
+  end
+
+  def report_validation_results
+    log "\n#{"=" * 60}"
+
+    if @errors.empty? && @warnings.empty?
+      # Show summary of what was ignored in normal mode
+      if !@strict && (@skipped_known_gaps > 0 || @skipped_missing_fields > 0 || @skipped_dag_fields > 0)
+        log "✅ Schema validation passed"
+        log "📋 Ignored: #{@skipped_dag_fields} DAG fields, #{@skipped_known_gaps} known gaps, #{@skipped_missing_fields} missing fields"
+        log "   (Use --strict to see all issues)"
+      else
+        log "✅ Schema validation passed - no data drift detected"
+      end
+      return true
+    end
+
+    if @errors.any?
+      log "❌ Schema validation failed with #{@errors.length} errors:"
+      log ""
+
+      # Categorize errors for better readability
+      categorized_errors = categorize_errors(@errors)
+
+      # Display errors in priority order
+      display_error_category("� FIELD DRIFT", categorized_errors[:field_missing])
+      display_error_category("⚠️  REQUIRED FIELDS", categorized_errors[:required_field])
+      display_error_category("❓ COMPATIBILITY", categorized_errors[:other])
+      display_error_category("🗺️  MODEL MAPPING", categorized_errors[:model_mapping])
+      display_error_category("🚨 NAMING", categorized_errors[:naming])
+    end
+
+    if @warnings.any?
+      log "⚠️  #{@warnings.length} warnings (non-blocking):"
+      @warnings.each_with_index do |warning, i|
+        log "   #{i + 1}. #{warning}"
+      end
+      log ""
+    end
+
+    # Only show help text if there are errors to fix
+    if @errors.any?
+      categorized_errors = categorize_errors(@errors)
+
+      log "💡 How to fix errors:"
+
+      if categorized_errors[:field_missing].any?
+        log "   📊 Field drift (protobuf fields not in DB):"
+        log "      • Add to known_gaps if expected (computed fields, etc.)"
+        log "      • Or map to existing DB field in field_mappings"
+        log "      • Or remove from protobuf if unnecessary"
+      end
+
+      if categorized_errors[:required_field].any?
+        log "   ⚠️  Required fields (DB fields missing from protobuf):"
+        log "      • Add to field_mappings if protobuf uses different names"
+        log "      • Or add to protobuf definition"
+        log "      • Or document as intentionally omitted in known_gaps"
+      end
+
+      if categorized_errors[:other].any?
+        log "   ❓ Compatibility (export/import mismatches):"
+        log "      • Review export API to provide all import fields"
+        log "      • Or document as known limitation in compatibility_issues"
+      end
+
+      log ""
+      log "📖 Full guide on how to fix errors is here: script/elm/README.md"
+      log "🔧 Re-run: bin/elm-schema-validator"
+    end
+    @errors.empty?
+  end
+
+  def categorize_errors(errors)
+    categorized = {
+      naming: [],
+      field_missing: [],
+      required_field: [],
+      configuration: [],
+      model_mapping: [],
+      other: []
+    }
+
+    errors.each do |error|
+      if error.include?("Expected") && error.include?("message name")
+        categorized[:naming] << error
+      elsif error.include?("references fields not in database")
+        categorized[:field_missing] << error
+      elsif error.include?("missing required database fields")
+        categorized[:required_field] << error
+      elsif error.include?("Could not find corresponding ActiveRecord model")
+        categorized[:configuration] << error
+      elsif error.include?("MODEL_MAPPING:")
+        categorized[:model_mapping] << error
+      else
+        categorized[:other] << error
+      end
+    end
+
+    categorized
+  end
+
+  def display_error_category(title, errors)
+    return if errors.empty?
+
+    log "   #{title} (#{errors.length}):"
+    errors.each do |error|
+      filename = error.split(":").first
+      message = error.split(":", 2).last.strip
+      log "    • #{filename}: #{message}"
+    end
+    log ""
+  end
+
+  def load_configuration
+    config_path = File.join(__dir__, "field_mappings.yml")
+
+    if File.exist?(config_path)
+      YAML.safe_load_file(config_path) || {}
+    else
+      log "⚠️  Configuration file not found: #{config_path}"
+      log "   Using built-in defaults only"
+      {}
+    end
+  rescue => e
+    log "⚠️  Error loading configuration: #{e.message}"
+    log "   Using built-in defaults only"
+    {}
+  end
+end
+
+# Run validation if called directly
+if __FILE__ == $PROGRAM_NAME
+  strict_mode = ARGV.include?("--strict") || ARGV.include?("-s")
+  quiet_mode = ARGV.include?("--quiet") || ARGV.include?("-q")
+
+  if strict_mode && !quiet_mode
+    puts "🚨 Running in STRICT mode - showing ALL errors including those normally ignored"
+    puts ""
+  end
+
+  validator = ElmSchemaValidator.new(quiet: quiet_mode, strict: strict_mode)
+  success = validator.validate!
+  exit(success ? 0 : 1)
+end

@@ -1,0 +1,188 @@
+<%# view is an instance of RepositoryCodeScanning::ShowView %>
+
+<%
+  page_info(
+    title: view.page_title,
+    container_xl: true,
+    selected_link: :code_scanning,
+  )
+%>
+
+<%= render layout: "layouts/repository_container", locals: { repository: current_repository } do %>
+<div class="clearfix container-xl tmp-px-3 tmp-px-lg-4 tmp-px-xl-0 tmp-mt-3 tmp-mt-lg-4">
+  <% if view.turboscan_unavailable? %>
+    <%= render Primer::Beta::Blankslate.new(data: { hpc: "" }, classes: "tmp-my-6") do |c| %>
+      <% c.with_visual_icon(icon: "alert") %>
+      <% c.with_heading(tag: :h3, mt: 4, font_size: 2) { "Loading alert failed" } %>
+      <% c.with_description do %>
+        <% if GitHub.enterprise? %>
+          <p>If the problem persists <%= contact_support_snippet(true) %>.</p>
+        <% else %>
+          <p>We track these errors automatically, but if the problem persists feel free to <a class="Link--inTextBlock" href="<%= contact_path %>">contact us</a>.</p>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% else %>
+    <%= render Repos::Security::SecurityShowPageComponent.new do |show_page_component| %>
+      <% show_page_component.with_pre_header do %>
+        <%= render "repos/code_scanning/site_admin_warning", view: view %>
+      <% end %>
+
+      <% show_page_component.with_alert_actions do %>
+        <span class="d-flex js-alert-actions-portal-root">
+          <% if view.show_dismiss_alert_button? %>
+            <%= render_react_partial name: "shared-dismissal", disable_ssr: true, props: {
+                alertNumbers: [view.result.number],
+                path: view.dismiss_alert_path,
+                delegatedAlertDismissalEnabled: view.code_scanning_alert_dismissal_enabled?,
+                codeSecurity: true,
+                entity: "alert",
+                disabled: view.has_pending_request?,
+              } %>
+          <% elsif view.show_reopen_alert_button? %>
+            <div <%= test_selector("code-scanning-reopen-alert") %>>
+                <%= form_tag view.reopen_path(number: view.result.number, ref_names: Array(view.selected_alert_instance&.ref_name_bytes)), method: :put do %>
+                  <%= render Primer::Beta::Button.new(scheme: :default, type: :submit) do %>
+                    Reopen alert
+                  <% end %>
+                <% end %>
+              </div>
+          <% end %>
+        </span>
+      <% end %>
+
+      <%
+        tracking_issue = if AlertTrackingLinks.enabled?(current_repository)
+          view.alert_tracking_links&.find { |link| link[:issue].present? }&.dig(:issue)&.then do |issue|
+            issue.merge(
+              state: issue[:state]&.upcase,
+              stateReason: issue[:stateReason]&.upcase
+            )
+          end
+        end
+      %>
+      <% show_page_component.with_react_header do %>
+        <%= render_react_partial name: "code-scanning-alert-show-header", props: {
+          alertTitle: result_title(view.result),
+          alertNumber: view.result.number,
+          backButtonUrl: repository_code_scanning_results_path,
+          status: view.status,
+          branchName: view.status_should_show_branch_name? ? view.status_branch_name : nil,
+          statusDate: view.status_date.present? ? view.status_date : nil,
+          trackingIssue: tracking_issue,
+          dismissalRequest: view.pending_dismissal_request? ? {
+            requester: view.pending_dismissal_requester,
+            resolution: view.pending_dismissal_resolution,
+            requestedAt: view.pending_dismissal_requested_at,
+          } : nil,
+        } %>
+      <% end %>
+
+      <% show_page_component.with_react_sidebar do %>
+        <%= render(CodeScanning::ReactSidebarComponent.new(
+          repository: current_repository,
+          response: view.response,
+          alert_title: result_title(view.result),
+          severity_filter_url: view.severity_link_for_result(view.result, base_query: view.default_query),
+          current_user: view.current_user_assignee,
+          assignees: view.assignees,
+          assignable_to_copilot: view.assignable_to_copilot,
+          suggested_fix: view.suggested_fix,
+          use_agentic_autofix: view.use_agentic_autofix,
+          config_statuses: view.config_statuses,
+          config_statuses_complete: view.config_statuses_complete,
+          alert_links: view.alert_links,
+          tracking_links: view.alert_tracking_links,
+          show_alert_with_suggested_fix: !view.use_agentic_autofix && view.show_alert_with_suggested_fix?,
+          branch_list_cache_key: ref_list_cache_key,
+          linked_branches: view.linked_branches,
+          linked_pull_requests: view.linked_pull_requests,
+          campaigns_with_counts: view.campaigns_with_counts,
+          runtime_risks: view.runtime_risks,
+        )) %>
+      <% end %>
+
+      <% show_page_component.with_main do %>
+        <% if result_closed?(view.result) %>
+          <h2 class="sr-only">Code snippet</h2>
+          <%= render partial: "repos/scanning/location", locals: {
+            full_path: view.alert_instance.location.file_path,
+            path_link: view.code_snippet_path_link,
+            snippet_helper: view.snippet_helper(view.alert_instance.location, view.alert_instance.commit_oid),
+            tool_display_name: view.tool_display_name,
+            alert_title: result_title(view.result),
+            code_paths_url: view.has_code_paths? ? view.code_paths_url : nil,
+            classifications: view.classifications,
+            line_number: view.alert_instance.location.start_line,
+            alert_rule_severity: view.result.rule_severity,
+          } %>
+        <% else %>
+          <%= render partial: "repos/code_scanning/suggested_fix", locals: { view: view } %>
+        <% end %>
+
+        <h2 class="sr-only">Rule</h2>
+        <div class="Box Box--condensed tmp-mt-3 Details js-details-container">
+          <div class="Box-header tmp-p-3 d-md-flex">
+            <% if view.tool_display_name.present? %>
+              <div class="tmp-mr-md-5" <%= test_selector("code-scanning-tool-name") %>>
+                <h3 class="Box-title mb-1">Tool</h3>
+                <div class="f6"><%= view.tool_display_name %></div>
+              </div>
+            <% end %>
+            <div class="tmp-mr-md-5 tmp-mt-3 tmp-mt-md-0">
+              <h3 class="Box-title mb-1">Rule ID</h3>
+              <div class="text-mono f6"><%= view.result.rule&.sarif_identifier %></div>
+            </div>
+            <% if view.rule_query_uri.present? %>
+              <div class="tmp-mr-5 tmp-mt-3 tmp-mt-md-0" <%= test_selector("code-scanning-query-source") %>>
+                <h3 class="Box-title mb-1">Query</h3>
+                <a class="Link--primary d-block f6" href="<%= view.rule_query_uri %>" target="_blank" rel="noopener noreferrer">View source</a>
+              </div>
+            <% end %>
+          </div>
+
+          <h3 class="sr-only">Description</h3>
+          <% if view.has_rule_help? %>
+            <div class="Box-body markdown-body comment-body position-relative border-bottom-0 Details-content--shown" <%= test_selector("code-scanning-rule-intro") %>>
+              <%= view.rule_intro %>
+            </div>
+            <div id="code-scanning-rule-description" class="Box-body markdown-body comment-body position-relative Details-content--hidden" <%= test_selector("code-scanning-rule-description") %>>
+              <%= view.rule_description %>
+            </div>
+
+            <% if view.rule_help_expandable? %>
+              <div class="Box-footer py-2 color-bg-subtle">
+                <%= render Primer::Beta::Button.new(scheme: :link, block: true, classes: "Details-content--shown js-details-target", aria: { expanded: true, controls: "code-scanning-rule-description" }) do %>Show more <%= primer_octicon(:"chevron-down") %><% end %>
+                <%= render Primer::Beta::Button.new(scheme: :link, block: true, classes: "Details-content--hidden js-details-target", aria: { expanded: false, controls: "code-scanning-rule-description" } ) do %>Show less <%= primer_octicon(:"chevron-up") %><% end %>
+              </div>
+            <% end %>
+          <% elsif view.result.rule&.full_description.present? %>
+            <div class="Box-body markdown-body comment-body">
+              <%= view.result.rule.full_description %>
+            </div>
+          <% else %>
+            <div class="Box-body markdown-body comment-body">
+              <p class="color-fg-muted f5"><em>No rule help available for this alert.</em></p>
+            </div>
+          <% end %>
+        </div>
+
+        <h2 class="sr-only">Activity</h2>
+        <%= render Primer::Alpha::IncludeFragment.new(src: view.timeline_path, test_selector: "code-scanning-alert-timeline-fragment") do %>
+          <%= render(Primer::Beta::TimelineItem.new(condensed: false, pb: 1)) do |component| %>
+            <% component.with_badge(icon: "shield") %>
+            <% component.with_body(display: :flex, align_items: :center) do %>
+              <span data-hide-on-error>
+                Loading<span class="AnimatedEllipsis"></span>
+              </span>
+              <span data-show-on-error hidden>
+                Sorry, something went wrong loading the alert history.
+              </span>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+</div>
+<% end %>

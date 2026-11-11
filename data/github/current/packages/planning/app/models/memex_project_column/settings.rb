@@ -1,0 +1,222 @@
+# typed: true
+# frozen_string_literal: true
+
+class MemexProjectColumn::Settings
+  include ActiveModel::Validations
+
+  class InitializationError < ArgumentError; end
+
+  attr_reader :width,
+              :options,
+              :configuration,
+              :progress_configuration,
+              :default_value
+
+  DEFAULT_COLOR = "GRAY".freeze
+  ALLOWED_COLORS = [DEFAULT_COLOR, "BLUE", "GREEN", "ORANGE", "RED", "PINK", "PURPLE", "YELLOW"].freeze
+  MIN_WIDTH = 1
+  MAX_WIDTH = 10000
+  SUPPORTED_KEYS = %i(width options configuration progress_configuration default_value)
+
+  validates(
+    :width,
+    allow_blank: true,
+    numericality: {
+      only_integer: true,
+      greater_than_or_equal_to: MIN_WIDTH,
+      less_than_or_equal_to: MAX_WIDTH
+    }
+  )
+  validate :no_unsupported_entries
+  validate :no_unsupported_entries_for_data_type
+  validate :options_are_valid
+  validate :configuration_is_valid
+  validate :progress_configuration_is_valid
+  validate :default_value_is_valid
+
+  def initialize(data_type, settings, default_value_enabled: false)
+    unless settings.is_a?(Hash)
+      raise InitializationError, "must provide a hash"
+    end
+
+    if settings[:options] && !settings[:options].is_a?(Array)
+      raise InitializationError, "options must be an array"
+    end
+
+    if settings[:options] && !settings[:options].all? { |o| o.is_a?(Hash) }
+      raise InitializationError, "options must be an array of hashes"
+    end
+
+    if settings.slice(:options, :configuration, :progress_configuration).keys.length > 1
+      raise InitializationError, "cannot provide more than one: options, configuration, and progress_configuration"
+    end
+
+    @width = settings[:width] && settings[:width].to_i
+    @options = settings[:options] && MemexProjectColumn::Settings::Options.new(settings[:options])
+    @configuration = settings[:configuration] && MemexProjectColumn::Settings::Configuration.new(settings[:configuration])
+    @progress_configuration = settings[:progress_configuration] && MemexProjectColumn::Settings::ProgressConfiguration.new(settings[:progress_configuration])
+    @default_value = settings[:default_value]
+    @unsupported_entries = settings.reject { |key, _| SUPPORTED_KEYS.include?(key.to_sym) }
+    @data_type = data_type.to_sym
+    @default_value_enabled = default_value_enabled
+
+    clear_default_value_if_option_removed
+  end
+
+  def serialize
+    return @serialized if defined?(@serialized)
+
+    @serialized = {
+      width: @width,
+      options: @options&.serialize,
+      configuration: @configuration&.serialize,
+      progress_configuration: @progress_configuration&.serialize,
+      default_value: @default_value,
+    }.compact.with_indifferent_access
+  end
+
+  def add_option(name:, color: nil, description: nil, position: nil)
+    @options = options.insert(position, MemexProjectColumn::Settings::OptionEntry.new({ name: name, color: color, description: description })).compact
+  end
+
+  def delete_option(option_id)
+    option = options.find { |o| o.id == option_id }
+    if option
+      @options = options.except { |o| o.id == option_id }
+      @default_value = nil if @default_value == option_id
+      option
+    end
+  end
+
+  # https://stackoverflow.com/a/47161783 for insertion fun
+  def update_option(option_id, name: nil, color: nil, description: nil, position: nil)
+    if previous_index = options.index { |o| o.id == option_id }
+      option_to_update = @options.delete_at(previous_index)
+      option_to_update.name = name if name
+      option_to_update.color = color if color
+      option_to_update.description = description if description
+
+      new_position = position || previous_index
+      # compact the options in case of a race condition
+      # where the provided position is out of bounds and `nil` values are inserted
+      # at earlier indexes
+      @options = options.insert(new_position, option_to_update).compact
+    end
+  end
+
+  # Public: when a settings object has configurations and iterations, we will
+  # want to ensure that the iterations are properly placed, ordered, and
+  # deduped.
+  #
+  # Returns an instance of Settings
+  def allocate_iterations
+    return self unless @configuration
+
+    @configuration = Configuration
+      .new(@configuration.serialize)
+      .partition_iterations
+
+    self
+  end
+
+  private
+
+  def no_unsupported_entries
+    if @unsupported_entries.present?
+      errors.add(:base, "Contains unsupported keys: #{@unsupported_entries.keys.join(", ")}")
+    end
+  end
+
+  def no_unsupported_entries_for_data_type
+    if @data_type != :single_select && @options.present?
+      errors.add(:base, "Options key is not supported for #{@data_type} column")
+    end
+  end
+
+  def options_are_valid
+    if @options && !@options.valid?
+      @options.errors.full_messages.each { |msg| errors.add(:base, msg) }
+    end
+  end
+
+  def configuration_is_valid
+    if @configuration && !@configuration.valid?
+      @configuration.errors.full_messages.each { |msg| errors.add(:base, msg) }
+    end
+  end
+
+  def progress_configuration_is_valid
+    if @progress_configuration && !@progress_configuration.valid?
+      @progress_configuration.errors.full_messages.each { |msg| errors.add(:base, msg) }
+    end
+  end
+
+  def default_value_is_valid
+    return if @default_value.nil?
+    return unless @default_value_enabled
+
+    case @data_type
+    when :text
+      validate_text_default_value
+    when :number
+      validate_number_default_value
+    when :single_select
+      validate_single_select_default_value
+    else
+      errors.add(:base, "Default value is not supported for #{@data_type} columns")
+    end
+  end
+
+  def validate_text_default_value
+    unless @default_value.is_a?(String)
+      errors.add(:base, "Default value for text column must be a string")
+      return
+    end
+
+    if @default_value.bytesize > MemexProjectColumnValue::TEXT_VALUE_BYTESIZE_LIMIT
+      errors.add(:base, "Default value for text column must be #{MemexProjectColumnValue::TEXT_VALUE_BYTESIZE_LIMIT} bytes or fewer")
+    end
+  end
+
+  def validate_number_default_value
+    unless @default_value.is_a?(Numeric)
+      errors.add(:base, "Default value for number column must be a number")
+      return
+    end
+
+    limit = MemexProjectColumnValue::NUMBER_VALUE_SIGNED_INT_LIMIT
+    unless @default_value >= -limit && @default_value <= limit
+      errors.add(:base, "Default value for number column must be between #{-limit} and #{limit}")
+      return
+    end
+
+    precision = MemexProjectColumnValue::NUMBER_VALUE_PRECISION
+    unless @default_value.to_f.round(precision) == @default_value.to_f
+      errors.add(:base, "Default value for number column must not exceed precision of #{precision}")
+    end
+  end
+
+  def validate_single_select_default_value
+    unless @default_value.is_a?(String)
+      errors.add(:base, "Default value for single select column must be a string (option ID)")
+      return
+    end
+
+    if @options.nil?
+      errors.add(:base, "Cannot set default value for single select column without options")
+      return
+    end
+
+    valid_option_ids = @options.options.map(&:id)
+    unless valid_option_ids.include?(@default_value)
+      errors.add(:base, "Default value '#{@default_value}' is not a valid option ID for this single select column")
+    end
+  end
+
+  def clear_default_value_if_option_removed
+    return unless @data_type == :single_select && @options && @default_value.is_a?(String)
+
+    valid_option_ids = @options.options.map(&:id)
+    @default_value = nil unless valid_option_ids.include?(@default_value)
+  end
+end

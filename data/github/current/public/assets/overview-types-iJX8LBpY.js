@@ -1,0 +1,1 @@
+function e(e){return`overview`in e}const t={README:`readme`,CODE_OF_CONDUCT:`code_of_conduct`,CONTRIBUTING:`contributing`,LICENSE:`license`,SECURITY:`security`};export{e as n,t};

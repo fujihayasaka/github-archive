@@ -1,0 +1,71 @@
+#!/bin/bash
+
+# Parse command line options
+SYNC_RUNTIME=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --sync-runtime)
+            SYNC_RUNTIME=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [--sync-runtime]"
+            exit 1
+            ;;
+    esac
+done
+
+# If --sync-runtime is specified, run the sync command
+if [ "$SYNC_RUNTIME" = true ]; then
+    echo "Syncing runtime..."
+    ORIGINAL_DIR=$(pwd)
+    cd /workspaces/sweagentd/runtime/
+    npm run sync-action-repo
+    cd "$ORIGINAL_DIR"
+    echo "Runtime sync completed."
+fi
+
+# Check if overmind is installed
+if ! command -v overmind &> /dev/null; then
+    echo "overmind not found, installing..."
+
+    # Check if we're on macOS and have brew
+    if [[ "$OSTYPE" == "darwin"* ]] && command -v brew &> /dev/null; then
+        brew install overmind
+    else
+        # For other systems, install via go
+        echo "Installing overmind via go install..."
+        go install github.com/DarthSim/overmind/v2@latest
+    fi
+
+    # Verify installation
+    if ! command -v overmind &> /dev/null; then
+        echo "Failed to install overmind. Please install it manually:"
+        echo "  macOS: brew install overmind"
+        echo "  Other: go install github.com/DarthSim/overmind/v2@latest"
+        exit 1
+    fi
+fi
+
+# Ensure CosmosDB is running and ready before starting other services
+echo "Ensuring Cosmos DB emulator is ready..."
+script/cosmos-dev start
+
+# Ensure Redis is running and ready before starting other services
+echo "Ensuring Redis is ready..."
+script/redis-dev start
+
+# Use a project-specific socket to avoid conflicts with other overmind instances
+export OVERMIND_SOCKET="/tmp/overmind-sweagentd.sock"
+
+echo "Starting dependent services with overmind..."
+echo "Services that will start:"
+echo "  - HTTP server (port 2208)"
+echo "  - Twirp server (port 2209)"
+echo "  - Worker"
+echo "  - Cosmos DB emulator (port 8081) [already running]"
+echo "  - Redis (port 6381) [already running]"
+echo ""
+overmind start

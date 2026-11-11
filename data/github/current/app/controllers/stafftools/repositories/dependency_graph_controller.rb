@@ -1,0 +1,199 @@
+# typed: true
+# frozen_string_literal: true
+
+require "benchmark"
+
+class Stafftools::Repositories::DependencyGraphController < StafftoolsController
+  before_action :ensure_repo_exists
+
+  javascript_bundle :"stafftools-repositories"
+  layout "layouts/stafftools/repository/overview"
+
+  DEPENDABOT_DETECTOR_NAME = "dependabot".freeze
+
+  depends_on_clusters ApplicationRecord::Mysql1,
+    ApplicationRecord::IamAbilities,
+    ApplicationRecord::Repositories,
+    ApplicationRecord::Ballast,
+    ApplicationRecord::Configurations,
+    ApplicationRecord::SecurityProductsEnablement,
+    ApplicationRecord::Spokes,
+    ApplicationRecord::Collab,
+    ApplicationRecord::Mysql2,
+    ApplicationRecord::NotificationsEntries,
+    ApplicationRecord::Mysql5,
+    ApplicationRecord::Billing,
+    only: [:dependency_graph, :exclude_dependency_snapshot, :download_dependency_snapshot]
+
+  depends_on_clusters ApplicationRecord::Copilot,
+    only: [:dependency_graph], optional: true
+
+  def dependency_graph # rubocop:todo GitHub/UseRestfulActions
+    return render_404 unless GitHub.dependency_graph_enabled?
+
+    result = T.let(nil, T.untyped)
+    packages = []
+    dependents_unavailable = true
+    timing = 0.0
+
+    if current_repository.public?
+      timing = Benchmark.measure do
+        result = Platform::Loaders::Dependencies.load_packages({
+          package_filter: {
+            repository_id: current_repository.id,
+            first: 30,
+            preview: current_repository.dependency_graph_preview?,
+            debug: true,
+          },
+          include_dependent_counts: true,
+        }).sync
+      end
+
+      dependents_unavailable = !result.ok?
+      packages = result.value { [] }
+    end
+
+    manifest_paths = DependencyGraph::ManifestsQuery.new(
+        manifest_filter: { repository_id: current_repository.id }
+      ).results.value![:manifests].map(&:filename)
+
+    snapshots_or_error = get_canonical_snapshots_or_error
+
+    snapshot_error = nil
+    dependabot_snapshots = []
+    complete_snapshots = []
+
+    if snapshots_or_error.is_a?(Array)
+      complete_snapshots = snapshots_or_error.reject { |s| s[:detector]&.downcase == DEPENDABOT_DETECTOR_NAME }
+      dependabot_snapshots = snapshots_or_error.select { |s| s[:detector]&.downcase == DEPENDABOT_DETECTOR_NAME }
+    else
+      snapshot_error = snapshots_or_error
+    end
+
+    max_manifests_high_enabled = GitHub.enterprise? ? false : FeatureFlag.vexi.enabled?(:dependency_graph_max_manifests_high, current_repository, default: false)
+    non_expiring_snapshots_enabled = GitHub.enterprise? ? false : FeatureFlag.vexi.enabled?(:dependency_graph_non_expiring_snapshots, current_repository, default: false)
+
+    respond_to do |format|
+      format.html do
+        render "stafftools/repositories/dependency_graph", locals: {
+          timing: timing,
+          packages: packages,
+          current_repo: current_repository,
+          dependents_unavailable: dependents_unavailable,
+          manifest_paths: manifest_paths,
+          complete_snapshots: complete_snapshots,
+          dependabot_snapshots: dependabot_snapshots,
+          snapshot_error: snapshot_error,
+          max_manifests_high_enabled: max_manifests_high_enabled,
+          non_expiring_snapshots_enabled: non_expiring_snapshots_enabled,
+        }
+      end
+    end
+  end
+
+  def get_canonical_snapshots_or_error # rubocop:todo GitHub/UseRestfulActions
+    p = DependencySnapshot::DependencySnapshotProvider.new
+    resp = p.get_included_dependency_snapshots(repository: current_repository)
+    if resp[:status_code] != 200
+      return "Error #{resp[:status_code]}: #{resp[:error]}"
+    end
+
+    snapshots = resp[:response].to_h[:included_snapshots]
+
+    snapshots.map do |snapshot|
+      {
+        snapshot_id: snapshot[:snapshot_id],
+        detector: snapshot[:detector],
+        correlator: snapshot[:correlator],
+        created_at: snapshot[:created_at].nil? ? nil : Google::Protobuf::Timestamp.new(seconds: snapshot[:created_at][:seconds], nanos: snapshot[:created_at][:nanos]).to_time,
+      }
+    end
+  end
+
+  def detect_manifests # rubocop:todo GitHub/UseRestfulActions
+    RepositoryDependencyRedetectJob.perform_later(
+      current_repository.id,
+      actor_id: current_user.id,
+      trigger: :RESET_TRIGGER_STAFFTOOLS
+    )
+
+    flash[:notice] = "Manifest detection job enqueued"
+    redirect_to gh_dependency_graph_stafftools_repository_path(current_repository)
+  end
+
+  def clear_dependencies # rubocop:todo GitHub/UseRestfulActions
+    # no DS-API static manifest treatment yet; use clear-canonicals chatop for now
+    RepositoryDependencyClearDependencies.perform_later(
+      current_repository.id,
+      actor_id: current_user.id,
+      trigger: :RESET_TRIGGER_STAFFTOOLS,
+    )
+
+    flash[:notice] = "Clear dependencies job enqueued"
+    redirect_to gh_dependency_graph_stafftools_repository_path(current_repository)
+  end
+
+  def download_dependency_snapshot # rubocop:todo GitHub/UseRestfulActions
+    id = params.require(:snapshot_id).to_i
+
+    p = DependencySnapshot::DependencySnapshotProvider.new
+    resp = p.get_dependency_snapshot(repository: current_repository, snapshot_id: id)
+    contents = resp[:response].payload
+    send_data contents, filename: "dependency_snapshot_#{id}.txt", disposition: "attachment", status: 200
+  end
+
+  def exclude_dependency_snapshot # rubocop:todo GitHub/UseRestfulActions
+    id = params.require(:snapshot_id).to_i
+    result = exclude_canonical_snapshots([id])
+    flash[:notice] = result
+    redirect_to gh_dependency_graph_stafftools_repository_path(current_repository)
+  end
+
+  def clear_snapshot_dependencies # rubocop:todo GitHub/UseRestfulActions
+    snapshots_or_error = get_canonical_snapshots_or_error
+    if snapshots_or_error.is_a?(String)
+      flash[:notice] = "Error: #{snapshots_or_error}"
+    else
+      ids = snapshots_or_error
+        # we should only exclude non-Dependabot snapshots
+        .reject { |s| s[:detector]&.downcase == DEPENDABOT_DETECTOR_NAME }
+        .map { |s| s[:snapshot_id] }
+      result = exclude_canonical_snapshots(ids)
+      flash[:notice] = result
+    end
+    redirect_to gh_dependency_graph_stafftools_repository_path(current_repository)
+  end
+
+  # Set the Used By repository configuration flag.
+  def set_used_by # rubocop:todo GitHub/UseRestfulActions
+    if params[:used_by_enabled] == "1"
+      flash[:notice] = "Used By is now enabled" if current_repository.enable_used_by(actor: current_user)
+    elsif params[:used_by_enabled] == "0"
+      flash[:notice] = "Used By is now disabled" if current_repository.disable_used_by(actor: current_user)
+    end
+
+    redirect_to :back
+  end
+
+  def resync_autosubmit # rubocop:todo GitHub/UseRestfulActions
+    begin
+      SecurityProduct::DependencyGraphAutosubmitAction.new(current_repository).refresh_configuration(actor: current_user)
+      flash[:notice] = "Repository autosubmit configuration resynced"
+    rescue => e
+      flash[:alert] = "Failed to resync repository autosubmit configuration: #{e.message}"
+    end
+    redirect_to gh_dependency_graph_stafftools_repository_path(current_repository)
+  end
+
+  private
+
+  def exclude_canonical_snapshots(ids)
+    p = DependencySnapshot::DependencySnapshotProvider.new
+    resp = p.exclude_dependency_snapshots(repository: current_repository, snapshot_ids: ids)
+    if resp[:status_code] != 200
+      "Error #{resp[:status_code]}: #{resp[:error]}"
+    else
+      "Success"
+    end
+  end
+end

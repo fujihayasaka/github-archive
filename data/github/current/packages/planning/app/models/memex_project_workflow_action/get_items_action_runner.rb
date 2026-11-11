@@ -1,0 +1,136 @@
+# typed: true
+# frozen_string_literal: true
+
+# This class is a scaffold for testing the piped workflow runner, will be fleshed out in a future PR
+class MemexProjectWorkflowAction::GetItemsActionRunner < MemexProjectWorkflowAction::BaseActionRunner
+  include Scientist
+
+  ACTION_TYPE = :get_items
+
+  UPDATE_EVENT_TOPICS = %w(
+    cp1-iad.ingest.github.v1.IssueUpdateMilestone
+    github.memex_automation.v0.IssueUpdateEvent
+    github.v1.PullRequestUpdate
+    github.v1.IssueUpdateLabel
+    github.v1.IssueUpdateAssignee
+    github.v1.IssueUpdateIssueType
+  )
+
+  SUGGESTION_LIMIT = 50
+
+  def run
+    @query = @action.arguments["query"]
+    @repository_id = @action.arguments["repositoryId"]
+
+    log_duration do
+      if @manual_run
+        raise NotImplementedError, "Manual run not implemented for get_items action"
+      else
+        filter_items
+      end
+    end
+  end
+
+  private
+
+  def memex_project
+    @action.workflow&.memex_project
+  end
+
+  def last_updater
+    @action.last_updater
+  end
+
+  def filter_items
+    if should_run?
+      items = @input.reject { |item| memex_project.memex_project_items.exists?(content_id: item.id) }
+
+      science "project_workflow_action.get_items_action_runner.filter_items" do |e|
+        e.run_if { FeatureFlag.vexi.enabled?(:memex_project_workflow_advance_search_filter, default: false) }
+        e.use { MemexProjectWorkflowAction::ItemsFilter.filter_items(items, @query, repository_id: @repository_id) }
+        e.try { advance_search_filter_items(items) }
+        e.compare { |control, candidate| control.map(&:id).sort == candidate.map(&:id).sort }
+        e.clean { |filtered_items| filtered_items.map(&:id).sort }
+      end
+    else
+      []
+    end
+  end
+
+  def advance_search_filter_items(candidate_items)
+    # Return empty if no candidate items to filter
+    return [] if candidate_items.empty?
+
+    # If no query, return all candidate items (same as control behavior)
+    return candidate_items if @query.blank?
+
+    # This is a simple way to construct an ES query that finds the candidate items by their numbers
+    # while also applying the user's original query as a filter. In the future, we should use a more robust
+    # query that properly leverages the items ids as unique identifiers.
+    # Needless to say, for the purpose of this experiment, this should suffice.
+    item_numbers = candidate_items.map { |item| "##{item.number}" }.join(" ")
+    es_query = [@query.to_s.strip, item_numbers].reject(&:empty?).join(" ")
+
+    query = ::Search::Queries::ConditionalIssueQuery.new(
+      allow_insecure_user_to_server_app_query: false,
+      phrase: es_query,
+      current_user: last_updater,
+      repo_id: @repository_id,
+      per_page: [candidate_items.size, SUGGESTION_LIMIT].min,
+      source_fields: false,
+      context: "project_workflow_action.get_items_action_runner.advance_search_filter_items",
+    )
+
+    query.execute.models
+  end
+
+  # Should any items be returned at all?
+  def should_run?
+    if FeatureFlag.vexi.enabled?(:memex_auto_add_automation_update_event_filter, default: true) && is_update_topic?
+      return false unless update_topic_has_matching_query
+    end
+
+    # Skip the last_updater permission check to prevent workflows from becoming disabled
+    # when the last updater loses write access
+    @repository_id.present? && memex_project.present?
+  end
+
+  def topic
+    topic_tag = @tags&.find { |tag| tag.include?("topic:") }&.match(/topic:(.*)/)
+    topic_tag ? topic_tag[1] : nil
+  end
+
+  def is_update_topic?
+    topic && UPDATE_EVENT_TOPICS.include?(topic)
+  end
+
+  def has_label_query?
+    @query.match(MemexProjectWorkflowAction::ItemsFilter::LABEL_QUALIFIER)
+  end
+
+  def has_type_query?
+    @query.match(MemexProjectWorkflowAction::ItemsFilter::ISSUE_TYPE_QUALIFIER)
+  end
+
+  def has_assignee_query?
+    @query.match(MemexProjectWorkflowAction::ItemsFilter::ASSIGNEE_QUALIFIER)
+  end
+
+  # Check if has IssueUpdateAssignee or IssueUpdateLabel events
+  # have a corresponding (labels, assignee, issue type) query that matches those topics and vice versa
+  def update_topic_has_matching_query
+    is_assignee_update = topic == "github.v1.IssueUpdateAssignee"
+    is_label_update = topic == "github.v1.IssueUpdateLabel"
+    is_type_update = topic == "github.v1.IssueUpdateIssueType"
+
+    # IssueUpdateAssignee or IssueUpdateLabel or IssueUpdateIssueType events must have matching query
+    if is_label_update || is_assignee_update || is_type_update
+      is_label_update && has_label_query? || is_assignee_update && has_assignee_query? || is_type_update && has_type_query?
+    # Other updates events should not have these queries
+    elsif has_label_query? || has_assignee_query? || has_type_query?
+      false
+    else
+      true
+    end
+  end
+end

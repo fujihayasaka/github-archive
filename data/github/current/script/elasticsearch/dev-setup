@@ -1,0 +1,41 @@
+#!/bin/bash
+set -euo pipefail
+IFS=$'\n\t'
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+skip_kibana=false
+for arg in "$@"; do
+    case "$arg" in
+        --skip-kibana) skip_kibana=true ;;
+    esac
+done
+
+# Source Elasticsearch utils
+source "$SCRIPT_DIR/utils"
+source "$SCRIPT_DIR/inference-helpers"
+
+# Ensure Elasticsearch is ready
+wait_for_elasticsearch
+
+if [ "$skip_kibana" = true ]; then
+    echo "Skipping Kibana installation (--skip-kibana)"
+else
+    echo "Setting up Kibana and Elasticsearch"
+    source "$SCRIPT_DIR/install-kibana"
+    echo "Installing Kibana"
+    install_kibana
+    wait_for_kibana
+fi
+
+# Apply Elasticsearch license
+apply_license
+
+# Create test inference endpoint
+create_inference_endpoint "test-endpoint" ".multilingual-e5-small"
+
+if [ "$skip_kibana" = true ]; then
+    echo "Elasticsearch setup completed (Kibana skipped)"
+else
+    echo "Elasticsearch + Kibana setup completed"
+fi

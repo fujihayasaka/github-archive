@@ -1,0 +1,140 @@
+<%# erblint:counter DeprecatedComponentsCounter 2 %>
+<div class="tmp-pb-6 tmp-mt-6">
+  <div class="container-lg p-responsive">
+    <h1 class="tmp-mb-6">Change how often <%= subscription_item.subscribable_name %> is billed</h1>
+
+    <%= render(Primer::LayoutComponent.new(side: :left, sidebar_col: 5)) do |component| %>
+      <% component.with_sidebar do %>
+        <h2 class="f4 tmp-mb-3">Plan change</h2>
+        <%= render Primer::Box.new(border: true, border_radius: 2, classes: "tmp-p-3") do %>
+          <div class="tmp-pb-3 tmp-mb-3 border-bottom">
+            <p class="text-small color-fg-muted text-uppercase mb-1">Current</p>
+            <p class="text-bold mb-0" <%= test_selector("current-duration-and-price")%>>
+              Pay <%= subscription_item.billing_interval %>ly · <%= subscription_item.base_price(duration: subscription_item.billing_interval).format %>/<%= subscription_item.billing_interval %>
+            </p>
+          </div>
+          <div>
+            <p class="text-small color-fg-muted text-uppercase mb-1">New</p>
+            <p class="text-bold mb-0" <%= test_selector("new-duration")%>>
+              Pay <%= new_duration %>ly · <span <%= test_selector("new-base-price")%>><%= new_duration_base_price.format %>/<%= new_duration %></span>
+            </p>
+          </div>
+        <% end %>
+      <% end %>
+      <% component.with_main do %>
+        <h2 class="f4 tmp-mb-3">Order summary</h2>
+        <%= render Primer::Box.new(border: true, border_radius: 2, classes: "tmp-mb-4") do %>
+          <div class="d-flex flex-justify-between flex-items-center tmp-p-3 border-bottom">
+            <div class="d-flex flex-items-center">
+              <%= render(Primer::Beta::Octicon.new(icon: "package", color: :muted, mr: 2)) %>
+              <span><%= new_duration.capitalize %>ly billing</span>
+            </div>
+            <span class="text-mono"><%= new_duration_base_price.format %></span>
+          </div>
+
+          <% if new_duration_pricing&.has_coupon %>
+            <div class="d-flex flex-justify-between flex-items-center tmp-p-3 border-bottom color-bg-subtle">
+              <div class="d-flex flex-items-center color-fg-success">
+                <%= render(Primer::Beta::Octicon.new(icon: "tag", mr: 2)) %>
+                <span class="text-bold" <%= test_selector("discount-label") %>><%= new_duration_pricing.discount_label %></span>
+                <% if new_duration_pricing.coupon&.will_expire? %>
+                  <span class="color-fg-muted text-small ml-2">· <%= new_duration_pricing.coupon.human_duration %> remaining</span>
+                <% end %>
+              </div>
+              <span class="text-mono color-fg-success">−<%= new_duration_pricing.formatted_discount_amount %></span>
+            </div>
+          <% end %>
+
+          <div class="d-flex flex-justify-between flex-items-center tmp-p-3 border-bottom">
+            <span class="text-bold">Total</span>
+            <% if new_duration_pricing&.has_coupon && new_duration_pricing.discounted_price.zero? %>
+              <span class="text-mono text-bold color-fg-success">Free!</span>
+            <% elsif new_duration_pricing&.has_coupon %>
+              <span class="text-mono text-bold"><%= new_duration_pricing.formatted_discounted_price %>/<%= new_duration %></span>
+            <% else %>
+              <span class="text-mono text-bold"><%= new_duration_base_price.format %>/<%= new_duration %></span>
+            <% end %>
+          </div>
+
+          <div class="d-flex flex-justify-between flex-items-center tmp-p-3 color-bg-subtle">
+            <span class="text-bold" <%= test_selector("payment-due-date") %>>Due <%= payment_due_date.strftime("%b %e, %Y") %></span>
+            <span class="text-mono text-bold f4" <%= test_selector("next-payment-amount") %>>
+              <% if new_duration_pricing&.has_coupon && new_duration_pricing.discounted_price.zero? %>
+                Free!
+              <% elsif new_duration_pricing&.has_coupon %>
+                <%= new_duration_pricing.formatted_discounted_price %>
+              <% else %>
+                <%= new_duration_base_price.format %>
+              <% end %>
+            </span>
+          </div>
+        <% end %>
+
+        <div>
+          <div class="clearfix">
+            <%= render(Primer::Beta::Text.new(tag: :h4, font_weight: :bold, classes: "tmp-mb-3")) { "Billing Information" } %>
+            <% if current_user.is_allowed_to_edit_billing_information? %>
+              <div class="float-right js-edit-user-personal-profile-wrapper">
+                <div class="btn f6 js-edit-user-personal-profile" type="button">
+                  Edit
+                </div>
+              </div>
+            <% end %>
+
+            <%# Trade Screening Record Name Address Summary %>
+            <div class="<%= class_names("col-sm-6 tmp-mb-3", "tmp-mb-sm-0" => current_user.has_saved_billing_information?) %>">
+              <div class="d-flex flex-items-center">
+                <%= render GitHub::AvatarComponent.new(actor: current_user, size: 48, mr: 2) %>
+                <ul class="list-style-none lh-condensed mb-2" style="min-height: 48px;">
+                  <li class="pb-1 text-bold"><%= current_user.safe_profile_name %></li>
+                  <li class="text-small color-fg-muted">
+                    <%= current_user.organization? ? "Organization" : "Personal" %> account
+                  </li>
+                </ul>
+              </div>
+              <div class="col-sm-6 text-sm-right lh-condensed">
+                <% if current_user.has_saved_billing_information? %>
+                  <%= render Billing::Settings::NameAddressSummaryComponent.new(contact: current_user.billing_contact, target: current_user) %>
+                <% end %>
+              </div>
+            </div>
+
+            <%# TODO: replace hide name address collection wrapper with method in component once refactored %>
+            <div class="js-name-address-collection-wrapper" <%= "hidden" if hide_name_address_collection_wrapper %>>
+              <%= render Billing::Settings::NameAddressFormComponent.new(
+                target: current_user,
+                payment_flow_loaded_from: "SUBSCRIPTION_ITEMS_CHANGE_DURATION",
+                wrapper_class: nil,
+              ) %>
+            </div>
+            <%= render(TradeCompliance::TradeScreeningRestrictionNoticeComponent.new(
+                target: current_user,
+                title: "You can't proceed with your payment",
+                show_border: true,
+              )) %>
+            <% if current_user.has_saved_billing_information? %>
+              <div class="border-top tmp-py-3 js-payment-methods-wrapper" <%= test_selector("payment-method") %>>
+                <h4 class="tmp-mb-3">Payment method</h4>
+
+                <%= render Billing::Settings::PaymentMethodFormComponent.new(
+                  target: current_user,
+                  new_name_address_design: true,
+                  signature_view_context: Billing::Zuora::HostedPaymentsPage::SUBSCRIPTION_ITEMS_CHANGE_DURATION_SIGNATURE_VIEW_CONTEXT,
+                  return_to: subscription_item_change_duration_path(subscription_item_id: subscription_item.id),
+                ) %>
+                <div class="form-group m-0">
+                  <input type="reset" value="Cancel" class="btn js-sponsors-cancel-edit-payment-method-btn" hidden>
+                </div>
+              </div>
+              <% if current_user.payment_method&.valid_payment_token? %>
+                <%= form_with method: :put do |f| %>
+                  <%= render(Primer::ButtonComponent.new(scheme: :primary, type: :submit, w: :full, classes: "tmp-mt-3")) { "Submit" } %>
+                <% end %>
+              <% end %>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+    <% end %>
+  </div>
+</div>

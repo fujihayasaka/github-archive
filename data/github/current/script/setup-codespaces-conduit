@@ -1,0 +1,87 @@
+#!/bin/bash
+set -e
+
+# This script sets up the github/conduit repository for a github/github codespace.
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+ORANGE='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Function to print help message
+help() {
+   echo "Sets up the github/conduit repository for a github/github codespace."
+   echo
+   echo "Usage: setup-codespaces-conduit [-b branch] [-d|h] "
+   echo "Options:"
+   echo "-d     Before starting, delete the existing conduit directory in the codespace."
+   echo "-w     Add the conduit repo as a workspace in VS Code."
+   echo "-h     Print this help message."
+   echo
+}
+
+# Get the options
+while getopts ":b:hdw" opt; do
+   case $opt in
+      b) # Set the branch to use for the clone
+         BRANCH=$OPTARG;;
+      h) # display help message
+         help
+         exit;;
+      d) # Delete the repository if it exists
+         DELETE_REPO=true;;
+      w) # Add the repository as a workspace in VS Code
+         ADD_TO_WORKSPACE=true;;
+     :)
+      echo "Error: Option -$OPTARG requires an argument."
+      exit 1;;
+     \?) # Invalid option
+         echo "Error: Invalid option -$OPTARG"
+         exit 1;;
+   esac
+done
+
+# If the conduit repo already exists and the delete argument hasn't been specified, echo a warning and exit.
+if [[ -d "/workspaces/conduit" && -z "$DELETE_REPO" ]]; then
+  echo -e "${RED}The conduit directory already exists in this codespace.${NC} \nYou can rerun the setup script with the -d argument to force the deletion of the existing repository."
+  exit 1
+fi
+
+if [ "$DELETE_REPO" = true ]; then
+  echo -e "\n${GREEN}➡️ Deleting the existing conduit repo...\n${NC}"
+  rm -rf /workspaces/conduit
+fi
+
+# Do a shallow clone of conduit to the same dir as the github/github repo.
+echo -e "\n${GREEN}➡️ Cloning conduit repo...\n${NC}"
+git clone https://github.com/github/conduit /workspaces/conduit
+cd /workspaces/conduit || { echo -e "${RED}Error: The conduit directory does not exist.${NC}"; exit 1; }
+
+echo -e "\n${GREEN}➡️ Bootstrapping conduit...\n${NC}"
+# If a branch was supplied, check it out
+if [ -z "$BRANCH" ]; then
+   echo "No branch specified. Using default branch."
+else
+   git fetch
+   if ! git checkout "$BRANCH" 2>/dev/null; then
+      echo -e "${RED}Error: The branch $BRANCH does not exist.${NC}"
+      exit 1
+   fi
+fi
+
+# Bootstrap conduit
+( script/bootstrap ; )
+
+# Add the conduit repo as a workspace in VS Code
+if [ "$ADD_TO_WORKSPACE" = true ]; then
+   echo -e "\n${GREEN}➡️ Adding conduit to VS Code workspace...\n${NC}"
+   code --add /workspaces/conduit
+fi
+
+echo -e ""
+echo -e "${GREEN}🎉🎉 FINISHED! The conduit repo has been set up! 🎉🎉"
+echo -e "To start the conduit server in this branch, run the following commands:${NC}"
+echo -e ""
+echo -e "${ORANGE}cd /workspaces/conduit ; script/server"
+echo -e ""

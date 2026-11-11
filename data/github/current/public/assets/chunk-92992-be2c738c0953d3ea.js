@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["92992"],{278755(t,e,i){var a=i(331635),n=i(194571);class s extends HTMLElement{connectedCallback(){this.formEl.addEventListener("change",this.handleChange)}handleChange=()=>{this.submitBtn.classList.remove("Button--inactive")}}(0,a.Cg)([n.aC],s.prototype,"submitBtn",void 0),(0,a.Cg)([n.aC],s.prototype,"formEl",void 0),(0,a.Cg)([(0,n.p_)("copilot-plan-select-dialog")],s)}}]);
+//# sourceMappingURL=chunk-92992-be2c738c0953d3ea-b8dc1eec4deb030d.js.map

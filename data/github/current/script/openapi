@@ -1,0 +1,45 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "open_api"
+require "date"
+require "pathname"
+
+unless defined?(::GitHub)
+  module ::GitHub
+    def self.openapi_include_test_fixtures?
+      false
+    end
+  end
+end
+
+unless defined?(::GitHub::AppEnvironment)
+  module GitHub::AppEnvironment
+    def self.root
+      Pathname.new("..").expand_path(File.dirname(__FILE__))
+    end
+  end
+end
+
+# Ensure GitHub.api_versions is available for Api::Versioning to resolve active
+# changeset versions during bundling. In the monolith (via bin/safe-ruby), this
+# accessor is already loaded and populated by the Rails environment. In CI
+# (e.g., the rest-api-description openapi-diff workflow), neither the accessor
+# nor the values exist, so we load them here.
+require "github/config/api_versioning"
+
+# Populate api_versions from the release config if not already set (i.e., CI).
+# We use api.github.com.yaml because it is the canonical release and always
+# carries the full superset of all supported API versions. Other releases
+# (ghec, ghes-*) mirror or subset that list.
+if GitHub.api_versions.empty?
+  require "yaml"
+  release_config_path = GitHub::AppEnvironment.root.join("app/api/description/config/releases/api.github.com.yaml")
+  if release_config_path.exist?
+    config = YAML.safe_load(release_config_path.read)
+    versions = Array(config.dig("patch")&.detect { |p| p["path"] == "/info/x-github-api-versions" }&.dig("value"))
+    GitHub.api_versions = versions unless versions.empty?
+  end
+end
+
+OpenApi::CLI::Root.start

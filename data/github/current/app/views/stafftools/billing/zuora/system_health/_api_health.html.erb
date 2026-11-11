@@ -1,0 +1,146 @@
+<%
+  api_volume_sorted = api_volume.sort_by { |r| -(r["error"] || r[:error] || 0).to_i }
+
+  # Zuora "error" includes 4xx/5xx and soft errors like 200/NotFound
+  api_total_success = api_volume.sum { |r| (r["success"] || r[:success] || 0).to_i }
+  api_total_non_ok = api_volume.sum { |r| (r["error"] || r[:error] || 0).to_i }
+  api_total = api_total_success + api_total_non_ok
+  api_non_ok_pct = api_total > 0 ? (api_total_non_ok.to_f / api_total * 100).round(1) : 0
+  api_status = error ? "yellow" : "green"
+  api_label = error ? "Unknown" : "Healthy"
+  api_scheme = error ? :attention : :success
+%>
+
+<div class="health-card" style="flex: 1; min-width: 300px;">
+  <% if error %>
+    <%= render(Primer::Alpha::Banner.new(icon: :alert, scheme: :danger, mb: 2)) { error } %>
+  <% end %>
+  <div class="health-card-header">
+    <span class="f4 text-bold">
+      <span class="status-dot <%= api_status %>"></span>API Health
+    </span>
+    <%= render(Primer::Beta::Label.new(scheme: api_scheme)) { api_label } %>
+  </div>
+  <% if api_volume_sorted.any? %>
+    <div style="max-height: 280px; overflow-x: auto; overflow-y: auto;">
+      <table class="stafftools-table" style="margin-bottom: 0;">
+        <thead>
+          <tr>
+            <th style="white-space: nowrap;">Endpoint</th>
+            <th style="text-align:right; white-space: nowrap;">OK</th>
+            <th style="text-align:right; white-space: nowrap;">Non-OK</th>
+            <th style="text-align:right; white-space: nowrap;">Non-OK %</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% api_volume_sorted.each do |row| %>
+            <%
+              method = row["httpMethod"] || row[:httpMethod] || ""
+              path_val = row["path"] || row[:path] || ""
+              ok = (row["success"] || row[:success] || 0).to_i
+              non_ok = (row["error"] || row[:error] || 0).to_i
+              total_row = ok + non_ok
+              pct = total_row > 0 ? (non_ok.to_f / total_row * 100).round(1) : 0
+            %>
+            <tr>
+              <td style="white-space: nowrap;"><code style="font-size: 12px;"><%= method %> <%= path_val %></code></td>
+              <td style="text-align:right; white-space: nowrap;"><%= number_with_delimiter(ok) %></td>
+              <td style="text-align:right; white-space: nowrap; color: var(--fgColor-muted);"><%= number_with_delimiter(non_ok) %></td>
+              <%
+                pct_color = if pct >= 10
+                  "var(--fgColor-danger)"
+                elsif pct >= 5
+                  "var(--fgColor-attention)"
+                elsif pct > 0
+                  "var(--fgColor-muted)"
+                else
+                  "var(--fgColor-muted)"
+                end
+                pct_weight = pct >= 5 ? "600" : "normal"
+              %>
+              <td class="pct-cell" style="text-align:right; white-space: nowrap; color: <%= pct_color %>; font-weight: <%= pct_weight %>;"><%= pct %>%</td>
+            </tr>
+          <% end %>
+        </tbody>
+        <tfoot>
+          <tr style="font-weight: 600; background: var(--bgColor-muted);">
+            <td style="white-space: nowrap; border-top: 2px solid var(--borderColor-default);">Total (<%= api_volume_sorted.size %> endpoints)</td>
+            <td style="text-align:right; white-space: nowrap; border-top: 2px solid var(--borderColor-default);"><%= number_with_delimiter(api_total_success) %></td>
+            <td style="text-align:right; white-space: nowrap; border-top: 2px solid var(--borderColor-default);"><%= number_with_delimiter(api_total_non_ok) %></td>
+            <%
+              total_pct_color = if api_non_ok_pct >= 10
+                "var(--fgColor-danger)"
+              elsif api_non_ok_pct >= 5
+                "var(--fgColor-attention)"
+              elsif api_non_ok_pct > 0
+                "var(--fgColor-muted)"
+              else
+                "var(--fgColor-muted)"
+              end
+              total_pct_weight = api_non_ok_pct >= 5 ? "600" : "normal"
+            %>
+            <td style="text-align:right; white-space: nowrap; border-top: 2px solid var(--borderColor-default); color: <%= total_pct_color %>; font-weight: <%= total_pct_weight %>;"><%= api_non_ok_pct %>%</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  <% else %>
+    <p class="color-fg-muted f6">No API data available for this time range.</p>
+  <% end %>
+</div>
+
+<%# ═══ API Failure Details (collapsible) ═══ %>
+<% if api_failures.any? %>
+  <details class="tmp-mb-3 col-12" style="flex-basis: 100%;">
+    <%= render Primer::Beta::Button.new(tag: :summary, scheme: :link, font_weight: :bold) do %>
+      ▸ API Failure Records (<%= api_failures.size %>)
+    <% end %>
+    <div class="Box mt-2" style="overflow-x: auto;">
+      <table class="stafftools-table detail-table" style="table-layout: fixed; width: 100%;">
+        <thead>
+          <tr>
+            <th style="width: 160px;">Timestamp</th>
+            <th style="width: 200px;">API</th>
+            <th style="width: 70px;">Method</th>
+            <th style="width: 60px;">Status</th>
+            <th style="width: 100px;">Zuora Code</th>
+            <th style="text-align:right; width: 80px;">Latency</th>
+            <th>Response</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% api_failures.each do |rec| %>
+            <%
+              ts = rec["timestamp"] || rec[:timestamp] || ""
+              api_path = rec["api"] || rec[:api] || rec["request_path"] || rec[:request_path] || ""
+              http_method = rec["http_method"] || rec[:http_method] || ""
+              status_code = rec["http_status"] || rec[:http_status] || ""
+              z_code = rec["zuora_response_code"] || rec[:zuora_response_code] || ""
+              latency = (rec["latency"] || rec[:latency] || 0).to_i
+              resp_body = rec["response_body"] || rec[:response_body] || ""
+              status_scheme = status_code.to_s.start_with?("2") ? :success : :danger
+            %>
+            <tr>
+              <td><%= ts %></td>
+              <td style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"><code style="font-size: 12px;"><%= api_path %></code></td>
+              <td><%= render(Primer::Beta::Label.new(scheme: :secondary)) { http_method } %></td>
+              <td><%= render(Primer::Beta::Label.new(scheme: status_scheme)) { status_code.to_s } %></td>
+              <td><%= z_code %></td>
+              <td style="text-align:right;<%= " color: var(--fgColor-attention); font-weight: 600;" if latency > 1000 %><%= " color: var(--fgColor-danger); font-weight: 600;" if latency > 10000 %>"><%= number_with_delimiter(latency) %>ms</td>
+              <td style="position: relative;">
+                <% if resp_body.present? %>
+                  <details style="display:inline;">
+                    <summary style="font-size: 11px; cursor: pointer; color: var(--fgColor-accent);">view</summary>
+                    <pre style="font-size: 11px; padding: 8px; background: var(--bgColor-muted); border-radius: 4px; margin-top: 4px; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow: auto;"><%= h(resp_body.is_a?(String) ? resp_body : resp_body.to_json) %></pre>
+                  </details>
+                <% else %>
+                  —
+                <% end %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </details>
+<% end %>

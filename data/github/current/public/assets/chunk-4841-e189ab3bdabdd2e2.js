@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["4841"],{364720(u,s,i){i.r(s);var t=i(468349),a=i(221403);async function b(){await i.e("97038").then(i.bind(i,4253))}(0,a.lB)(".js-user-status-container, .js-load-user-status-submit",{subscribe:u=>(0,t.Rt)(u,"click",b,{once:!0})}),(0,a.lB)(".user-status-dialog-fragment",{add:b})}}]);
+//# sourceMappingURL=chunk-4841-e189ab3bdabdd2e2-6f2e0b1acad1d8a7.js.map

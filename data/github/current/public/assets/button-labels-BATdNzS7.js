@@ -1,0 +1,1 @@
+const e={comment:`Comment`,updateComment:`Update comment`};export{e as t};

@@ -1,0 +1,171 @@
+<%# erblint:counter DeprecatedComponentsCounter 2 %>
+<% page_info title: "Upgrade Advanced Security", selected_link: :business_billing_settings,
+  stafftools: stafftools_enterprise_path(this_business) %>
+
+<div class="container-lg p-responsive tmp-mt-4">
+  <%= render partial: "settings/header", locals: {
+    current_context: this_business,
+    hide_profile_link: true,
+    hide_context_switcher: true,
+  } %>
+</div>
+
+<div class="tmp-my-5">
+  <div class="container-lg p-responsive">
+    <div class="border-bottom tmp-pb-3 tmp-mb-5">
+      <h1 class="d-inline-block f1 text-normal">
+        Add GitHub Advanced Security
+      </h1>
+    </div>
+
+    <% completed_billing_information = this_business.has_saved_billing_information?(skip_validation_errors: true) %>
+    <%
+      azure_payment_allowed = this_business.has_valid_azure_subscription?
+      completed_payment_method = this_business.has_credit_card? || this_business.has_paypal_account? || azure_payment_allowed
+    %>
+    <% can_complete_purchase = completed_billing_information && completed_payment_method %>
+    <% consumed_seats = this_business.advanced_security_license.consumed_seats %>
+    <% price_due = total_monthly_charge.nil? ? "N/A" : total_monthly_charge.format %>
+
+    <% if this_business.has_active_advanced_security_trial? && consumed_seats > 0 %>
+      <%= render(Primer::Beta::Flash.new(icon: :info, dismissible: true, test_selector: "ghas_suggested_committers", classes: "tmp-mb-5")) do |component| %>
+        Based on your active committers during your trial, we recommend <%= pluralize(consumed_seats, "committer") %>.
+        <% component.with_action(mr: 4, mt: 0) do %>
+          <%= render(Primer::Beta::Link.new(href: "#{GitHub.help_url}/enterprise-cloud@latest/billing/managing-billing-for-github-advanced-security/about-billing-for-github-advanced-security", classes: "Link--inTextBlock")) { "Learn more" } %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <div class="d-md-flex gutter-md">
+      <div class="col-md-7">
+        <%= render(Billing::Settings::Upgrade::SectionComponent.new(title: "Monthly spending on usage", icon: :graph)) do |component| %>
+          <% component.with_body do %>
+            <%= render Billing::Settings::Upgrade::MonthlySpendingComponent.new(
+              business: this_business,
+              billed_items: billed_items
+            ) %>
+          <% end %>
+        <% end %>
+
+        <%= render "businesses/billing_settings/checkout/billing_information_section", completed_billing_information: completed_billing_information, return_to: billing_settings_advanced_security_upgrade_enterprise_path(this_business) %>
+
+        <%= render(Billing::Settings::Upgrade::SectionComponent.new(
+          title: "Payment method",
+          icon: completed_payment_method ? :"check-circle-fill" : :"credit-card",
+          test_selector: "payment_information",
+        )) do |component| %>
+          <% component.with_body(pt: 3) do %>
+            <% if completed_billing_information %>
+              <%= render(TradeCompliance::TradeScreeningRestrictionNoticeComponent.new(
+                target: this_business,
+                title: "You can't proceed with your payment",
+                check_for_current_user: true,
+                class_name: "container-sm mx-0",
+              )) %>
+              <%= render(Growth::PaymentMethodComponent.new(target: this_business, return_to: billing_settings_advanced_security_upgrade_enterprise_path(this_business), include_azure: true)) %>
+            <% else %>
+              <p class="mt-2">
+                You have not added billing information for your account.
+              </p>
+            <% end %>
+          <% end %>
+        <% end %>
+      </div>
+      <div class="col-md-5">
+        <div class="tmp-pb-3">
+          <%= form_tag billing_settings_advanced_security_subscribe_enterprise_path(this_business), method: :put, id: 'subscribe-advanced-security' do %>
+            <% if this_business.display_sales_tax_on_checkout? %>
+              <div class="pb-1">
+                <div class="d-flex gutter-condensed">
+                  <div class="col-5">
+                    <%= render(Primer::Beta::Heading.new(tag: :h5, font_weight: :normal, color: :muted).with_content("Subtotal")) %>
+                  </div>
+                  <div class="col-8 text-right">
+                    <span class="f5 color-fg-muted text-normal"><%= price_due %> / month</span>
+                  </div>
+                </div>
+              </div>
+              <div class="tmp-pb-3">
+                <div class="d-flex gutter-condensed">
+                  <div class="col-5">
+                    <%= render(Primer::Beta::Heading.new(tag: :h5, font_weight: :normal, color: :muted, test_selector: "sales-tax-label").with_content("Sales tax")) %>
+                  </div>
+                  <div class="col-8 text-right">
+                    <span class="f5 color-fg-muted text-normal" <%= test_selector("sales-tax-value") %>>(applied to your invoice)</span>
+                  </div>
+                </div>
+              </div>
+            <% end %>
+            <div class="tmp-pb-3 border-bottom">
+              <div class="d-flex gutter-condensed">
+                <div class="col-6">
+                  <span class="h4">Estimated monthly total</span>
+                </div>
+                <div class="col-6 text-right mt-n1">
+                  <span class="f2 unstyled-renewal-price"><%= price_due %></span>
+                  <p class="f5 color-fg-muted">
+                    per month
+                  </p>
+                </div>
+              </div>
+              <% if total_monthly_charge == Billing::Money.zero %>
+                <%= render(Primer::Alpha::Banner.new(dismiss_scheme: :none, icon: :info, test_selector: "zero-consumption-notice")) do %>
+                  You are not consuming any user licenses yet. The estimated monthly total will change when you start
+                  consuming services and user licenses.
+                <% end %>
+              <% end %>
+            </div>
+            <div class="tmp-pb-3">
+              <p class="f6 color-fg-muted tmp-mt-3">
+                By clicking &ldquo;Purchase Advanced Security&rdquo;, you are accepting the
+                <a class="Link--inTextBlock" href="<%= customer_term_index_path %>" target="_blank" rel="noopener noreferrer">GitHub Customer
+                Agreement</a> and confirming that you have the authority to do so on behalf of your organization. For
+                more information about GitHub's privacy practices, see the
+                <a class="Link--inTextBlock" href="<%= site_privacy_path %>" target="_blank" rel="noopener noreferrer">GitHub Privacy
+                Statement</a>.
+              </p>
+            </div>
+            <%= render Primer::ButtonComponent.new(
+              scheme: :primary,
+              block: true,
+              type: :submit,
+              disabled: !can_complete_purchase || this_business.has_trade_screening_restriction? || current_user.has_trade_screening_restriction?,
+              test_selector: "purchase_button",
+              data: analytics_click_attributes(
+                category: "advanced_security_upgrade",
+                action: "click_on_purchase_advanced_security",
+                label: "ref_page:#{request.fullpath};ref_cta:seats input;ref_loc:advanced_security_account_upgrade" )
+                ) do %>
+                Purchase Advanced Security
+            <% end %>
+            <%= render Primer::Beta::Button.new(
+              href: enterprise_path(this_business),
+              block: true,
+              tag: :a,
+              mt: 2,
+              data: {
+                **analytics_click_attributes(
+                  category: "advanced_security_upgrade",
+                  action: "cancel_advanced_security_purchase",
+                  label: "enterprise_id:#{this_business.id}"),
+              }
+            ) do %>
+              Cancel
+            <% end %>
+            <% if !can_complete_purchase %>
+              <p class="mt-2">
+                You have not added the
+                <% if completed_billing_information %>
+                  payment method
+                <% else %>
+                  billing information and payment method
+                <% end %>
+                for your account.
+              </p>
+            <% end %>
+          <% end %>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

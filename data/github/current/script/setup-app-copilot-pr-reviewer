@@ -1,0 +1,68 @@
+#!/usr/bin/env safe-ruby
+# frozen_string_literal: true
+
+require_relative "../config/environment"
+
+unless Rails.env.development?
+  raise "This is a dev-only script"
+end
+
+unless ENV["MULTI_TENANT_ENTERPRISE"] == "1"
+  puts "This script is only needed in multi-tenant mode"
+  exit 0
+end
+
+puts "Setting up Copilot Pull Request Reviewer app for multi-tenant mode..."
+
+# Step 1: Ensure trusted OAuth apps owner exists
+if GitHub.trusted_oauth_apps_owner.nil?
+  puts "Creating trusted OAuth apps owner organization..."
+  Organization.where(login: GitHub.trusted_oauth_apps_org_name).first_or_create(
+    login: GitHub.trusted_oauth_apps_org_name,
+    plan: GitHub::Plan.find("free").name,
+    billing_email: "ghost-org@github.com",
+    admins: [User.ghost]
+  )
+  puts "✓ Trusted OAuth apps owner created"
+end
+
+# Step 2: Delete existing integration
+existing_integration = Integration.find_by(id: 836)
+if existing_integration.present? && !Apps::Privileged.integration(:copilot_pull_request_reviewer).present?
+  puts "Removing existing non-privileged integration with ID 836..."
+  existing_integration.delete
+  puts "✓ Deleted existing integration."
+end
+
+# Step 3: Seed the integration
+unless Apps::Privileged.integration(:copilot_pull_request_reviewer).present?
+  puts "Creating Copilot Pull Request Reviewer integration..."
+  Apps::Privileged::CopilotPullRequestReviewer.seed_database!
+  puts "✓ Integration recreated."
+end
+
+# Step 4: Add recreated integration to the privileged apps registry
+puts "Configuring privileged apps registry..."
+cfg = Apps::Privileged::CopilotPullRequestReviewer::PRODUCTION
+
+Apps::Privileged::Registry.configure(
+  type: "Integration",
+  app_alias: cfg[:alias],
+  database_lookup_attributes: cfg[:database_lookup_attributes],
+  inherits: cfg[:inherits],
+  capabilities: cfg[:capabilities],
+  properties: cfg[:properties],
+  can_auto_install: cfg[:can_auto_install],
+  custom_instrumentation_events: cfg[:custom_instrumentation_events],
+  owners: cfg[:owners],
+)
+
+# Step 5: Reload caches and verify
+Apps::Privileged::Registry.instance.reload_caches!
+
+if Apps::Privileged.integration(:copilot_pull_request_reviewer).present?
+  puts "✓ Copilot Pull Request Reviewer app successfully configured."
+else
+  puts "❌ Failed to configure Copilot Pull Request Reviewer app."
+  exit 1
+end

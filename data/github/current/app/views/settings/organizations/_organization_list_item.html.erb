@@ -1,0 +1,109 @@
+<%# erblint:counter GoogleAnalyticsDeprecation 2 %>
+<div class="Box-row d-flex flex-justify-between flex-wrap">
+  <div class="py-1">
+    <%= render(Primer::Beta::Avatar.new(src: membership.organization.primary_avatar_url, size: 20, alt: membership.organization.name, shape: :square)) %>
+    <strong class="ml-1"><%= link_to membership.name, user_path(membership.organization) %></strong>
+    <% if membership.organization.archived? %>
+      <%= render(Primer::Beta::Label.new(scheme: :attention)) { "Archived" } %>
+    <% end %>
+    <%= render(Primer::Beta::Label.new(scheme: :secondary)) { membership.description } %>
+  </div>
+  <div class="d-flex flex-justify-between flex-items-baseline py-1">
+    <% if view.two_factor_requirement_enabled?(membership.organization) %>
+      <%= render(Primer::Beta::Label.new(scheme: :primary, align_self: :center)) { "2FA required" } %>
+    <% end %>
+
+    <% if membership.show_upgrade_button? %>
+      <%= render(Primer::Beta::Button.new(
+        tag: :a,
+        scheme: :secondary,
+        size: :small,
+        ml: 2,
+        href: new_org_enterprise_upgrade_path(membership.organization),
+        align_self: :center,
+        data: analytics_click_attributes(
+          category: "entacct_migration",
+          action: "click_to_upgrade_for_free",
+          label: "ref_loc:#{ref_loc};ref_cta:upgrade;organization:#{membership.organization.id}",
+        ),
+        test_selector: "entacct-upgrade-button",
+      )) { "Upgrade" } %>
+
+      <%= render(Primer::Alpha::ActionMenu.new(ml: 2, test_selector: "organization-action-menu")) do |menu| %>
+        <% menu.with_show_button(icon: :"kebab-horizontal", scheme: :invisible, aria: { label: "Organization options" }) %>
+
+        <% menu.with_item(
+          label: "Compare plans",
+          role: "menuitem",
+          href: settings_org_plans_path(membership.organization),
+          content_arguments: {
+            data: {
+              category: "compare_plans",
+              action: "click_to_go_to_compare_plans",
+              label: "ref_page:/settings/organizations;ref_cta:compare_plans;ref_loc:organization_settings;ref_org:#{membership.organization.display_login}"
+            },
+          },
+        ) if membership.show_compare_plans? %>
+
+        <% menu.with_item(
+          label: "Settings",
+          role: "menuitem",
+          href: membership.org_settings_path,
+          content_arguments: {
+            data: { ga_click: ga_label_with_analytics_tracking_id("Orgs, go to organization settings, text:Settings;")},
+          }
+        ) if membership.show_settings_button? %>
+
+        <% menu.with_item(
+          label: "Leave",
+          role: "menuitem",
+          href: leave_org_path(membership.organization),
+          tag: :button,
+          form_arguments: { method: :post },
+          scheme: :danger,
+          content_arguments: {
+            test_selector: "leave-organization-allowed",
+            data: { confirm: membership.delete_confirmation_message },
+          },
+        ) if view.show_leave_button?(membership.organization) %>
+      <% end %>
+    <% else %>
+      <% if membership.show_compare_plans? %>
+        <%=
+          link_to "Compare plans",
+          settings_org_plans_path(membership.organization),
+          data: {
+            category: "compare_plans",
+            action: "click_to_go_to_compare_plans",
+            label: "ref_page:/settings/organizations;ref_cta:compare_plans;ref_loc:organization_settings;ref_org:#{membership.organization.display_login}"
+          },
+          class: "btn btn-sm ml-2"
+        %>
+      <% end %>
+
+      <% if membership.show_settings_button? %>
+        <%=
+          link_to "Settings",
+          membership.org_settings_path,
+          data: { ga_click: ga_label_with_analytics_tracking_id("Orgs, go to organization settings, text:Settings;")},
+          class: "btn btn-sm ml-2"
+        %>
+      <% end %>
+
+      <% if view.show_leave_button?(membership.organization) %>
+        <%= render(Primer::Alpha::Dialog.new(id: "leave-org-dialog-#{membership.organization.id}", title: "Leave organization")) do |d| %>
+          <% d.with_show_button(size: :small, scheme: :danger, ml: 2) do %>
+            Leave
+          <% end %>
+          <% d.with_body { membership.delete_confirmation_message } %>
+          <% d.with_footer do %>
+            <%= render(Primer::Beta::Button.new(data: { "close-dialog-id": "leave-org-dialog-#{membership.organization.id}" })) { "Cancel" } %>
+            <div <%= test_selector("leave-organization-allowed") %>>
+              <%= button_to "Leave", leave_org_path(membership.organization), :form_class => "inline-form", :class => "btn btn-danger" %>
+            </div>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  </div>
+</div>

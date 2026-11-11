@@ -1,0 +1,47 @@
+# Worker-specific patches for notificationworker
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aqueduct-worker
+  annotations:
+    moda.github.net/allow-missing-ready-pods: "1"
+spec:
+  template:
+    metadata:
+      annotations:
+        observability.github.com/splunk_index: prod-notifications
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: aqueduct
+          args:
+            - bin/resqued
+            - --pidfile
+            - /resqued-pidfile/resqued.pid
+            - config/resqued/github-environment.rb
+            - config/resqued/github-notificationworker-kube.rb
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - "bin/resqued"
+                  - "quit-and-wait"
+                  - "/resqued-pidfile/resqued.pid"
+                  - "--grace-period"
+                  - "30"
+          resources:
+            requests:
+              cpu: 6
+              memory: 24Gi
+            limits:
+              cpu: 12
+              memory: 30Gi
+          env:
+            - name: JOB_WORKER_GRACEFUL_MEMORY_LIMIT_IN_MB
+              value: "3584"
+            - name: DOGSTATSD_ADDITIONAL_TAGS
+              value: "kube_deployment:notificationworker"
+            - name: GITHUB_CONFIG_ROLE
+              value: "notificationworker"
+            - name: OTEL_SERVICE_NAME
+              value: "github-notificationworker-kube"

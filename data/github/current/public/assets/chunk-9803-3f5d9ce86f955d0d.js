@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["9803"],{116422(t,e,i){i.r(e),(0,i(163557).eC)(".js-csv-filter-field",function(t){let e=t.target.value.toLowerCase();for(let t of document.querySelectorAll(".js-csv-data tbody tr"))t instanceof HTMLElement&&t.textContent&&(t.hidden=!!e&&!t.textContent.toLowerCase().includes(e))})}}]);
+//# sourceMappingURL=chunk-9803-3f5d9ce86f955d0d-2e3d343e941b2f05.js.map

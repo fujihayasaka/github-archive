@@ -1,0 +1,33 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: backfill-business-plus-orgs
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "backfill-business-plus-orgs"
+        heaven.githubapp.com/image-placeholder: "dependency-graph-api"
+spec:
+    schedule: "*/20 * * * *" # Every 20 minutes.
+    concurrencyPolicy: Forbid # Do not allow multiple instances of the same job to run, at the same time.
+    successfulJobsHistoryLimit: 2
+    failedJobsHistoryLimit: 2
+    jobTemplate:
+        spec:
+            template:
+                spec:
+                    dnsPolicy: ClusterFirst
+                    restartPolicy: Never
+                    containers:
+                        - name: backfill-business-plus-orgs
+                          image: dependency-graph-api
+                          command: ["/usr/bin/tools/istio-job-wrapper"]
+                          args: ["./script/dependency_insights/backfill_business_plus_orgs.rb"]
+                          envFrom:
+                            - configMapRef:
+                                name: environment
+                            - secretRef:
+                                name: vault-secrets
+                          env:
+                            - name: DOGSTATSD_HOST
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: spec.nodeName

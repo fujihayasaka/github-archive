@@ -1,0 +1,140 @@
+<%# erblint:counter ButtonComponentMigrationCounter 0 %>
+<%
+  page_info(title: "Copilot Model Registry - Pending Changes", description: "Review and approve model configuration changes")
+  pending_count = pending_changes.count { |c| c[:status] == "pending" }
+  approved_count = pending_changes.count { |c| c[:status] == "approved" }
+  rejected_count = pending_changes.count { |c| c[:status] == "rejected" }
+%>
+<%= render layout: "stafftools/stafftools" do %>
+
+  <div class="site-admin-subhead ruleless">
+    <div class="d-flex flex-items-center flex-justify-between tmp-mb-3">
+      <div>
+        <h2 class="site-admin-subhead-heading">
+          <%= render(Primer::Beta::Octicon.new(:"git-pull-request", size: :medium, mr: 2)) %>
+          Pending Changes
+        </h2>
+        <p class="color-fg-muted">Review and approve model configuration changes before they go live.</p>
+      </div>
+      <div class="d-flex" style="gap: 8px;">
+        <%= render(Primer::Beta::Link.new(href: stafftools_copilot_model_registry_index_path, classes: "btn btn-sm")) do %>
+          <%= render(Primer::Beta::Octicon.new(:"arrow-left", size: :small, mr: 1)) %>
+          Back to Registry
+        <% end %>
+      </div>
+    </div>
+
+    <%# Status Filter Pills %>
+    <div class="d-flex flex-wrap tmp-mb-4" style="gap: 8px;">
+      <%= link_to pending_changes_stafftools_copilot_model_registry_index_path(status: "pending"),
+        class: "btn btn-sm #{'selected' if active_status == 'pending'}",
+        style: "border-radius: 20px;" do %>
+        <%= render(Primer::Beta::Octicon.new(:clock, size: :small, mr: 1)) %>
+        Pending: <%= pending_count %>
+      <% end %>
+
+      <%= link_to pending_changes_stafftools_copilot_model_registry_index_path(status: "approved"),
+        class: "btn btn-sm #{'selected' if active_status == 'approved'}",
+        style: "border-radius: 20px;" do %>
+        <%= render(Primer::Beta::Octicon.new(:check, size: :small, mr: 1)) %>
+        Approved: <%= approved_count %>
+      <% end %>
+
+      <%= link_to pending_changes_stafftools_copilot_model_registry_index_path(status: "rejected"),
+        class: "btn btn-sm #{'selected' if active_status == 'rejected'}",
+        style: "border-radius: 20px;" do %>
+        <%= render(Primer::Beta::Octicon.new(:x, size: :small, mr: 1)) %>
+        Rejected: <%= rejected_count %>
+      <% end %>
+    </div>
+
+    <%# Changes List %>
+    <% if pending_changes.any? %>
+      <div class="Box">
+        <% pending_changes.each_with_index do |change, idx| %>
+          <%
+            is_new = change[:yaml_model_id].nil? || change[:yaml_model_id] == 0
+            is_publish = change[:target_state] == "published" && !is_new
+            status = change[:status].to_s
+            status_scheme = case status
+              when "pending" then :attention
+              when "approved" then :success
+              when "rejected" then :danger
+              else :secondary
+            end
+            change_type = if is_new
+              "New Model"
+            elsif is_publish
+              "Publish"
+            else
+              "Update"
+            end
+            change_icon = if is_new
+              :plus
+            elsif is_publish
+              :rocket
+            else
+              :pencil
+            end
+          %>
+          <div class="Box-row d-flex flex-items-center flex-justify-between">
+            <div class="d-flex flex-items-center">
+              <div class="tmp-mr-3">
+                <span class="color-fg-muted">
+                  <%= render(Primer::Beta::Octicon.new(change_icon, size: :small)) %>
+                </span>
+              </div>
+              <div>
+                <div class="d-flex flex-items-center flex-wrap" style="gap: 6px;">
+                  <strong><%= change[:reference_id].presence || "(new model)" %></strong>
+                  <%= render(Primer::Beta::Label.new(scheme: status_scheme)) { status.capitalize } %>
+                  <%= render(Primer::Beta::Label.new(scheme: :secondary)) { change_type } %>
+                  <% if change[:target_state].present? %>
+                    <%= render(Primer::Beta::Label.new(scheme: :accent)) { "→ #{change[:target_state]}" } %>
+                  <% end %>
+                </div>
+                <div class="text-small color-fg-muted tmp-mt-1">
+                  Submitted by <strong><%= change[:submitted_by].presence || "unknown" %></strong>
+                  <% if change[:created_at] %>
+                    &middot; <%= time_ago_in_words(change[:created_at]) %> ago
+                  <% end %>
+                  <% if change[:reviewed_by].present? %>
+                    &middot; Reviewed by <strong><%= change[:reviewed_by] %></strong>
+                    <% if change[:reviewed_at] %>
+                      <%= time_ago_in_words(change[:reviewed_at]) %> ago
+                    <% end %>
+                  <% end %>
+                </div>
+                <% if change[:review_comment].present? %>
+                  <div class="text-small color-fg-muted tmp-mt-1">
+                    <%= render(Primer::Beta::Octicon.new(:comment, size: :small, mr: 1)) %>
+                    "<%= change[:review_comment] %>"
+                  </div>
+                <% end %>
+                <% if change[:ai_reviews]&.any? %>
+                  <div class="text-small color-fg-muted tmp-mt-1">
+                    <%= render(Primer::Beta::Octicon.new(:copilot, size: :small, mr: 1)) %>
+                    AI review available
+                  </div>
+                <% end %>
+              </div>
+            </div>
+            <div>
+              <%= render(Primer::Beta::Link.new(
+                href: review_stafftools_copilot_model_registry_path(change[:id]),
+                classes: "btn btn-sm#{' btn-primary' if status == 'pending'}"
+              )) do %>
+                <%= render(Primer::Beta::Octicon.new(status == "pending" ? :eye : :"file-diff", size: :small, mr: 1)) %>
+                <%= status == "pending" ? "Review" : "View" %>
+              <% end %>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    <% else %>
+      <%= render(Primer::Alpha::Banner.new(icon: :info, scheme: :warning, classes: "tmp-mt-3")) do %>
+        No <%= active_status %> changes found.
+      <% end %>
+    <% end %>
+  </div>
+<% end %>

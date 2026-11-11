@@ -1,0 +1,68 @@
+<div class="TimelineItem TimelineItem--condensed pt-0 js-comment-container js-socket-channel js-updatable-content js-command-palette-pull-body"
+  data-gid="<%= pull_request.global_relay_id %>"
+  data-url="<%= data_url %>"
+  data-channel-event-name="body_updated"
+  data-channel="<%= live_update_view_channel(websocket_channel) %>">
+
+<%= profile_link author, class: "TimelineItem-avatar circle d-md-block d-none", data: hovercard_data_attributes_for_user(author) do %>
+  <%= avatar_for_with_copilot(author, 40, class: "avatar") %>
+<% end %>
+<div class= "timeline-comment-group js-minimizable-comment-group js-targetable-element TimelineItem-body my-0"  id="<%= dom_id %>">
+  <%= render Comments::CommentComponent.new(
+    comment: pull_request,
+    classes: "editable-comment js-comment timeline-comment--caret reorderable-task-lists timeline-comment tmp-ml-n3"
+    ) do |component| %>
+    <% component.with_header do %>
+      <%= render Comments::CommentHeaderComponent.new(
+        comment: pull_request,
+        repository: pull_request.repository,
+        classes: "timeline-comment-header",
+        action_text: action_text,
+        show_datestamp: true,
+        avatar_classes: "d-inline-flex d-md-none",
+        action_menu_path: action_menu_path
+      ) do |header_component| %>
+        <%= header_component.with_avatar %>
+      <% end %>
+    <% end %>
+
+    <% component.with_body do %>
+      <div>
+        <%= render PullRequests::CommentBodyComponent.new(comment: pull_request, body_html: body_html, classes: "d-block") %>
+      </div>
+      <% if should_show_swe_agent_feedback? %>
+        <div class="tmp-mx-3 tmp-mb-3 f6 color-fg-muted edit-comment-hide" <%= test_selector("swe-agent-body-feedback") %>>
+          <%= CopilotSweAgent::Helpers.feedback_caption_body_text(author) %>
+        </div>
+      <% end %>
+    <% end %>
+    <% component.with_reactions do %>
+      <% reactions_content = capture do %>
+        <div class="pr-review-reactions <%= " pr-review-reactions-next-to-feedback" if should_show_swe_agent_feedback? %>">
+          <%= render PullRequests::ReactionsComponent.new(target: pull_request, popover_direction: "se") %>
+        </div>
+      <% end %>
+      <% if should_show_swe_agent_feedback? %>
+        <%# We need edit-comment-hide's display:none, so we have a separate element to apply flex internally. %>
+        <div class="tmp-ml-3 edit-comment-hide">
+          <div class="d-flex">
+            <%= render PullRequests::Copilot::FeedbackComponent.new(
+              comment_id: "PR_BODY",
+              additional_parameters: {"feedback_target": "PR_BODY"},
+              feedback_options: Copilot::SweAgent::FeedbackController::FEEDBACK_OPTIONS,
+              feedback_path: repo_swe_agent_feedback_path(pull_request.repository.owner_display_login, pull_request.repository.name, pull_request.number)) %>
+            <%= reactions_content %>
+          </div>
+        </div>
+      <% else %>
+        <%= reactions_content %>
+      <% end %>
+    <% end %>
+    <% component.with_edit_form do %>
+      <%= form_tag form_path, method: :put, class: "js-comment-update", id: "#{dom_id}-edit-form", "data-type" => "json" do %>
+          <%= render Comments::DeferredEditFormComponent.new(form_path: form_path, comment_context: nil, textarea_id: "#{dom_id}-body") %>
+      <% end %>
+    <% end %>
+  <% end %>
+  </div>
+</div>

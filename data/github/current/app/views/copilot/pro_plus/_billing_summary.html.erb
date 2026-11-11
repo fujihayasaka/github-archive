@@ -1,0 +1,124 @@
+<%# locals(payment_duration:, subscribe_path:, copilot_user:, success_path: nil, return_to_path: nil) -%>
+
+<%
+  success_path ||= nil
+  return_to_path ||= nil
+
+  # Use pricing helper for consistent discount calculations
+  pricing = copilot_signup_pricing(
+    product_key: Copilot::INDIVIDUAL_PRO_PLUS_PRODUCT_KEY,
+    billing_cycle: payment_duration,
+    user: current_user
+  )
+
+  billing_period = payment_duration == "monthly" ? 1.month : 1.year
+  next_billing_date = (Time.now + billing_period).strftime("%B %e, %Y")
+
+  has_entered_all_required_info = current_user.has_saved_billing_information? && current_user.has_valid_payment_method?
+  has_active_subscription = copilot_user.has_active_subscription?
+
+  # Date when coupon expires and regular pricing resumes
+  coupon_end_date = pricing.has_coupon && pricing.coupon&.will_expire? ? (Time.now + pricing.coupon.duration.days).strftime("%B %e, %Y") : nil
+
+  # Final billing amount
+  billing_amount = pricing.discounted_price
+%>
+
+<%= render Primer::Box.new(border: true, border_radius: 2, bg: :default, classes: "tmp-p-3") do %>
+  <h2 class="sr-only">Subscription summary</h2>
+
+  <% if pricing.has_coupon %>
+    <%= render Primer::Beta::Label.new(scheme: :accent, mb: 2) do %>
+      <%= render(Primer::Beta::Octicon.new(icon: "gift", size: :small, mr: 1)) %>
+      Coupon applied
+    <% end %>
+  <% end %>
+
+  <%= render Primer::Alpha::Stack.new(direction: :horizontal, justify: :space_between, mb: 2) do %>
+    <%= render Primer::Beta::Text.new(tag: :p, font_size: 5, font_weight: :bold, flex_grow: 0, mb: 0) do %>
+      <span>GitHub Copilot Pro+</span>
+    <% end %>
+
+    <%= render Primer::Beta::Text.new(tag: :p, font_size: 5, font_weight: :bold, mb: 0) do %>
+      <%= billing_amount.format(no_cents_if_whole: false) %>
+    <% end %>
+  <% end %>
+
+  <% if pricing.has_coupon %>
+    <div class="tmp-mb-3">
+      <div class="d-flex flex-justify-between color-fg-muted f6">
+        <span>Regular price</span>
+        <span><%= pricing.formatted_original_price %>/<%= pricing.billing_period_label %></span>
+      </div>
+      <div class="d-flex flex-justify-between color-fg-success f6">
+        <span><%= pricing.discount_label %></span>
+        <span>−<%= pricing.formatted_discount_amount %></span>
+      </div>
+    </div>
+  <% end %>
+
+  <% if FeatureFlag.vexi.enabled?(:site_spark_pro_plus_activation_flow, current_user, default: false) %>
+    <%= render Primer::Alpha::Stack.new(direction: :horizontal, align: :center, gap: :condensed, classes: "tmp-mb-3") do %>
+      <%= render Primer::Beta::Octicon.new(:"sparkle-fill", size: :small, color: :done, flex_grow: 0) %>
+
+      <%= render Primer::Beta::Text.new(tag: :p, color: :muted, font_size: 6, mb: 0) do %>
+        Includes access to GitHub Spark
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <%= render Primer::Beta::Text.new(tag: :p, color: :default, font_size: 6, mb: 0) do %>
+    You will be billed <%= billing_amount.format(no_cents_if_whole: false) %> today<%= has_active_subscription ? ", minus a prorated credit from your existing subscription." : "." %>
+    <% if pricing.has_coupon && payment_duration == "monthly" && coupon_end_date %>
+      Your coupon is active for <%= pricing.coupon.human_duration %> — regular pricing of <%= pricing.formatted_original_price %>/mo starts <span style="white-space: nowrap;"><%= coupon_end_date %></span>.
+    <% elsif pricing.has_coupon && payment_duration == "yearly" %>
+      Your next payment will be <%= pricing.formatted_original_price %> on <%= next_billing_date %>.
+    <% else %>
+      Your next payment will be <%= pricing.formatted_discounted_price %> on <%= next_billing_date %>.
+    <% end %>
+  <% end %>
+
+  <% if has_entered_all_required_info %>
+    <% if current_user.billing_contact.country_code == "KR" %>
+      <%= render Primer::Alpha::Dialog.new(title: "Privacy agreement", size: :medium_portrait) do |d| %>
+        <% d.with_header(show_divider: true) do %>
+          Privacy agreement
+        <% end %>
+
+        <% d.with_show_button(scheme: :primary, size: :large, block: true, mt: 3) { "Continue" } %>
+
+        <% d.with_body do %>
+          <%= render "copilot/pro_plus/subscribe_form",
+            payment_duration: payment_duration,
+            subscribe_path: subscribe_path,
+            success_path: success_path,
+            return_to_path: return_to_path,
+            hide_submit: true
+          %>
+        <% end %>
+
+        <% d.with_footer(show_divider: true) do %>
+          <%= render Primer::Beta::Button.new(scheme: :primary, type: :submit, size: :large, block: true,
+            form: "copilot-pro-plus-subscription-form",
+            data: {
+              target: "billing-checkout.submitButton",
+              action: "click:billing-checkout#handleSubscriptionActivation"
+            }
+          ) do %>
+            Activate now
+          <% end %>
+        <% end %>
+      <% end %>
+    <% else %>
+      <hr class="tmp-my-3">
+
+      <%= render "copilot/pro_plus/subscribe_form",
+        payment_duration: payment_duration,
+        subscribe_path: subscribe_path,
+        success_path: success_path,
+        return_to_path: return_to_path,
+        hide_submit: !billing_info_exists_without_errors
+      %>
+    <% end %>
+  <% end %>
+<% end %>

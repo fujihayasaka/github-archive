@@ -1,0 +1,104 @@
+<%
+nudge_html_element       = "a"
+nudge_location           = "dashboard"
+
+nudges_to_render.each do |dashboard_nudge|
+  nudge = dashboard_nudge.nudge
+  treatment_type = dashboard_nudge.treatment_type
+  nudge_category = dashboard_nudge.nudge_category
+
+  nudge_type = nudge.nudge_type
+  nudge_id = nudge.nudge_id
+  nudge_group = nudge.nudge_group
+  destination_key = nudge.destination_key
+  use_dismiss_and_redirect = false
+%>
+  <% case nudge_type %>
+  <% when :nucbs %>
+    <%
+    title = "#{organization.safe_profile_name} has enabled Copilot Business for your account"
+    description = "Unlimited code completions and Agent Mode are now available in your editor — write, refactor, and troubleshoot code faster."
+    icon_path = image_path("modules/dashboard/promos/general/copilot-menu-no-indicator-1746823169.svg")
+    icon_alt = "Copilot logo"
+    cta_title = "Get started with Copilot"
+    cta_action = "get_started_with_copilot"
+    use_dismiss_and_redirect = true
+  when :ipm_accelerate_dashboard_copilot_cli_enabled
+    title = "#{organization.safe_profile_name} has enabled Copilot CLI for you"
+    description = "Plan with Shift+Tab, switch your /model, /delegate work, or run /fleet in parallel."
+    icon_path = image_path("modules/dashboard/promos/general/copilot-menu-no-indicator-1746823169.svg")
+    icon_alt = "Copilot logo"
+    cta_title = "Get started with Copilot CLI"
+    cta_action = "get_started_with_copilot_cli"
+    use_dismiss_and_redirect = true
+    %>
+  <% end %>
+  <span <%= test_selector(nudge_category) %>></span>
+  <%= content_tag(
+    :span,
+    data: {
+      **analytics_visible_attributes(
+        category: nudge_category,
+        organization: organization.id,
+        plan: organization.plan.name,
+        group: nudge_group
+      )
+    }
+  ) do %> <% end %>
+
+  <% if treatment_type == :treatment %>
+    <div class="ipm-nudge-box dashboard">
+      <div class="ipm-nudge-icon-wrapper" aria-hidden="true">
+        <img class="ipm-nudge-icon" src="<%= icon_path %>" alt="<%= icon_alt %>" width="32" height="32">
+      </div>
+
+      <div class="ipm-nudge-content">
+        <h3><%= title %></h3>
+        <p><%= description %></p>
+
+        <% endpoint = use_dismiss_and_redirect ? "dismiss-and-redirect" : "click-and-redirect" %>
+        <%= link_to(cta_title, "/in-product-messaging/#{endpoint}?destination_key=#{destination_key}&organization_id=#{organization.id}&notice=#{nudge_id}&group=#{nudge_group}",
+          data: {
+            "test-selector": "dashboard-organization-#{organization.id}-#{nudge.nudge_type}-nudge",
+            **analytics_click_attributes(
+              action: cta_action,
+              category: nudge_category,
+              group: nudge_group,
+              location: nudge_location,
+              organization: organization.id,
+              plan: organization.plan.name,
+              tag: nudge_html_element,
+            ),
+          },
+          class: "ipm-nudge-cta btn btn-sm"
+        ) %>
+      </div>
+
+      <%= form_tag(
+        organization_dismiss_notice_path(
+          notice: nudge_id,
+          organization_id: organization.id,
+          group: nudge_group
+        ),
+      ) do %>
+        <div class="ipm-nudge-dismiss">
+          <%= render(Primer::Beta::IconButton.new(
+            type: :submit,
+            icon: :x,
+            scheme: :invisible,
+            aria: { label: "Dismiss" },
+            color: :on_emphasis,
+            data: analytics_click_attributes(
+              action: "dismiss",
+              category: nudge_category,
+              group: nudge_group,
+              location: nudge_location,
+              organization: organization.id,
+              plan: organization.plan.name,
+              tag: nudge_html_element,
+            ))) %>
+        </div>
+      <% end %>
+    </div>
+  <% end %>
+<% end %>

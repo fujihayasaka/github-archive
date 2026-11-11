@@ -1,0 +1,92 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base/proxima
+
+replicas:
+  - name: dependabot-alerts-alerting-progress-processor
+    count: 3
+  - name: dependabot-alerts-vulnerable-dependency-processor
+    count: 3
+  - name: memex-events-processor
+    count: 3
+  - name: memex-live-updates-processor
+    count: 3
+  - name: sharedworker
+    count: 4
+  - name: unicorn
+    count: 9
+  - name: unicorn-api
+    count: 19
+  - name: unicorn-api-graphql
+    count: 5
+  - name: unicorn-gitauth-api
+    count: 4
+  - name: unicorn-internal-api
+    count: 6
+  - name: unicorn-performance
+    count: 3
+
+patches:
+  - target:
+      kind: Deployment
+      name: unicorn-api
+    patch: |-
+      - op: test
+        path: /spec/template/spec/containers/1/env/14/name
+        value: CPS_NETWORK_SERVICE_URL
+      - op: replace
+        path: /spec/template/spec/containers/1/env/14/value
+        value: "https://cps-network-service-staffship.githubapp.com/api/v1"
+      - op: add
+        path: /metadata/annotations/moda.github.net~1allow-missing-ready-pods
+        value: "1"
+  - target:
+      kind: Deployment
+      name: unicorn
+    patch: |-
+      - op: test
+        path: /spec/template/spec/containers/2/env/14/name
+        value: CPS_NETWORK_SERVICE_URL
+      - op: replace
+        path: /spec/template/spec/containers/2/env/14/value
+        value: "https://cps-network-service-staffship.githubapp.com/api/v1"
+      - op: replace
+        path: /metadata/annotations/moda.github.net~1latest-image-placeholders-for
+        value: "geoip"
+  - target:
+      kind: Namespace
+      name: base-namespace
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: github-staff-wus2-01
+      - op: replace
+        path: "/metadata/labels/github.com~1name"
+        value: github-staff-wus2-01
+  - target:
+      kind: ResourceQuota
+      name: pod-object-count
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: github-staff-wus2-01
+  - target:
+      kind: Deployment
+      name: unicorn-(|api|api-graphql|internal-api|gitauth-api)
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/1/env/-
+        value:
+          name: COPILOT_USAGE_REPORTS_KUSTO_CLUSTER_NAME
+          value: "reportsstaffwus201.westus2"
+  - target:
+      kind: Deployment
+      name: unicorn
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: COPILOT_USAGE_REPORTS_KUSTO_CLUSTER_NAME
+          value: "reportsstaffwus201.westus2"

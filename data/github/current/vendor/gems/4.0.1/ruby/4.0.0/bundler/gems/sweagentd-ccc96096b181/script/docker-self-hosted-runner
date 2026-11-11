@@ -1,0 +1,120 @@
+#!/bin/bash
+set -e
+cd "$(dirname "$0")"
+
+mkdir -p actions-runner
+
+# Defaults
+image_name="mcr.microsoft.com/devcontainers/typescript-node:24-bookworm"
+runner_user="node"
+fallback_runner_version="2.328.0"
+
+# Handle "set" command to change the image or runner user
+if [ "$1" = "set" ]; then
+    if [ ! -z "$2" ]; then
+        image_name="$2"
+    fi
+    if [ ! -z "$3" ]; then
+        runner_user="$3"
+    fi
+cat <<EOF > ./actions-runner/.docker-self-hosted-runner
+image_name=$image_name
+runner_user=$runner_user
+EOF
+    echo "Setup updated."
+    exit 0
+fi
+
+# Load tool settings
+if [ -e "actions-runner/.docker-self-hosted-runner" ]; then
+    . ./actions-runner/.docker-self-hosted-runner
+fi
+
+# Map "config" to "./config.sh" and "run" to "./run.sh", default to run
+command="$1"
+if [ -z "$2" ]; then
+    command_args=""
+else
+    shift
+    command_args="$@"
+fi
+if [ "$command" = "" ]; then
+    command="./run.sh"
+elif [ "$command" = "run" ]; then
+    command="./run.sh"
+elif [ "$command" = "config" ]; then
+    command="./config.sh"
+fi
+full_command="${command} ${command_args}"
+
+cat <<EOF > ./actions-runner/docker-self-hosted-runner-bootstrap.sh
+#!/bin/bash
+set -e
+
+# Function to get the latest runner version, with fallback
+set_runner_version() {
+    echo "Fetching latest GitHub Actions runner version..."
+
+    # Get latest version from GitHub API
+    if command -v jq > /dev/null 2>&1; then
+        # Use jq if available for more robust JSON parsing
+        latest_version=\$(curl -s https://api.github.com/repos/actions/runner/releases/latest | jq -r '.tag_name' | sed 's/^v//')
+    else
+        # Fallback to sed parsing
+        latest_version=\$(curl -s https://api.github.com/repos/actions/runner/releases/latest | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
+    fi
+
+    if [ -z "\$latest_version" ] || [ "\$latest_version" = "null" ]; then
+        echo "Warning: Could not fetch latest runner version from GitHub API"
+        echo "Using fallback version: $fallback_runner_version"
+        runner_version="$fallback_runner_version"
+    else
+        echo "✓ Using latest runner version: \$latest_version"
+        runner_version="\$latest_version"
+    fi
+    echo ""
+}
+
+# Install git if needed
+if ! type -P git > /dev/null 2>&1; then
+    sudo apt-get update
+    sudo apt-get install -y git
+fi
+
+# Install git-lfs if needed
+if ! type -P git-lfs > /dev/null 2>&1; then
+    sudo apt-get update
+    sudo apt-get install -y git-lfs
+fi
+
+cd "\$(dirname "\$0")"
+cd /actions-runner
+if [ ! -e "config.sh" ] && [ ! -e "run.sh" ]; then
+    # Fetch the latest runner version
+    set_runner_version
+
+    curl -o actions-runner-linux-x64-\${runner_version}.tar.gz -L https://github.com/actions/runner/releases/download/v\${runner_version}/actions-runner-linux-x64-\${runner_version}.tar.gz
+    tar xzf ./actions-runner-linux-x64-\${runner_version}.tar.gz
+    rm -rf ./actions-runner-linux-x64-\${runner_version}.tar.gz
+    chown -R $runner_user:$runner_user .
+fi
+sudo su $runner_user -c 'export GITHUB_ACTIONS_RUNNER_TRACE=1; $full_command'
+EOF
+chmod +x ./actions-runner/docker-self-hosted-runner-bootstrap.sh
+
+docker_command="$(cat <<EOF
+  docker run \
+    --userns=host \
+    --cgroupns=host \
+    --privileged \
+    --pid=host \
+    --network=host \
+    --mount=type=bind,source=$(pwd)/actions-runner,target=/actions-runner \
+    --mount=type=bind,source=/sys/fs/cgroup,target=/sys/fs/cgroup \
+    -it \
+    --rm
+EOF
+)"
+
+${docker_command} ${image_name} /actions-runner/docker-self-hosted-runner-bootstrap.sh
+

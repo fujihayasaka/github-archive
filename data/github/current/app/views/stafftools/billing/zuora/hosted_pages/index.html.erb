@@ -1,0 +1,228 @@
+<% page_info title: "Zuora Hosted Payment Pages", container_xl: true %>
+<%= render layout: "stafftools/stafftools" do %>
+  <div class="site-admin-subhead ruleless">
+    <h2 class="site-admin-subhead-heading">💳 Zuora Hosted Payment Pages</h2>
+    <p class="text-small color-fg-muted tmp-mb-3">
+      Registry of hosted payment page configurations from
+      <code><%= GitHub.zuora_rest_server %></code>
+      mapped to <code>zuora_*_payment_page_id</code> config attributes.
+      Source of truth: <code>Billing::Zuora::HostedPaymentsPage</code>.
+    </p>
+  </div>
+
+  <% if error.present? %>
+    <%= render(Primer::Alpha::Banner.new(icon: :alert, scheme: :danger, classes: "tmp-mb-3")) do %>
+      <strong>Error fetching from Zuora:</strong> <%= error %>
+    <% end %>
+  <% end %>
+
+  <% unless error.present? %>
+    <%
+      mapped_count = config_mappings.count { |m| m[:status] == :mapped }
+      unmapped_count = config_mappings.count { |m| m[:status] == :unmapped }
+      total_config = config_mappings.size
+      zuora_total = zuora_pages.size
+      mapped_zuora_ids = config_mappings.select { |m| m[:status] == :mapped }.map { |m| m[:page_id] }.uniq
+      orphan_pages = zuora_pages.reject { |p| mapped_zuora_ids.include?(p["pageId"] || p[:pageId]) }
+      grouped = config_mappings.group_by { |m| m[:page_name] }
+    %>
+
+    <%# ── Status Banner ── %>
+    <% if unmapped_count > 0 || orphan_pages.any? %>
+      <%= render(Primer::Alpha::Banner.new(icon: :alert, scheme: :warning, classes: "tmp-mb-4")) do %>
+        <strong>Drift detected:</strong>
+        <% if unmapped_count > 0 %><%= unmapped_count %> config attribute<%= unmapped_count == 1 ? "" : "s" %> not matched to a Zuora page. <% end %>
+        <% if orphan_pages.any? %><%= orphan_pages.size %> Zuora page<%= orphan_pages.size == 1 ? "" : "s" %> not referenced by any config.<% end %>
+      <% end %>
+    <% else %>
+      <%= render(Primer::Alpha::Banner.new(icon: :"check-circle", scheme: :default, classes: "tmp-mb-4")) do %>
+        <strong>All clear:</strong> All <%= total_config %> config attributes are mapped to Zuora pages. No orphan pages detected.
+      <% end %>
+    <% end %>
+
+    <%# ── Summary Stat Cards ── %>
+    <div class="d-flex flex-wrap tmp-mb-4" style="gap: 16px;">
+      <div class="Box tmp-p-3 flex-1" style="min-width: 180px;">
+        <div class="d-flex flex-items-center mb-2" style="gap: 8px;">
+          <%= render(Primer::Beta::Octicon.new(:server, color: :accent)) %>
+          <span class="text-small color-fg-muted text-bold">Zuora Pages</span>
+        </div>
+        <span class="h1 text-bold color-fg-default"><%= zuora_total %></span>
+        <p class="text-small color-fg-muted mt-1 mb-0">Total hosted pages in Zuora</p>
+      </div>
+
+      <div class="Box tmp-p-3 flex-1" style="min-width: 180px;">
+        <div class="d-flex flex-items-center mb-2" style="gap: 8px;">
+          <%= render(Primer::Beta::Octicon.new(:gear, color: :accent)) %>
+          <span class="text-small color-fg-muted text-bold">Config Entries</span>
+        </div>
+        <span class="h1 text-bold color-fg-default"><%= total_config %></span>
+        <p class="text-small color-fg-muted mt-1 mb-0">Registered page ID attributes</p>
+      </div>
+
+      <div class="Box tmp-p-3 flex-1" style="min-width: 180px;">
+        <div class="d-flex flex-items-center mb-2" style="gap: 8px;">
+          <%= render(Primer::Beta::Octicon.new(:"check-circle", color: :success)) %>
+          <span class="text-small color-fg-muted text-bold">Mapped</span>
+        </div>
+        <span class="h1 text-bold color-fg-success"><%= mapped_count %></span>
+        <p class="text-small color-fg-muted mt-1 mb-0">Matched to a Zuora page</p>
+      </div>
+
+      <% if unmapped_count > 0 %>
+        <div class="Box tmp-p-3 flex-1" style="min-width: 180px;">
+          <div class="d-flex flex-items-center mb-2" style="gap: 8px;">
+            <%= render(Primer::Beta::Octicon.new(:alert, color: :attention)) %>
+            <span class="text-small color-fg-muted text-bold">Unmapped</span>
+          </div>
+          <span class="h1 text-bold color-fg-attention"><%= unmapped_count %></span>
+          <p class="text-small color-fg-muted mt-1 mb-0">No matching Zuora page</p>
+        </div>
+      <% end %>
+
+      <% if orphan_pages.any? %>
+        <div class="Box tmp-p-3 flex-1" style="min-width: 180px;">
+          <div class="d-flex flex-items-center mb-2" style="gap: 8px;">
+            <%= render(Primer::Beta::Octicon.new(:unlink, color: :severe)) %>
+            <span class="text-small color-fg-muted text-bold">Unassigned</span>
+          </div>
+          <span class="h1 text-bold color-fg-severe"><%= orphan_pages.size %></span>
+          <p class="text-small color-fg-muted mt-1 mb-0">Not in any GitHub config</p>
+        </div>
+      <% end %>
+    </div>
+
+    <%# ── Grouped Page Configurations ── %>
+    <% grouped.each do |page_name, mappings| %>
+      <%
+        group_mapped = mappings.count { |m| m[:status] == :mapped }
+        group_total = mappings.size
+        all_mapped = group_mapped == group_total
+      %>
+
+      <div class="tmp-mb-4">
+        <h3 class="h4 mb-1 d-flex flex-items-center" style="gap: 8px;">
+          <%= render(Primer::Beta::Octicon.new(all_mapped ? :"check-circle" : :alert, color: all_mapped ? :success : :attention)) %>
+          <%= page_name.gsub("_", " ").titleize %>
+          <%= render(Primer::Beta::Counter.new(count: group_total)) %>
+        </h3>
+        <p class="text-small color-fg-muted tmp-mb-3"><%= group_mapped %>/<%= group_total %> variants mapped</p>
+
+        <div class="d-flex flex-wrap" style="gap: 12px;">
+          <% mappings.each do |mapping| %>
+            <% zuora_page = mapping[:zuora_page] %>
+            <%
+              theme_icon = case mapping[:color_theme]
+                when "light" then :sun
+                when "dark" then :moon
+                when "auto" then :paintbrush
+                else :question
+              end
+              border_color = mapping[:status] == :mapped ? "var(--borderColor-success-emphasis, var(--color-success-emphasis))" : "var(--borderColor-attention-emphasis, var(--color-attention-emphasis))"
+            %>
+            <div class="Box tmp-p-3" style="min-width: 320px; flex: 1 1 320px; max-width: 520px; border-left: 3px solid <%= border_color %>;">
+              <%# Card header: page name + theme + host %>
+              <div class="d-flex flex-items-center mb-2" style="gap: 6px;">
+                <span class="text-bold"><%= mapping[:page_name].gsub("_", " ").titleize %></span>
+                <span class="color-fg-muted">·</span>
+                <%= render(Primer::Beta::Octicon.new(theme_icon, size: :small, color: :muted)) %>
+                <%= render(Primer::Beta::Text.new(tag: :span, font_weight: :bold, classes: "text-small")) { mapping[:color_theme]&.capitalize } %>
+                <span class="color-fg-muted">·</span>
+                <%= render(Primer::Beta::Label.new(
+                  scheme: mapping[:host_type] == "preview" ? :accent : :secondary
+                )) { mapping[:host_type]&.capitalize } %>
+                <% if zuora_page %>
+                  <span class="text-small color-fg-muted ml-auto">
+                    <%= zuora_page["pageType"] || zuora_page[:pageType] %>
+                    v<%= zuora_page["pageVersion"] || zuora_page[:pageVersion] %>
+                  </span>
+                <% end %>
+              </div>
+
+              <%# Page ID %>
+              <div class="mb-2">
+                <% if mapping[:page_id].present? %>
+                  <a href="<%= zuora_ui_base_url %>/apps/HostedPageLite.do?method=preview&id=<%= mapping[:page_id] %>" target="_blank" rel="noopener" class="Link--primary text-mono text-small">
+                    <%= mapping[:page_id] %> <%= render(Primer::Beta::Octicon.new(:"link-external", size: :small)) %>
+                  </a>
+                <% else %>
+                  <span class="text-small color-fg-muted">No page ID configured</span>
+                <% end %>
+              </div>
+
+              <%# Zuora extra fields %>
+              <% if zuora_page %>
+                <% extra_keys = (zuora_page.keys.map(&:to_s) - ["pageId", "pageType", "pageVersion"]) %>
+                <% if extra_keys.any? %>
+                  <div class="text-small color-fg-muted mb-2">
+                    <% extra_keys.each_with_index do |key, i| %>
+                      <% if i > 0 %> · <% end %><%= key %>: <strong class="color-fg-default"><%= zuora_page[key] || zuora_page[key.to_sym] %></strong>
+                    <% end %>
+                  </div>
+                <% end %>
+              <% end %>
+
+              <%# Config attribute %>
+              <div class="text-small color-fg-muted">
+                <%= render(Primer::Beta::Octicon.new(:gear, size: :small, mr: 1)) %>
+                <code class="text-small"><%= mapping[:config_attr] %></code>
+              </div>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
+    <%# ── Unassigned Zuora Pages ── %>
+    <% if orphan_pages.any? %>
+      <div class="tmp-mb-4">
+        <h3 class="h4 mb-1 d-flex flex-items-center" style="gap: 8px;">
+          <%= render(Primer::Beta::Octicon.new(:unlink, color: :severe)) %>
+          Unassigned Zuora Pages
+          <%= render(Primer::Beta::Counter.new(count: orphan_pages.size, scheme: :primary)) %>
+        </h3>
+        <p class="text-small color-fg-muted tmp-mb-3">
+          These pages exist in Zuora but are not referenced by any registered config attribute.
+        </p>
+
+        <div class="d-flex flex-wrap" style="gap: 12px;">
+          <% orphan_pages.each do |page| %>
+            <% orphan_id = page["pageId"] || page[:pageId] %>
+            <div class="Box tmp-p-3" style="min-width: 320px; flex: 1 1 320px; max-width: 520px; border-left: 3px solid var(--borderColor-severe-emphasis, var(--color-severe-emphasis));">
+              <div class="d-flex flex-items-center mb-2" style="gap: 6px;">
+                <span class="text-small color-fg-muted">
+                  <%= page["pageType"] || page[:pageType] || "—" %>
+                  v<%= page["pageVersion"] || page[:pageVersion] || "?" %>
+                </span>
+              </div>
+              <div class="mb-2">
+                <a href="<%= zuora_ui_base_url %>/apps/HostedPageLite.do?method=preview&id=<%= orphan_id %>" target="_blank" rel="noopener" class="Link--primary text-mono text-small">
+                  <%= orphan_id %> <%= render(Primer::Beta::Octicon.new(:"link-external", size: :small)) %>
+                </a>
+              </div>
+              <% extra_keys = (page.keys.map(&:to_s) - ["pageId", "pageType", "pageVersion"]) %>
+              <% if extra_keys.any? %>
+                <div class="text-small color-fg-muted">
+                  <% extra_keys.each_with_index do |key, i| %>
+                    <% if i > 0 %> · <% end %><%= key %>: <strong class="color-fg-default"><%= page[key] || page[key.to_sym] %></strong>
+                  <% end %>
+                </div>
+              <% end %>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
+    <%# ── Raw JSON ── %>
+    <details class="tmp-mb-4">
+      <summary class="text-small text-bold cursor-pointer d-inline-flex flex-items-center color-fg-accent" style="gap: 4px;">
+        <%= render(Primer::Beta::Octicon.new(icon: :code, size: :small)) %>
+        Raw Zuora API Response (<%= zuora_pages.size %> pages)
+      </summary>
+      <div class="Box mt-2 tmp-p-3 overflow-auto color-bg-subtle" style="max-height: 400px;">
+        <pre class="text-small mb-0"><%= JSON.pretty_generate(zuora_pages) %></pre>
+      </div>
+    </details>
+  <% end %>
+<% end %>

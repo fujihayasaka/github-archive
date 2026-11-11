@@ -1,0 +1,262 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative "../config/environment"
+
+RED = "\033[0;31m"
+GREEN = "\033[0;32m"
+ORANGE = "\033[0;33m"
+BLUE = "\033[0;34m"
+NC = "\033[0m" # No Color
+
+def print_help
+  puts <<~HELP
+    #{GREEN}Setup Cost Centers Script#{NC}
+
+    This script creates multiple cost centers and assigns users to them.
+
+    Usage: bin/setup-cost-centers [OPTIONS]
+
+    Options:
+      -n, --number NUM       Number of cost centers to create (required)
+      -c, --customer-id ID   Customer ID (default: 1)
+      -l, --label TEXT       Optional label to include in cost center names
+      -h, --help             Show this help message
+
+    Examples:
+      bin/setup-cost-centers -n 5
+      bin/setup-cost-centers -n 10 -c 1234
+      bin/setup-cost-centers -n 3 -l "QA Testing"
+  HELP
+end
+
+def check_billing_platform_availability(client)
+  print "#{BLUE}Checking billing platform availability...#{NC}"
+
+  # Try to get customer to verify connection
+  client.get_customer(customer_id: "1")
+  puts " #{GREEN}✓#{NC}"
+  true
+rescue => e
+  puts " #{RED}✗#{NC}"
+  puts ""
+  puts "#{RED}Error: Billing platform is not available!#{NC}"
+  puts ""
+  puts "Please start the billing platform server first:"
+  puts "  #{ORANGE}cd /workspaces/billing-platform#{NC}"
+  puts "  #{ORANGE}script/server#{NC}"
+  puts ""
+  puts "Or run the setup script if billing-platform is not yet set up:"
+  puts "  #{ORANGE}script/setup-codespaces-billing-platform#{NC}"
+  puts ""
+  puts "Error details: #{e.message}"
+  false
+end
+
+def create_user(index, unique_id)
+  # Create a user with human-readable date for uniqueness
+  User.create!(
+    login: "cost-center-user-#{unique_id}-#{index}",
+    email: "cost-center-user-#{unique_id}-#{index}@example.com",
+  )
+end
+
+def create_cost_center(client, customer_id, name, target_id, target_type, description)
+  # Based on protobuf enum: NoTarget=0, User=1, Team=2, Repo=3, Org=4, Enterprise=5, CostCenterResource=6, CustomerResource=7
+  resources = [{
+    id: target_id,
+    type: target_type,
+  }]
+
+  response = client.create_cost_center(
+    customer_id: customer_id,
+    target_id: target_id,
+    target_type: target_type,
+    name: name,
+    resources: resources,
+    description: description,
+  )
+
+  response
+end
+
+# Parse command line arguments
+options = {
+  number: nil,
+  customer_id: "1",
+  label: nil,
+}
+
+i = 0
+while i < ARGV.length
+  case ARGV[i]
+  when "-h", "--help"
+    print_help
+    exit 0
+  when "-n", "--number"
+    i += 1
+    options[:number] = ARGV[i].to_i
+  when "-c", "--customer-id"
+    i += 1
+    options[:customer_id] = ARGV[i]
+  when "-l", "--label"
+    i += 1
+    options[:label] = ARGV[i]
+  else
+    puts "#{RED}Unknown option: #{ARGV[i]}#{NC}"
+    puts "Use -h or --help for usage information"
+    exit 1
+  end
+  i += 1
+end
+
+# Validate required arguments
+unless options[:number] && options[:number] > 0
+  puts "#{RED}Error: Number of cost centers is required and must be greater than 0#{NC}"
+  puts "Use -h or --help for usage information"
+  exit 1
+end
+
+puts ""
+puts "#{GREEN}═══════════════════════════════════════════════════════#{NC}"
+puts "#{GREEN}      Cost Centers Setup Script#{NC}"
+puts "#{GREEN}═══════════════════════════════════════════════════════#{NC}"
+puts ""
+
+# Validate customer exists and is associated with a Business
+customer = Customer.find_by(id: options[:customer_id])
+unless customer
+  puts "#{RED}Error: Customer with ID #{options[:customer_id]} does not exist.#{NC}"
+  exit 1
+end
+
+unless customer.billable_owner.is_a?(Business)
+  puts "#{RED}Error: Cost centers can only be created for Enterprise/Business accounts.#{NC}"
+  puts ""
+  puts "Customer #{options[:customer_id]} is associated with a #{customer.billable_owner.class.name} account"
+  puts ""
+  puts "Cost centers are only available for Business/Enterprise customers."
+  puts "Please provide a customer ID that is associated with a Business."
+  exit 1
+end
+
+# Create billing platform client
+client = Billing::Platform::Api::Client.new(timeout: 5)
+
+# Check billing platform availability
+unless check_billing_platform_availability(client)
+  exit 1
+end
+
+puts ""
+puts "#{BLUE}Configuration:#{NC}"
+puts "  Customer ID: #{options[:customer_id]}"
+puts "  Number of cost centers: #{options[:number]}"
+puts ""
+
+# Confirm with user
+print "#{ORANGE}Do you want to proceed? (y/n): #{NC}"
+response = STDIN.gets.chomp
+unless response.downcase == "y"
+  puts "#{ORANGE}Aborted.#{NC}"
+  exit 0
+end
+
+puts ""
+puts "#{GREEN}➡️  Creating #{options[:number]} cost centers...#{NC}"
+puts ""
+
+# Use human-readable date+time for uniqueness (e.g., "Dec23-1430" for 2:30 PM)
+unique_id = Time.now.strftime("%b%d-%H%M")
+
+created_cost_centers = []
+errors = []
+
+options[:number].times do |i|
+  index = i + 1
+
+  begin
+    print "  [#{index}/#{options[:number]}] Creating user... "
+
+    # Create user
+    user = create_user(index, unique_id)
+
+    puts "#{GREEN}✓#{NC}"
+
+    print "  [#{index}/#{options[:number]}] Creating cost center... "
+
+    # Create cost center with human-readable date for uniqueness
+    label_part = options[:label] ? "#{options[:label]} " : ""
+    cost_center_name = "Cost Center #{label_part}#{unique_id}-#{index}"
+    description = "Cost center created by setup script for user #{user.login}"
+
+    # Based on protobuf enum: NoTarget=0, User=1, Team=2, Repo=3, Org=4, Enterprise=5, CostCenterResource=6, CustomerResource=7
+    user_target_type = 1  # User enum value
+
+    response = create_cost_center(
+      client,
+      options[:customer_id],
+      cost_center_name,
+      user.id.to_s,
+      user_target_type,
+      description,
+    )
+
+    # Check if response is an error
+    if response.is_a?(Billing::Platform::Api::Error)
+      raise "Billing platform error: #{response.message}"
+    end
+
+    uuid = response.dig(:costCenter, :costCenterKey, :uuid) ||
+           response.dig("costCenter", "costCenterKey", "uuid") ||
+           "unknown"
+
+    created_cost_centers << {
+      name: cost_center_name,
+      user: user.login,
+      user_id: user.id,
+      uuid: uuid,
+    }
+
+    puts "#{GREEN}✓#{NC}"
+
+  rescue => e
+    puts "#{RED}✗#{NC}"
+    errors << {
+      index: index,
+      error: e.message,
+    }
+  end
+end
+
+puts ""
+puts "#{GREEN}═══════════════════════════════════════════════════════#{NC}"
+puts "#{GREEN}      Summary#{NC}"
+puts "#{GREEN}═══════════════════════════════════════════════════════#{NC}"
+puts ""
+puts "#{GREEN}Created: #{created_cost_centers.length}/#{options[:number]}#{NC}"
+puts ""
+
+if created_cost_centers.any?
+  puts "#{BLUE}Created Cost Centers:#{NC}"
+  created_cost_centers.each do |cc|
+    puts "  • #{cc[:name]}"
+    puts "    User: #{cc[:user]} (ID: #{cc[:user_id]})"
+    puts "    UUID: #{cc[:uuid]}"
+    puts ""
+  end
+else
+  puts "#{ORANGE}No cost centers were created. Please check the error output and try again.#{NC}"
+  puts ""
+end
+
+if errors.any?
+  puts "#{RED}Errors (#{errors.length}):#{NC}"
+  errors.each do |error|
+    puts "  • Cost Center #{error[:index]}: #{error[:error]}"
+  end
+  puts ""
+end
+
+puts "#{GREEN}✨ Done!#{NC}"
+puts ""

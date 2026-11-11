@@ -1,0 +1,1 @@
+const e={issueBodyHeader:`Description`,issueBodyPlaceholder:`Type your description here…`,issueBodyHeaderActions:`Issue body actions`,staleBodyErrorPrefix:`GraphQL error: STALE_DATA`,convertButton:e=>`Create an issue with the title "${e}"`,authorLabel:e=>`${e?`bot`:`mannequin`}`,copilotCTAButton:`Write with Copilot`};export{e as t};

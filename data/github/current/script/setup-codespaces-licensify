@@ -1,0 +1,106 @@
+#!/bin/bash
+set -e
+
+# This script sets up the github/licensify repository for a github/github codespace.
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+ORANGE='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Function to print help message
+help() {
+  echo "Sets up the github/licensify repository for a github/github codespace."
+  echo
+  echo "Usage: setup-codespaces-licensify [-b branch] [-d|e|h] "
+  echo "Options:"
+  echo "-b     Specify the licensify branch to clone. Defaults to main if not provided."
+  echo "-d     Before starting, delete the existing licensify directory in the codespace."
+  echo "-e     Skip using the Azure CosmoDB emulator during bootstrap. By default, the emulator is used."
+  echo "-h     Print this help message."
+  echo
+}
+
+# Set the branch as main. If a branch is provided as an argument, it will be set to that when we parse the provided options.
+BRANCH=main
+USE_EMULATOR=true
+
+# Get the options
+while getopts ":b:hde" opt; do
+  case $opt in
+    h) # display help message
+      help
+      exit;;
+    b) # If a branch was provided, re-set the variable
+      BRANCH=$OPTARG;;
+    d) # Delete the repository if it exists
+      DELETE_REPO=true;;
+    e) # Skip using the CosmosDB emulator
+      USE_EMULATOR=false;;
+    :)
+    echo "Error: Option -$OPTARG requires an argument."
+    exit 1;;
+    \?) # Invalid option
+      echo "Error: Invalid option -$OPTARG"
+      exit 1;;
+  esac
+done
+
+# If the licensify repo already exists and the delete argument hasn't been specified, echo a warning and exit.
+if [[ -d "/workspaces/licensify" && -z "$DELETE_REPO" ]]; then
+  echo -e "${RED}The licensify directory already exists in this codespace.${NC} \nYou can rerun the setup script with the -d argument to force the deletion of the existing repository."
+  exit 1
+fi
+
+if [ "$DELETE_REPO" = true ]; then
+  echo -e "\n${GREEN}➡️ Deleting the existing licensify repo...\n${NC}"
+  rm -rf /workspaces/licensify
+fi
+
+echo -e "\n${GREEN}➡️ Cloning licensify repo at branch $BRANCH...\n${NC}"
+git clone https://github.com/github/licensify.git /workspaces/licensify --branch $BRANCH
+
+# Symlink licensify skills into the monolith so Copilot discovers them
+echo -e "\n${GREEN}➡️ Symlinking licensify Copilot skills into .github/skills/...\n${NC}"
+for skill_dir in /workspaces/licensify/.github/skills/*/; do
+  skill_name=$(basename "$skill_dir")
+  target="/workspaces/github/.github/skills/$skill_name"
+  # Handle existing targets safely so reruns are idempotent
+  if [ -L "$target" ]; then
+    # Remove existing symlink (including broken ones) and recreate it
+    rm -f "$target"
+  elif [ -e "$target" ]; then
+    # A non-symlink exists at the target path; skip to avoid overwriting it
+    echo -e "${ORANGE}Skipping .github/skills/$skill_name because a non-symlink already exists at $target.${NC}"
+    continue
+  fi
+
+  ln -s "$skill_dir" "$target"
+
+  # Keep the symlink out of git status via the local exclude file (idempotent)
+  exclude_file="/workspaces/github/.git/info/exclude"
+  if ! grep -qx ".github/skills/$skill_name" "$exclude_file" 2>/dev/null; then
+    echo ".github/skills/$skill_name" >> "$exclude_file"
+  fi
+done
+
+# Install azure-cli if it's not already installed
+if ! command -v az &> /dev/null
+then
+  echo -e "\n${GREEN}➡️ Installing azure-cli...\n${NC}"
+  curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+fi
+
+# Bootstrap licensify dependencies
+echo -e "\n${GREEN}➡️ Setting up licensify...\n${NC}"
+if [ "$USE_EMULATOR" = true ]; then
+  ( cd /workspaces/licensify ; script/bootstrap --use-emulator )
+else
+  ( cd /workspaces/licensify ; script/bootstrap )
+fi
+
+echo -e ""
+echo -e "${GREEN}💵💵 FINISHED! licensify is now installed. 💵💵${NC}"
+echo -e ""
+echo -e "Follow the instructions in ${ORANGE}/workspaces/licensify/docs/development.md${NC} to configure & run licensify 🚀"

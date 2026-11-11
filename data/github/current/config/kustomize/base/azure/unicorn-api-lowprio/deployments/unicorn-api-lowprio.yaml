@@ -1,0 +1,79 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unicorn-api
+  annotations:
+    moda.github.net/canary-replicas: null
+    moda.github.net/allow-missing-ready-pods: null
+    moda.github.net/canary-v2: null
+    moda.github.net/canary-maxunavailable: null
+    moda.github.net/canary-label: null
+    moda.github.net/cluster-preferences: null
+  labels:
+    service: unicorn-api-lowprio
+spec:
+  selector:
+    matchLabels:
+      service: unicorn-api-lowprio
+  template:
+    metadata:
+      labels:
+        service: unicorn-api-lowprio
+        sidecar.istio.io/inject: "true"
+        istio.io/rev: stable
+      annotations:
+        observability.github.com/splunk_index: rails
+    spec:
+      dnsPolicy: ClusterFirst
+      containers:
+        - name: nginx
+        - name: unicorn
+          envFrom:
+            - configMapRef:
+                name: observability-config
+            - configMapRef:
+                name: application-config
+            - secretRef:
+                name: vault-secrets
+            - configMapRef:
+                name: mysql-hosts
+          resources:
+            limits:
+              memory: 20Gi
+            requests:
+              cpu: 5
+              memory: 16Gi
+          env:
+            - name: KUBE_DEPLOYMENT_NAME
+              value: unicorn-api-lowprio
+            - name: USERS_CACHE_CONNECT_API
+              value: "0"
+            - name: SMTP_HOST
+              value: smtp.service.github.net
+            - name: GH_HOSTNAME
+              value: github.com
+            - name: GITHUB_CONFIG_ROLE
+              value: api
+            - name: REDIS_RATE_LIMITER_URLS
+              value: "rediss://default:$(REDIS_API_RL_00_PRIMARY_PASSWORD)@db-redis-api-rl-00-gc-cus-02.redis.cache.windows.net:6380;rediss://default:$(REDIS_API_RL_00_PRIMARY_PASSWORD)@db-redis-api-rl-00-gc-cus-02.redis.cache.windows.net:6380,rediss://default:$(REDIS_API_RL_01_PRIMARY_PASSWORD)@db-redis-api-rl-01-gc-cus-02.redis.cache.windows.net:6380;rediss://default:$(REDIS_API_RL_01_PRIMARY_PASSWORD)@db-redis-api-rl-01-gc-cus-02.redis.cache.windows.net:6380,rediss://default:$(REDIS_API_RL_02_PRIMARY_PASSWORD)@db-redis-api-rl-02-gc-cus-02.redis.cache.windows.net:6380;rediss://default:$(REDIS_API_RL_02_PRIMARY_PASSWORD)@db-redis-api-rl-02-gc-cus-02.redis.cache.windows.net:6380,rediss://default:$(REDIS_API_RL_03_PRIMARY_PASSWORD)@db-redis-api-rl-03-gc-cus-02.redis.cache.windows.net:6380;rediss://default:$(REDIS_API_RL_03_PRIMARY_PASSWORD)@db-redis-api-rl-03-gc-cus-02.redis.cache.windows.net:6380"
+            - name: MONOLITH_REDIS_RATE_LIMITER_URLS
+              value: "rediss://default:$(REDIS_MONOLITH_RL_PRIMARY_PASSWORD)@db-redis-monolith-rl-gc-cus-02.redis.cache.windows.net:6380;rediss://default:$(REDIS_MONOLITH_RL_PRIMARY_PASSWORD)@db-redis-monolith-rl-gc-cus-02.redis.cache.windows.net:6380"
+            - name: JOB_COORDINATION_REDIS_URL
+              value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+            - name: JOB_COORD_REDIS_URLS
+              value: "rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380,rediss://default:$(REDIS_AZURE_MONOLITH_PRIMARY_PASSWORD)@db-redis-azure-monolith-gc-cus-02.redis.cache.windows.net:6380"
+            - name: AUTHND_SERVICE_URL
+              value: http://authnd.authnd-production.svc.cluster.local:8080
+            - name: AUTHZD_ENDPOINT
+              value: https://authzd-production.service.gc-cus-02.github.net/twirp
+            - name: AUTHZD_CONTROLACCESS_ENDPOINT
+              value: https://authzd-controlaccess-production.service.gc-cus-02.github.net/twirp
+            - name: AUTHZD_CONDITIONAL_ACCESS_ENDPOINT
+              value: https://authzd-capevaluator-production.service.gc-cus-02.github.net/twirp
+            - name: SPOKESD_URL
+              value: https://spokesd-production.service.gc-cus-02.github.net:10013/twirp/
+            - name: TREELIGHTS_ENDPOINT
+              value: https://treelights-production.service.gc-cus-02.github.net
+            - name: TURBOSCAN_DISABLE_SERVICE_MESH
+              value: "true"

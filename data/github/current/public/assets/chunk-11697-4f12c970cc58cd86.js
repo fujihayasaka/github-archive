@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["11697"],{371368(t,e,a){a.r(e),a.d(e,{PortalFragmentElement:()=>r});var i=a(331635),g=a(194571);class r extends HTMLElement{targetElement="body";connectedCallback(){this.parentNode!==this.targetNode&&this.targetNode?.appendChild(this)}get targetNode(){return this.closest(this.targetElement)}}(0,i.Cg)([g.CF],r.prototype,"targetElement",void 0),r=(0,i.Cg)([(0,g.p_)("portal-fragment")],r)}}]);
+//# sourceMappingURL=chunk-11697-4f12c970cc58cd86-fb06a3f0ade1e913.js.map

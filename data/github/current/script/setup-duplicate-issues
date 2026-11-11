@@ -1,0 +1,259 @@
+#!/bin/bash
+#
+# Setup duplicate issue detection for local development.
+# Enables feature flags, creates ES index, and sample issues with embeddings.
+#
+# Prerequisites:
+#   - Elasticsearch on port 9400
+#   - Inference endpoint configured (use --setup-es or run script/elasticsearch/dev-setup)
+#   - bin/seed completed
+#
+# Usage:
+#   script/setup-duplicate-issues              # assumes ES + inference already configured
+#   script/setup-duplicate-issues --setup-es    # run ES dev-setup first (Kibana, license, inference)
+#
+# Options:
+#   -e, --setup-es   Run script/elasticsearch/dev-setup before starting.
+#                    Output is captured to tmp/es-dev-setup.log to reduce noise.
+#   -h, --help       Show this help message and exit.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ES_URL="${ES_URL:-http://localhost:9400}"
+REPO_NWO="github/private-server"
+SETUP_ES=false
+
+usage() {
+  sed -n '/^# Usage:/,/^[^#]/{ /^#/s/^# \?//p }' "$0"
+}
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -e|--setup-es)
+      SETUP_ES=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -*)
+      echo "Unknown option: $1"
+      usage
+      exit 1
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+echo "=== Setting up Duplicate Issue Detection ==="
+
+# Step 0: Optionally run ES dev-setup (Kibana, license, inference endpoint)
+if $SETUP_ES; then
+  ES_SETUP_LOG="tmp/es-dev-setup.log"
+  printf "\nStep 0: Running Elasticsearch dev-setup (this may take several minutes)...\n"
+  echo "  Output captured to: $ES_SETUP_LOG"
+  if ( script/elasticsearch/dev-setup ) &> "$ES_SETUP_LOG"; then
+    echo "  OK"
+  else
+    echo "  ERROR: ES dev-setup failed. Last 20 lines of log:"
+    echo ""
+    tail -20 "$ES_SETUP_LOG" | sed 's/^/  /'
+    echo ""
+    echo "  See full log: $ES_SETUP_LOG"
+    exit 1
+  fi
+fi
+
+# Step 1: Check Elasticsearch
+printf "\nStep 1: Checking Elasticsearch...\n"
+if ! curl -s "$ES_URL/_cluster/health" > /dev/null 2>&1; then
+  echo "ERROR: Elasticsearch not running at $ES_URL"
+  exit 1
+fi
+echo "  OK"
+
+# Step 2: Check inference endpoint
+printf "\nStep 2: Checking inference endpoint...\n"
+runner_output=$(bin/rails runner 'puts GitHub.es_issues_prs_inference_id' 2>&1) || {
+  echo "ERROR: Failed to fetch inference ID via bin/rails runner:"
+  echo "$runner_output"
+  exit 1
+}
+INFERENCE_ID=$(printf '%s\n' "$runner_output" | tail -n 1)
+if [ -z "$INFERENCE_ID" ]; then
+  INFERENCE_ID="test-endpoint"
+fi
+
+# Check if the configured endpoint exists
+if curl -s "$ES_URL/_inference/text_embedding/$INFERENCE_ID" | grep -q '"inference_id"'; then
+  echo "  Found: $INFERENCE_ID"
+else
+  # Check if any text_embedding endpoint exists
+  AVAILABLE_ENDPOINTS=$(curl -s "$ES_URL/_inference" | jq -r '.endpoints[] | select(.task_type == "text_embedding") | .inference_id' 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+
+  echo "  ERROR: Inference endpoint '$INFERENCE_ID' not found."
+  echo ""
+  echo "  To set up the inference endpoint, either:"
+  echo "    1. Re-run with --setup-es:  script/setup-duplicate-issues --setup-es"
+  echo "    2. Run manually:            script/elasticsearch/dev-setup"
+  echo ""
+  if [ -n "$AVAILABLE_ENDPOINTS" ]; then
+    echo "  Available text_embedding endpoints: $AVAILABLE_ENDPOINTS"
+    echo "  (You may need to configure GitHub.es_issues_prs_inference_id to use one of these)"
+    echo ""
+  fi
+  echo "  Note: Inference endpoints require a valid Elasticsearch license."
+  echo "  If dev-setup fails with license errors, check the ELASTICSEARCH_LICENSE env var."
+  exit 1
+fi
+
+# Step 3: Enable feature flags
+printf "\nStep 3: Enabling feature flags...\n"
+bin/toggle-feature-flag enable semantic_similarity_duplicate_issue_detection
+bin/toggle-feature-flag enable semantic_issues_search_api
+bin/toggle-feature-flag enable issues_index_semantic_search
+bin/toggle-feature-flag enable copilot_semantic_indexing_source_fields
+bin/toggle-feature-flag disable copilot_semantic_indexing_source_fields_disabled  # double-negative
+
+# Step 4: Create issues index (384 dims for local model vs 1536 in prod)
+printf "\nStep 4: Setting up issues index...\n"
+curl -s -X DELETE "$ES_URL/issues-1" > /dev/null 2>&1 || true
+
+index_response=$(curl -s -X PUT "$ES_URL/issues-1" -H "Content-Type: application/json" -d '{
+  "settings": { "number_of_shards": 1, "number_of_replicas": 0 },
+  "mappings": {
+    "properties": {
+      "id": { "type": "long" },
+      "issue_id": { "type": "long" },
+      "number": { "type": "integer" },
+      "repo_id": { "type": "long" },
+      "state": { "type": "keyword" },
+      "title": { "type": "text" },
+      "body": { "type": "text" },
+      "created_at": { "type": "date" },
+      "updated_at": { "type": "date" },
+      "public": { "type": "boolean" },
+      "author_id": { "type": "long" },
+      "title_dense_vector": { "type": "dense_vector", "dims": 384, "index": true, "similarity": "cosine" },
+      "body_dense_vector": { "type": "dense_vector", "dims": 384, "index": true, "similarity": "cosine" }
+    }
+  }
+}')
+if ! echo "$index_response" | grep -q '"acknowledged":true'; then
+  echo "ERROR: Failed to create index: $index_response"
+  exit 1
+fi
+
+alias_response=$(curl -s -X POST "$ES_URL/_aliases" -H "Content-Type: application/json" -d '{
+  "actions": [
+    { "remove": { "index": "*", "alias": "issues", "must_exist": false } },
+    { "remove": { "index": "*", "alias": "issues-search", "must_exist": false } },
+    { "add": { "index": "issues-1", "alias": "issues" } },
+    { "add": { "index": "issues-1", "alias": "issues-search" } }
+  ]
+}')
+if ! echo "$alias_response" | grep -q '"acknowledged":true'; then
+  echo "ERROR: Failed to create aliases: $alias_response"
+  exit 1
+fi
+echo "  OK"
+
+# Step 5: Create and index sample issues
+printf "\nStep 5: Creating sample issues...\n"
+export REPO_NWO
+bin/rails runner '
+require "uri"
+require "net/http"
+require "json"
+
+ES_URL = ENV.fetch("ES_URL", "http://localhost:9400")
+REPO_NWO = ENV.fetch("REPO_NWO", "github/private-server")
+
+def es_request(method, path, body = nil)
+  uri = URI("#{ES_URL}#{path}")
+  http = Net::HTTP.new(uri.host, uri.port)
+  req = case method
+    when :post then Net::HTTP::Post.new(uri)
+    when :put then Net::HTTP::Put.new(uri)
+    else raise ArgumentError, "Unsupported HTTP method: #{method}"
+  end
+  if body
+    req["Content-Type"] = "application/json"
+    req.body = body.to_json
+  end
+  http.request(req)
+end
+
+def get_embedding(text)
+  return nil if text.blank?
+  resp = es_request(:post, "/_inference/text_embedding/#{GitHub.es_issues_prs_inference_id}", { input: text[0...5000] })
+  return nil unless resp.is_a?(Net::HTTPSuccess)
+  JSON.parse(resp.body).dig("text_embedding", 0, "embedding")
+rescue => e
+  puts "  Warning: embedding failed - #{e.message}"
+  nil
+end
+
+repo = Repository.nwo(REPO_NWO)
+abort "  ERROR: #{REPO_NWO} not found. Run bin/seed first." unless repo
+
+author = User.find_by(login: "monalisa") || repo.owner_user_or_first_admin
+abort "  ERROR: No user found to create issues. Run bin/seed first." unless author
+
+ISSUES = [
+  ["Login page returns 500 error when submitting form", "When I try to log in, the page crashes with a 500 error."],
+  ["Authentication fails with server error", "Users cannot authenticate. The server returns an error on sign in."],
+  ["Improve documentation for API endpoints", "API docs are incomplete. Need examples for REST endpoints."],
+  ["API docs need better examples", "Developer docs need code samples in multiple languages."],
+  ["Performance issue with large file uploads", "Files >100MB upload slowly and sometimes timeout."],
+  ["Add dark mode support to the UI", "Users request dark mode for reduced eye strain."]
+]
+
+issues = ISSUES.map do |title, body|
+  existing = repo.issues.find_by(title: title)
+  if existing
+    puts "  exists: ##{existing.number}"
+    existing
+  else
+    issue = repo.issues.create!(user: author, title: title, body: body, state: "open")
+    puts "  created: ##{issue.number}"
+    issue
+  end
+end
+
+puts "  Indexing..."
+issues.each do |issue|
+  doc = {
+    id: issue.id, issue_id: issue.id, number: issue.number, repo_id: issue.repository_id,
+    state: issue.state, title: issue.title, body: issue.body, public: issue.repository.public?,
+    author_id: issue.user_id, created_at: issue.created_at.iso8601, updated_at: issue.updated_at.iso8601,
+    title_dense_vector: get_embedding(issue.title), body_dense_vector: get_embedding(issue.body)
+  }.compact
+  resp = es_request(:put, "/issues-1/_doc/#{issue.id}?routing=#{issue.repository_id}", doc)
+  puts resp.is_a?(Net::HTTPSuccess) ? "  indexed: ##{issue.number}" : "  FAILED: ##{issue.number}"
+end
+'
+
+# Step 6: Verify
+printf "\nStep 6: Verifying...\n"
+curl -s -X POST "$ES_URL/issues-1/_refresh" > /dev/null
+doc_count=$(curl -s "$ES_URL/issues-1/_count" | grep -o '"count":[0-9]*' | cut -d: -f2)
+echo "  $doc_count documents indexed"
+
+printf "\n=== Setup Complete! ===\n\n"
+echo "Test duplicate detection at: http://github.localhost/$REPO_NWO/issues/new"
+echo ""
+echo "Try creating an issue with:"
+echo "  Title: Login error when authenticating"
+echo "  Body:  Users cannot sign in to the application"
+echo ""
+echo "Or:"
+echo "  Title: Need better API documentation"
+echo "  Body:  The REST API examples are unclear"
+echo ""
+echo "The UI should suggest similar existing issues as you type."
+echo "View sample issues: http://github.localhost/$REPO_NWO/issues"

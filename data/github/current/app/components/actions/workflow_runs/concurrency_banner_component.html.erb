@@ -1,0 +1,32 @@
+<% track_render_partial("actions/blocking_resources") do %>
+  <%
+    div_options = {}
+    if @should_update
+      div_options[:class] = "js-updatable-content js-socket-channel"
+      div_options[:data] = {
+        channel: live_update_view_channel(@check_suite.channel),
+        url: workflow_run_concurrency_banner_partial_path(workflow_run_id: @check_suite.workflow_run.id, repository: current_repository, user_id: current_repository.owner.display_login)
+      }
+    end
+  %>
+  <%= content_tag(:div, **div_options) do %>
+      <% if @check_suite&.status == "pending" && !blocking_resources.empty? && @should_update %>
+        <%= render(Primer::Alpha::Banner.new(scheme: :warning, icon: "rocket", test_selector: "serialization-info", classes: "tmp-py-3 tmp-my-3")) do |component| %>
+          <%= blocked_at_level_verbiage %> waiting for
+
+          <% if blocking_resources.count == 1 %>
+            <%= render Actions::WorkflowRuns::WorkflowJobNameLinkComponent.new(name: blocking_resources.first[:display_name], url: blocking_resources.first[:url]) %>
+          <% elsif blocking_resources.count == 2 %>
+            <%= render Actions::WorkflowRuns::WorkflowJobNameLinkComponent.new(name: blocking_resources.first[:display_name], url: blocking_resources.first[:url]) %> and
+            <%= render Actions::WorkflowRuns::WorkflowJobNameLinkComponent.new(name: blocking_resources.second[:display_name], url: blocking_resources.second[:url]) %>
+          <% elsif blocking_resources.count > 2 %>
+            <%= render Actions::WorkflowRuns::WorkflowJobNameLinkComponent.new(name: blocking_resources.first[:display_name], url: blocking_resources.first[:url]) %>,
+            <%= render Actions::WorkflowRuns::WorkflowJobNameLinkComponent.new(name: blocking_resources.second[:display_name], url: blocking_resources.second[:url]) %>,
+            and <%= pluralize(blocking_resources.count - 2, "other") %>
+          <% end %>
+          to complete before running.
+          <a class="Link--inTextBlock" href="<%= GitHub.help_url %>/actions/reference/workflow-syntax-for-github-actions#concurrency">Learn more about concurrency</a>.
+        <% end %>
+      <% end %>
+  <% end %>
+<% end %>

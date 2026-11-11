@@ -1,0 +1,194 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+images:
+  - name: octofactory.service.private-us-east-1.github.net/moda-artifacts-docker/docker-nginx
+    digest: sha256:fad6ebb459e7f51d120ebe9514ee4776bca3cdeebddc37cd29cbfdd14239eb45
+
+resources:
+  - ../commonBase
+  - aqueduct/deployments/sharedworker
+  - stream-processors/deployments/pages-deployment-status-processor.yaml
+  - stream-processors/deployments/programmatic-access-processor.yaml
+  - stream-processors/deployments/progress-processor.yaml
+  - stream-processors/deployments/projects-denormalization-processor.yaml
+  - stream-processors/deployments/pull-request-review-submit-processor.yaml
+  - stream-processors/deployments/pull-request-timeline-comment-create-processor.yaml
+  - stream-processors/deployments/registry-metadata-artifact-storage-event-processor.yaml
+  - stream-processors/deployments/rms-layer-deleted-processor.yaml
+  - stream-processors/deployments/rms-layer-downloaded-processor.yaml
+  - stream-processors/deployments/rms-layer-published-processor.yaml
+  - stream-processors/deployments/rms-package-deleted-audit-processor.yaml
+  - stream-processors/deployments/rms-package-published-audit-processor.yaml
+  - stream-processors/deployments/rms-repository-access-removal-processor.yaml
+  - stream-processors/deployments/rms-version-deleted-audit-processor.yaml
+  - stream-processors/deployments/rms-version-downloaded-processor.yaml
+  - stream-processors/deployments/rms-version-published-audit-processor.yaml
+  - stream-processors/deployments/rms-version-published-processor.yaml
+  - stream-processors/deployments/secret-scanning-alert-events-processor.yaml
+  - stream-processors/deployments/secret-scanning-notifications-processor.yaml
+  - stream-processors/deployments/secret-scanning-scan-completion-processor.yaml
+  - stream-processors/deployments/security-center-repository-update-processor.yaml
+  - stream-processors/deployments/submit-advisory-processor.yaml
+  - stream-processors/deployments/user-metadata-achievement-processor.yaml
+  - stream-processors/deployments/user-metadata-developer-program-membership-processor.yaml
+  - stream-processors/deployments/user-metadata-discussion-answer-processor.yaml
+  - stream-processors/deployments/user-metadata-global-advisory-credit-processor.yaml
+  - stream-processors/deployments/user-metadata-package-processor.yaml
+  - stream-processors/deployments/user-metadata-pro-badge-processor.yaml
+  - stream-processors/deployments/user-metadata-project-processor.yaml
+  - stream-processors/deployments/user-metadata-repo-processor.yaml
+  - stream-processors/deployments/user-metadata-sponsor-processor.yaml
+  - stream-processors/deployments/user-metadata-star-processor.yaml
+  - stream-processors/deployments/user-metadata-user-follow-processor.yaml
+  - stream-processors/deployments/user-metadata-user-team-membership-processor.yaml
+  - stream-processors/deployments/vss-subscription-event-processor.yaml
+  - timerd/deployments/timerd.yaml
+  - unicorn-api/configmaps/unicorn-api-nginx-config.yaml
+  - unicorn-api/deployments/unicorn-api.yaml
+  - unicorn-api/services/unicorn-api.yaml
+  - unicorn/deployments/unicorn.yaml
+  - unicorn/services/unicorn.yaml
+  - unicorn-performance/
+  - unicorn-api-graphql/
+
+components:
+  - ../../base/istio
+  - ../../base/metric-attribution
+  - ../../base/nginx-proxima-config
+
+configMapGenerator:
+  - name: observability-config
+    behavior: merge
+    literals:
+      - SERVICE_MESH_ENABLED=true
+
+patches:
+  - target:
+      kind: Deployment
+      name: unicorn-(api|api-graphql|internal-api|gitauth-api)
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/annotations/proxy.istio.io~1config
+        value: |
+          terminationDrainDuration: 10s
+  - target:
+      kind: Deployment
+      name: unicorn-internal-api
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/1/env/-
+        value:
+          name: PROXIMA_REQUEST_SCOPING_DISABLED
+          value: "1"
+      - op: add
+        path: /spec/template/spec/containers/1/env/-
+        value:
+          name: PROXIMA_INTERNAL_API_UNIQUE_LOGINS_REQUIRED
+          value: "1"
+      - op: add
+        path: /spec/template/spec/containers/1/env/-
+        value:
+          name: PROXIMA_INTERNAL_API_PRIVATE_MODE_BYPASS
+          value: "1"
+  - target:
+      kind: Service
+      name: unicorn-internal-api
+    patch: |-
+      - op: add
+        path: "/metadata/annotations/moda.github.net~1dns-registration-enabled"
+        value: "true"
+      - op: add
+        path: "/metadata/annotations/moda.github.net~1domain-name"
+        value: internal-api.service.%site%.github.net,internal-api.service.%stamp%.github.net
+  - target:
+      kind: Service
+      name: unicorn
+    patch: |-
+      - op: replace
+        path: "/metadata/annotations/moda.github.net~1domain-name"
+        value: ghe.com
+      - op: replace
+        path: "/metadata/annotations/moda.github.net~1load-balancer-type"
+        value: glb-http:multitenant
+      - op: replace
+        path: "/metadata/annotations/haproxy.org~1backend-config-snippet"
+        value: |-
+            option redispatch 1
+            option httpchk
+            http-check connect
+            http-check send meth GET uri /site/sha ver HTTP/1.1 hdr host ghe.com
+  - target:
+      kind: Service
+      name: unicorn-gitauth-api
+    patch: |-
+      - op: add
+        path: "/metadata/annotations/moda.github.net~1domain-name"
+        value: gitauth.service.%site%.github.net,gitauth.service.%stamp%.github.net
+  - target:
+      kind: Service
+      name: unicorn(|-api|-api-graphql)
+    patch: |-
+      - op: replace
+        path: "/metadata/annotations/moda.github.net~1load-balancer-type"
+        value: glb-tcp:multitenant
+      - op: remove
+        path: "/metadata/annotations/moda.github.net~1domain-name"
+  - target:
+      kind: Service
+      name: unicorn(|-api|-api-graphql|-internal-api|-gitauth-api)
+    patch: |-
+      - op: add
+        path: "/metadata/annotations/moda.github.net~1istio-ingress-enabled"
+        value: "true"
+  - target:
+      kind: Deployment
+      name: unicorn-gitauth-api
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/1/env/-
+        value:
+          name: GOTAUTH_URL
+          value: 'https://gotauth-%stamp%.service.%stamp%.github.net'
+  - target:
+      kind: Deployment
+      name: unicorn
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: REDIS2_TIMEOUT
+          value: "0.2"
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: AZURE_REGION
+          value: "%region%"
+      - op: add
+        path: /spec/template/spec/containers/2/env/-
+        value:
+          name: COPILOT_USAGE_SERVICE_URL
+          value: "http://api-server.copilot-usage-service-%stamp%.svc.cluster.local:8080"
+  - target:
+      kind: Deployment
+      name: unicorn-(|api|api-graphql|gitauth-api)
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/1/env/-
+        value:
+          name: REDIS2_TIMEOUT
+          value: "0.2"
+  - target:
+      kind: Deployment
+      name: unicorn-(|api|api-graphql|internal-api|gitauth-api)
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/1/env/-
+        value:
+          name: AZURE_REGION
+          value: "%region%"
+      - op: add
+        path: /spec/template/spec/containers/1/env/-
+        value:
+          name: COPILOT_USAGE_SERVICE_URL
+          value: "http://api-server.copilot-usage-service-%stamp%.svc.cluster.local:8080"

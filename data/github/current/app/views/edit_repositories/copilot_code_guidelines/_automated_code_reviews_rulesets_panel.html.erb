@@ -1,0 +1,130 @@
+<%
+  org_managed = ruleset_type == :organization
+  ruleset_count_label = ruleset_type == :organization ? "organization ruleset" : "ruleset"
+%>
+
+<%= render Primer::Beta::BorderBox.new do |component| %>
+  <% component.with_header(display: :flex) do |h| %>
+    <% h.with_title(tag: :h2, flex: 1, test_selector: "#{ruleset_type}-rulesets-title") do %>
+      <%= pluralize(rulesets.count, ruleset_count_label) %>
+    <% end %>
+
+    <% if org_managed %>
+      <span class="text-small color-fg-muted">Managed by <%= current_repository.owner.name %></span>
+    <% else %>
+      <%= render Primer::Beta::Button.new(
+          scheme: :link,
+          tag: :a,
+          float: :right,
+          type: :button,
+          id: "view-all-rulesets-button",
+          href: repository_rulesets_path(current_repository.owner, current_repository),
+      ) do |b| %>
+        View all rulesets
+        <% b.with_trailing_visual_icon(icon: :'link-external') %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% rulesets.each do |ruleset| %>
+    <%
+      ruleset_url = org_managed ? organization_ruleset_path(current_repository.owner, ruleset) : repository_ruleset_path(current_repository.owner, current_repository, ruleset)
+
+      target_count_info = target_counts_by_ruleset[ruleset.id]
+      target_count = target_count_info&.dig(:count)
+      target_text = if target_count_info&.dig(:errorMessage)
+        "targeting branches (too many to display)"
+      elsif target_count
+        "targeting #{pluralize(target_count, "branch")}"
+      else
+        "targeting #{pluralize(ruleset.conditions.count, "branch condition")}"
+      end
+
+      if org_managed && target_count_info&.dig(:errorMessage).nil?
+        target_text += " in this repository"
+      end
+    %>
+
+    <% component.with_row(classes: "Box-row d-flex tmp-px-3 py-2 flex-justify-between flex-items-center") do %>
+      <div class="d-flex flex-items-start gap-2">
+        <span>
+        <% case ruleset.enforcement %>
+        <% when "enabled" %>
+          <%= render Primer::Beta::Octicon.new(icon: "play", classes: "color-fg-success", size: :small, "aria-label": "Active") %>
+        <% when "evaluate" %>
+          <%= render Primer::Beta::Octicon.new(icon: "meter", classes: "color-fg-severe", size: :small, "aria-label": "Evaluate") %>
+        <% else %>
+          <%= render Primer::Beta::Octicon.new(icon: "skip", classes: "color-fg-muted", size: :small, "aria-label": "Disabled") %>
+        <% end %>
+        </span>
+
+        <div class="d-flex flex-column">
+          <%= render Primer::Beta::Link.new(
+            href: ruleset_url,
+            classes: "color-fg-default text-bold"
+          ) do %>
+            <%= ruleset.name %>
+          <% end %>
+          <div class="text-small color-fg-muted">
+            <%= pluralize(ruleset.rule_configurations.count, "Copilot code review rule") %> • <%= target_text %>
+          </div>
+        </div>
+      </div>
+    <% end %>
+
+    <% component.with_row(classes: "d-flex Box-row tmp-px-3 pt-0 pb-2 flex-justify-between flex-items-center bgColor-inset") do %>
+      <%
+        ccr_rule = ruleset.rule_configurations.find { |rule| rule.rule_type == "copilot_code_review" }
+      %>
+
+      <div class="d-flex flex-1 flex-column">
+          <% if ccr_rule.present? %>
+            <%
+              review_on_pushes_enabled = ccr_rule.param("review_on_push")
+              review_draft_prs_enabled = ccr_rule.param("review_draft_pull_requests")
+            %>
+
+            <div class="d-flex flex-1 mt-2">
+              <span>
+                <%= render Primer::Beta::Octicon.new(icon: "check", classes: "color-fg-muted", size: :small) %>
+              </span>
+              <div class="d-flex flex-1 ml-2">
+                <div class="color-fg-default text-bold flex-1 <%= review_draft_prs_enabled || review_on_pushes_enabled ? "border-bottom borderColor-muted pb-2" : "" %>">
+                  Automated code reviews on push
+                </div>
+              </div>
+            </div>
+            <% if review_draft_prs_enabled || review_on_pushes_enabled %>
+              <div class="d-flex flex-1 tmp-ml-4 <%= review_draft_prs_enabled && review_on_pushes_enabled ? "py-2" : "pt-2" %> flex-column">
+                <% if review_on_pushes_enabled %>
+                  <div class="d-flex flex-1">
+                    <span>
+                      <%= render Primer::Beta::Octicon.new(icon: "check", classes: "color-fg-muted", size: :small) %>
+                    </span>
+                    <div class="d-flex flex-1 ml-2">
+                      <div class="color-fg-default text-bold flex-1 <%= review_draft_prs_enabled ? "border-bottom borderColor-muted pb-2" : "" %>">
+                        Review new pushes
+                      </div>
+                    </div>
+                  </div>
+                <% end %>
+
+                <% if review_draft_prs_enabled %>
+                  <div class="d-flex flex-1 <%= review_on_pushes_enabled ? "pt-2" : "" %>">
+                    <span>
+                      <%= render Primer::Beta::Octicon.new(icon: "check", classes: "color-fg-muted", size: :small) %>
+                    </span>
+                    <div class="d-flex flex-1 ml-2">
+                      <div class="color-fg-default text-bold flex-1">
+                        Review draft pull requests
+                      </div>
+                    </div>
+                  </div>
+                <% end %>
+              </div>
+            <% end %>
+          <% end %>
+    </div>
+    <% end %>
+  <% end %>
+<% end %>

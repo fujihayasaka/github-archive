@@ -1,0 +1,99 @@
+<%= render "stafftools/users/licensing/navigation" %>
+
+<% if !this_user.is_organization_billed_through_business? && this_user.customer %>
+  <%= render_react_partial(
+    name: "licensify-licenses",
+    disable_ssr: true,
+    props: {
+      customerId: this_user.customer.id.to_s,
+      licenseStatuses: Licensify::Services::V1::LicenseStatus.constants,
+      enablementReasons: Licensify::Services::V1::EnablementReason.constants.sort,
+      products: ['sdlc', 'code_security', 'secret_protection'],
+    }
+  ) %>
+<% end %>
+
+<%= render Primer::Beta::Subhead.new(hide_border: true) do |component| %>
+  <% component.with_heading(tag: :h2, danger: true) do %>Danger zone<% end %>
+<% end %>
+<div class="Box Box--danger">
+  <div class="Box-row">
+    <div class="form-group d-flex mt-0">
+      <div class="d-flex flex-column col-6">
+        <label>Synchronize licenses with Licensify</label>
+        <span class="note">
+          If the numbers in Overview or Licenses don't match up, you can try synchronizing licenses in Licensify.
+          This is a safe operation.
+        </span>
+      </div>
+      <div class="d-flex flex-1 flex-justify-center flex-column">
+        <%= form_tag stafftools_user_billing_sdlc_licensing_index_path(this_user), method: :put do %>
+          <%= render(Primer::Alpha::Dialog.new(
+              title: "Confirm license synchronization",
+              id: dom_id(this_user),
+              size: :medium_portrait,
+            )) do |dialog| %>
+            <% dialog.with_show_button(
+              scheme: :danger,
+              block: true,
+              id: dom_id(this_user)
+            ) { "Synchronize licenses" } %>
+
+            <% dialog.with_body do %>
+              Use this to make sure we're tracking up-to-date licenses within this organization.
+            <% end %>
+
+            <% dialog.with_footer do %>
+              <%= render(Primer::Beta::Button.new(data: { "close-dialog-id": dom_id(this_user) })) { "Cancel" } %>
+              <%= render(Primer::Beta::Button.new(type: :submit, scheme: :danger)) { "Confirm" } %>
+            <% end %>
+          <% end %>
+        <% end %>
+      </div>
+    </div>
+  </div>
+  <% if this_user.customer %>
+    <div class="Box-row">
+      <div class="form-group d-flex mt-0">
+        <div class="d-flex flex-column col-6">
+          <label>Synchronize product enablements with Licensify</label>
+          <span class="note">
+            Synchronize product enablements for this customer with Licensify.
+          </span>
+        </div>
+        <div class="d-flex flex-1 flex-justify-center flex-column">
+            <%= render(Primer::Alpha::Dialog.new(
+            title: "Synchronize product enablements",
+            id: dom_id(this_user, :product_enablements_sync),
+            size: :medium_portrait,
+          )) do |dialog| %>
+            <% dialog.with_show_button(
+              scheme: :danger,
+              block: true
+            ) { "Synchronize product enablements" } %>
+            <%= form_with(url: sync_product_enablements_stafftools_customer_licensify_licenses_path(this_user.customer.id), method: :post) do |f| %>
+              <%= render(Primer::Alpha::Dialog::Body.new) do %>
+                <%= render(Primer::Alpha::CheckBoxGroup.new(
+                  name: "products",
+                  label: "Products",
+                  caption: "Select the products to synchronize with Licensify.",
+                )) do |component| %>
+                  <% component.check_box(label: "Bundled GHAS", value: "ghas", checked: true) %>
+                  <% component.check_box(label: "Code Security", value: "code_security", checked: true) %>
+                  <% component.check_box(label: "Secret Protection", value: "secret_protection", checked: true) %>
+                <% end %>
+              <% end %>
+
+              <%= render(Primer::Alpha::Dialog::Footer.new) do %>
+                <%= render(Primer::Beta::Button.new(data: { "close-dialog-id": dom_id(this_user, :product_enablements_sync) })) { "Cancel" } %>
+                <%= render(Primer::Beta::Button.new(type: :submit, scheme: :danger)) { "Synchronize" } %>
+              <% end %>
+            <% end %>
+          <% end %>
+        </div>
+      </div>
+    </div>
+    <%= render "stafftools/licensing/delete_deactivated_licenses_button", customer_id: this_user.customer.id, dom_id_base: this_user, col_class: "col-6" %>
+  <% end %>
+</div>
+

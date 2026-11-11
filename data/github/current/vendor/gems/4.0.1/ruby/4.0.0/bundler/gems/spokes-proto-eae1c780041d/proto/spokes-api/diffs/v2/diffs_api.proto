@@ -1,0 +1,322 @@
+syntax = "proto3";
+
+package github.spokes.diffs.v2;
+
+option go_package = "github.com/github/spokes-proto/gen/go/v2/diffs";
+option ruby_package = "GitHub::Spokes::Proto::Diffs::V2";
+
+import "spokes-api/extensions/v1/field_options.proto";
+
+import "spokes-api/types/v1/diff_algorithm.proto";
+import "spokes-api/types/v1/object_id.proto";
+import "spokes-api/types/v1/path.proto";
+import "spokes-api/types/v1/pathspec.proto";
+import "spokes-api/types/v1/repository.proto";
+import "spokes-api/types/v1/request_context.proto";
+import "spokes-api/types/v1/cursor.proto";
+import "spokes-api/types/v1/transaction_context.proto";
+import "spokes-api/types/v2/attribution.proto";
+
+
+import "spokes-api/types/selectors/v1/none_selector.proto";
+import "spokes-api/types/selectors/v1/repo_object_id_selector.proto";
+import "spokes-api/types/selectors/v1/root_selector.proto";
+import "spokes-api/types/selectors/v1/resolved_base_selector.proto";
+
+
+import "spokes-api/diffs/v2/diff_appliable_result.proto";
+import "spokes-api/diffs/v2/diff_summary_delta.proto";
+import "spokes-api/diffs/v2/diff_summary_stat.proto";
+import "spokes-api/diffs/v2/diff_delta.proto";
+
+
+// DiffsAPI contains APIs for diff-related Git operations.
+service DiffsAPI {
+    // GetDiffPositions calculates the updated line numbers after applying a diff,
+    // given the original line numbers. All line numbers are 1-indexed,
+    // so the first line is represented by 1.
+    rpc GetDiffPositions(GetDiffPositionsRequest) returns (GetDiffPositionsResponse);
+
+    // ReadDiffSummary computes a summary of the changes between two commits and
+    // a merge base.
+    rpc ReadDiffSummary(ReadDiffSummaryRequest) returns (ReadDiffSummaryResponse);
+
+    // ReadDiffPairs computes the diffs between pairs of files.
+    rpc ReadDiffPairs(ReadDiffPairsRequest) returns (ReadDiffPairsResponse);
+
+    // GetDiffAppliable checks whether a given diff patch can be applied to a commit via `git apply --3way`.
+    // If the patch does not contain index lines, git falls back to applying without 3-way merge.
+    rpc GetDiffAppliable(GetDiffAppliableRequest) returns (GetDiffAppliableResponse);
+
+    // CreateCommitFromDiff applies a diff to the given treeish creating an object.
+    rpc CreateCommitFromDiff(CreateCommitFromDiffRequest) returns (CreateCommitFromDiffResponse);
+}
+
+// CheckCommitReachability checks whether the selected commits are reachable from a branch or tag.
+message ReadDiffSummaryRequest {
+    // repository is the repository to operate on.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.RequestContext request_context = 2;
+
+    // oid1 is the first head to operate on.  If it is a RootSelector, the empty
+    // tree (from the root of the repository) will be used.
+    oneof oid1 {
+      github.spokes.types.v1.ObjectID object_id1 = 3;
+
+      github.spokes.types.selectors.v1.RepoObjectIDSelector repo_object_id1 = 4;
+
+      github.spokes.types.selectors.v1.RootSelector root_selector1 = 5;
+    }
+
+    // oid2 is the second head to operate on.  Diff information will be between
+    // the computed merge base and this commit.
+    oneof oid2 {
+      github.spokes.types.v1.ObjectID object_id2 = 6;
+
+      github.spokes.types.selectors.v1.RepoObjectIDSelector repo_object_id2 = 7;
+    }
+
+    // base_oid is the merge base to use; if it is not provided, one will
+    // be computed.
+    oneof base_oid {
+      github.spokes.types.v1.ObjectID base_object_id = 8;
+
+      github.spokes.types.selectors.v1.RepoObjectIDSelector repo_base_object_id = 9;
+
+      github.spokes.types.selectors.v1.NoneSelector none_base = 10;
+    }
+
+    // diff_algorithm is the diff algorithm to be used.
+    github.spokes.types.v1.DiffAlgorithm diff_algorithm = 11;
+
+    // ignore_whitespace indicates whether whitespace is to be ignored.
+    bool ignore_whitespace = 12;
+
+    // include_stat indicates whether to include stat information (additions,
+    // deletions, and changed files), both for individual files and for the diff
+    // as a whole, in the output.
+    bool include_stat = 13;
+
+    // pathspec can optionally be specified to limit the response
+    // to only files matching at least one of the paths in the pathspec.
+    github.spokes.types.v1.Pathspec pathspec = 14;
+}
+
+// ReadDiffSummaryResponse contains a summary of a diff.
+message ReadDiffSummaryResponse {
+    // stat is the total number of additions, deletions, and changed files in
+    // this diff.
+    DiffSummaryStat stat = 1;
+
+    // deltas are the metadata about each modified file.
+    repeated DiffSummaryDelta deltas = 2;
+}
+
+message SourcePathLineNumbers {
+  // The path in the source treeish.
+  github.spokes.types.v1.Path source_path = 1;
+
+  // An array of 1-indexed line numbers in the file specified by the given
+  // source path. The special value "0" indicates a mapping of the content from
+  // source path to target path as a whole which is used for file level
+  // commments. At least 1 item is required per request.
+  repeated int64 line_numbers = 2;
+}
+
+message GetDiffPositionsRequest {
+  // The repository to operate on.
+  github.spokes.types.v1.Repository repository = 1;
+
+  github.spokes.types.v1.RequestContext request_context = 2;
+
+  // The source treeish where the given file/line number is defined.
+  // Usually this is a commit object id, but it can be any treeish.
+  github.spokes.types.selectors.v1.RepoObjectIDSelector source_oid = 3;
+
+  // The target treeish in which we want to know the new line numbers.
+  // Usually this is a commit object id, but it can be any treeish.
+  github.spokes.types.selectors.v1.RepoObjectIDSelector target_oid = 4;
+
+  // Paths with line numbers that the caller wants the new line numbers for.
+  // A least 1 line number query within a path is required per request.
+  // A maximum of 1000 line number requests are allowed per request.
+  repeated SourcePathLineNumbers source_items = 5 [(github.spokes.extensions.v1.limit) = 1000];
+}
+
+message LineNumberMapping {
+  // The 1-indexed line number in the file specified by the source path
+  // (given in the request). The special value "0" indicates a mapping of the
+  // content from source path to target path as a whole which is used for file
+  // level commments.
+  int64 source_line_number = 1;
+
+  // The 1-indexed line number in the file specified by the target path
+  // (set in the response). If a whole file mapping was requested with the
+  // special value "0" in the source line number, then the target line number
+  // will be set to "0" as well. The special value "-1" in a target line number
+  // indicates a deleted hunk.
+  int64 target_line_number = 2;
+}
+
+message MappingState {
+  enum StateCode {
+      STATE_CODE_INVALID = 0;
+      STATE_CODE_SUCCESS = 1;
+      STATE_CODE_REMOVED_PATH = 2;
+      STATE_CODE_INVALID_PATH = 3;
+      STATE_CODE_CONTENT_TOO_LARGE = 4;
+      STATE_CODE_RENAME_TOO_COMPLEX = 5;
+  }
+  // Machine-readable state code.
+  StateCode code = 1;
+
+  // Human-readable description of the state code.
+  string description = 2;
+}
+
+message TargetPathLineNumbers {
+  // The path in the source treeish (given in the request).
+  github.spokes.types.v1.Path source_path = 1;
+
+  // The path in the target treeish (set in the response). The path is empty,
+  // then the source path was deleted in the target treeish.
+  github.spokes.types.v1.Path target_path = 2;
+
+  // An array of 1-index line number mappings from the source path to the target path.
+  // Unless the source path was deleted, this array will always contain at least
+  // one item.
+  repeated LineNumberMapping line_numbers = 3;
+
+  // Additional context for the mapping result from source to target.
+  MappingState state = 4;
+}
+
+message GetDiffPositionsResponse {
+  // A mapping from source paths with line numbers to target paths with new line
+  // numbers in the given treeishs.
+  repeated TargetPathLineNumbers target_items = 1;
+
+  // The error message indicating the problem, if any.
+  string error = 2;
+}
+
+message ReadDiffPairsRequest {
+    // repository is the repository to operate on.
+  github.spokes.types.v1.Repository repository = 1;
+
+  github.spokes.types.v1.RequestContext request_context = 2;
+
+  // cursor is used for paging the results of the diff pair computation.
+  // When provided, the response will continue from where the previous request left off
+  // via the next_cursor in the previous response.
+  github.spokes.types.v1.Cursor cursor = 3;
+
+  oneof pairs {
+      DiffDeltaSelector diff_deltas = 4;
+  }
+
+  // (Optional) resolved_base_selector is the selector that triggers internal resolution of a merge base
+  github.spokes.types.selectors.v1.ResolvedBaseSelector resolved_base_selector = 5;
+
+  // (Optional) contains options to customize the diff output.
+  ReadDiffPairsOptions options = 6;
+
+}
+
+message DiffDeltaSelector {
+    // diff_delta_list is list of file deltas to compute diffs for.
+    repeated github.spokes.diffs.v2.DiffDelta diff_delta_list = 1;
+}
+
+
+message ReadDiffPairsResponse {
+  // items are the per-file diff results, aligned with the requested pairs.
+  repeated DiffPairResult items = 1;
+
+  github.spokes.types.v1.Cursor next_cursor = 2;
+
+}
+
+message ReadDiffPairsOptions {
+    // max_diff_size is the maximum size in bytes for a single diff output.
+    // If a diff exceeds this size, it will be truncated or omitted.
+    uint64 max_diff_size = 1;
+
+    // max_total_size is the maximum total size in bytes for all diff outputs combined.
+    // If the total size exceeds this limit, processing will stop and return partial results.
+    uint64 max_total_size = 2;
+
+    // max_diff_lines is the maximum number of lines for a single diff output.
+    // If a diff exceeds this number of lines, it will be truncated or omitted.
+    uint32 max_diff_lines = 3;
+
+    // max_total_lines is the maximum total number of lines for all diff outputs combined.
+    // If the total lines exceed this limit, processing will stop and return partial results.
+    uint32 max_total_lines = 4;
+
+    // ignore_whitespace indicates whether whitespace is to be ignored.
+    bool ignore_whitespace = 5;
+}
+
+message DiffPairResult {
+  // diff_content contains the textual diff for the response.
+  bytes diff_content = 1;
+  // truncated indicates whether the diff content was truncated due to size limits.
+  bool truncated = 2;
+}
+
+// GetDiffAppliableRequest checks whether a diff patch can be applied to a commit.
+message GetDiffAppliableRequest {
+    // repository is the repository to operate on.
+    github.spokes.types.v1.Repository repository = 1;
+
+    // request_context is extra information used for quotas and request handling.
+    github.spokes.types.v1.RequestContext request_context = 2;
+
+    // commit_oid is the commit SHA to check the patch against.
+    github.spokes.types.v1.ObjectID commit_oid = 3;
+
+    // diff_patch is the unified diff patch content to check for appliability.
+    bytes diff_patch = 4;
+}
+
+// GetDiffAppliableResponse contains the result of the appliability check.
+message GetDiffAppliableResponse {
+    // result indicates whether and why the patch can or cannot be applied.
+    DiffAppliableResult result = 1;
+
+    // resolved_diff_patch is the result of applying the input diff_patch to the commit,
+    // expressed as a new diff. Only populated when it differs from the input diff_patch.
+    bytes resolved_diff_patch = 2;
+}
+
+message CreateCommitFromDiffRequest {
+    // repository is the repository to operate on.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.RequestContext request_context = 2;
+
+    // diff_patch is the unified diff patch content for creating the commit object
+    bytes diff_patch = 3;
+
+    // base_oid is the required base object ID to operate on
+    github.spokes.types.v1.ObjectID base_oid = 4;
+  
+    // author is the author of the commit 
+    github.spokes.types.v2.Attribution author = 5;
+
+    // committer is the committer of the commit
+    github.spokes.types.v2.Attribution committer = 6;
+  
+    // message is the commit message
+    bytes message = 7;
+}
+
+message CreateCommitFromDiffResponse {
+    // transaction_context is the updated state after creating the objects.
+    github.spokes.types.v1.TransactionContext transaction_context = 1;
+
+    // oid is the object id of the created commit
+    github.spokes.types.v1.ObjectID oid = 2;
+}

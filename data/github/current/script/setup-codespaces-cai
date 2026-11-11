@@ -1,0 +1,142 @@
+#!/bin/bash
+set -e
+
+# This script sets up the github/coding-agent-integrations repository for a github/github codespace.
+
+#=============================================================================
+# CONSTANTS AND CONFIGURATION
+#=============================================================================
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+ORANGE='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Default settings. If the user provides options, these will be updated accordingly.
+BRANCH=main
+DELETE_REPO=false
+ADD_WORKSPACE=false
+
+#=============================================================================
+# HELPER FUNCTIONS
+#=============================================================================
+
+# Prints a help menu describing the script and its options.
+help() {
+   echo "Sets up the github/coding-agent-integrations repository for a github/github codespace."
+   echo
+   echo "Usage: setup-codespaces-cai [-b branch] [-d|h|w] "
+   echo
+   echo "Options:"
+  echo " -b     Specify the coding-agent-integrations branch to clone. Defaults to main if not provided."
+   echo "  -d     Before starting, delete the existing coding-agent-integrations and copilot-api directories in the codespace."
+   echo "  -w     Add the coding-agent-integrations repo as a workspace in VS Code."
+   echo "  -h     Print this help message."
+   echo
+}
+
+# Prints the script banner.
+banner() {
+  echo -e "${GREEN}"
+cat << 'EOF'
+
+   ██████╗ ██████╗ ██████╗ ██╗███╗   ██╗ ██████╗
+  ██╔════╝██╔═══██╗██╔══██╗██║████╗  ██║██╔════╝
+  ██║     ██║   ██║██║  ██║██║██╔██╗ ██║██║  ███╗
+  ██║     ██║   ██║██║  ██║██║██║╚██╗██║██║   ██║
+  ╚██████╗╚██████╔╝██████╔╝██║██║ ╚████║╚██████╔╝
+   ╚═════╝ ╚═════╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝ ╚═════╝
+
+   █████╗  ██████╗ ███████╗███╗   ██╗████████╗
+  ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝
+  ███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║
+  ██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║
+  ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║
+  ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝
+
+  ██╗███╗   ██╗████████╗███████╗ ██████╗ ██████╗  █████╗ ████████╗██╗ ██████╗ ███╗   ██╗███████╗
+  ██║████╗  ██║╚══██╔══╝██╔════╝██╔════╝ ██╔══██╗██╔══██╗╚══██╔══╝██║██╔═══██╗████╗  ██║██╔════╝
+  ██║██╔██╗ ██║   ██║   █████╗  ██║  ███╗██████╔╝███████║   ██║   ██║██║   ██║██╔██╗ ██║███████╗
+  ██║██║╚██╗██║   ██║   ██╔══╝  ██║   ██║██╔══██╗██╔══██║   ██║   ██║██║   ██║██║╚██╗██║╚════██║
+  ██║██║ ╚████║   ██║   ███████╗╚██████╔╝██║  ██║██║  ██║   ██║   ██║╚██████╔╝██║ ╚████║███████║
+  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝
+
+                                🚀 Codespace Setup Script 🚀
+
+EOF
+echo -e "${NC}"
+}
+
+parse_arguments() {
+  while getopts ":b:hdw" opt; do
+    case $opt in
+      h) # display help message
+        help
+        exit;;
+      b) # If a branch was provided, re-set the variable
+        BRANCH=$OPTARG;;
+      d) # Delete the repository if it exists
+        DELETE_REPO=true;;
+      w) # Add as workspace in VS Code
+        ADD_WORKSPACE=true;;
+      :) # Missing argument
+      echo -e "${RED}Error: Option -$OPTARG requires an argument.${NC}"
+      exit 1;;
+      \?) # Invalid option
+        echo -e "${RED}Error: Invalid option -$OPTARG${NC}"
+        exit 1;;
+    esac
+  done
+}
+
+# Clones the coding-agent-integrations repository. Supports deleting existing repo and adding to VS Code workspace.
+setup_coding_agent_integrations() {
+  if [[ -d "/workspaces/coding-agent-integrations" && "$DELETE_REPO" = false ]]; then
+    echo -e "${RED}The coding-agent-integrations directory already exists in this codespace.${NC} \nYou can rerun the setup script with the -d argument to force the deletion of the existing repository."
+    exit 1
+  fi
+
+  if [ "$DELETE_REPO" = true ]; then
+    echo -e "\n${GREEN}➡️ Deleting the existing coding-agent-integrations repo...\n${NC}"
+    rm -rf /workspaces/coding-agent-integrations
+  fi
+
+  echo -e "\n${GREEN}➡️ Cloning coding-agent-integrations repo at branch $BRANCH...\n${NC}"
+  git clone https://github.com/github/coding-agent-integrations /workspaces/coding-agent-integrations --branch $BRANCH
+
+  if [ "$ADD_WORKSPACE" = true ]; then
+    echo -e "\n${GREEN}➡️ Adding coding-agent-integrations as a workspace in VS Code...\n${NC}"
+    code --add /workspaces/coding-agent-integrations
+  fi
+}
+
+# Clones the copilot-api repository and enables Copilot Chat in the Codespace. Supports deleting existing repo.
+setup_copilot_api() {
+  if [ "$DELETE_REPO" = true ]; then
+    script/setup-codespaces-copilot-api -d || true
+  else
+    script/setup-codespaces-copilot-api || true
+  fi
+
+  script/enable-copilot-chat || true
+}
+
+success() {
+  echo -e ""
+  echo -e "${GREEN}🎉🎉 FINISHED! The coding-agent-integrations repo has been set up! 🎉🎉"
+  echo -e "To start the coding-agent-integrations server in this branch, run the following commands:${NC}"
+  echo -e ""
+  echo -e "${ORANGE}cd /workspaces/coding-agent-integrations ; make run${NC}"
+  echo -e ""
+}
+
+#=============================================================================
+# SCRIPT EXECUTION
+#=============================================================================
+banner
+parse_arguments "$@"
+
+setup_coding_agent_integrations
+setup_copilot_api
+success

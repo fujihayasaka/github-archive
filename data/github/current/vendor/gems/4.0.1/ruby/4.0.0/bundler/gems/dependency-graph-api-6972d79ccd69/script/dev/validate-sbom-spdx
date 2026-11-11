@@ -1,0 +1,75 @@
+#!/bin/sh
+#
+# Validates an SBOM SPDX file for a repository ID with popular SBOM SPDX format validators.
+# Usage: script/dev/validate-sbom-spdx REPOSITORY_ID [-v validtor]
+# -v validtor: sbom-utility or sbomqs, if not specified, both will be used
+
+set -e
+
+sbom_file=$(mktemp sbom.XXXXXXXX.json)
+repository_id=$1
+shift 1
+
+generate_sbom()
+{
+  echo "Generating SBOM SPDX file $sbom_file for GitHub repository ID $repository_id"
+  bin/rails r script/dev/generate-sbom-spdx $repository_id > $sbom_file &
+  wait
+  if grep "does not exist" $sbom_file; then
+    rm -rf $sbom_file
+    exit 1
+  else
+    printf "\nSBOM SPDX file generated successfully, here is the output: \n"
+    cat $sbom_file
+  fi
+}
+validate_with_sbom_utility()
+{
+  printf "\nValidating SBOM SPDX file with sbom-utility... \n\n"
+  # If you'd like to provide a different schema, you can overwrite the default schema in the sbom-schema-config.json file
+  sbom-utility validate -i $sbom_file --config-schema sbom-schema-config.json || true
+}
+
+validate_with_sbomqs()
+{
+  printf "\nValidating SBOM SPDX file with sbomqs tool... \n\n"
+  sbomqs score $sbom_file
+  echo "For a sharable link to SBOM Quality Report visit: $(sbomqs share $sbom_file)"
+}
+
+help()
+{
+   # Display Help
+   echo "Validates an SBOM SPDX file for a repository ID with popular SBOM SPDX format validators."
+   echo
+   echo "Syntax: validate-sbom-spdx repository_id [-h|v]"
+   echo "options:"
+   echo "h     Print this help."
+   echo "v     Specify a validator to use - either sbom-utility or sbomqs. If not provided defaults to all validators."
+}
+
+while getopts "hv:" option; do
+   case $option in
+      h) # display Help
+        help
+        exit;;
+      v) # execute validator(s)
+        if [ "$OPTARG" = "sbom-utility" ] ; then
+          generate_sbom
+          validate_with_sbom_utility
+          exit
+        elif [ "$OPTARG" = "sbomqs" ] ; then
+          generate_sbom
+          validate_with_sbomqs
+          exit
+        fi
+        exit;;
+      *)
+        exit
+        ;;
+   esac
+done
+
+generate_sbom
+validate_with_sbom_utility
+validate_with_sbomqs

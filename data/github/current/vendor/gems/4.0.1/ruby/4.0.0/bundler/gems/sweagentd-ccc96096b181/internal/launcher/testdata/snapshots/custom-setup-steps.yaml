@@ -1,0 +1,282 @@
+run-name: 'Copilot: Custom Steps Test'
+permissions:
+    deployments: write
+"on": dynamic
+jobs:
+    copilot-job:
+        runs-on:
+            - self-hosted
+            - linux
+        timeout-minutes: 120
+        permissions:
+            contents: read
+            deployments: write
+            pull-requests: write
+        environment: copilot
+        env:
+            SHOULD_CONTINUE: "true"
+        steps:
+            - name: Validate runner OS
+              run: |-
+                if [[ "${{ runner.os }}" != "Linux" ]]; then
+                  echo "SHOULD_CONTINUE=false" >> $GITHUB_ENV
+                  echo "${{ runner.os }} is not currently supported. Only Linux is supported."
+                  exit 1
+                fi
+              shell: bash
+            - name: Validate firewall settings (Linux)
+              if: ${{ runner.environment == 'self-hosted' && runner.os == 'Linux' }}
+              run: |-
+                if [ "$COPILOT_AGENT_FIREWALL_ENABLED" == "true" ]; then
+                  echo "SHOULD_CONTINUE=false" >> $GITHUB_ENV
+                  echo "You have configured Copilot coding agent to use self-hosted GitHub Actions runners in copilot-setup-steps.yml, but the agent firewall is enabled. You must disable the agent firewall in the repository's settings to use self-hosted runners. For more information, see https://gh.io/cca-self-hosted-disable-firewall."
+                  exit 1
+                fi
+              shell: bash
+              env:
+                COPILOT_AGENT_FIREWALL_ENABLED: ${{ vars.COPILOT_AGENT_FIREWALL_ENABLED || true }}
+            - name: Validate firewall settings (Windows)
+              if: ${{ runner.os == 'Windows' }}
+              run: |-
+                if ($env:COPILOT_AGENT_FIREWALL_ENABLED -eq "true") {
+                  "SHOULD_CONTINUE=false" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+                  Write-Host "The agent firewall is enabled, but firewall is not supported on Windows runners. You must disable the agent firewall in the repository's settings to use Windows runners. For more information, see https://gh.io/cca-disable-firewall."
+                  exit 1
+                }
+              shell: pwsh
+              env:
+                COPILOT_AGENT_FIREWALL_ENABLED: ${{ vars.COPILOT_AGENT_FIREWALL_ENABLED || true }}
+            - name: Prepare Copilot (Linux)
+              if: ${{ env.SHOULD_CONTINUE == 'true' && runner.os == 'Linux' }}
+              run: |-
+                set -o pipefail
+                echo "Preparing Copilot..." && \
+                echo "Runtime version: $COPILOT_AGENT_RUNTIME_VERSION" && \
+                echo "COPILOT_AGENT_START_TIME_SEC=$(date +%s)" >> $GITHUB_ENV
+                echo "COPILOT_AGENT_TIMEOUT_MIN=120" >> $GITHUB_ENV
+                mkdir -p "runtime-logs" "cca-mcp-debug-logs" && \
+                MAX_RETRIES=3 && RETRY_COUNT=0 && \
+                while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do \
+                  if [ -n "$GITHUB_COPILOT_ACTION_OVERRIDE_DOWNLOAD_URL" ]; then \
+                    curl -f -D "runtime-logs/download.log" -H "Authorization: Bearer $GITHUB_COPILOT_API_TOKEN" $GITHUB_COPILOT_ACTION_OVERRIDE_DOWNLOAD_URL 2>> "runtime-logs/download.log" | tar -zxv >> "runtime-logs/download.log" 2>&1; \
+                  else \
+                    curl -f -D "runtime-logs/download.log" $GITHUB_COPILOT_ACTION_DOWNLOAD_URL 2>> "runtime-logs/download.log" | tar -zxv >> "runtime-logs/download.log" 2>&1; \
+                  fi; \
+                  if [ $? -eq 0 ]; then break; fi; \
+                  RETRY_COUNT=$((RETRY_COUNT + 1)); \
+                  sleep 1; \
+                done && \
+                echo "Finished downloading and extracting runtime" && \
+                if [ ! -d "copilot-developer-action-main" ]; then mv copilot-developer-action-* copilot-developer-action-main >> "runtime-logs/download.log" 2>&1; fi && \
+                ./copilot-developer-action-main/script/setup.sh "${{ runner.temp }}/ghcca-node" && \
+                echo "Copilot prepared successfully." 2>&1 | tee -a "runtime-logs/download.log"
+              working-directory: ${{ runner.temp }}
+              env:
+                COPILOT_AGENT_RUNTIME_VERSION: ${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).COPILOT_AGENT_RUNTIME_VERSION }}
+                COPILOT_AGENT_SOURCE_ENVIRONMENT: production
+                GITHUB_COPILOT_ACTION_DOWNLOAD_URL: ${{ secrets.GITHUB_COPILOT_ACTION_DOWNLOAD_URL }}
+                GITHUB_COPILOT_ACTION_OVERRIDE_DOWNLOAD_URL: ""
+                GITHUB_COPILOT_API_TOKEN: ${{ secrets.GITHUB_COPILOT_API_TOKEN }}
+            - name: Prepare Copilot (Windows)
+              if: ${{ env.SHOULD_CONTINUE == 'true' && runner.os == 'Windows' }}
+              run: |-
+                Write-Host "Preparing Copilot..."
+                Write-Host "Runtime version: $env:COPILOT_AGENT_RUNTIME_VERSION"
+
+                # Verify tar is available (built-in on Windows 10 1803+ and Server 2019+)
+                if (-not (Get-Command tar -ErrorAction SilentlyContinue)) {
+                  throw "The 'tar' command is not available on this runner. Please either install the tar tool or use GitHub-hosted runners."
+                }
+
+                $timestamp = [int][double]::Parse((Get-Date -UFormat %s))
+                "COPILOT_AGENT_START_TIME_SEC=$timestamp" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+                "COPILOT_AGENT_TIMEOUT_MIN=120" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+                New-Item -ItemType Directory -Force -Path "runtime-logs", "cca-mcp-debug-logs" | Out-Null
+
+                $maxRetries = 3
+                $retryCount = 0
+                $success = $false
+
+                while ($retryCount -lt $maxRetries) {
+                  try {
+                    if ($env:GITHUB_COPILOT_ACTION_OVERRIDE_DOWNLOAD_URL) {
+                      $headers = @{ "Authorization" = "Bearer $env:GITHUB_COPILOT_API_TOKEN" }
+                      Invoke-WebRequest -Uri $env:GITHUB_COPILOT_ACTION_OVERRIDE_DOWNLOAD_URL -OutFile "action.tar.gz" -Headers $headers -ErrorAction Stop
+                    } else {
+                      Invoke-WebRequest -Uri $env:GITHUB_COPILOT_ACTION_DOWNLOAD_URL -OutFile "action.tar.gz" -ErrorAction Stop
+                    }
+                    $success = $true
+                    break
+                  } catch {
+                    $retryCount++
+                    Start-Sleep -Seconds 1
+                  }
+                }
+
+                if (-not $success) {
+                  throw "Failed to download action after $maxRetries retries"
+                }
+
+                # Extract tar.gz using tar (built-in on Windows 10 1803+ and Server 2019+)
+                tar -zxf action.tar.gz *>> "runtime-logs\download.log"
+                if ($LASTEXITCODE -ne 0) {
+                  throw "Failed to extract action.tar.gz with exit code $LASTEXITCODE"
+                }
+
+                # Rename directory if needed
+                $dirs = Get-ChildItem -Directory -Filter "copilot-developer-action-*"
+                if ($dirs -and -not (Test-Path "copilot-developer-action-main")) {
+                  Rename-Item -Path $dirs[0].FullName -NewName "copilot-developer-action-main"
+                }
+
+                # Run setup script (PowerShell version expected in the runtime package)
+                if (Test-Path "copilot-developer-action-main\script\setup.ps1") {
+                  & "copilot-developer-action-main\script\setup.ps1" "${{ runner.temp }}\ghcca-node"
+                  if ($LASTEXITCODE -ne 0) { throw "Setup script failed with exit code $LASTEXITCODE" }
+                } else {
+                  throw "setup.ps1 not found. The runtime package may be corrupted or incompatible with Windows runners."
+                }
+
+                Write-Host "Copilot prepared successfully."
+              shell: pwsh
+              working-directory: ${{ runner.temp }}
+              env:
+                COPILOT_AGENT_RUNTIME_VERSION: ${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).COPILOT_AGENT_RUNTIME_VERSION }}
+                COPILOT_AGENT_SOURCE_ENVIRONMENT: production
+                GITHUB_COPILOT_ACTION_DOWNLOAD_URL: ${{ secrets.GITHUB_COPILOT_ACTION_DOWNLOAD_URL }}
+                GITHUB_COPILOT_ACTION_OVERRIDE_DOWNLOAD_URL: ""
+                GITHUB_COPILOT_API_TOKEN: ${{ secrets.GITHUB_COPILOT_API_TOKEN }}
+            - name: Install custom dependencies
+              run: apt-get update && apt-get install -y custom-tool
+            - name: Setup custom environment
+              run: export CUSTOM_VAR=value
+            - name: Setup Agent (Linux)
+              if: ${{ env.SHOULD_CONTINUE == 'true' && (success() || !cancelled()) && runner.os == 'Linux' }}
+              run: |-
+                echo "Setting up the agent..."
+                npm config get prefix
+                npm install -g @custom/tool
+              working-directory: ${{ runner.temp }}
+            - name: Setup Agent (Windows)
+              if: ${{ env.SHOULD_CONTINUE == 'true' && (success() || !cancelled()) && runner.os == 'Windows' }}
+              run: |-
+                Write-Host "Setting up the agent..."
+                npm config get prefix
+                npm install -g @custom/tool
+              shell: pwsh
+              working-directory: ${{ runner.temp }}
+            - name: Processing Request (Linux)
+              if: ${{ env.SHOULD_CONTINUE == 'true' && (success() || !cancelled()) && runner.os == 'Linux' }}
+              run: |-
+                echo "Processing requests..." && \
+                "${{ runner.temp }}/copilot-developer-action-main/ebpf/launch.sh" \
+                  "${{ runner.temp }}/ghcca-node/node/bin/node --enable-source-maps ${{ runner.temp }}/copilot-developer-action-main/dist/index.js" \
+                  "${{ runner.temp }}/runtime-logs" \
+                  "false"
+              env:
+                BLACKBIRD_MODE: ""
+                COPILOT_AGENT_DEBUG: ${{ (vars.COPILOT_AGENT_DEBUG == 'true' || ( vars.COPILOT_AGENT_DEBUG != 'true' && vars.COPILOT_AGENT_DEBUG != 'false' && 'false' == 'true' )) && true || false }}
+                COPILOT_AGENT_FIREWALL_ALLOW_LIST: https://github.com,${{ vars.COPILOT_AGENT_FIREWALL_ALLOW_LIST }},${{ github.server_url }},${{ vars.COPILOT_AGENT_FIREWALL_ALLOW_LIST_ADDITIONS }}
+                COPILOT_AGENT_FIREWALL_ENABLE_RULESET_ALLOW_LIST: ${{ vars.COPILOT_AGENT_FIREWALL_ALLOW_LIST == '' && 'true' || 'false' }}
+                COPILOT_AGENT_FIREWALL_ENABLED: ${{ vars.COPILOT_AGENT_FIREWALL_ENABLED || true }}
+                COPILOT_AGENT_FIREWALL_RULESET_ALLOW_LIST: ${{ vars.COPILOT_AGENT_FIREWALL_RULE_SET_ALLOW_LIST || 'default-rules' }}
+                COPILOT_AGENT_INJECTED_SECRET_NAMES: ""
+                COPILOT_AGENT_MCP_SERVER_TEMP: ${{ runner.temp }}/mcp-server
+                COPILOT_AGENT_ONLINE_EVALUATION_DISABLED: ""
+                COPILOT_AGENT_RUNTIME_VERSION: ${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).COPILOT_AGENT_RUNTIME_VERSION }}
+                COPILOT_AGENT_SOURCE_ENVIRONMENT: production
+                COPILOT_EXPERIMENT_ASSIGNMENT_CONTEXT: ""
+                COPILOT_EXPERIMENTS: ""
+                COPILOT_FEATURE_FLAGS: ""
+                COPILOT_MCP_ENABLED: "false"
+                CPD_SAVE_TRAJECTORY_OUTPUT: ${{ runner.temp }}/copilot-developer-action-main/dist/trajectory.md
+                GITHUB_COPILOT_API_TOKEN: ${{ secrets.GITHUB_COPILOT_API_TOKEN }}
+                GITHUB_COPILOT_INTEGRATION_ID: ${{ secrets.GITHUB_COPILOT_INTEGRATION_ID }}
+                GITHUB_DOWNLOADS_URL: ${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).GITHUB_DOWNLOADS_URL }}
+                GITHUB_TOKEN: ${{ secrets.GITHUB_COPILOT_GIT_TOKEN }}
+                GITHUB_UPLOADS_URL: ${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).GITHUB_UPLOADS_URL }}
+                SECRET_SCANNING_URL: ${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).SECRET_SCANNING_URL }}
+            - name: Processing Request (Windows)
+              if: ${{ env.SHOULD_CONTINUE == 'true' && (success() || !cancelled()) && runner.os == 'Windows' }}
+              run: |-
+                Write-Host "Processing requests..."
+                # Note: eBPF is not available on Windows, running node directly
+                $nodePath = "${{ runner.temp }}\ghcca-node\node\bin\node.exe"
+                if (-not (Test-Path $nodePath)) {
+                  $nodePath = "${{ runner.temp }}\ghcca-node\node\node.exe"
+                  if (-not (Test-Path $nodePath)) {
+                    throw "Node.js executable not found in expected locations: ${{ runner.temp }}\ghcca-node\node\bin\node.exe or ${{ runner.temp }}\ghcca-node\node\node.exe"
+                  }
+                }
+                & $nodePath --enable-source-maps "${{ runner.temp }}\copilot-developer-action-main\dist/index.js"
+              shell: pwsh
+              env:
+                BLACKBIRD_MODE: ""
+                COPILOT_AGENT_DEBUG: ${{ (vars.COPILOT_AGENT_DEBUG == 'true' || ( vars.COPILOT_AGENT_DEBUG != 'true' && vars.COPILOT_AGENT_DEBUG != 'false' && 'false' == 'true' )) && true || false }}
+                COPILOT_AGENT_FIREWALL_ALLOW_LIST: https://github.com,${{ vars.COPILOT_AGENT_FIREWALL_ALLOW_LIST }},${{ github.server_url }},${{ vars.COPILOT_AGENT_FIREWALL_ALLOW_LIST_ADDITIONS }}
+                COPILOT_AGENT_FIREWALL_ENABLE_RULESET_ALLOW_LIST: ${{ vars.COPILOT_AGENT_FIREWALL_ALLOW_LIST == '' && 'true' || 'false' }}
+                COPILOT_AGENT_FIREWALL_ENABLED: ${{ vars.COPILOT_AGENT_FIREWALL_ENABLED || true }}
+                COPILOT_AGENT_FIREWALL_RULESET_ALLOW_LIST: ${{ vars.COPILOT_AGENT_FIREWALL_RULE_SET_ALLOW_LIST || 'default-rules' }}
+                COPILOT_AGENT_INJECTED_SECRET_NAMES: ""
+                COPILOT_AGENT_MCP_SERVER_TEMP: ${{ runner.temp }}/mcp-server
+                COPILOT_AGENT_ONLINE_EVALUATION_DISABLED: ""
+                COPILOT_AGENT_RUNTIME_VERSION: ${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).COPILOT_AGENT_RUNTIME_VERSION }}
+                COPILOT_AGENT_SOURCE_ENVIRONMENT: production
+                COPILOT_EXPERIMENT_ASSIGNMENT_CONTEXT: ""
+                COPILOT_EXPERIMENTS: ""
+                COPILOT_FEATURE_FLAGS: ""
+                COPILOT_MCP_ENABLED: "false"
+                CPD_SAVE_TRAJECTORY_OUTPUT: ${{ runner.temp }}/copilot-developer-action-main/dist/trajectory.md
+                GITHUB_COPILOT_API_TOKEN: ${{ secrets.GITHUB_COPILOT_API_TOKEN }}
+                GITHUB_COPILOT_INTEGRATION_ID: ${{ secrets.GITHUB_COPILOT_INTEGRATION_ID }}
+                GITHUB_DOWNLOADS_URL: ${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).GITHUB_DOWNLOADS_URL }}
+                GITHUB_TOKEN: ${{ secrets.GITHUB_COPILOT_GIT_TOKEN }}
+                GITHUB_UPLOADS_URL: ${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).GITHUB_UPLOADS_URL }}
+                SECRET_SCANNING_URL: ${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).SECRET_SCANNING_URL }}
+            - name: Clean Up (Linux)
+              if: always() && runner.os == 'Linux'
+              run: |-
+                echo "Cleaning up..." && \
+                mkdir -p "${{ runner.temp }}/runtime-logs" && \
+                curl -L -H "Content-Type: application/json" -H "Accept: application/json" --data '{"oid":'$GITHUB_REPOSITORY_OWNER_ID',"rid":'$GITHUB_REPOSITORY_ID',"wid":'$GITHUB_RUN_ID'}' \
+                  -H "Authorization: Bearer ${{ secrets.GITHUB_COPILOT_API_TOKEN }}" -H "X-GitHub-Copilot-Cleanup-List: ${{ secrets.GITHUB_COPILOT_API_TOKEN }},${{ secrets.GITHUB_COPILOT_GIT_TOKEN }}" \
+                  "https://api.githubcopilot.com/cleanup" > "${{ runner.temp }}/runtime-logs/clean.log" 2>&1
+            - name: Clean Up (Windows)
+              if: always() && runner.os == 'Windows'
+              run: |-
+                Write-Host "Cleaning up..."
+                New-Item -ItemType Directory -Force -Path "${{ runner.temp }}\runtime-logs" | Out-Null
+
+                $body = @{
+                  oid = $env:GITHUB_REPOSITORY_OWNER_ID
+                  rid = $env:GITHUB_REPOSITORY_ID
+                  wid = $env:GITHUB_RUN_ID
+                } | ConvertTo-Json
+
+                $headers = @{
+                  "Content-Type" = "application/json"
+                  "Accept" = "application/json"
+                  "Authorization" = "Bearer ${{ secrets.GITHUB_COPILOT_API_TOKEN }}"
+                  "X-GitHub-Copilot-Cleanup-List" = "${{ secrets.GITHUB_COPILOT_API_TOKEN }},${{ secrets.GITHUB_COPILOT_GIT_TOKEN }}"
+                }
+
+                try {
+                  Invoke-RestMethod -Uri "https://api.githubcopilot.com/cleanup" -Method Post -Body $body -Headers $headers -ContentType "application/json" -ErrorAction Stop | Out-File -FilePath "${{ runner.temp }}\runtime-logs\clean.log"
+                } catch {
+                  $_ | Out-File -FilePath "${{ runner.temp }}\runtime-logs\clean.log"
+                }
+              shell: pwsh
+            - name: '[Optional] Archive Details'
+              if: ${{ always() && ((vars.COPILOT_AGENT_DEBUG == 'true' || (vars.COPILOT_AGENT_DEBUG != 'true' && vars.COPILOT_AGENT_DEBUG != 'false' && 'false' == 'true')) && true || false) }}
+              uses: actions/upload-artifact@v4
+              with:
+                name: logs
+                path: |-
+                    ${{ runner.temp }}/cca-mcp-debug-logs/*
+                    ${{ runner.temp }}/runtime-logs/blocked.jsonl
+                    ${{ runner.temp }}/runtime-logs/blocked.md
+                    ${{ runner.temp }}/runtime-logs/fw.jsonl
+                    ${{ runner.temp }}/runtime-logs/ipv6.log
+                    ${{ runner.temp }}/runtime-logs/download.log
+                    ${{ runner.temp }}/runtime-logs/mkcert.log
+                    ${{ runner.temp }}/runtime-logs/clean.log

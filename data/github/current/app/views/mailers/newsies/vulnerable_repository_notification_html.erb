@@ -1,0 +1,79 @@
+<% content_for :header do %>
+  <%= @message.title %>
+<% end %>
+
+<%= render(Mail::BorderedRowComponent.new) do %>
+  <%= render(Mail::HeaderTitleComponent.new(
+    title: "Dependabot found vulnerable dependencies",
+    icon: "dependabot.png")
+  )%>
+
+  <%= render(Mail::ContainerComponent.new) do %>
+    <%= render(Mail::ButtonComponent.new(
+      text: "View all alerts",
+      url: repository_alerts_url(host: GitHub.url, repository: @message.repository, user_id: @message.repository.owner),
+      classes: "btn-primary btn-large"))
+    %>
+  <% end %>
+  <%= render(Mail::SpacerComponent.new(size: 32)) %>
+<% end %>
+
+<% alerts_count = @message.alerts.count %>
+<% alert_limit_counter = 0 %>
+
+<% if alerts_count > 0 %>
+  <%= render(Mail::BorderedRowComponent.new(last: true, skip_padding: true)) do %>
+    <table class="width-full text-left">
+      <thead>
+        <tr>
+          <th scope="col" class="p-2" style="width: 100%">Package and Manifest</th>
+          <th scope="col" class="pr-2 py-2" style="white-space: nowrap">Severity</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @message.alerts.each do |alert| %>
+          <% break if alert_limit_counter >= @message.default_email_alert_count %>
+          <tr>
+            <td class="p-2" style="width: 100%">
+              <p class="mb-0">
+                <b><%= alert.package_name %></b>
+                <br>
+                <a href="<%= alert.permalink %>">
+                  <%= alert.vulnerable_manifest_path %>
+                </a>
+              </p>
+            </td>
+            <td class="pr-2 py-2" style="white-space: nowrap">
+              <%= render DependabotAlerts::SeverityLabelComponent.new(severity: alert.open_source_vulnerability&.severity) %>
+            </td>
+          </tr>
+          <% alert_limit_counter += 1 %>
+        <% end %>
+        <% remaining_alerts_count = alerts_count - alert_limit_counter %>
+        <% if remaining_alerts_count > 0 %>
+          <tr>
+            <td class="p-2" style="width: 100%" colspan="2">
+              <p class="mb-0 text-gray-light">
+                <%= pluralize(remaining_alerts_count, "more dependency") %>
+              </p>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+<% end %>
+
+<% content_for :footer_text do %>
+  <p class="f6 text-gray-light"> You are receiving this email because your repository has Dependabot enabled. If you want to ship secure code, make sure it is enabled on all your important repositories.
+  </p>
+
+  <%= render(Mail::ContainerComponent.new(classes: "text-center")) do %>
+    <%= render(Mail::SpacerComponent.new) %>
+      <p class="f6" role="contentinfo">
+        <% @message.footer_links.each_with_index do |link, index| %>
+          <a href="<%= link[:url] %>" class="d-inline-block"><%= link[:text] %></a> <% unless index == @message.footer_links.size - 1 %>・<% end %>
+        <% end %>
+      </p>
+  <% end %>
+<% end %>

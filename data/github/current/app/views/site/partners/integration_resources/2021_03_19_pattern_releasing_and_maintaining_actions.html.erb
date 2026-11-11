@@ -1,0 +1,172 @@
+<%
+  post_title = "Releasing and maintaining actions"
+  post_date = "2021-03-19"
+  post_categories = ["Integration-Resources"]
+  post_tags = ["Patterns", "Actions"]
+  post_type = "Documentation"
+  post_featured_image = nil
+  post_preview = "Follow this pattern to understand how you can release and maintain actions by leveraging automation."
+  post_priority = 2
+  post_sections = ["resources"]
+  post_video_url = nil
+  post_video_title = nil
+
+  post_content = <<-HTML
+    <h2>Problem statement</h2>
+
+    <p>So you have <a href="https://docs.github.com/en/actions/creating-actions/creating-a-javascript-action">created an action</a>...now what? This pattern guide shows a minimal solution to releasing and maintaining actions in open source, favoring automation whenever possible, providing value while keeping overhead at a minimum.</p>
+
+    <p>The solution should:</p>
+
+    <ol>
+      <li>Leverage GitHub Actions for continuous integration, dependency updates, release management, and task automation.</li>
+      <li>Promote discoverability with regular publishing to GitHub Marketplace.</li>
+      <li>Provide confidence through automated tests and build badges.</li>
+      <li>Indicate how the action can be used, ideally as part of a broader workflow.</li>
+      <li>Signal what type of community contributions you welcome, e.g. issues, pull requests, or vulnerability reports.</li>
+    </ol>
+
+    <h3>Solution</h3>
+
+    <p>We recommend that <a href="https://partner.github.com/technology-partners">Technology Partners</a> build actions with <a href="https://docs.github.com/en/actions/creating-actions/about-actions#types-of-actions">JavaScript instead of in containers</a> for speed and cross-platform functionality, so this guide will focus on JavaScript actions.</p>
+
+    <p>Though they are "just" Node.js repositories with metadata in an <code>action.yml</code> file, JavaScript actions have a few interesting properties compared to traditional Node.js projects:</p>
+
+    <ul>
+      <li>Dependent packages are committed alongside the code, typically in a compiled and minified form, so <strong>automated builds</strong> and <strong>secure community contributions</strong> are important.</li>
+      <li>Tagged releases can be published directly to GitHub Marketplace and consumed by workflows across GitHub, making sensible <strong>releasing and tagging</strong> of special interest.</li>
+      <li>Many actions make use of the GitHub API <em>and</em> third party APIs, so we encourage <strong>robust end-to-end testing</strong>.</li>
+    </ul>
+
+    <p>We base a solution on <a href="https://github.com/actions/javascript-action">actions/javascript-action</a>, putting special focus on solving the problem areas identified above. We use GitHub Actions to automate releasing the action and publishing to GitHub Marketplace, and open source best practices to increase confidence and usage.</p>
+
+    <h3>Implementation</h3>
+
+    <h4>Automate release management</h4>
+
+    <p>GitHub <a href="https://docs.github.com/en/actions/creating-actions/about-actions#using-release-management-for-actions">recommends</a> creating releases using <a href="https://docs.npmjs.com/about-semantic-versioning">semantically versioned</a> tags – for example, <code>v1.1.3</code> – and keeping major (<code>v1</code>) and minor (<code>v1.1</code>) tags current to the latest appropriate commit. When a release is created, it can be <a href="https://docs.github.com/en/actions/creating-actions/publishing-actions-in-github-marketplace">published to GitHub Marketplace</a> for increased discoverability.</p>
+
+    <pre><code>^
+|
+|
+| * commit 9a4eb0d (tag: v1, tag: v1.1, tag: v1.1.0)
+|/  Author: Octocat &lt;octocat@github.com&gt;
+|
+|      New features!
+|
+|
+| * commit ac2415 (tag: v1.0, tag: v1.0.3)
+|/  Author: Octocat &lt;octocat@github.com&gt;
+|
+|       Initial release
+|
+*
+|
+main</code></pre>
+
+    <p>We let GitHub Actions do the automation for us to enable this workflow:</p>
+
+    <ol>
+      <li>Do feature work in branches per <a href="https://guides.github.com/introduction/flow/">GitHub flow</a>.</li>
+    </ol>
+
+    <ul>
+      <li>When a feature branch commit is pushed, GitHub Actions runs a <code>test</code> workflow from which you can call unit and integration tests.</li>
+    </ul>
+
+    <ol start="2">
+      <li>Create pull requests to the <code>main</code> branch to initiate discussion and review, merging when ready.</li>
+    </ol>
+
+    <ul>
+      <li>When a pull request is opened, either from a branch or a fork, GitHub Actions again runs the <code>test</code> workflow, this time with the merge commit. A <code>label</code> workflow also runs to add appropriate labels to the pull request depending on which file path is being changed.</li>
+      <li><em>Note: for security reasons, workflows triggered by <code>pull_request</code> from forks have restricted <code>GITHUB_TOKEN</code> permissions and do not have access to secrets. If your tests or other workflows triggered upon pull request require access to secrets, consider using a different event like a <a href="https://docs.github.com/en/actions/reference/events-that-trigger-workflows#manual-events">manual trigger</a> or a <a href="https://docs.github.com/en/actions/reference/events-that-trigger-workflows#pull_request_target"><code>pull_request_target</code></a>. Read more <a href="https://docs.github.com/en/actions/reference/events-that-trigger-workflows#pull-request-events-for-forked-repositories">here</a>.</em></li>
+    </ul>
+
+    <ol start="3">
+      <li>Create a semantically tagged release <a href="https://docs.github.com/en/github/administering-a-repository/managing-releases-in-a-repository#creating-a-release">using the GitHub UI</a>, also <a href="https://docs.github.com/en/actions/creating-actions/publishing-actions-in-github-marketplace#publishing-an-action">publishing to GitHub Marketplace</a> with a simple checkbox.</li>
+    </ol>
+
+    <ul>
+      <li>When the release is created, GitHub Actions runs a <code>publish</code> workflow that uses a community action, <a href="https://github.com/JasonEtco/build-and-tag-action">JasonEtco/build-and-tag-action</a> to compile and bundle the JavaScript and metadata file and force push semantic major, minor, and patch tags as visualized above.</li>
+    </ul>
+
+    <p>Unlike some other automated release management strategies, we intentionally do not commit dependencies to the <code>main</code> branch, only to the tagged release commits. By doing so, we encourage users of our action to reference named tags or <code>sha</code>s, and we help ensure the security of third party pull requests by doing the build ourselves during a release.</p>
+
+    <p>Committing to semantic releases means that the users of your actions can pin their workflows to a version and know that they might continue to receive the latest stable, non-breaking features, depending on their comfort level:</p>
+
+    <pre><code>### A workflow consuming your action
+
+# The latest major release version:
+uses: github-developer/javascript-action@v1
+
+# Or, the latest minor release version:
+uses: github-developer/javascript-action@v1.1
+
+# Or, the latest patch release version:
+uses: github-developer/javascript-action@v1.1.0
+
+# Or, a specific commit sha:
+uses: github-developer/javascript-action@ff958b3d4b36abb3d3058e1e866695ce6111d213</code></pre>
+
+    <h4>Open source like the best</h4>
+
+    <p>Working in the open can be hard, but fortunately, GitHub provides tools and <a href="https://opensource.guide/">guides</a> to make it easier. Here are a few structures we recommend setting up for healthy bidirectional communication.</p>
+
+    <p>By providing the following signals to the community, we encourage use, modification, and contribution to our action:</p>
+
+    <ul>
+      <li>Maintain a great README with plenty of usage examples, guidance, and badges
+        <ul>
+          <li>How to add a workflow status badge (<a href="https://docs.github.com/en/actions/managing-workflow-runs/adding-a-workflow-status-badge">docs</a>)</li>
+          <li>Other metadata badges (<a href="https://shields.io/">shields.io</a>)</li>
+        </ul>
+      </li>
+      <li>Set up <a href="https://docs.github.com/en/github/building-a-strong-community/creating-a-default-community-health-file#supported-file-types">community health files</a> like <code>CODE_OF_CONDUCT</code>, <code>CONTRIBUTING</code>, and <code>SECURITY</code>, either organization-wide or in your action repository.</li>
+      <li>Keep issues current by utilizing actions like <a href="https://github.com/actions/stale">stale</a></li>
+    </ul>
+
+    <p>Check out more resources for building in the open <a href="https://github.com/open-source">here</a>.</p>
+
+    <h3>Concrete implementation</h3>
+
+    <p>Template repository: <a href="https://github.com/github-developer/javascript-action">https://github.com/github-developer/javascript-action</a></p>
+
+    <h3>Examples</h3>
+
+    <p>Examples where similar patterns are employed include:</p>
+
+    <ul>
+      <li><a href="https://github.com/github/super-linter">https://github.com/github/super-linter</a></li>
+      <li><a href="https://github.com/octokit/request-action">https://github.com/octokit/request-action</a></li>
+    </ul>
+
+    <h3>Related</h3>
+
+    <ul>
+      <li><a href="https://docs.github.com/en/actions/creating-actions/creating-a-javascript-action">https://docs.github.com/en/actions/creating-actions/creating-a-javascript-action</a></li>
+      <li><a href="https://docs.github.com/en/actions/creating-actions/publishing-actions-in-github-marketplace">https://docs.github.com/en/actions/creating-actions/publishing-actions-in-github-marketplace</a></li>
+      <li><a href="https://opensource.guide/">https://opensource.guide/</a></li>
+      <li><a href="https://github.com/open-source">https://github.com/open-source</a></li>
+    </ul>
+  HTML
+%>
+
+<% content_for :partners_content do %>
+  <%= render template: "site/partners/templates/post_content", locals: {
+    post_title: post_title,
+    post_date: post_date,
+    post_categories: post_categories,
+    post_tags: post_tags,
+    post_type: post_type,
+    post_featured_image: post_featured_image,
+    post_preview: post_preview,
+    post_priority: post_priority,
+    post_sections: post_sections,
+    post_video_url: post_video_url,
+    post_video_title: post_video_title,
+    post_content: post_content
+  } %>
+<% end %>
+
+<%= render template: "site/partners/templates/layout_wrapper" %>

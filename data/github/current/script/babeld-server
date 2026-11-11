@@ -1,0 +1,218 @@
+#!/bin/bash
+
+if [ -n "$CODESPACES" ]; then
+  bindaddr=""
+else
+  bindaddr="--bind-addr 127.0.0.1"
+fi
+
+if [ -n "$MULTI_TENANT_ENTERPRISE" ]; then
+  mt_flag="--multi-tenant"
+else
+  mt_flag=""
+fi
+
+# Loop through the command line flags and assign them to variables
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --bind-addr)
+      bindaddr="$2"
+      shift 2
+      ;;
+    --ssh-host-key-file)
+      ssh_host_key_file="$2"
+      shift 2
+      ;;
+    --ssh-dss-host-key-file)
+      ssh_dss_host_key_file="$2"
+      shift 2
+      ;;
+    --gitauth-port)
+      gitauth_port="$2"
+      shift 2
+      ;;
+    --git-http-daemon-port)
+      git_http_daemon_port="$2"
+      shift 2
+      ;;
+    --git-daemon-port)
+      git_daemon_port="$2"
+      shift 2
+      ;;
+    --http-port)
+      http_port="$2"
+      shift 2
+      ;;
+    --git-port)
+      git_port="$2"
+      shift 2
+      ;;
+    --ssh-port)
+      ssh_port="$2"
+      shift 2
+      ;;
+    --log-file)
+      log_file="$2"
+      shift 2
+      ;;
+    --config-file)
+      config_file="$2"
+      shift 2
+      ;;
+    --pid-file)
+      pid_file="$2"
+      shift 2
+      ;;
+    --verbose-hooks)
+      verbose_hooks="true"
+      shift 1
+      ;;
+    *)
+      echo "Unknown option: $1"
+      shift
+      ;;
+  esac
+done
+
+ssh_host_key_file=$(realpath "${ssh_host_key_file:-/tmp/babeld/ssh_host_key.dev}")
+ssh_dss_host_key_file=$(realpath "${ssh_dss_host_key_file:-./dss_host_key.dev}")
+
+# Could probably wrap this into the case loop above
+NAME="babeld"
+
+volumes=("-v" "$ssh_host_key_file:$ssh_host_key_file" "-v" "$ssh_dss_host_key_file:$ssh_dss_host_key_file")
+babeld_args=()
+babeld_args+=("--ssh-host-key-file" "$ssh_host_key_file")
+babeld_args+=("--ssh-dss-host-key-file" "$ssh_dss_host_key_file")
+
+if [ "$gitauth_port" != "" ]; then
+  babeld_args+=("--gitauth-port" "$gitauth_port")
+fi
+
+if [ "$git_http_daemon_port" != "" ]; then
+  babeld_args+=("--git-http-daemon-port" "$git_http_daemon_port")
+fi
+
+if [ "$git_daemon_port" != "" ]; then
+  babeld_args+=("--git-daemon-port" "$git_daemon_port")
+fi
+
+if [ "$http_port" != "" ]; then
+  babeld_args+=("--http-port" "$http_port")
+  NAME="$NAME-$http_port"
+fi
+
+if [ "$git_port" != "" ]; then
+  babeld_args+=("--git-port" "$git_port")
+fi
+
+if [ "$ssh_port" != "" ]; then
+  babeld_args+=("--ssh-port" "$ssh_port")
+fi
+
+if [ "$verbose_hooks" != "" ]; then
+  babeld_args+=("--verbose-hooks")
+fi
+
+if [ "$log_file" != "" ]; then
+  log_file=$(realpath $log_file)
+  babeld_args+=("--log-file" "$log_file")
+  log_dir=$(dirname $log_file)
+  volumes+=("-v" "$log_dir:$log_dir")
+fi
+
+if [ "$config_file" != "" ]; then
+  config_file=$(realpath $config_file)
+  babeld_args+=("--config-file" "$config_file")
+  volumes+=("-v" "$config_file:$config_file")
+fi
+
+if [ "$pid_file" != "" ]; then
+  pid_file=$(realpath $pid_file)
+  babeld_args+=("--pid-file" "$pid_file")
+  PIDDIR=$(dirname $pid_file)
+  volumes+=("-v" "$PIDDIR:$PIDDIR")
+fi
+
+environment=()
+if [ "$PLOGFILE" != "" ]; then
+  PLOGFILE="$(realpath "$PLOGFILE")"
+  environment+=("-e" "PLOGFILE=$PLOGFILE")
+  PLOGDIR=$(dirname $PLOGFILE)
+  volumes+=("-v" "$PLOGDIR:$PLOGDIR")
+fi
+
+if [ "$BABELD_LD_PRELOAD" != "" ]; then
+  BABELD_LD_PRELOAD="$(realpath "$BABELD_LD_PRELOAD")"
+  PRELOAD_DIR="$(dirname $BABELD_LD_PRELOAD)"
+  volumes+=("-v" "$PRELOAD_DIR:$PRELOAD_DIR")
+  environment+=("-e" "LD_PRELOAD=$BABELD_LD_PRELOAD")
+fi
+
+if [[ "$DX_EDGE" = true ]] && [[ "$DX_FEATURE_SUBPROJECT_CONTAINERS" = true ]] && [[ -z "$LOCAL_BABELD_PATH" ]]; then
+  ssh_host_key_dir=$(dirname $ssh_host_key_file)
+  [ ! -e "$ssh_host_key_file" ] && mkdir -p "$ssh_host_key_dir" && ssh-keygen -N "" -m PEM -t rsa -f "$ssh_host_key_file"
+
+  SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+  source $SCRIPT_DIR/dx/lib/subproject-containers
+
+  IMAGE=ghcr.io/github/babeld/babeld
+  SUBPROJECT_VERSION=$(subproject_version "babeld")
+  echo "babeld version $SUBPROJECT_VERSION"
+
+  start_subproject --name="$NAME" -ti\
+  -v $(pwd)/tmp/babeld:/tmp/babeld "${volumes[@]}" \
+  -e API_INTERNAL_BABELD_HMAC_KEY="octocat" "${environment[@]}" \
+  -e POSTRX_TIMEOUT_SECS \
+  -e BABELD_PRELOAD_PORT \
+  -e CLIENT_PACKFILE_FAILURES \
+  -e DYLD_FORCE_FLAT_NAMESPACE \
+  -e DYLD_INSERT_LIBRARIES \
+  $IMAGE:$SUBPROJECT_VERSION \
+  "./babeld" \
+  $bindaddr \
+  $mt_flag \
+  "${babeld_args[@]}" \
+  "$@"
+else
+  BABELD_BIN="vendor/babeld/babeld"
+  # Set LOCAL_BABELD_PATH to opt out of docker flow (for babeld developers)
+  # Set either directly to the vendored bin, ie:
+  #    LOCAL_BABELD_PATH=/workspaces/github/vendor/babeld/bin/babeld ./script/server
+  # Or when cycling outside of github/github, some other path:
+  #    LOCAL_BABELD_PATH=/workspaces/babeld/bin/babeld ./script/server
+  if [[ -n "$LOCAL_BABELD_PATH" ]]; then
+    BABELD_BIN=$LOCAL_BABELD_PATH
+  fi
+
+  # This is necessary so babeld can talk to github internal
+  # api on localhost
+  export API_INTERNAL_BABELD_HMAC_KEY="octocat"
+
+  until [ -x $BABELD_BIN ]; do
+    if [ "$BABELD_BIN" != "1" ]; then
+      echo "Run 'script/build-babeld' to setup babeld."
+      BABELD_BIN=1
+    fi
+    sleep 60
+  done
+
+  cd $(dirname $BABELD_BIN)
+
+  executable=$(basename $BABELD_BIN)
+
+  trap 'kill $PID' EXIT HUP INT QUIT PIPE TERM
+
+  if [ "$BABELD_LD_PRELOAD" != "" ]; then
+    export LD_PRELOAD="$BABELD_LD_PRELOAD"
+  fi
+  ./$executable \
+    $bindaddr \
+    $mt_flag \
+    "${babeld_args[@]}" \
+    "$@" &
+
+  unset LD_PRELOAD
+  PID=$!
+  wait
+fi

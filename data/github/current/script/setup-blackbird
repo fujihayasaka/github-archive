@@ -1,0 +1,54 @@
+#!/bin/bash
+#/ Usage: setup-blackbird
+#/
+#/ Clones seed repos and indexes them in Blackbird for local development.
+#/ Requires that you've run `script/setup-codespaces-blackbird` first.
+
+set -e
+
+### Bail out early if preconditions aren't met: ###
+if [[ ! -d "/workspaces/blackbird" ]]; then
+  echo "/workspaces/blackbird does not exist. Please run ./script/setup-codespaces-blackbird first."
+  exit 1
+fi
+
+PORT=8152
+if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null ; then
+  # gitrpc server running
+  :
+else
+  echo -e "Your server is not running. Please start it with ./script/server and try again. (expected port ${PORT})"
+  exit 1
+fi
+
+# There are some feature flags that need to be enabled for blackbird to work properly.
+echo -e "\n${GREEN}➡️ Mirror prod-enabled feature flags...\n${NC}"
+./bin/toggle-global-flags --enable
+
+BASE_DIR=~/.blackbird/repos
+rm -rf "$BASE_DIR"
+mkdir -p "$BASE_DIR"
+
+GREEN='\033[0;32m'
+NC='\033[0m' # No Color
+REPOS=(
+  "monalisa/smile"
+  "monalisa/illuminati"
+  "actions/cache"
+)
+
+for i in "${!REPOS[@]}"; do
+  REPO="${REPOS[$i]}"
+  CLONE_DIR="$BASE_DIR/${REPO//\//_}"
+
+  echo -e "\n${GREEN}➡️ Cloning $REPO into $CLONE_DIR...\n${NC}"
+  git clone --depth 1 "http://monalisa:ghp_MonalisaTheOctoPatMonalisaTheOctoPat@github.localhost/$REPO.git" "$CLONE_DIR"
+done
+
+echo -e "\n${GREEN}➡️ Indexing all repos in $BASE_DIR...\n${NC}"
+cd /workspaces/blackbird && cargo run --bin blackbird-local -- ingest directory --dir "$BASE_DIR"
+
+echo -e "${GREEN}🎉🎉 FINISHED! All repos are indexed in blackbird has been set up! 🎉🎉${NC}"
+echo -e ""
+echo -e "${GREEN}🎉🎉 Run blackbird service with 'script/blackbird-server'${NC}"
+echo -e ""

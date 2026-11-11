@@ -1,0 +1,45 @@
+#!/bin/bash
+set -o errexit
+
+# Sets up the github/trust-metadata-api repository for a github/github Codespaces.
+
+# run checks before trying to setup
+run_checks() {
+  # Ensure we're in a Codespaces environment
+  if [ "$CODESPACES" != "true" ]; then
+    echo "This script should only be run in a GitHub Codespaces. Exiting."
+    exit 1
+  fi
+
+  # Check if the directory /workspaces/trust-metadata-api exists
+  if [ -d "/workspaces/trust-metadata-api" ]; then
+    echo "The directory /workspaces/trust-metadata-api already exists. Exiting."
+    exit 1
+  fi
+}
+
+# setup Trust-Metadata-API and it's dependencies
+setup_trust_metadata_api() {
+  echo -e '\n==== Cloning trust-metadata-api into /workspaces/trust-metadata-api ===='
+  git clone git@github.com:github/trust-metadata-api.git /workspaces/trust-metadata-api
+
+  pushd "/workspaces/trust-metadata-api"
+
+  echo -e '\n==== installing golang-migrate ===='
+  go install -tags mysql github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+
+  echo -e '\n==== starting docker services for local development ===='
+  make dev-start
+
+  echo -e '\n==== running database migrations for local development ===='
+  make dev-migrate-up
+
+  popd
+
+  echo -e ""
+  echo -e "🎉 FINISHED! The trust-metadata-api repo has been set up at /workspaces/trust-metadata-api! 🎉"
+  echo -e "To start trust-metadata-api, open a new terminal window in /workspaces/trust-metadata-api and run 'make dev-server'"
+}
+
+run_checks
+setup_trust_metadata_api

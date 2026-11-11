@@ -1,0 +1,65 @@
+<%# view is an instance of Notification::V2::IndexView %>
+<%
+  resources_for_cap_filter = current_user&.resources_for_cap_filter(
+    direct_and_indirect_orgs: true,
+    ip: cap_filter.actor_ip_for_authzd
+  )
+%>
+
+<% if current_user&.feature_flag_enabled_or_raise?(:notifications_exclude_entries_by_owner_id) # rubocop:disable GitHub/FeatureManagement/NoVexiActorFeatureFlagEnabledOrRaiseUsage %>
+  <% track_render_partial("notifications/index/copilot_digest/conditional_access_banner") do %>
+    <h3 id="single-sign-on" class="sr-only" <%= test_selector("notifications-single-sign-on") %>>Single sign-on</h3>
+    <%= render ConditionalAccess::UnauthorizedAccountsComponent.new(
+      classes: "Box mb-1",
+      container_classes: "mb-2",
+      resource_label: "notifications",
+      cap_filter: cap_filter,
+      accounts: resources_for_cap_filter,
+      # Enable SAML logging
+      logging: current_user&.feature_flag_enabled_or_raise?(:log_notifications_unauthorized_accounts), # rubocop:disable GitHub/FeatureManagement/NoVexiActorFeatureFlagEnabledOrRaiseUsage
+      # Group SAML accounts into unified SAML SSO banner
+      group_saml: current_user&.feature_flag_enabled_or_raise?(:notifications_unified_sso_banner), # rubocop:disable GitHub/FeatureManagement/NoVexiActorFeatureFlagEnabledOrRaiseUsage
+      # Sort SAML accounts by name
+      sort_by_name: current_user&.feature_flag_enabled_or_raise?(:notifications_unified_sso_banner_alphabetical_order), # rubocop:disable GitHub/FeatureManagement/NoVexiActorFeatureFlagEnabledOrRaiseUsage
+    ) %>
+  <% end %>
+<% end %>
+
+<% if total_count == 0 %>
+  <div
+    class="js-notifications-list js-socket-channel js-notifications-blankslate"
+    data-channel="<%= live_update_view_channel(GitHub::WebSocket::Channels.notifications_changed(current_user)) %>"
+    data-url="<%= notifications_beta_notifications_exist_path(query: params[:query]) %>"
+    data-hpc
+  >
+    <% track_render_partial("notifications/index/copilot_digest/list_blankslate") do %>
+      <%= render partial: "notifications/v2/blankslate", locals: { view: view } %>
+    <% end %>
+  </div>
+<% else %>
+  <% if !current_user&.feature_flag_enabled_or_raise?(:notifications_exclude_entries_by_owner_id) # rubocop:disable GitHub/FeatureManagement/NoVexiActorFeatureFlagEnabledOrRaiseUsage %>
+    <% track_render_partial("notifications/index/copilot_digest/conditional_access_banner") do %>
+      <h3 id="single-sign-on" class="sr-only" <%= test_selector("notifications-single-sign-on") %>>Single sign-on</h3>
+      <%= render ConditionalAccess::UnauthorizedAccountsComponent.new(
+        classes: "Box mb-1",
+        container_classes: "mb-2",
+        resource_label: "notifications",
+        cap_filter: cap_filter,
+        accounts: resources_for_cap_filter,
+        # Enable SAML logging
+        logging: current_user&.feature_flag_enabled_or_raise?(:log_notifications_unauthorized_accounts), # rubocop:disable GitHub/FeatureManagement/NoVexiActorFeatureFlagEnabledOrRaiseUsage
+        # Group SAML accounts into unified SAML SSO banner
+        group_saml: FeatureFlag.vexi.enabled?(:notifications_unified_sso_banner, current_user, default: true),
+        # Sort SAML accounts by name
+        sort_by_name: FeatureFlag.vexi.enabled?(:notifications_unified_sso_banner_alphabetical_order, current_user, default: true),
+      ) %>
+    <% end %>
+  <% end %>
+
+  <div class="tmp-mb-3 d-flex flex-column height-full tmp-p-5 position-relative" style="border: 1px solid transparent; border-bottom: 0; border-radius: 8px; background: var(--bgColor-default); background-clip: padding-box;" <%= test_selector("copilot-digest-container") %>>
+    <div style="position: absolute; inset: 0; border-radius: 8px; padding: 1px; padding-bottom: 0; background: linear-gradient(to bottom, var(--borderColor-default) 0%, transparent 90%); -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none;"></div>
+    <%= render partial: "notifications/v2/copilot_digest_poll", locals: {
+      polling_url: polling_url
+    } %>
+  </div>
+<% end %>

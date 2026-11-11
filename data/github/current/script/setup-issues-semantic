@@ -1,0 +1,78 @@
+#!/bin/bash
+#
+# Setup script for local semantic search on issues and pull requests development
+# See: https://github.com/github/copilot-indexing-issues-prs/blob/main/docs/local-development-setup.md
+#
+# Prerequisites:
+#   - Access to a GitHub Codespace in github/github
+#   - API key from the team (reach out on #copilot-semantic-indexing if needed)
+#
+# Usage:
+#   export ISSUES_SEMANTIC_API_KEY='your-api-key'
+#   script/setup-issues-semantic              # Setup only
+#   script/setup-issues-semantic --seed       # Setup + seed test data (issues & PRs)
+
+set -e
+
+SEED_DATA=false
+for arg in "$@"; do
+  case "$arg" in
+    --seed) SEED_DATA=true ;;
+  esac
+done
+
+echo "=== Setting up Semantic Issues & PR Search Local Development ==="
+echo
+
+# Step 1: Enable feature flags
+echo "Step 1: Enabling feature flags..."
+bin/toggle-feature-flag enable issues_index_semantic_search
+bin/toggle-feature-flag enable semantic_issues_search_api
+bin/toggle-feature-flag enable copilot_semantic_indexing_source_fields
+bin/toggle-feature-flag enable copilot_semantic_indexing_source_fields_prs
+bin/toggle-feature-flag enable semantic_search_prs_rollout
+bin/toggle-feature-flag enable semantic_search_prs
+bin/toggle-feature-flag enable issues_dashboard_semantic_search
+
+# Step 2: Enable Feature Preview flags
+echo
+echo "Step 2: Enabling Feature Preview flags..."
+bin/toggle-feature-flag enable feature_preview_indicator
+bin/toggle-feature-flag enable github_edge
+
+# Step 3: Create Feature Preview entry
+echo
+echo "Step 3: Creating Feature Preview entry..."
+bin/rails runner '
+feature = Feature.find_by(slug: "issues_index_semantic_search")
+if feature
+  puts "Feature Preview entry already exists"
+else
+  Feature.create!(
+    public_name: "Semantic issue search",
+    slug: "issues_index_semantic_search",
+    feature_flag_name: "issues_index_semantic_search",
+    enrolled_by_default: true,
+    feedback_link: "https://github.com/github/copilot-indexing-issues-prs/issues/new"
+  )
+  puts "Feature Preview entry created"
+end
+'
+
+echo
+echo
+echo "=== Setup Complete! ==="
+echo "You can now create issues and test semantic search locally."
+echo "Enable the feature from the Feature Preview dropdown in your local GitHub UI."
+
+# Step 6: Optionally seed test data with semantic issues and PRs
+if [ "$SEED_DATA" = true ]; then
+  echo
+  echo "Step 6: Seeding test data (issues and PRs with semantic content)..."
+  bin/seed semantic_retrieval --repos 2
+  echo "Seed data created. Issues and PRs have been indexed with semantic vectors."
+else
+  echo
+  echo "To seed test data with semantically rich issues and PRs, re-run with --seed:"
+  echo "  script/setup-issues-semantic --seed"
+fi

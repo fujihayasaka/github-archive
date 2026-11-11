@@ -1,0 +1,1 @@
+import{es as e,gm as t,lh as n}from"./main-BChbnewi.js";var r=n(t());const i=(0,r.createContext)({});i.displayName=`RouteStateMapContext`;function a(){return(0,r.use)(i)[e().key]}function o(){let e=a();return(e&&e.type===`loaded`?e.data:void 0)?.payload}export{o as t};

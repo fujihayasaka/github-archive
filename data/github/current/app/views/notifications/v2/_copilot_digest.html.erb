@@ -1,0 +1,57 @@
+<%# Renders the Copilot Digest TabPanels section %>
+<%# This partial is loaded asynchronously via include-fragment %>
+<%
+  locals = ensure_local_vars(local_assigns, {
+    required: [:copilot_digest, :view],
+    optional: [:error, :error_message, :digest_summary],
+    defaults: { error: false, error_message: nil },
+    view: "notifications/v2/copilot_digest"
+  })
+%>
+
+<% if error %>
+  <%= render(Primer::Alpha::Banner.new(scheme: :danger, icon: :"copilot-error")) do %>
+    <%= error_message || "Unable to load Copilot digest. Please try again later." %>
+  <% end %>
+<% elsif copilot_digest.empty? %>
+  <%= render(Primer::Alpha::Banner.new(scheme: :default, icon: :copilot)) do %>
+    No digest items available at this time.
+  <% end %>
+<% else %>
+  <div class="ml-1">
+    <%= render(Primer::Beta::Heading.new(tag: :h3, display: :flex, align_items: :center, mb: 1)) do %>
+      <%= primer_octicon(:copilot, size: :medium, mr: 2, color: :muted) %>
+      Hello, <span class="color-fg-muted ml-1">@</span><%= current_user.display_login %>
+    <% end %>
+
+    <div class="tmp-mb-4">
+      <%= render(Primer::Beta::Heading.new(tag: :h4, mb: 1, color: :muted, font_weight: :light)) do %>
+        <% if digest_summary.present? %>
+          <%= digest_summary %>
+        <% else %>
+          Copilot has reviewed your notifications and highlighted the most relevant ones to help you catch up faster.
+        <% end %>
+      <% end %>
+    </div>
+  </div>
+
+  <%= render(Primer::Alpha::TabPanels.new(label: "Copilot Digest", align: "left", classes: "border-bottom-0")) do |component| %>
+    <% copilot_digest.each_with_index do |(category, category_notifications), index| %>
+      <% component.with_tab(selected: index.zero?, id: "tab-#{category.parameterize}", classes: "border-0 tmp-px-2 text-bold") do |tab| %>
+        <% tab.with_text { category } %>
+        <% tab.with_counter(count: category_notifications.length) %>
+        <% tab.with_panel do %>
+          <%= render(Primer::Alpha::Stack.new(direction: :vertical, gap: :normal)) do |stack| %>
+            <%= safe_join(category_notifications.map do |copilot_notification|
+              render partial: "notifications/v2/copilot_digest_item", locals: {
+                notification: copilot_notification.notification,
+                copilot_notification: copilot_notification,
+                view: view
+              }
+            end) %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

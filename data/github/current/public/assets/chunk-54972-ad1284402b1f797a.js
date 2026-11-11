@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["54972"],{842263(t,u,a){a.r(u);var i=a(909785);(0,a(163557).uE)("input[data-autoselect], textarea[data-autoselect]",async function(t){await (0,i.k2)(),t.select()})}}]);
+//# sourceMappingURL=chunk-54972-ad1284402b1f797a-3bd61142b708d4bf.js.map

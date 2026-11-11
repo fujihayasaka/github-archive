@@ -1,0 +1,76 @@
+<% page_info :title => "Verify Session" %>
+<% multi_account_enabled = account_switcher_helper.enabled? %>
+
+<%= render Sessions::AuthenticationWrapperComponent.new(
+      html_attributes: { "style" => "min-height: 80vh;", "data-hpc" => true },
+      classes: "mt-0 d-flex flex-items-center flex-justify-center",
+    ) do |component| %>
+
+  <% component.with_header do %>
+    <div class="d-flex flex-items-center flex-justify-center gap-2">
+      <%= render(Primer::Beta::Octicon.new(:"mark-github", height: 44)) %>
+      <%= render(Primer::Beta::Octicon.new(:"arrow-switch", height: 20)) %>
+      <%= oauth_application_logo(application, 44, :class => "avatar", :alt => application.name) %>
+    </div>
+
+    <%= render "shared/flash" %>
+    <div class="auth-form-header p-0 m-0">
+      <h1>Authorize <%= application.name %></h1>
+      <p>
+        From the options below, choose which account you would like to use to authorize this app.
+      </p>
+    </div>
+  <% end %>
+
+  <% component.with_body do %>
+    <div class="width-full account-switcher-box">
+     <%= render partial: "sessions/account_switcher_box", locals: {
+        view_name: "switch_account",
+        signing_out: false,
+        continue_to: oauth_account_picker_path(account_picker_params),
+        continue_method: :post,
+        return_to: return_to_target,
+      }%>
+    </div>
+    <div class="width-full authentication-divider tmp-mt-3 text-center f4">
+      <span>or</span>
+    </div>
+    <% if from_vscode_social %>
+      <%= form_tag kill_session_path, method: "post" do %>
+        <%= hidden_field_tag :after_logout, social_redirect_path(provider: params[:provider], return_to: return_to_target) %>
+        <%= hidden_field_tag "destroy_all", "true" %>
+        <%= render(Primer::Beta::Button.new(
+          type: :submit,
+          scheme: :invisible,
+          border: true,
+        )) do |component| %>
+          <% component.with_leading_visual_svg do %>
+            <% case params[:provider] %>
+            <% when "google" %>
+              <%= render Providers::GoogleIconComponent.new %>
+            <% when "apple" %>
+              <%= render Providers::AppleIconComponent.new %>
+            <% end %>
+          <% end %>
+          Continue with <%= params[:provider].capitalize %>
+        <% end %>
+      <% end %>
+      <p class="note">
+        Continuing with <%= params[:provider].capitalize %> will sign you out of all your accounts.
+      </p>
+    <% else %>
+      <% if multi_account_enabled %>
+        <%= render(Primer::Beta::Button.new(type: :button, tag: :a, scheme: :invisible, border: true, href: login_path(return_to: return_to_target, add_account: "1", allow_signup: account_picker_params[:allow_signup], client_id: params["client_id"]))) { "Use a different account" } %>
+      <% else %>
+        <%= form_tag kill_session_path, method: "post" do %>
+          <%= hidden_field_tag :after_logout, return_to_target %>
+          <%= render(Primer::Beta::Button.new(
+            type: :submit,
+            scheme: :invisible,
+            border: true,
+          )) { "Use a different account" } %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

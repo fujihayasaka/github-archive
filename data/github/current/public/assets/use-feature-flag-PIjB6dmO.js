@@ -1,0 +1,1 @@
+import{n as e}from"./use-app-payload-sQWHJ9yx.js";const t=()=>e()?.enabled_features??{},n=e=>!!t()[e];export{t as n,n as t};

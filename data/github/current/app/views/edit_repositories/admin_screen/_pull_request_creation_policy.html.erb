@@ -1,0 +1,44 @@
+<% pull_request_creation_config = PullRequestCreationConfig.new(repository) %>
+<% status ||= nil %>
+<%
+  status_class = case status
+                 when :success then "status-indicator-success"
+                 when :error   then "status-indicator-failed"
+                 end
+%>
+<turbo-frame id="pull-request-creation-policy" class="d-inline-flex flex-items-center">
+  <%= render Primer::Alpha::ActionMenu.new(select_variant: :single, dynamic_label: true, dynamic_label_prefix: "Creation allowed by") do |menu| %>
+    <% menu.with_show_button do |button| %>
+      <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+    <% end %>
+
+    <% menu.with_item(
+      label: "All users",
+      active: pull_request_creation_config.pull_request_creation_allowed_by_all?,
+      href: repository_pull_request_creation_policy_path(repository.owner, repository),
+      form_arguments: { method: :put, name: "pull_request_creation_policy", value: Configurable::PullRequestCreationPolicy::ALL },
+    ) do |item| %>
+      <% item.with_description.with_content("Anyone can create a pull request") %>
+    <% end %>
+
+    <% menu.with_item(
+      label: "Collaborators only",
+      active: pull_request_creation_config.pull_request_creation_restricted_to_collaborators?,
+      href: repository_pull_request_creation_policy_path(repository.owner, repository),
+      form_arguments: { method: :put, name: "pull_request_creation_policy", value: Configurable::PullRequestCreationPolicy::COLLABORATORS_ONLY },
+    ) do |item| %>
+      <% item.with_description.with_content("Only collaborators can create PRs") %>
+    <% end %>
+  <% end %>
+  <span class="hx_status-indicator status-indicator ml-2 <%= status_class %>">
+    <%= render(Primer::Beta::Spinner.new(size: :small, classes: "status-indicator-spinner")) %>
+    <%= render(Primer::Beta::Octicon.new(icon: "check")) %>
+    <%= render(Primer::Beta::Octicon.new(icon: "x")) %>
+  </span>
+</turbo-frame>
+
+<style>
+  turbo-frame#pull-request-creation-policy[busy] .status-indicator-spinner {
+    display: inline-block;
+  }
+</style>

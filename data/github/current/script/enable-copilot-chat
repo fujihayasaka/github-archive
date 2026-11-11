@@ -1,0 +1,92 @@
+#!/bin/bash
+set -e
+
+# Parse command line arguments
+ENABLE_MCP=false
+PORT=8152
+SETUP_CHAT_SERVICE=false
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --gh-mcp)
+      ENABLE_MCP=true
+      shift
+      ;;
+    --chat-service)
+      SETUP_CHAT_SERVICE=true
+      shift
+      ;;
+    --gitrpc-port)
+      if [ -n "$2" ] && [[ ! "$2" == --* ]]; then
+        PORT="$2"
+        shift 2
+      else
+        echo "Error: --gitrpc-port requires a numeric argument."
+        exit 1
+      fi
+      ;;
+    --help|-h)
+      echo "Usage: $0 [OPTIONS]"
+      echo ""
+      echo "Options:"
+      echo "  --gh-mcp               Also set up GitHub MCP server for development"
+      echo "  --chat-service         Also set up Copilot Chat service for development"
+      echo "  --gitrpc-port <port>   Specify gitrpc port (default ${PORT})"
+      echo "  --help, -h             Show this help message"
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1"
+      echo "Use --help for usage information"
+      exit 1
+      ;;
+  esac
+done
+
+### Bail out early if preconditions aren't met: ###
+if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null ; then
+  # gitrpc server running
+  :
+else
+  echo -e "Your server is not running. Please start it with ./script/server and try again. (expected port ${PORT})"
+  exit 1
+fi
+
+bin/rake db:abort_if_pending_migrations
+
+###################################################
+
+GREEN='\033[0;32m'
+NC='\033[0m' # No Color
+
+echo -e "\n${GREEN}➡️ Setting up Copilot...\n${NC}"
+./bin/setup-copilot -E -c
+
+echo -e "\n${GREEN}➡️ Mirror prod-enabled feature flags...\n${NC}"
+./bin/toggle-global-flags --enable
+
+echo -e "\n${GREEN}➡️ Running enable-copilot-chat-skills...\n${NC}"
+./bin/enable-copilot-chat-skills
+
+echo -e "\n${GREEN}➡️ Running copilot4prs seed script...\n${NC}"
+./bin/seed copilot4prs
+
+echo -e "\n${GREEN}➡️ Enabling models for development...\n${NC}"
+./bin/enable-copilot-chat-dev-models
+
+echo -e "\n${GREEN}➡️ Copilot enterprise admin \`cfbbizentadmin\` created...${NC}"
+echo -e "\n${GREEN}➡️ Copilot org admin \`cfbbizentorgadmin\` created...\n${NC}"
+
+# Set up MCP server if requested
+if [ "$ENABLE_MCP" = true ]; then
+  echo -e "\n${GREEN}➡️ Setting up GitHub MCP server...\n${NC}"
+  ./script/setup-github-mcp-server
+fi
+
+# Set up Copilot Chat service if requested
+if [ "$SETUP_CHAT_SERVICE" = true ]; then
+  echo -e "\n${GREEN}➡️ Setting up Copilot Chat service...\n${NC}"
+  ./script/setup-copilot-chat-service -w
+fi
+
+echo -e "\n${GREEN}➡️ Copilot setup complete!${NC}"

@@ -1,0 +1,250 @@
+<% page_info title: "#{this_business.name} - Licensing", selected_link: :business_licenses %>
+
+<div class="d-flex flex-column">
+  <%= render "stafftools/businesses/enterprise_licensing/navigation" %>
+  <%= render Primer::Beta::Subhead.new(test_selector: "license-overview") do |component| %>
+    <% component.with_heading(tag: :h1) do %>Overview<% end %>
+    <% component.with_actions do %>
+      <%= render(Primer::Alpha::ActionMenu.new) do |menu| %>
+        <% menu.with_show_button do |button| %>
+          <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+          Tools
+        <% end %>
+        <% menu.with_item(
+          label: "View licensing model audit logs",
+          href: stafftools_licensing_model_changes_audit_log_path(this_business, current_user),
+          content_arguments: { target: "_blank", rel: "noopener" }
+        ) %>
+        <% menu.with_item(
+          label: "View licensing report in Kusto",
+          href: kusto_link_for_licensing_report(this_business),
+          content_arguments: { target: "_blank", rel: "noopener" }
+        ) %>
+        <% unless this_business.metered_plan? %>
+          <% menu.with_item(
+            label: "Check metered transition eligibility",
+            tag: :button,
+            content_arguments: { data: { "show-dialog-id": dom_id(this_business, :metered_eligibility) } }
+          ) %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% unless this_business.metered_plan? %>
+    <%= render(Primer::Alpha::Dialog.new(
+      title: "Metered Transition Eligibility",
+      id: dom_id(this_business, :metered_eligibility),
+      size: :medium_portrait,
+    )) do |dialog| %>
+      <% dialog.with_body do %>
+        <%= render(Stafftools::Licensing::MeteredEligibilityComponent.new(this_business, tag: :div, omit: ['is_owner'])) %>
+      <% end %>
+      <% dialog.with_footer do %>
+        <%= render(Primer::Beta::Button.new(data: { "close-dialog-id": dom_id(this_business, :metered_eligibility) })) { "Close" } %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% unless this_business.metered_plan? %>
+    <%= render partial: "stafftools/businesses/license_overview", locals: { view: } %>
+  <% end %>
+
+  <% if !(this_business.copilot_licensing_enabled? && this_business.seats_plan_basic?) # hide GHE card for copilot-only businesses %>
+    <%= render_fallback_on_error(fallback: render("stafftools/businesses/enterprise_licensing/error_fallback", message: "Could not load Enterprise Cloud data.")) do %>
+      <%= render_react_partial(
+        name: "licensing-enterprise-overview",
+        props: {
+          enterpriseContactUrl: ent_contact_url,
+          ghe: ghe_overview_react_payload(business: this_business, is_stafftools: true, current_user:),
+          slug: this_business.slug,
+          isStafftools: true
+        }
+      ) %>
+    <% end %>
+  <% end %>
+
+  <%= render_fallback_on_error(fallback: render("stafftools/businesses/enterprise_licensing/error_fallback", message: "Could not load Advanced Security data.")) do %>
+    <%= render_react_partial(
+      name: "licensing-advanced-security-overview",
+      props: {
+        enterpriseContactUrl: ent_contact_url,
+        ghas: ghas_overview_react_payload(business: this_business, viewer: current_user),
+        slug: this_business.slug,
+        isStafftools: true
+      }
+    ) %>
+  <% end %>
+
+  <% unless enterprise_copilot_licensing_enabled?(this_business) %>
+    <%= render_fallback_on_error(fallback: render("stafftools/businesses/enterprise_licensing/error_fallback", message: "Could not load Copilot data.")) do %>
+      <%= render_react_partial(
+        name: "licensing-copilot-overview",
+        props: {
+          enterpriseContactUrl: ent_contact_url,
+          copilot: copilot_overview_react_payload(business: this_business),
+          slug: this_business.slug,
+          isStafftools: true
+        }
+      ) %>
+    <% end %>
+  <% end %>
+
+  <% if this_business.metered_ghes_eligible? || this_business.advanced_security_products_metered? %>
+    <%= render_fallback_on_error(fallback: render("stafftools/businesses/enterprise_licensing/error_fallback", message: "Could not load Enterprise Server data.")) do %>
+      <%= render_react_partial(
+        name: "licensing-enterprise-server-overview",
+        props: {
+          ghesUsage: ghes_overview_react_payload(business: this_business)
+        }
+      ) %>
+    <% end %>
+  <% end %>
+  <% if this_business.metered_ghes_eligible? %>
+    <%= render_fallback_on_error(fallback: render("stafftools/businesses/enterprise_licensing/error_fallback", message: "Could not load Enterprise Server licenses data.")) do %>
+      <%= render_react_partial(
+        name: "metered-enterprise-server-licenses",
+        props: ghes_keys_react_payload(business: this_business, is_stafftools: true)
+      )
+      %>
+    <% end %>
+  <% end %>
+
+</div>
+
+<%= render Primer::Beta::Subhead.new(hide_border: true) do |component| %>
+  <% component.with_heading(tag: :h2, danger: true) do %>Danger zone<% end %>
+<% end %>
+
+<div class="Box Box--danger">
+  <div class="Box-row">
+    <div class="form-group d-flex mt-0">
+      <div class="d-flex flex-column col-12">
+        <label>Recalculate license usage</label>
+      </div>
+    </div>
+    <div class="form-group d-flex mt-0">
+      <div class="d-flex flex-column col-7">
+        <span class="note">
+          If the numbers in Overview don't match up, you can try recalculating the stored license usage.
+          This is a safe operation, that is normally run automatically. For example, when a new user is added
+          to one of the enterprise organizations.
+        </span>
+      </div>
+      <div class="d-flex flex-1 flex-justify-center flex-column">
+        <%= form_tag stafftools_enterprise_licensing_path(this_business), method: :patch do %>
+          <%= render Primer::Beta::Button.new(type: :submit, scheme: :danger,  block: true) do %>Recalculate license usage<% end %>
+        <% end %>
+      </div>
+    </div>
+  </div>
+  <div class="Box-row">
+    <div class="form-group d-flex mt-0">
+      <div class="d-flex flex-column col-7">
+        <label>Synchronize licenses with Licensify</label>
+        <span class="note">
+          If the numbers in Overview or Licenses don't match up, you can try synchronizing licenses in Licensify.
+          This is a safe operation.
+        </span>
+      </div>
+      <div class="d-flex flex-1 flex-justify-center flex-column">
+        <%= form_tag sync_licenses_stafftools_customer_licensify_licenses_path(this_business.customer_id), method: :post do %>
+          <%= render(Primer::Alpha::Dialog.new(
+              title: "Confirm license synchronization",
+              id: dom_id(this_business, :licensify_licenses_sync),
+              size: :medium_portrait,
+            )) do |dialog| %>
+            <% dialog.with_show_button(
+              scheme: :danger,
+              block: true,
+              id: dom_id(this_business, :licensify_licenses_sync)
+            ) { "Synchronize licenses" } %>
+            <% dialog.with_body do %>
+              Use this to make sure we're tracking up-to-date licenses owned by the business in Licensify.
+            <% end %>
+            <% dialog.with_footer do %>
+              <%= render(Primer::Beta::Button.new(data: { "close-dialog-id": dom_id(this_business, :licensify_licenses_sync) })) { "Cancel" } %>
+              <%= render(Primer::Beta::Button.new(type: :submit, scheme: :danger)) { "Confirm" } %>
+            <% end %>
+          <% end %>
+        <% end %>
+      </div>
+    </div>
+  </div>
+  <div class="Box-row">
+    <div class="form-group d-flex mt-0">
+      <div class="d-flex flex-column col-7">
+        <label>Synchronize customer with Licensify</label>
+        <span class="note">
+          This syncs the customer's info with Licensify. If the licenses look incorrect you can try synchronizing the customer info.
+          This is a safe operation.
+        </span>
+      </div>
+      <div class="d-flex flex-1 flex-justify-center flex-column">
+        <%= form_tag sync_customer_stafftools_customer_licensify_licenses_path(this_business.customer_id), method: :post do %>
+          <%= render(Primer::Alpha::Dialog.new(
+              title: "Confirm customer synchronization",
+              id: dom_id(this_business, :licensify_customer_sync),
+              size: :medium_portrait,
+            )) do |dialog| %>
+            <% dialog.with_show_button(
+              scheme: :danger,
+              block: true,
+              id: dom_id(this_business, :licensify_customer_sync)
+            ) { "Synchronize customer" } %>
+            <% dialog.with_body do %>
+              Use this to make sure we're tracking up-to-date info for the customer in Licensify.
+            <% end %>
+            <% dialog.with_footer do %>
+              <%= render(Primer::Beta::Button.new(data: { "close-dialog-id": dom_id(this_business, :licensify_customer_sync) })) { "Cancel" } %>
+              <%= render(Primer::Beta::Button.new(type: :submit, scheme: :danger)) { "Confirm" } %>
+            <% end %>
+          <% end %>
+        <% end %>
+      </div>
+    </div>
+  </div>
+  <div class="Box-row">
+    <div class="form-group d-flex mt-0">
+      <div class="d-flex flex-column col-7">
+        <label>Synchronize product enablements with Licensify</label>
+        <span class="note">
+          Synchronize product enablements for this customer with Licensify.
+        </span>
+      </div>
+      <div class="d-flex flex-1 flex-justify-center flex-column">
+        <%= render(Primer::Alpha::Dialog.new(
+          title: "Synchronize product enablements",
+          id: dom_id(this_business, :product_enablements_sync),
+          size: :medium_portrait,
+        )) do |dialog| %>
+          <% dialog.with_show_button(
+            scheme: :danger,
+            block: true
+          ) { "Synchronize product enablements" } %>
+          <%= form_with(url: sync_product_enablements_stafftools_customer_licensify_licenses_path(this_business.customer_id), method: :post) do |f| %>
+            <%= render(Primer::Alpha::Dialog::Body.new) do %>
+              <%= render(Primer::Alpha::CheckBoxGroup.new(
+                name: "products",
+                label: "Products",
+                caption: "Select the products to synchronize with Licensify.",
+              )) do |component| %>
+                <% component.check_box(label: "Bundled GHAS", value: "ghas", checked: true) %>
+                <% component.check_box(label: "Code Security", value: "code_security", checked: true) %>
+                <% component.check_box(label: "Secret Protection", value: "secret_protection", checked: true) %>
+              <% end %>
+            <% end %>
+
+            <%= render(Primer::Alpha::Dialog::Footer.new) do %>
+              <%= render(Primer::Beta::Button.new(data: { "close-dialog-id": dom_id(this_business, :product_enablements_sync) })) { "Cancel" } %>
+              <%= render(Primer::Beta::Button.new(type: :submit, scheme: :danger)) { "Synchronize" } %>
+            <% end %>
+          <% end %>
+        <% end %>
+      </div>
+    </div>
+  </div>
+  <%= render "stafftools/licensing/delete_deactivated_licenses_button", customer_id: this_business.customer_id, dom_id_base: this_business, col_class: "col-7" %>
+  <%= render Licensing::MeteredLicenseTransitionComponent.new(business: this_business, current_user: current_user, transition: transition) %>
+  <%= render Licensing::GhasTransitionComponent.new(business: this_business, transition: transition) %>
+</div>

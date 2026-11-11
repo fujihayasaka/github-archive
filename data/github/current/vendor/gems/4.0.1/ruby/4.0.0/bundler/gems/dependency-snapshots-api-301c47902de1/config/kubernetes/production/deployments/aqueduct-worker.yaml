@@ -1,0 +1,56 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    annotations:
+        heaven.githubapp.com/deploy-requirement: "true"
+        heaven.githubapp.com/image-placeholder: dependency-snapshots-api
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: aqueduct-worker
+    name: aqueduct-worker
+spec:
+    replicas: 5
+    selector:
+        matchLabels:
+            app: dependency-snapshots-api
+            role: aqueduct-worker
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser_stderr: json
+                fluentbit.io/parser_stdout: logfmt
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: dependency-snapshots-api
+                sidecar.istio.io/proxyCPU: 250m
+                sidecar.istio.io/proxyCPULimit: 2000m
+                sidecar.istio.io/proxyMemory: 512Mi
+                sidecar.istio.io/proxyMemoryLimit: 1Gi
+            labels:
+                app: dependency-snapshots-api
+                role: aqueduct-worker
+        spec:
+            containers:
+                - command:
+                    - ./bin/ds-aqueduct-worker
+                  env:
+                    - name: STATS_ADDR
+                      value: $(KUBE_NODE_HOSTNAME):28125
+                    - name: GOMAXPROCS
+                      value: "2"
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  image: dependency-snapshots-api
+                  name: aqueduct-worker
+                  resources:
+                    limits:
+                        cpu: 1
+                        memory: 512Mi
+                    requests:
+                        cpu: 200m
+                        memory: 128Mi
+            dnsPolicy: ClusterFirst
+            terminationGracePeriodSeconds: 60

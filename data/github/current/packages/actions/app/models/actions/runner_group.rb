@@ -1,0 +1,560 @@
+# typed: true
+# frozen_string_literal: true
+
+require "github-launch"
+require "actions-runner-admin"
+
+class Actions::RunnerGroup
+  extend Actions::RunnerGroupsHelper
+  include Scientist
+
+  class RunnerGroupServiceError < Actions::ServiceError; end
+
+  class SelectedTargetsLoader
+    def load(owner, selected_targets)
+      ids_by_type = self.class.target_ids_by_type(selected_targets)
+      if owner.is_a?(Business)
+        owner.organizations.where(id: ids_by_type["Organization"].to_a)
+      else
+        owner.repositories.where(id: ids_by_type["Repository"].to_a, active: true)
+      end
+    end
+
+    def self.target_ids_by_type(selected_targets)
+      selected_targets.each_with_object({}) do |t, targets|
+        klass, id = Platform::Helpers::NodeIdentification.from_global_id(t.global_id)
+        targets[klass] ||= []
+        targets[klass].push(id)
+      end
+    end
+  end
+
+  class SelectedTargetsPreloader
+    def initialize(owner, groups)
+      preloaded_array = SelectedTargetsLoader.new.load(owner, groups.flat_map(&:selected_targets).uniq)
+      @preloaded_targets = preloaded_array.each_with_object({}) do |t, targets|
+        targets[t.class.to_s] ||= {}
+        targets[t.class.to_s][t.id] = t
+      end
+    end
+
+    def load(owner, selected_targets)
+      ids_by_type = SelectedTargetsLoader.target_ids_by_type(selected_targets)
+      ids_by_type.flat_map do |type, ids|
+        ids.map do |id|
+          @preloaded_targets.dig type, id.to_i
+        end
+      end.compact
+    end
+  end
+
+  SELECTED_TARGETS_ONLY = "selected"
+  DEFAULT_GROUP_ID = 1 # Id of default runner group. This group always has the same ID = 1 and name "Default" because it is created on Host creation by Actions service
+
+  attr_reader(
+    :id,
+    :name,
+    :size,
+    :runners,
+    :runner_scale_sets,
+    :visibility,
+    :allow_public,
+    :inherited_allow_public,
+    :selected_targets,
+    :selected_target_global_ids,
+    :hosted,
+    :default,
+    :selected_workflow_refs,
+    :restricted_to_workflows,
+    :workflow_restrictions_read_only,
+    :owner_group_id
+  )
+
+  attr_accessor :owner
+
+  def initialize(
+    id:,
+    name:,
+    size: 0,
+    owner_id: nil,
+    runners: [],
+    runner_scale_sets: [],
+    visibility: :SELECTED,
+    allow_public: false,
+    inherited_allow_public: false,
+    selected_targets: [],
+    selected_target_global_ids: [],
+    selected_workflow_refs: [],
+    precreated: false,
+    hosted: false,
+    restricted_to_workflows: false,
+    workflow_restrictions_read_only: false,
+    owner_group_id: nil
+  )
+    @id = id
+    @name = name
+    @size = size
+    @owner_id = owner_id
+    @runners = runners
+    @runner_scale_sets = runner_scale_sets
+    @visibility = visibility
+    @allow_public = allow_public
+    @inherited_allow_public = inherited_allow_public
+    @selected_targets = selected_targets
+    @selected_target_global_ids = selected_target_global_ids
+    @selected_workflow_refs = selected_workflow_refs
+    @precreated = precreated
+    @hosted = hosted
+    @restricted_to_workflows = restricted_to_workflows
+    @workflow_restrictions_read_only = workflow_restrictions_read_only
+    @owner_group_id = owner_group_id
+  end
+
+  def computed_allow_public
+    return allow_public unless inherited?
+    allow_public && inherited_allow_public
+  end
+
+  sig { params(owner: T.untyped, group: T.any(GitHub::Launch::Services::Runnergroups::RunnerGroup, GitHub::ActionsRunnerAdmin::Api::V1::RunnerGroup), targets_loader: T.untyped).returns(Actions::RunnerGroup) }
+  def self.from_rpc_object(owner, group, targets_loader: SelectedTargetsLoader.new)
+    new(
+      id: group.id,
+      name: group.name,
+      size: group.size,
+      owner_id: group.owner_id,
+      runners: Actions::Runner.from_rpc_collection(group.runners),
+      runner_scale_sets: Actions::RunnerScaleSet.from_rpc_collection(group.runner_scale_sets),
+      visibility: group.visibility,
+      allow_public: group.allow_public,
+      inherited_allow_public: group.inherited_allow_public,
+      selected_targets: targets_loader ? targets_loader.load(owner, group.selected_targets) : nil,
+      selected_target_global_ids: group.selected_targets.map(&:global_id),
+      precreated: group.is_default,
+      hosted: group.is_hosted,
+      selected_workflow_refs: group.selected_workflow_refs,
+      restricted_to_workflows: group.restricted_to_workflows,
+      workflow_restrictions_read_only: group.workflow_restrictions_read_only,
+      owner_group_id: group.owner_group_id
+    )
+  end
+  private_class_method :from_rpc_object
+
+  def self.selected_targets_for_group(group, preloaded_records)
+  end
+  private_class_method :selected_targets_for_group
+
+  def self.from_rpc_collection(owner, groups)
+    targets_loader = SelectedTargetsPreloader.new(owner, groups)
+    groups.map do |runner_group|
+      from_rpc_object(owner, runner_group, targets_loader: targets_loader)
+    end
+  end
+  private_class_method :from_rpc_collection
+
+  def self.from_rpc_collection_ignore_selected_targets(owner, groups)
+    groups.map do |runner_group|
+      from_rpc_object(owner, runner_group, targets_loader: nil)
+    end
+  end
+  private_class_method :from_rpc_collection_ignore_selected_targets
+
+  sig { params(entity: T.untyped, include_runners: T::Boolean, propagate_errors: T::Boolean, include_hosted_runner_groups: T::Boolean, include_elastic_runners: T::Boolean, include_runner_scale_sets: T::Boolean, is_ui_read: T::Boolean, is_api_read: T::Boolean, is_write: T::Boolean, force_launch: T::Boolean, include_selected_targets: T::Boolean).returns(T.untyped) }
+  def self.for_entity(entity, include_runners: false, propagate_errors: false, include_hosted_runner_groups: false, include_elastic_runners: false, include_runner_scale_sets: false, is_ui_read: false, is_api_read: false, is_write: false, force_launch: false, include_selected_targets: true)
+    GitHub.tracer.in_span("actions/runner_group.for_entity", kind: :internal, attributes: {
+      "entity_type" => entity.class.name,
+    }) do |_span|
+      if entity.is_a? Repository
+        return [] unless entity.owner&.organization?
+        owner = T.cast(entity.owner, Organization)
+
+        if FeatureFlag.vexi.enabled?("actions_runner_admin_skip_selected_targets_preloader", owner, default: false)
+          # Fast path: skip SelectedTargetsPreloader (expensive MySQL query that loads
+          # all repo objects for all selected targets across all groups).
+          # Use selected_target_global_ids for visibility checks instead.
+          do_experiment = do_runner_admin_experiment?(owner)
+          if owner.business
+            do_experiment = false
+          end
+
+          self_hosted_resp = list_runner_groups(
+            owner: owner,
+            include_runners: include_runners,
+            include_runner_scale_sets: include_runner_scale_sets,
+            include_elastic_runners: include_elastic_runners,
+            use_runner_admin: !force_launch && use_runner_admin?(owner, is_ui_read: is_ui_read, is_api_read: is_api_read, is_write: is_write),
+            do_experiment: do_experiment
+          )
+
+          if propagate_errors && !self_hosted_resp.call_succeeded?
+            raise RunnerGroupServiceError.new("list_groups failed", status: self_hosted_resp.status, options: self_hosted_resp.options)
+          end
+
+          org_runner_groups = from_rpc_collection_ignore_selected_targets(owner, self_hosted_resp.value&.runner_groups || [])
+
+          if include_hosted_runner_groups
+            hosted_resp = get_hosted_runner_group(owner: owner, include_runners: include_runners)
+            if propagate_errors && !hosted_resp.call_succeeded?
+              raise RunnerGroupServiceError.new("list_groups failed", status: hosted_resp.status, options: hosted_resp.options)
+            end
+            org_runner_groups = org_runner_groups.concat(from_rpc_collection_ignore_selected_targets(owner, hosted_resp.value&.runner_groups || []))
+          end
+
+          visible_runner_groups = GitHub.tracer.in_span("actions/runner_group.filter_visible_to_repo", kind: :internal) do |_span|
+            org_runner_groups.select do |runner_group|
+              runner_group_visible_to_repo?(runner_group, owner, entity)
+            end
+          end
+          return visible_runner_groups
+        else
+          # Old path: recursive for_entity(org) with SelectedTargetsPreloader.
+          # Note: include_selected_targets is intentionally NOT forwarded here —
+          # runner_group_visible_to_repo? needs loaded AR objects in selected_targets
+          # to filter by visibility. The FF-on path above handles this differently.
+          org_runner_groups = self.for_entity(
+            owner,
+            include_runners: include_runners,
+            propagate_errors: propagate_errors,
+            include_hosted_runner_groups: include_hosted_runner_groups,
+            include_runner_scale_sets: include_runner_scale_sets,
+            include_elastic_runners: include_elastic_runners,
+            is_ui_read: is_ui_read,
+            is_api_read: is_api_read,
+            is_write: is_write,
+            force_launch: force_launch,
+          )
+          visible_runner_groups = GitHub.tracer.in_span("actions/runner_group.filter_visible_to_repo", kind: :internal) do |_span|
+            org_runner_groups.select do |runner_group|
+              runner_group_visible_to_repo?(runner_group, owner, entity)
+            end
+          end
+          return visible_runner_groups
+        end
+      end
+
+      do_experiment = do_runner_admin_experiment?(entity)
+      if entity.is_a?(Organization) && entity.business
+        do_experiment = false
+      end
+
+      self_hosted_resp = list_runner_groups(
+        owner: entity,
+        include_runners: include_runners,
+        include_runner_scale_sets: include_runner_scale_sets,
+        include_elastic_runners: include_elastic_runners,
+        use_runner_admin: !force_launch && use_runner_admin?(entity, is_ui_read: is_ui_read, is_api_read: is_api_read, is_write: is_write),
+        do_experiment: do_experiment
+      )
+
+      if propagate_errors && !self_hosted_resp.call_succeeded?
+        raise RunnerGroupServiceError.new("list_groups failed", status: self_hosted_resp.status, options: self_hosted_resp.options)
+      end
+
+      runner_groups = if include_selected_targets
+        from_rpc_collection(entity, self_hosted_resp.value&.runner_groups || [])
+      else
+        from_rpc_collection_ignore_selected_targets(entity, self_hosted_resp.value&.runner_groups || [])
+      end
+
+      if include_hosted_runner_groups
+        hosted_resp = get_hosted_runner_group(owner: entity, include_runners: include_runners)
+
+        if propagate_errors && !hosted_resp.call_succeeded?
+          raise RunnerGroupServiceError.new("list_groups failed", status: hosted_resp.status, options: hosted_resp.options)
+        end
+
+        hosted_groups = if include_selected_targets
+          from_rpc_collection(entity, hosted_resp.value&.runner_groups || [])
+        else
+          from_rpc_collection_ignore_selected_targets(entity, hosted_resp.value&.runner_groups || [])
+        end
+        runner_groups = runner_groups.concat(hosted_groups)
+      end
+
+      runner_groups
+    end
+  end
+
+  def self.runner_group_visible_to_repo?(runner_group, org, repo)
+    # repo must be included in targets for select visibility
+    visibility = visibility_for(runner_group)
+    if visibility == Launch::Twirp::RunnerGroupsClient::GROUP_VISIBILITY_SELECTED
+      if !runner_group.selected_targets.nil?
+        # Targets loaded (FF off or loaded path): use AR objects
+        return false unless runner_group.selected_targets.any? { |target| target.global_relay_id == repo.next_global_id || target.global_relay_id == repo.global_relay_id }
+      else
+        # Targets not loaded (FF on): use raw global_ids to avoid loading repo objects from DB
+        repo_ids = [repo.next_global_id, repo.global_relay_id].compact
+        return false unless runner_group.selected_target_global_ids.any? { |gid| repo_ids.include?(gid) }
+      end
+    end
+    # private repos can use any runner group
+    return true unless repo.public?
+    # return allow_public
+    runner_group.computed_allow_public
+  end
+
+  sig { params(owner: T.untyped, id: T.untyped, include_runners: T::Boolean, include_hosted_runner_groups: T::Boolean, include_elastic_runners: T::Boolean, include_runner_scale_sets: T::Boolean, is_ui_read: T::Boolean, is_api_read: T::Boolean, is_write: T::Boolean, force_launch: T::Boolean, include_selected_targets: T::Boolean).returns(T.untyped) }
+  def self.get(owner, id:, include_runners: false, include_hosted_runner_groups: false, include_elastic_runners: false, include_runner_scale_sets: false, is_ui_read: false, is_api_read: false, is_write: false, force_launch: false, include_selected_targets: true)
+    resp = get_runner_group(
+      owner: owner,
+      group_id: id,
+      include_runners: include_runners,
+      include_hosted_runner_groups: include_hosted_runner_groups,
+      include_elastic_runners: include_elastic_runners,
+      include_runner_scale_sets: include_runner_scale_sets,
+      use_runner_admin: !force_launch && use_runner_admin?(owner, is_ui_read: is_ui_read, is_api_read: is_api_read, is_write: is_write),
+      do_experiment: do_runner_admin_experiment?(owner),
+    )
+
+    runner_group = resp.value&.runner_group
+    return nil unless runner_group
+    result = from_rpc_object(owner, runner_group, targets_loader: include_selected_targets ? SelectedTargetsLoader.new : nil)
+    result.owner = owner
+    result
+  end
+
+  sig { params(runner_group: T.untyped).returns(T.untyped) }
+  def self.visibility_for(runner_group)
+    return Launch::Twirp::RunnerGroupsClient::GROUP_VISIBILITY_SELECTED if runner_group.visibility == ActionsRunnerAdmin::Twirp::RunnerAdminClient::GROUP_VISIBILITY_SELECTED
+    return Launch::Twirp::RunnerGroupsClient::GROUP_VISIBILITY_ALL if runner_group.visibility == ActionsRunnerAdmin::Twirp::RunnerAdminClient::GROUP_VISIBILITY_ALL
+    return Launch::Twirp::RunnerGroupsClient::GROUP_VISIBILITY_ALL if runner_group.visibility == Launch::Twirp::RunnerGroupsClient::GROUP_VISIBILITY_PRIVATE
+    runner_group.visibility
+  end
+
+  # @return Boolean
+  def restricted_to_workflows?
+    !!@restricted_to_workflows
+  end
+
+  def workflow_restrictions_read_only?
+    !!@workflow_restrictions_read_only
+  end
+
+  # Internal: Compare two runner groups
+  # Non-inherited groups are sorted before inherited
+  # Default groups are sorted before other groups
+  # Otherwise groups are sorted by name, case-insensitive
+  #
+  # other - Another RunnerGroup
+  #
+  # Returns the usual tri-state. See Comparable for details.
+  def <=>(other)
+    return nil unless other.is_a?(self.class)
+
+    return 1 if inherited? && !other.inherited?
+    return -1 if !inherited? && other.inherited?
+
+    return -1 if precreated? && !other.precreated?
+    return 1 if !precreated? && other.precreated?
+
+    return -1 if default? && !other.default?
+    return 1 if !default? && other.default?
+
+    @name.downcase <=> other.name.downcase
+  end
+
+  def inherited?
+    @owner_id&.global_id.present?
+  end
+
+  def owner_global_id
+    @owner_id&.global_id
+  end
+
+  def precreated?
+    # Checks if the group is created by our services rather than by user
+    @precreated || default?
+  end
+
+  def default?
+    # Check if this is a default runner group. There is only ever one default group; new runners are assigned to this group automatically
+    @id == DEFAULT_GROUP_ID
+  end
+
+  def hosted?
+    @hosted
+  end
+
+  # Call Launch service with repo filtering performed on the Launch side
+  sig { params(repository: Repository, include_runners: T::Boolean, propagate_errors: T::Boolean, include_runner_scale_sets: T::Boolean, include_elastic_runners: T::Boolean, is_ui_read: T::Boolean, is_api_read: T::Boolean, is_write: T::Boolean, force_launch: T::Boolean, ignore_selected_targets: T::Boolean).returns(T.untyped) }
+  def self.list_runner_groups_with_repo_filter(repository:, include_runners: false, propagate_errors: false, include_runner_scale_sets: false, include_elastic_runners: false, is_ui_read: false, is_api_read: false, is_write: false, force_launch: false, ignore_selected_targets: false)
+    return [] unless repository.owner
+
+    # Personal repositories don't support runner groups
+    return [] unless repository.owner&.organization?
+
+    # Repository owner should be an Organization (enterprises own orgs, not repos directly)
+    owner = T.cast(repository.owner, Organization)
+
+    GitHub.tracer.in_span("actions/runner_group.list_runner_groups_with_repo_filter", kind: :internal) do |_span|
+      filter_target_id = if FeatureFlag.vexi.enabled?("actions_fix_runner_repo_filter", owner, default: false)
+        repository.next_global_id
+      else
+        repository.global_relay_id
+      end
+
+      self_hosted_resp = Launch::Twirp.runner_groups_client.list_groups_with_filter(
+        owner: owner,
+        include_hosted_runner_groups: false,
+        filter_target_id: filter_target_id,
+        filter_target_is_public: repository.public?,
+        include_runners: include_runners,
+        include_runner_scale_sets: include_runner_scale_sets,
+        include_elastic_runners: include_elastic_runners
+      )
+
+      if propagate_errors && !self_hosted_resp.call_succeeded?
+        raise RunnerGroupServiceError.new("list_groups failed", status: self_hosted_resp.status, options: self_hosted_resp.options)
+      end
+
+      if ignore_selected_targets
+        return from_rpc_collection_ignore_selected_targets(owner, self_hosted_resp.value&.runner_groups || [])
+      else
+        return from_rpc_collection(owner, self_hosted_resp.value&.runner_groups || [])
+      end
+    end
+  end
+
+  # Run science experiment comparing new vs old implementations
+  sig { params(repository: Repository, include_runners: T::Boolean, propagate_errors: T::Boolean, include_runner_scale_sets: T::Boolean, include_elastic_runners: T::Boolean, is_ui_read: T::Boolean, is_api_read: T::Boolean, is_write: T::Boolean, force_launch: T::Boolean).returns(T.untyped) }
+  def self.run_repo_filter_experiment(repository:, include_runners: false, propagate_errors: false, include_runner_scale_sets: false, include_elastic_runners: false, is_ui_read: false, is_api_read: false, is_write: false, force_launch: false)
+    GitHub.tracer.in_span("actions/runner_group.run_repo_filter_experiment", kind: :internal) do |_span|
+      start_time = Time.current
+      control_value = T.let(nil, T.nilable(T::Array[Actions::RunnerGroup]))
+
+      # Experiment
+      science("actions.runner_groups.repo_filter_comparison") do |experiment|
+        experiment.context(
+          entity_type: repository.class.name,
+          entity_id: repository.id,
+          owner_type: repository.owner.class.name,
+          owner_id: repository.owner&.id,
+          is_public: repository.public?
+        )
+
+        # Control
+        experiment.use do
+          control_value = begin
+            org_runner_groups = self.for_entity(
+              repository.owner,
+              include_runners: include_runners,
+              propagate_errors: propagate_errors,
+              include_runner_scale_sets: include_runner_scale_sets,
+              include_elastic_runners: include_elastic_runners,
+              is_ui_read: is_ui_read,
+              is_api_read: is_api_read,
+              is_write: is_write,
+              force_launch: force_launch,
+            )
+            org_runner_groups.select do |rg|
+              runner_group_visible_to_repo?(rg, repository.owner, repository)
+            end
+          end
+          control_value
+        end
+
+        # Candidate
+        experiment.try do
+          # Ellapsed time > 2s?
+          if Time.current - start_time > 2.0
+            GitHub.logger.info("Skipped candidate due to slow control execution",
+                             entity_id: repository.id,
+                             owner_id: repository.owner&.id)
+            next control_value
+          end
+
+          list_runner_groups_with_repo_filter(
+            repository: repository,
+            include_runners: include_runners,
+            propagate_errors: propagate_errors,
+            include_runner_scale_sets: include_runner_scale_sets,
+            include_elastic_runners: include_elastic_runners,
+            is_ui_read: is_ui_read,
+            is_api_read: is_api_read,
+            is_write: is_write,
+            force_launch: force_launch,
+            ignore_selected_targets: false
+          )
+        end
+
+        # Compare
+        experiment.compare do |control, candidate|
+          # Ellapsed time > 2s?
+          if Time.current - start_time > 2.0
+            GitHub.logger.info("Skipped comparison due to slow control or candidate execution",
+                             entity_id: repository.id,
+                             owner_id: repository.owner&.id)
+            next true
+          end
+
+          # Clean and sort
+          clean_control = clean_runner_groups_for_comparison(control)
+          clean_candidate = clean_runner_groups_for_comparison(candidate)
+
+          # Ellapsed time > 2s?
+          if Time.current - start_time > 2.0
+            GitHub.logger.info("Skipped comparison due to slow control, candidate, or clean execution",
+                             entity_id: repository.id,
+                             owner_id: repository.owner&.id)
+            next true
+          end
+
+          # Compare
+          clean_control == clean_candidate
+        end
+
+        # Clean function for logging mismatches
+        experiment.clean do |runner_groups|
+          clean_runner_groups_for_comparison(runner_groups)
+        end
+      end
+
+      # Return
+      control_value
+    end
+  end
+
+  # Helper method to clean runner groups for comparison, excluding selected_targets
+  sig { params(runner_groups: T.nilable(T::Array[Actions::RunnerGroup])).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
+  def self.clean_runner_groups_for_comparison(runner_groups)
+    return nil unless runner_groups
+
+    runner_groups.map do |runner_group|
+      # Extract all fields for comparison, ignoring selected_targets which differ between implementations
+
+      # Normalize visibility format (VISIBILITY_ALL -> ALL, etc.) to account for Runner Admin difference
+      visibility_normalized = runner_group.visibility.to_s.delete_prefix("VISIBILITY_").to_sym
+
+      clean_hash = {
+        id: runner_group.id,
+        name: runner_group.name,
+        visibility: visibility_normalized,
+        allow_public: runner_group.allow_public,
+        inherited_allow_public: runner_group.inherited_allow_public,
+        hosted: runner_group.hosted?,
+        restricted_to_workflows: runner_group.restricted_to_workflows?,
+        workflow_restrictions_read_only: runner_group.workflow_restrictions_read_only?,
+        owner_group_id: runner_group.owner_group_id,
+        selected_workflow_refs: runner_group.selected_workflow_refs&.sort || [],
+        runners: runner_group.runners&.map do |runner|
+          {
+            id: runner.id,
+            name: runner.name,
+            os: runner.os,
+            arch: runner.arch,
+            runner_group_id: runner.runner_group_id
+          }
+        end&.sort_by { |r| r[:id] } || [],
+        runner_scale_sets: runner_group.runner_scale_sets&.map do |scale_set|
+          {
+            id: scale_set.id,
+            name: scale_set.name,
+            runner_group_id: scale_set.runner_group_id
+          }
+        end&.sort_by { |rs| rs[:id] } || [],
+      }
+
+      clean_hash.sort.to_h
+    end.sort_by { |rg| rg[:id] }
+  end
+end

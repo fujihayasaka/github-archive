@@ -1,0 +1,1217 @@
+#!/usr/bin/env safe-ruby
+# frozen_string_literal: true
+
+# This script sets up seed data for in-product messaging testing.
+# It creates various organizations, enterprises, and repositories with
+# different configurations for Copilot Business and Copilot Code Review,
+# as well as individual users with Copilot Pro, Copilot Pro+, and Copilot Max plans.
+#
+# Usage:
+#   script/in-product-messaging           # Create all seed data
+#   script/in-product-messaging --destroy # Delete all seed data
+#
+# This is a development-only script and should never be used in production.
+
+require_relative "#{Rails.root}/config/environment"
+require_relative "#{Rails.root}/script/seeds/objects"
+require "#{Rails.root}/test/test_helpers/user_test_helpers"
+require_relative "seeds/factory_bot_loader"
+require "logger"
+require "securerandom"
+
+LOGGER = Logger.new(STDERR)
+DEFAULT_PASSWORD = "passworD1"
+
+module LoggingHelpers
+  def title(string)
+    LOGGER.info colorize(string, "yellow", style: :underline)
+  end
+
+  def yellow(string)
+    LOGGER.info colorize(string, "yellow")
+  end
+
+  def green(string)
+    LOGGER.info colorize(string, "green")
+  end
+
+  def log(string)
+    LOGGER.info string
+  end
+
+  def colorize(string, color, options = {})
+    background = options[:background] || options[:bg] || false
+    style = options[:style]
+    offsets = %w[gray red green yellow blue magenta cyan white]
+    styles = %w[normal bold dark italic underline xx xx underline xx strikethrough]
+    start = background ? 40 : 30
+    color_code = start + (offsets.index(color) || 8)
+    style_code = styles.index(style) || 0
+    "\e[#{style_code};#{color_code}m#{string}\e[0m"
+  end
+end
+
+unless Rails.env.development?
+  raise "This script can only be run in the development environment"
+end
+
+# Entity configuration - single source of truth
+# All arrays below are dynamically populated from this configuration
+ENTITY_CONFIG = {
+  free_orgs: [
+    { org: "ipm-free-org-cb", admin: "ipm-free-org-cb-admin", copilot_business: true, copilot_code_review: false },
+    { org: "ipm-free-org-cb-ccr", admin: "ipm-free-org-cb-ccr-admin", copilot_business: true, copilot_code_review: true },
+    { org: "ipm-free-org-no-cb", admin: "ipm-free-org-no-cb-admin", copilot_business: false, copilot_code_review: false },
+  ],
+  team_orgs: [
+    { org: "ipm-team-org-cb", admin: "ipm-team-org-cb-admin", copilot_business: true, copilot_code_review: false },
+    { org: "ipm-team-org-cb-ccr", admin: "ipm-team-org-cb-ccr-admin", copilot_business: true, copilot_code_review: true },
+    { org: "ipm-team-org-no-cb", admin: "ipm-team-org-no-cb-admin", copilot_business: false, copilot_code_review: false },
+    {
+      org: "ipm-team-org-cb-with-copilot-cli",
+      admin: "ipm-admin-with-team-org-copilot-cli",
+      member: "ipm-member-with-team-org-copilot-cli",
+      copilot_business: true,
+      copilot_code_review: false,
+      copilot_cli: true
+    },
+  ],
+  enterprises: [
+    { business: "ipm-ghec-cb-account", owner: "ipm-ghec-cb-owner", org: "ipm-ghec-cb-org", copilot_business: true, copilot_code_review: false },
+    { business: "ipm-ghec-cb-ccr-account", owner: "ipm-ghec-cb-ccr-owner", org: "ipm-ghec-cb-ccr-org", copilot_business: true, copilot_code_review: true },
+    { business: "ipm-ghec-no-cb-account", owner: "ipm-ghec-no-cb-owner", org: "ipm-ghec-no-cb-org", copilot_business: false, copilot_code_review: false },
+    {
+      business: "ipm-ghec-account-cb-with-copilot-cli",
+      owner: "ipm-owner-with-ent-org-copilot-cli",
+      org: "ipm-ghec-cb-cli-org",
+      member: "ipm-member-with-ent-copilot-cli",
+      copilot_business: true,
+      copilot_code_review: false,
+      copilot_cli: true
+    },
+  ],
+  enterprise_trials: [
+    { business: "ipm-ghec-trial-account", owner: "ipm-ghec-trial-owner", org: nil, has_repository: false },
+    { business: "ipm-ghec-trial-nothing-account", owner: "ipm-ghec-trial-nothing-owner", org: nil, has_repository: false },
+    { business: "ipm-ghec-trial-org-account", owner: "ipm-ghec-trial-org-owner", org: "ipm-ghec-trial-org-org", has_repository: false },
+    { business: "ipm-ghec-trial-repo-account", owner: "ipm-ghec-trial-repo-owner", org: "ipm-ghec-trial-repo-org", has_repository: true },
+  ],
+  individual_users: [
+    { login: "ipm-copilot-pro-user", plan: :pro },
+    { login: "ipm-copilot-pro-plus-user", plan: :pro_plus },
+    { login: "ipm-copilot-pro-max-user", plan: :max },
+  ],
+}.freeze
+
+HUMAN_READABLE_ORG_NAMES = {
+  "ipm-free-org-cb" => "IPM Org 01",
+  "ipm-free-org-cb-ccr" => "IPM Org 02",
+  "ipm-free-org-no-cb" => "IPM Org 03",
+  "ipm-team-org-cb" => "IPM Org 04",
+  "ipm-team-org-cb-ccr" => "IPM Org 05",
+  "ipm-team-org-no-cb" => "IPM Org 06",
+  "ipm-team-org-cb-with-copilot-cli" => "IPM Org 07",
+  "ipm-ghec-cb-org" => "IPM Org 08",
+  "ipm-ghec-cb-ccr-org" => "IPM Org 09",
+  "ipm-ghec-no-cb-org" => "IPM Org 10",
+  "ipm-ghec-cb-cli-org" => "IPM Org 11",
+  "ipm-ghec-trial-org-org" => "IPM Org 12",
+  "ipm-ghec-trial-repo-org" => "IPM Org 13",
+}.freeze
+
+HUMAN_READABLE_BUSINESS_NAMES = {
+  "ipm-ghec-cb-account" => "IPM Business 01",
+  "ipm-ghec-cb-ccr-account" => "IPM Business 02",
+  "ipm-ghec-no-cb-account" => "IPM Business 03",
+  "ipm-ghec-account-cb-with-copilot-cli" => "IPM Business 04",
+  "ipm-ghec-trial-account" => "IPM Business 05",
+  "ipm-ghec-trial-nothing-account" => "IPM Business 06",
+  "ipm-ghec-trial-org-account" => "IPM Business 07",
+  "ipm-ghec-trial-repo-account" => "IPM Business 08",
+}.freeze
+
+# Dynamically populate entity identifier arrays from configuration
+ALL_ORG_LOGINS = (
+  ENTITY_CONFIG[:free_orgs].map { |e| e[:org] } +
+  ENTITY_CONFIG[:team_orgs].map { |e| e[:org] } +
+  ENTITY_CONFIG[:enterprises].map { |e| e[:org] } +
+  ENTITY_CONFIG[:enterprise_trials].map { |e| e[:org] }.compact
+).freeze
+
+ALL_USER_LOGINS = (
+  ENTITY_CONFIG[:free_orgs].map { |e| e[:admin] } +
+  ENTITY_CONFIG[:team_orgs].map { |e| e[:admin] } +
+  ENTITY_CONFIG[:team_orgs].map { |e| e[:member] }.compact +
+  ENTITY_CONFIG[:enterprises].map { |e| e[:owner] } +
+  ENTITY_CONFIG[:enterprises].map { |e| e[:member] }.compact +
+  ENTITY_CONFIG[:enterprise_trials].map { |e| e[:owner] } +
+  ENTITY_CONFIG[:individual_users].map { |e| e[:login] }
+).freeze
+
+ALL_BUSINESS_SLUGS = (
+  ENTITY_CONFIG[:enterprises].map { |e| e[:business] } +
+  ENTITY_CONFIG[:enterprise_trials].map { |e| e[:business] }
+).freeze
+
+IN_PRODUCT_MESSAGING_DEV_ENABLED_FLAGS = %i[
+  copilot_coding_agent_enterprise_nudge
+  copilot_enterprise_nudge_enterprises
+  ipm_accelerate_dashboard_copilot_cli_enabled_nudge
+  hawaii_exp
+  dfd_new_tasks_enable_cb_nudge
+  dfd_new_tasks_create_org_nudge
+  dfd_new_tasks_create_repo_nudge
+  dfd_new_tasks_add_code_nudge
+  dfd_new_tasks_enable_ghas_nudge
+  dfd_new_tasks
+  free_health_assessment_nudge
+  copilot_add_on_for_teams_new_orgs
+  organization_new_tasks_nudges
+  organization_new_tasks_raf_cb_nudge
+  organization_new_tasks_nudges_variant_1_preference
+  dashboard_notify_users_cb_seat_nudge
+  dashboard_notify_users_cb_seat_nudge_1
+  pr_show_ccr_primary_nudge
+  pr_show_ccr_primary_nudge_1
+  spark_access_copilot_policy
+  copilot_ce_rollout
+  copilot_cb_rollout
+  nudge_enterprise_win_cb_users_back_credit
+  nudge_organization_win_cb_users_back_credit
+  pr_show_ccr_ghec_owner_primary_nudge
+  nudge_organization_win_cb_users_back_credit_offer_to_accept
+  nudge_enterprise_win_cb_users_back_credit_offer_to_accept
+  ipm_dashboard_banners_beneath_copilot_chat
+  dashboard_jan_2026_privacy_copilot_nudge
+  automatic_code_review_focus_mode
+  ipm_nudge_ccr_direct_billing
+  in_product_messaging_transactional_message_engine
+  global_nav_react
+  ipm_global_transactional_message_copilot
+  ipm_global_transactional_message_spaces
+  ipm_global_transactional_message_agents
+  ipm_global_transactional_message_issues
+  ipm_global_transactional_message_prs
+  ipm_global_transactional_message_dashboard
+  ipm_global_transactional_message_repos
+  ipm_global_transactional_message_org
+  ipm_global_transactional_message_enterprise
+  ipm_copilot_cli_ga_enterprise_nudge
+  ipm_copilot_cli_ga_organization_nudge
+  ipm_save_copilot_cli_enabled_date
+].freeze
+
+class SetupInProductMessaging
+  include GitHub::UserTestHelpers
+  include LoggingHelpers
+
+  # Age constants for seeded entities (in days)
+  # These values represent how old each entity should appear for testing purposes
+
+  # Standalone organizations (free/team) are created 60 days ago to simulate established orgs
+  ORG_AGE_DAYS = 60
+
+  # Enterprise accounts are created 60 days ago to simulate established enterprises
+  ENTERPRISE_AGE_DAYS = 60
+
+  # Organizations under enterprises and repositories are created 30 days ago
+  ENTERPRISE_ORG_AGE_DAYS = 30
+  REPO_AGE_DAYS = 30
+
+  # Trial enterprises and their organizations are created 21 days ago (partially through trial)
+  TRIAL_ELAPSED_DAYS = 21
+
+  # Pull requests are created 14 days ago to simulate active PRs awaiting review
+  PULL_REQUEST_AGE_DAYS = 14
+
+  # Trial remaining days: 30 day trial - 21 days elapsed = 9 days remaining
+  TRIAL_REMAINING_DAYS = 9
+
+  def call
+    yellow("Starting In-Product Messaging setup")
+    log("")
+
+    create_feature_flags
+
+    yellow("Creating Free Organizations")
+    log("")
+    create_free_organizations
+
+    yellow("Creating Team Organizations")
+    log("")
+    create_team_organizations
+
+    yellow("Creating Enterprise Accounts")
+    log("")
+    create_enterprise_accounts
+
+    yellow("Creating Enterprise Trial Accounts")
+    log("")
+    create_enterprise_trial_accounts
+
+    yellow("Creating Individual Copilot Users")
+    log("")
+    create_individual_copilot_users
+
+    green("In-Product Messaging setup complete!")
+    log("")
+    output_user_summary
+  end
+
+  private
+
+  def output_user_summary
+    title("Generated User Accounts")
+    log("Password for all accounts: #{DEFAULT_PASSWORD}")
+    log("")
+
+    ALL_USER_LOGINS.each do |login|
+      log("  #{user_style(login)}")
+    end
+    log("")
+  end
+
+  def create_feature_flags
+    title("Creating feature flags")
+    # Ensure copilot-related feature flags exist
+    Copilot::FeatureFlags::ALL_FLAGS.each do |flag|
+      Seeds::Objects::FeatureFlag.ensure_feature_flag_exists(flag)
+    end
+    Copilot::FeatureFlags::DEV_ENABLED.each do |flag|
+      Seeds::Objects::FeatureFlag.enable(feature_flag: flag)
+    end
+    ipm_newly_enabled_flags = []
+    ipm_already_enabled_flags = []
+    IN_PRODUCT_MESSAGING_DEV_ENABLED_FLAGS.each do |flag|
+      Seeds::Objects::FeatureFlag.ensure_feature_flag_exists(flag)
+      if FeatureFlag.vexi.enabled?(flag, default: false)
+        ipm_already_enabled_flags << flag
+      else
+        Seeds::Objects::FeatureFlag.enable(feature_flag: flag)
+        ipm_newly_enabled_flags << flag
+      end
+    end
+    ipm_disabled_flags = IN_PRODUCT_MESSAGING_DEV_ENABLED_FLAGS.reject do |flag|
+      FeatureFlag.vexi.enabled?(flag, default: false)
+    end
+
+    log("-> In-product messaging dev flags: #{IN_PRODUCT_MESSAGING_DEV_ENABLED_FLAGS.size}")
+    log("-> Newly enabled: #{ipm_newly_enabled_flags.size}; already enabled: #{ipm_already_enabled_flags.size}")
+    if ipm_newly_enabled_flags.any?
+      log("-> Newly enabled flags: #{ipm_newly_enabled_flags.join(", ")}")
+    end
+    if ipm_disabled_flags.any?
+      log("-> Failed to enable flags: #{ipm_disabled_flags.join(", ")}")
+    else
+      log("-> Verified all in-product messaging dev flags are enabled")
+    end
+
+    # Enable the Copilot Chat App
+    Apps::Privileged::CopilotChat.seed_database!
+
+    log("")
+  end
+
+  # ============================================
+  # Free Organizations
+  # ============================================
+
+  def create_free_organizations
+    ENTITY_CONFIG[:free_orgs].each do |config|
+      create_free_org(
+        org_login: config[:org],
+        admin_login: config[:admin],
+        copilot_business: config[:copilot_business],
+        copilot_code_review: config[:copilot_code_review]
+      )
+    end
+  end
+
+  def create_free_org(org_login:, admin_login:, copilot_business:, copilot_code_review:)
+    log("-> Creating Free organization #{org_style(org_login)}")
+    org_name = human_readable_org_name(org_login)
+
+    # Check if org already exists
+    existing_org = Organization.find_by(login: org_login)
+    if existing_org
+      admin = find_or_create_user(admin_login)
+      ensure_organization_profile_name(existing_org, org_name)
+      # Check if repo exists, create if missing
+      repo = Repository.nwo("#{org_login}/test-repo")
+      if repo
+        log("  -> Already exists, skipping")
+      else
+        log("  -> Organization exists, creating missing repository")
+        repo = create_org_repository(existing_org, admin)
+        log("  -> Repository: #{repo_style(repo.nwo)} (#{REPO_AGE_DAYS} days old)")
+        pr = create_pull_request(repo, admin)
+        log("  -> Pull Request: ##{pr.number} (#{PULL_REQUEST_AGE_DAYS} days old)")
+      end
+      log("")
+      return
+    end
+
+    # Create admin user
+    admin = find_or_create_user(admin_login)
+    log("  -> Admin: #{user_style(admin.login)}")
+
+    # Create the free organization with credit card billing enabled for Copilot
+    # We use credit_card_organization to enable proper billing for Copilot
+    org = FactoryBot.create(:credit_card_organization, login: org_login, plan: "free", admin: admin)
+    raise "Organization #{org_login} not created" unless org.persisted?
+    ensure_organization_profile_name(org, org_name)
+
+    # Set created_at to appear as an established organization
+    org.update_column(:created_at, ORG_AGE_DAYS.days.ago)
+    log("  -> Organization age: #{ORG_AGE_DAYS} days old")
+
+    # Enable Copilot Business if requested
+    if copilot_business
+      enable_copilot_business_for_standalone_org(org)
+      log("  -> Copilot Business: enabled")
+    end
+
+    # Enable/Disable Copilot Code Review
+    copilot_org = Copilot::Organization.new(org)
+    if copilot_code_review
+      copilot_org.code_review_enabled!
+      log("  -> Copilot Code Review: enabled")
+    else
+      copilot_org.code_review_disabled!
+      log("  -> Copilot Code Review: disabled")
+    end
+
+    # Create repository with README.md
+    repo = create_org_repository(org, admin)
+    log("  -> Repository: #{repo_style(repo.nwo)} (#{REPO_AGE_DAYS} days old)")
+
+    # Create pull request
+    pr = create_pull_request(repo, admin)
+    log("  -> Pull Request: ##{pr.number} (#{PULL_REQUEST_AGE_DAYS} days old)")
+
+    log("")
+  end
+
+  # ============================================
+  # Team Organizations
+  # ============================================
+
+  def create_team_organizations
+    ENTITY_CONFIG[:team_orgs].each do |config|
+      create_team_org(
+        org_login: config[:org],
+        admin_login: config[:admin],
+        member_login: config[:member],
+        copilot_business: config[:copilot_business],
+        copilot_code_review: config[:copilot_code_review],
+        copilot_cli: config[:copilot_cli]
+      )
+    end
+  end
+
+  def create_team_org(org_login:, admin_login:, copilot_business:, copilot_code_review:, member_login: nil, copilot_cli: nil)
+    log("-> Creating Team organization #{org_style(org_login)}")
+    org_name = human_readable_org_name(org_login)
+
+    # Check if org already exists
+    existing_org = Organization.find_by(login: org_login)
+    if existing_org
+      admin = find_or_create_user(admin_login)
+      ensure_organization_profile_name(existing_org, org_name)
+      ensure_recent_copilot_cli_access_for_team_org(
+        organization: existing_org,
+        admin: admin,
+        member_login: member_login,
+        copilot_cli: copilot_cli
+      )
+      # Check if repo exists, create if missing
+      repo = Repository.nwo("#{org_login}/test-repo")
+      if repo
+        log("  -> Already exists, skipping")
+      else
+        log("  -> Organization exists, creating missing repository")
+        repo = create_org_repository(existing_org, admin)
+        log("  -> Repository: #{repo_style(repo.nwo)} (#{REPO_AGE_DAYS} days old)")
+        pr = create_pull_request(repo, admin)
+        log("  -> Pull Request: ##{pr.number} (#{PULL_REQUEST_AGE_DAYS} days old)")
+      end
+      log("")
+      return
+    end
+
+    # Create admin user
+    admin = find_or_create_user(admin_login)
+    log("  -> Admin: #{user_style(admin.login)}")
+
+    # Create the team organization (business plan) with credit card billing for Copilot
+    org = FactoryBot.create(:credit_card_organization, login: org_login, plan: "business", admin: admin)
+    raise "Organization #{org_login} not created" unless org.persisted?
+    ensure_organization_profile_name(org, org_name)
+
+    # Set created_at to appear as an established organization
+    org.update_column(:created_at, ORG_AGE_DAYS.days.ago)
+    log("  -> Organization age: #{ORG_AGE_DAYS} days old")
+
+    # Enable Copilot Business if requested
+    if copilot_business
+      enable_copilot_business_for_standalone_org(org)
+      log("  -> Copilot Business: enabled")
+    end
+
+    # Enable/Disable Copilot Code Review
+    copilot_org = Copilot::Organization.new(org)
+    if copilot_code_review
+      copilot_org.code_review_enabled!
+      log("  -> Copilot Code Review: enabled")
+    else
+      copilot_org.code_review_disabled!
+      log("  -> Copilot Code Review: disabled")
+    end
+
+    ensure_recent_copilot_cli_access_for_team_org(
+      organization: org,
+      admin: admin,
+      member_login: member_login,
+      copilot_cli: copilot_cli
+    )
+
+    # Create repository with README.md
+    repo = create_org_repository(org, admin)
+    log("  -> Repository: #{repo_style(repo.nwo)} (#{REPO_AGE_DAYS} days old)")
+
+    # Create pull request
+    pr = create_pull_request(repo, admin)
+    log("  -> Pull Request: ##{pr.number} (#{PULL_REQUEST_AGE_DAYS} days old)")
+
+    log("")
+  end
+
+  # ============================================
+  # Enterprise Accounts
+  # ============================================
+
+  def create_enterprise_accounts
+    ENTITY_CONFIG[:enterprises].each do |config|
+      create_enterprise_account(
+        business_slug: config[:business],
+        owner_login: config[:owner],
+        org_login: config[:org],
+        member_login: config[:member],
+        copilot_business: config[:copilot_business],
+        copilot_code_review: config[:copilot_code_review],
+        copilot_cli: config[:copilot_cli]
+      )
+    end
+  end
+
+  def create_enterprise_account(business_slug:, owner_login:, org_login:, copilot_business:, copilot_code_review:, member_login: nil, copilot_cli: nil)
+    log("-> Creating Enterprise account #{enterprise_style(business_slug)}")
+    business_name = human_readable_business_name(business_slug)
+    org_name = human_readable_org_name(org_login)
+
+    # Check if business already exists
+    existing_business = Business.find_by(slug: business_slug)
+    if existing_business
+      owner = find_or_create_user(owner_login)
+      ensure_business_name(existing_business, business_name)
+      existing_org = Organization.find_by(login: org_login)
+      if existing_org
+        ensure_organization_profile_name(existing_org, org_name)
+        ensure_recent_copilot_cli_access_for_enterprise_org(
+          business: existing_business,
+          organization: existing_org,
+          owner: owner,
+          member_login: member_login,
+          copilot_cli: copilot_cli
+        )
+        # Check if repo exists, create if missing
+        repo = Repository.nwo("#{org_login}/test-repo")
+        if repo
+          log("  -> Already exists, skipping")
+        else
+          log("  -> Enterprise exists, creating missing repository")
+          repo = create_org_repository(existing_org, owner)
+          log("  -> Repository: #{repo_style(repo.nwo)} (#{REPO_AGE_DAYS} days old)")
+          pr = create_pull_request(repo, owner)
+          log("  -> Pull Request: ##{pr.number} (#{PULL_REQUEST_AGE_DAYS} days old)")
+        end
+      else
+        log("  -> Already exists, skipping")
+      end
+      log("")
+      return
+    end
+
+    # Create owner user
+    owner = find_or_create_user(owner_login)
+    log("  -> Owner: #{user_style(owner.login)}")
+
+    # Create the business (enterprise account)
+    business = FactoryBot.create(:business, :with_github_subscription, slug: business_slug, name: business_name, owners: [owner])
+    raise "Business #{business_slug} not created" unless business.persisted?
+
+    # Set created_at to appear as an established enterprise
+    business.update_column(:created_at, ENTERPRISE_AGE_DAYS.days.ago)
+    log("  -> Enterprise age: #{ENTERPRISE_AGE_DAYS} days old")
+
+    # Create organization under the enterprise
+    org = FactoryBot.create(:enterprise_linked_organization, login: org_login, business: business, admin: owner)
+    raise "Organization #{org_login} not created" unless org.persisted?
+    ensure_organization_profile_name(org, org_name)
+
+    # Set org created_at for enterprise-linked org
+    org.update_column(:created_at, ENTERPRISE_ORG_AGE_DAYS.days.ago)
+    log("  -> Organization: #{org_style(org_login)} (#{ENTERPRISE_ORG_AGE_DAYS} days old)")
+
+    # Enable Copilot Business for all organizations if requested
+    if copilot_business
+      enable_copilot_business_for_enterprise(business)
+      log("  -> Copilot Business: enabled for all organizations")
+    end
+
+    # Enable/Disable Copilot Code Review at enterprise level
+    if copilot_code_review
+      business.enable_code_review_repository_access(actor: owner)
+      log("  -> Copilot Code Review: enabled")
+    else
+      business.disable_code_review_repository_access(actor: owner, force: true)
+      log("  -> Copilot Code Review: disabled")
+    end
+
+    ensure_recent_copilot_cli_access_for_enterprise_org(
+      business: business,
+      organization: org,
+      owner: owner,
+      member_login: member_login,
+      copilot_cli: copilot_cli
+    )
+
+    # Create repository with README.md
+    repo = create_org_repository(org, owner)
+    log("  -> Repository: #{repo_style(repo.nwo)} (#{REPO_AGE_DAYS} days old)")
+
+    # Create pull request
+    pr = create_pull_request(repo, owner)
+    log("  -> Pull Request: ##{pr.number} (#{PULL_REQUEST_AGE_DAYS} days old)")
+
+    log("")
+  end
+
+  # ============================================
+  # Enterprise Trial Accounts
+  # ============================================
+
+  def create_enterprise_trial_accounts
+    ENTITY_CONFIG[:enterprise_trials].each do |config|
+      create_enterprise_trial(
+        business_slug: config[:business],
+        owner_login: config[:owner],
+        org_login: config[:org],
+        has_repository: config[:has_repository]
+      )
+    end
+  end
+
+  def create_enterprise_trial(business_slug:, owner_login:, org_login:, has_repository:)
+    log("-> Creating Enterprise trial account #{enterprise_style(business_slug)}")
+    business_name = human_readable_business_name(business_slug)
+    org_name = org_login ? human_readable_org_name(org_login) : nil
+
+    # Check if business already exists
+    existing_business = Business.find_by(slug: business_slug)
+    if existing_business
+      ensure_business_name(existing_business, business_name)
+      ensure_active_dfd_trial(business: existing_business)
+      ensure_enterprise_copilot_disabled(business: existing_business)
+      log("  -> Copilot Business: disabled")
+      if org_name
+        existing_org = Organization.find_by(login: org_login)
+        ensure_organization_profile_name(existing_org, org_name)
+      end
+      log("  -> Already exists, skipping")
+      log("")
+      return
+    end
+
+    # Create owner user
+    owner = find_or_create_user(owner_login)
+    log("  -> Owner: #{user_style(owner.login)}")
+
+    # Create the business in trial state
+    business = FactoryBot.create(:business, :in_trial, :with_github_subscription, slug: business_slug, name: business_name, owners: [owner])
+    raise "Business #{business_slug} not created" unless business.persisted?
+
+    # Set created_at and trial_expires_at to simulate a trial in progress
+    business.update_columns(
+      created_at: TRIAL_ELAPSED_DAYS.days.ago,
+      trial_expires_at: TRIAL_REMAINING_DAYS.days.from_now,
+      dfd_trial: true
+    )
+    log("  -> Enterprise age: #{TRIAL_ELAPSED_DAYS} days old (trial)")
+    ensure_enterprise_copilot_disabled(business: business, actor: owner)
+    log("  -> Copilot Business: disabled")
+
+    if org_login
+      # Create organization under the enterprise
+      org = FactoryBot.create(:enterprise_linked_organization, login: org_login, business: business, admin: owner)
+      raise "Organization #{org_login} not created" unless org.persisted?
+      ensure_organization_profile_name(org, org_name)
+
+      # Set org created_at to match trial elapsed time
+      org.update_column(:created_at, TRIAL_ELAPSED_DAYS.days.ago)
+      log("  -> Organization: #{org_style(org_login)} (#{TRIAL_ELAPSED_DAYS} days old)")
+
+      if has_repository
+        # Create repository with README.md
+        repo = create_org_repository(org, owner)
+        log("  -> Repository: #{repo_style(repo.nwo)} (#{REPO_AGE_DAYS} days old)")
+
+        # Create pull request
+        pr = create_pull_request(repo, owner)
+        log("  -> Pull Request: ##{pr.number} (#{PULL_REQUEST_AGE_DAYS} days old)")
+      else
+        log("  -> No repositories")
+      end
+    else
+      log("  -> No organizations")
+    end
+
+    log("")
+  end
+
+  # ============================================
+  # Individual Copilot Users
+  # ============================================
+
+  def create_individual_copilot_users
+    ensure_copilot_product_uuids_exist
+
+    ENTITY_CONFIG[:individual_users].each do |config|
+      create_individual_copilot_user(
+        login: config[:login],
+        plan: config[:plan]
+      )
+    end
+  end
+
+  def create_individual_copilot_user(login:, plan:)
+    plan_label = case plan
+    when :pro_plus then "Copilot Pro+"
+    when :max then "Copilot Max"
+    else "Copilot Pro"
+    end
+    log("-> Creating individual user #{user_style(login)} with #{plan_label}")
+
+    user = User.find_by(login: login)
+    if user
+      ensure_user_has_billing_plan_subscription(user)
+
+      # User exists - verify they have the correct plan
+      copilot_user = Copilot::User.new(user)
+      has_correct_plan = case plan
+      when :pro then copilot_user.has_pro_subscription?
+      when :pro_plus then copilot_user.has_pro_plus_subscription?
+      when :max then copilot_user.has_max_subscription?
+      end
+
+      if has_correct_plan
+        log("  -> Already exists with correct plan, skipping")
+        log("")
+        return
+      end
+
+      log("  -> User exists but needs correct plan, subscribing...")
+      subscribe_to_copilot_plan(copilot_user, login, plan)
+      ensure_active_copilot_plan(user, plan)
+      log("")
+      return
+    end
+
+    # Create user with credit card billing via FactoryBot
+    user = FactoryBot.create(:credit_card_user,
+      login: login,
+      password: DEFAULT_PASSWORD,
+      email: "#{login}@github.test.com",
+    )
+    user.emails.map(&:verify!)
+    log("  -> User: #{user_style(user.login)}")
+
+    # Create billing plan subscription (required for Copilot subscriptions)
+    FactoryBot.create(:billing_plan_subscription, :zuora, user: user)
+    log("  -> Billing plan subscription: created")
+
+    # Subscribe to the appropriate Copilot plan
+    copilot_user = Copilot::User.new(user)
+    subscribe_to_copilot_plan(copilot_user, login, plan)
+    ensure_active_copilot_plan(user, plan)
+
+    log("")
+  end
+
+  def subscribe_to_copilot_plan(copilot_user, login, plan)
+    case plan
+    when :pro
+      result = copilot_user.subscribe(:month)
+      raise "Failed to subscribe #{login} to Copilot Pro: #{result.error}" unless result.ok?
+      log("  -> Copilot Pro: subscribed (monthly)")
+    when :pro_plus
+      # subscribe_pro_plus can leave a cancelled item in this environment (quantity = 0),
+      # so enforce a direct active Pro+ subscription item for deterministic seed data.
+      ensure_active_copilot_plan(copilot_user.user_object, :pro_plus)
+      log("  -> Copilot Pro+: subscribed (monthly)")
+    when :max
+      ensure_active_copilot_plan(copilot_user.user_object, :max)
+      log("  -> Copilot Max: subscribed (monthly)")
+    end
+  end
+
+  def ensure_user_has_billing_plan_subscription(user)
+    return if user.plan_subscription
+
+    FactoryBot.create(:billing_plan_subscription, :zuora, user: user)
+    log("  -> Billing plan subscription: created")
+  end
+
+  def ensure_active_copilot_plan(user, plan)
+    expected_product_key = case plan
+    when :pro then Copilot::INDIVIDUAL_PRO_PRODUCT_KEY
+    when :pro_plus then Copilot::INDIVIDUAL_PRO_PLUS_PRODUCT_KEY
+    when :max then Copilot::INDIVIDUAL_MAX_PRODUCT_KEY
+    end
+
+    active_subscription_item = Copilot::User.new(user.reload).copilot_active_subscription_item
+    return if active_subscription_item&.product_identifier&.product_key == expected_product_key
+
+    product_uuid = Billing::ProductUUID.find_by!(
+      product_type: Copilot::PRODUCT_TYPE,
+      product_key: expected_product_key,
+      billing_cycle: "month",
+    )
+    copilot_product_uuid_ids = Billing::ProductUUID.where(
+      product_type: Copilot::PRODUCT_TYPE,
+      product_key: Copilot::INDIVIDUAL_PRODUCT_KEYS,
+    ).pluck(:id)
+
+    Billing::SubscriptionItem.for_account(user).where(
+      subscribable_type: "Billing::ProductUUID",
+      subscribable_id: copilot_product_uuid_ids,
+    ).update_all(quantity: 0)
+
+    expected_subscription_item = Billing::SubscriptionItem.for_account(user).find_by(
+      subscribable_type: "Billing::ProductUUID",
+      subscribable_id: product_uuid.id,
+    )
+
+    if expected_subscription_item
+      expected_subscription_item.update_columns(quantity: 1, free_trial_ends_on: nil)
+    else
+      Billing::SubscriptionItem.create!(
+        plan_subscription: user.plan_subscription,
+        subscribable: product_uuid,
+        quantity: 1,
+      )
+    end
+
+    log("  -> Copilot plan corrected to #{expected_product_key} (monthly)")
+  end
+
+  def ensure_copilot_product_uuids_exist
+    # Ensure Copilot product UUIDs exist for individual subscriptions.
+    # Create all copilot product UUIDs, individually rescuing duplicates
+    # so that missing ones are still created even if some already exist.
+    created = 0
+    copilot_product_uuid_definitions.each do |attrs|
+      Billing::ProductUUID.create!(attrs)
+      created += 1
+    rescue ActiveRecord::RecordInvalid => e
+      raise unless e.message =~ /has already been taken/
+    end
+    log("  -> Copilot product UUIDs: #{created > 0 ? "created #{created} new" : "all exist"}")
+  end
+
+  def copilot_product_uuid_definitions
+    [
+      {
+        product_type: "github.copilot", product_key: "v0", billing_cycle: "month",
+        zuora_product_id: "8ad095dd828b63d301828d69d0cc083b",
+        zuora_product_rate_plan_id: "8ad09bce828b63d901828d69e4a02b77",
+        zuora_product_rate_plan_charge_ids: { flat: "8ad095b8828b63cc01828d69ea5757d0" },
+        name: "GitHub Copilot Pro", couponable: true,
+        charges: [{ "name" => "GitHub Copilot Pro - month", "type" => "flat", "price" => "10.0",
+                     "billing_duration" => "month", "zuora_product_rate_plan_charge_id" => "8ad095b8828b63cc01828d69ea5757d0" }]
+      },
+      {
+        product_type: "github.copilot", product_key: "v0", billing_cycle: "year",
+        zuora_product_id: "8ad095dd828b63d301828d69d0cc083b",
+        zuora_product_rate_plan_id: "8ad095dd828b63d301828d69d7a10858",
+        zuora_product_rate_plan_charge_ids: { flat: "8ad09915828b63c701828d69dd4b4eaa" },
+        name: "GitHub Copilot Pro", couponable: true,
+        charges: [{ "name" => "GitHub Copilot Pro - year", "type" => "flat", "price" => "100.0",
+                     "billing_duration" => "year", "zuora_product_rate_plan_charge_id" => "8ad09915828b63c701828d69dd4b4eaa", "prorate" => false }]
+      },
+      {
+        product_type: "github.copilot", product_key: "pro-plus", billing_cycle: "month",
+        zuora_product_id: "7e280b039dc146f590157f4d9c53ca66",
+        zuora_product_rate_plan_id: "ffffc5f30ce84c299a40452a48cddea0",
+        zuora_product_rate_plan_charge_ids: { flat: "d2a6431924295842e5e5873ea422cd0e" },
+        name: "GitHub Copilot Pro+", couponable: true,
+        charges: [{ "name" => "GitHub Copilot Pro+ - month", "type" => "flat", "price" => "39.0",
+                     "billing_duration" => "month", "zuora_product_rate_plan_charge_id" => "d2a6431924295842e5e5873ea422cd0e" }]
+      },
+      {
+        product_type: "github.copilot", product_key: "pro-plus", billing_cycle: "year",
+        zuora_product_id: "7e280b039dc146f590157f4d9c53ca66",
+        zuora_product_rate_plan_id: "260112d7d7b04f74a82b897471131535",
+        zuora_product_rate_plan_charge_ids: { flat: "d2a61dba60e95844dde5873e9d5f7844" },
+        name: "GitHub Copilot Pro+", couponable: true,
+        charges: [{ "name" => "GitHub Copilot Pro+ - year", "type" => "flat", "price" => "390.0",
+                     "billing_duration" => "year", "zuora_product_rate_plan_charge_id" => "d2a61dba60e95844dde5873e9d5f7844", "prorate" => false }]
+      },
+      {
+        product_type: "github.copilot", product_key: "max", billing_cycle: "month",
+        zuora_product_id: "8ad095f6993cdc2501994f744d2c1ff1",
+        zuora_product_rate_plan_id: "d2a6b1d5abe993cdc0694f74506f0064",
+        zuora_product_rate_plan_charge_ids: { flat: "d2a6b1d5abe993cdc0694f7450b40065" },
+        name: "GitHub Copilot Max", couponable: true,
+        charges: [{ "name" => "GitHub Copilot Max - month", "type" => "flat", "price" => "99.0",
+                     "billing_duration" => "month", "zuora_product_rate_plan_charge_id" => "d2a6b1d5abe993cdc0694f7450b40065" }]
+      },
+      {
+        product_type: "github.copilot", product_key: "max", billing_cycle: "year",
+        zuora_product_id: "8ad095f6993cdc2501994f744d2c1ff1",
+        zuora_product_rate_plan_id: "d2a6b1d5abe993cdc0694f744e50005e",
+        zuora_product_rate_plan_charge_ids: { flat: "d2a6b1d5abe993cdc0694f744ee6005f" },
+        name: "GitHub Copilot Max", couponable: true,
+        charges: [{ "name" => "GitHub Copilot Max - year", "type" => "flat", "price" => "990.0",
+                     "billing_duration" => "year", "zuora_product_rate_plan_charge_id" => "d2a6b1d5abe993cdc0694f744ee6005f", "prorate" => false }]
+      },
+    ]
+  end
+
+  # ============================================
+  # Helper Methods
+  # ============================================
+
+  def human_readable_org_name(org_login)
+    HUMAN_READABLE_ORG_NAMES.fetch(org_login)
+  end
+
+  def human_readable_business_name(business_slug)
+    HUMAN_READABLE_BUSINESS_NAMES.fetch(business_slug)
+  end
+
+  def ensure_organization_profile_name(organization, profile_name)
+    return if organization.nil?
+    return if organization.profile_name == profile_name
+
+    organization.profile_name = profile_name
+    organization.save!
+    log("  -> Organization name: #{profile_name}")
+  end
+
+  def ensure_business_name(business, name)
+    return if business.name == name
+
+    business.update!(name: name)
+    log("  -> Enterprise name: #{name}")
+  end
+
+  def ensure_recent_copilot_cli_access_for_team_org(organization:, admin:, member_login:, copilot_cli:)
+    return if member_login.nil?
+
+    member = find_or_create_user(member_login)
+    organization.add_member(member, adder: admin)
+    log("  -> Member: #{user_style(member.login)}")
+    return unless copilot_cli
+
+    enable_copilot_business_for_standalone_org(organization)
+    copilot_org = Copilot::Organization.new(organization)
+    Copilot::Policies::Cli.update_org(copilot_org, "disabled", send_email: false) if copilot_org.cli_enabled?
+    Copilot::Policies::Cli.update_org(copilot_org, "enabled", send_email: false)
+    log("  -> Copilot CLI access: enabled")
+  end
+
+  def ensure_recent_copilot_cli_access_for_enterprise_org(business:, organization:, owner:, member_login:, copilot_cli:)
+    return if member_login.nil?
+
+    member = find_or_create_user(member_login)
+    organization.add_member(member, adder: owner)
+    log("  -> Member: #{user_style(member.login)}")
+    return unless copilot_cli
+
+    enable_copilot_business_for_enterprise(business)
+    copilot_business = Copilot::Business.new(business)
+    Copilot::Policies::Cli.update_business(copilot_business, "disabled") if copilot_business.cli_enabled?
+    Copilot::Policies::Cli.update_business(copilot_business, "enabled")
+    log("  -> Copilot CLI access: enabled")
+  end
+
+  def find_or_create_user(login)
+    user = User.find_by(login: login)
+    return user if user
+
+    user = User.create!(
+      login: login,
+      password: DEFAULT_PASSWORD,
+      email: "#{login}@github.test.com",
+      require_email_verification: false,
+      billing_attempts: 0,
+      plan: "medium"
+    )
+    user.emails.map(&:verify!)
+    user
+  end
+
+  def enable_copilot_business_for_standalone_org(org)
+    # For standalone orgs (free/team without enterprise), enable Copilot
+    # Enable the feature flag to allow Copilot for business on free orgs
+    Seeds::Objects::FeatureFlag.enable(feature_flag: :copilot_for_business_free, actor: org)
+
+    copilot_org = Copilot::Organization.new(org)
+    copilot_org.enable_copilot!
+    copilot_org.seat_management_allow_all!
+  end
+
+  def enable_copilot_business_for_enterprise(business)
+    # For enterprise-linked orgs, enable Copilot at the business level
+    copilot_business = Copilot::Business.new(business)
+    copilot_business.enable_copilot_for_all_organizations!
+  end
+
+  def ensure_enterprise_copilot_disabled(business:, actor: nil)
+    copilot_business = Copilot::Business.new(business)
+    return if copilot_business.copilot_disabled?
+
+    copilot_business.disable_copilot!(actor)
+  end
+
+  def ensure_active_dfd_trial(business:)
+    updates = {}
+    updates[:dfd_trial] = true unless business.dfd_trial?
+    if business.trial_expires_at.nil? || business.trial_expires_at < Time.current
+      updates[:trial_expires_at] = TRIAL_REMAINING_DAYS.days.from_now
+    end
+    business.update!(updates) if updates.any?
+  end
+
+  def create_org_repository(org, committer)
+    GH::Context.enabled do
+      repo_name = "test-repo"
+
+      # Check if repo already exists
+      repo = Repository.nwo("#{org.login}/#{repo_name}")
+      if repo&.active?
+        return repo
+      end
+      Repository.where(id: repo.id).delete_all if repo
+
+      result = Repository.handle_creation(
+        committer,
+        org.login,
+        {
+          name: repo_name,
+          description: "Test repository for in-product messaging",
+          public: false
+        },
+        synchronous: true
+      )
+      repo = result.repository
+
+      unless repo&.persisted?
+        raise "Repository not created for #{org.login}: #{result.error_message}"
+      end
+
+      repo = wait_for_active_repository(repo.id)
+      repo.setup_git_repository
+
+      # Set created_at for repository age
+      repo.update_column(:created_at, REPO_AGE_DAYS.days.ago)
+
+      # Create README.md with "Hello World" content
+      Seeds::Objects::Commit.create(
+        repo: repo,
+        message: "Initial commit - add README",
+        committer: committer,
+        branch_name: repo.default_branch,
+        files: { "README.md" => "Hello World" }
+      )
+
+      repo
+    end
+  end
+
+  def create_pull_request(repo, committer)
+    GH::Context.enabled do
+      repo = wait_for_active_repository(repo.id)
+
+      # Create a branch with a change
+      branch_name = "feature-branch"
+
+      Seeds::Objects::Commit.create(
+        repo: repo,
+        message: "Add feature file",
+        committer: committer,
+        branch_name: branch_name,
+        files: { "feature.md" => "This is a feature file" }
+      )
+
+      # Create the pull request
+      pr = ::PullRequest.create_for!(
+        repo,
+        user: committer,
+        title: "Add feature",
+        body: "This pull request adds a new feature.",
+        head: branch_name,
+        base: repo.default_branch,
+        draft: false
+      )
+
+      raise "Pull request not created for #{repo.nwo}" unless pr&.persisted?
+
+      # Set created_at for pull request age
+      pr.update_column(:created_at, PULL_REQUEST_AGE_DAYS.days.ago)
+      pr.issue.update_column(:created_at, PULL_REQUEST_AGE_DAYS.days.ago) if pr.issue
+
+      pr
+    end
+  end
+
+  def wait_for_active_repository(repo_id, attempts: 10, delay: 0.2)
+    attempts.times do
+      repo = Repositories::Public.find_active(repo_id)
+      return repo if repo
+
+      sleep(delay)
+    end
+
+    raise "Repository #{repo_id} did not become active after creation"
+  end
+
+  # ============================================
+  # Logging Helpers
+  # ============================================
+
+  def bold_white(string)
+    LOGGER.info colorize(string, "white", style: :bold)
+  end
+
+  def org_style(login)
+    colorize(login, "green", style: :underline)
+  end
+
+  def user_style(login)
+    colorize(login, "cyan", style: :underline)
+  end
+
+  def enterprise_style(slug)
+    colorize(slug, "red", style: :underline)
+  end
+
+  def repo_style(name)
+    colorize(name, "magenta")
+  end
+
+end
+
+class DestroyInProductMessaging
+  include LoggingHelpers
+  def call
+    yellow("Destroying In-Product Messaging seed data")
+    log("")
+
+    destroy_businesses
+    destroy_organizations
+    destroy_users
+    cleanup_reserved_logins
+
+    green("In-Product Messaging seed data destroyed!")
+  end
+
+  private
+
+  def destroy_businesses
+    title("Destroying Enterprise Accounts")
+    ALL_BUSINESS_SLUGS.each do |slug|
+      business = Business.find_by(slug: slug)
+      if business
+        # Delete associated orgs first (they'll be handled by org deletion)
+        business.delete
+        log("  -> Destroyed: #{slug}")
+      else
+        log("  -> Not found: #{slug}")
+      end
+    end
+    log("")
+  end
+
+  def destroy_organizations
+    title("Destroying Organizations")
+    ALL_ORG_LOGINS.each do |login|
+      org = Organization.find_by(login: login)
+      if org
+        # Get all repository IDs for this org
+        repo_ids = Repository.where(owner_id: org.id).pluck(:id)
+
+        if repo_ids.any?
+          # Delete pull requests and issues at the database level
+          pr_ids = PullRequest.where(repository_id: repo_ids).pluck(:id)
+          if pr_ids.any?
+            # Delete issues associated with pull requests
+            Issue.where(pull_request_id: pr_ids).delete_all
+            # Delete the pull requests themselves
+            PullRequest.where(id: pr_ids).delete_all
+          end
+
+          # Delete any remaining issues for these repos
+          Issue.where(repository_id: repo_ids).delete_all
+
+          # Delete repositories
+          Repository.where(id: repo_ids).delete_all
+        end
+
+        org.delete
+        log("  -> Destroyed: #{login}")
+      else
+        log("  -> Not found: #{login}")
+      end
+    end
+    log("")
+  end
+
+  def destroy_users
+    title("Destroying Users")
+    ALL_USER_LOGINS.each do |login|
+      user = User.find_by(login: login)
+      if user
+        # Delete any Copilot subscription items for this user
+        Billing::SubscriptionItem.for_account(user).delete_all
+        # Delete user's emails first, then the user
+        UserEmail.where(user_id: user.id).delete_all
+        user.delete
+        log("  -> Destroyed: #{login}")
+      else
+        log("  -> Not found: #{login}")
+        # Clean up any orphaned emails with this pattern
+        UserEmail.where(email: "#{login}@github.test.com").delete_all
+      end
+    end
+    log("")
+  end
+
+  def cleanup_reserved_logins
+    title("Cleaning up Reserved Logins")
+    all_logins = ALL_ORG_LOGINS + ALL_USER_LOGINS + ALL_BUSINESS_SLUGS
+    count = ReservedLogin.where(login: all_logins).delete_all
+    log("  -> Removed #{count} reserved logins")
+    log("")
+  end
+end
+
+$stdout.reopen(File.new("/dev/null", "w")) # ONLY LOGGER EXISTS!
+$VERBOSE = nil
+
+if ARGV.include?("--destroy")
+  DestroyInProductMessaging.new.call
+else
+  SetupInProductMessaging.new.call
+end

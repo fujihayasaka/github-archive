@@ -1,0 +1,598 @@
+#!/usr/bin/env safe-ruby
+# typed: true
+# frozen_string_literal: true
+
+require_relative "../config/environment"
+require_relative "./seeds/objects"
+require_relative "./dx/telemetry/datadog"
+require "optparse"
+require "time"
+require "open3"
+require "json"
+
+rails_server_running = system <<-SHELL
+if ! lsof -Pi :8152 -sTCP:LISTEN -t >/dev/null ; then
+  echo "Your Rails server is not running. Please start it with script/dx/server-start and run this setup script again."
+  exit 1
+fi
+SHELL
+return unless rails_server_running
+
+# Helper class for tracking telemetry
+class TelemetryTracker
+  attr_reader :metrics_backend
+
+  def initialize
+    @metrics_backend = DX::Datadog::MetricsBackend.new
+    @step_start_times = {}
+  end
+
+  def track_step(step_name)
+    start_time = Time.now
+    @step_start_times[step_name] = start_time
+
+    begin
+      results = yield
+      record_step_success(step_name, start_time)
+      results
+    rescue => e
+      record_step_error(step_name, start_time, e)
+      raise
+    end
+  end
+
+  def record_step_success(step_name, start_time)
+    duration_ms = ((Time.now - start_time) * 1000).to_i
+    timestamp = Time.now.to_i
+
+    # Submit latency as distribution points for better percentile analysis
+    metrics_backend.submit_distribution_points(
+      "copilot_swe_agent_codespaces.setup.step.duration",
+      timestamp,
+      [duration_ms],
+      ["step:#{step_name}", "status:success"]
+    )
+
+    # Submit success count
+    metrics_backend.submit_count(
+      "copilot_swe_agent_codespaces.setup.step.completed",
+      timestamp,
+      1,
+      ["step:#{step_name}", "status:success"]
+    )
+  rescue => e
+    puts "⚠️ [Telemetry] Failed to record metrics for #{step_name}: #{e.message}"
+  end
+
+  def record_step_error(step_name, start_time, error)
+    duration_ms = ((Time.now - start_time) * 1000).to_i
+    timestamp = Time.now.to_i
+
+    # Submit latency even for failed steps
+    metrics_backend.submit_distribution_points(
+      "copilot_swe_agent_codespaces.setup.step.duration",
+      timestamp,
+      [duration_ms],
+      ["step:#{step_name}", "status:error"]
+    )
+
+    # Submit error count
+    metrics_backend.submit_count(
+      "copilot_swe_agent_codespaces.setup.step.completed",
+      timestamp,
+      1,
+      ["step:#{step_name}", "status:error", "error_type:#{error.class}"]
+    )
+
+    # Submit specific error metric
+    metrics_backend.submit_count(
+      "copilot_swe_agent_codespaces.setup.errors",
+      timestamp,
+      1,
+      ["step:#{step_name}", "error_type:#{error.class}"]
+    )
+  rescue => e
+    puts "⚠️ [Telemetry] Failed to record error metrics for #{step_name}: #{e.message}"
+  end
+
+  def record_overall_metrics(start_time, success:)
+    total_duration_ms = ((Time.now - start_time) * 1000).to_i
+    timestamp = Time.now.to_i
+    status = success ? "success" : "error"
+
+    metrics_backend.submit_distribution_points(
+      "copilot_swe_agent_codespaces.setup.total_duration",
+      timestamp,
+      [total_duration_ms],
+      ["status:#{status}"]
+    )
+
+    metrics_backend.submit_count(
+      "copilot_swe_agent_codespaces.setup.runs",
+      timestamp,
+      1,
+      ["status:#{status}"]
+    )
+  rescue => e
+    puts "⚠️ [Telemetry] Failed to record overall metrics: #{e.message}"
+  end
+end
+
+# Helper class to parse and validate command line arguments
+class Runner
+  attr_reader :args, :launcher, :envvars
+
+  LAUNCHER_ACTIONS = "actions"
+  LAUNCHER_DOCKER = "docker"
+
+  def initialize
+    @args = parse_args(ARGV)
+    @launcher = @args[:launcher]
+    @envvars = {}
+  end
+
+  def capi?
+    @args[:capi]
+  end
+
+  def proxima?
+    @args[:proxima]
+  end
+
+  def docker?
+    @launcher == LAUNCHER_DOCKER
+  end
+
+  def actions?
+    @launcher == LAUNCHER_ACTIONS
+  end
+
+  def seed_github_app
+    integration = T.must(Apps::Privileged::CopilotSWEAgent.seed_database!)
+
+    key = integration.generate_key(creator: mona).private_key.to_pem
+
+    [integration, key]
+  end
+
+  def capi_hmac_key
+    @capi_hmac_key ||= get_capi_hmac_key.strip
+  end
+
+  def get_capi_hmac_key
+    onep_capi_hmac_key || stdin_capi_hmac_key
+  end
+
+  # Install the app on monalisa and the github org
+  def install_github_app(integration)
+    if integration.installations.any?
+      bot = integration.installations_on(Organization.find_by_login("github")).first.bot
+      seed_copilot_pr(bot)
+    else
+      integration.install_on(mona, repositories: [], installer: mona, entry_point: :test_case)
+      github = integration.install_on(Organization.find_by_login("github"), repositories: [], installer: mona, entry_point: :test_case)
+
+      if github.success? && !github.installation.nil? && !github.installation.bot.nil?
+        seed_copilot_pr(github.installation.bot)
+      else
+        puts "\n➡️ Optional: To Seed a Copilot-authored PR, please re-run the script once the server is up and running\n"
+      end
+    end
+  end
+
+  def seed_copilot_pr(bot)
+    puts "\n➡️ Seeding a Copilot-authored PR\n"
+
+    repo = Repository.nwo("github/private-server")
+
+    # Needs to start with copilot/
+    branch_name = "copilot/branch-#{Time.now.strftime('%Y-%m-%d-%H%M%S')}"
+
+    base_ref = repo.heads.find_or_build("main")
+    head_ref = repo.heads.create(branch_name, base_ref.target, bot)
+    head_ref.append_commit({ message: "copilot changes", committer: bot }, bot) do |files|
+      files.add("README.md", "foo")
+      files.add("config/gitconfig", "foo")
+    end
+
+    pull = PullRequest.create_for!(repo, { title: "a pr with a missing base ref", head: branch_name, base: "main", body: "copilot wrote me a PR", user: bot })
+    pull.pull_request_copilot_attributions.create(user: mona)
+  end
+
+  def allow_swe_agent_access
+    Organization.find_by_login("github").update_copilot_swe_agent_access("all_repos", actor: User.find_by_login("ghost"))
+    User.find_by_login("monalisa").update_copilot_swe_agent_access("all_repos", actor: User.find_by_login("ghost"))
+  end
+
+  def add_self_hosted_runner
+    scope = Organization.find_by_login("github").runner_creation_token_scope
+    token = User.find_by_login("monalisa").signed_auth_token(scope: scope, expires: 1.hour.from_now)
+    system("/workspaces/sweagentd/script/docker-self-hosted-runner ./config.sh --url http://github.localhost:80/github --token #{token} --unattended --labels docker-self-hosted-runner")
+  end
+
+  def enable_swe_agent_policies(org: "github", user: mona)
+    org = Organization.find_by_login(org)
+    copilot_org = Copilot::Organization.new(org)
+    copilot_business = copilot_org.copilot_business
+
+    # Enable Copilot for the business and upgrade it to the enterprise plan
+    copilot_business.enable_copilot_for_all_organizations!(user)
+    copilot_business.copilot_plan_enterprise!
+
+    # Give monalisa a Copilot seat
+    copilot_org.seat_management_allow_all!(user)
+
+    # Enable the SWE agent and MCP policies
+    copilot_business.swe_agent_enabled!
+    copilot_business.mcp_enabled!
+  end
+
+  def add_env_vars(vars)
+    envvars.merge!(vars)
+  end
+
+  def add_env_comment(comment)
+    envvars["##{Random.random_number}"] = comment
+  end
+
+  def write_env_file
+    puts "\n➡ Creating /workspaces/sweagentd/.env with these variables\n"
+    content = envvars_to_s
+    puts content
+    File.write("/workspaces/sweagentd/.env", content)
+  end
+
+  def setup_onep
+    # Check for the required environment variables, and prompt if we don't have them
+    unless ENV["GITHUB_USER"]
+      print("\nEnter your GitHub Username (for 1Password sign-in): ")
+      ENV["GITHUB_USER"] = STDIN.noecho(&:gets).chomp
+    end
+    github_user = ENV["GITHUB_USER"]
+
+    unless ENV["ONEP_SECRET_KEY"]
+      print("\nEnter your 1Password Secret Key: ")
+      ENV["ONEP_SECRET_KEY"] = STDIN.noecho(&:gets).chomp
+    end
+    onep_secret_key = ENV["ONEP_SECRET_KEY"]
+
+    unless ENV["ONEP_PASSWORD"]
+      print("\nEnter your 1Password Master Password: ")
+      ENV["ONEP_PASSWORD"] = STDIN.noecho(&:gets).chomp
+    end
+    onep_password = ENV["ONEP_PASSWORD"]
+
+    unless onep_secret_key && onep_password && github_user
+      warn "Could not sign in to 1Password: missing environment variables."
+      return false
+    end
+
+    print "\n1Password secrets detected. installing 1Password CLI..."
+    system("script/install_1password_cli")
+
+    print "\nSigning in to 1Password..."
+
+    # Check if the account is already added
+    account_exists = false
+    Open3.popen3("op", "account", "list", "--format", "json") do |_stdin, stdout, _stderr, wait_thr|
+      output = stdout.read
+      wait_thr.value # Wait for completion
+      accounts = JSON.parse(output)
+      if accounts.any? { |acc| acc["address"] == "github.1password.com" }
+        puts "\n1Password account already added."
+        account_exists = true
+      end
+    end
+
+    # Add the account if needed
+    unless account_exists
+      print "\nAdding 1Password account..."
+      Open3.popen3("op", "account", "add",
+                  "--address", "github.1password.com",
+                  "--email", "#{github_user}@github.com",
+                  "--secret-key", onep_secret_key) do |stdin, _stdout, _stderr, wait_thr|
+        stdin.write(onep_password)
+        stdin.close
+        wait_thr.value # Wait for completion
+      end
+    end
+
+    # Then sign in with the password
+    session_success = false
+    Open3.popen3("op", "signin", "--account", "github.1password.com") do |stdin, stdout, _stderr, wait_thr|
+      stdin.write(onep_password)
+      stdin.close
+      # Capture the session token from stdout
+      session_output = stdout.read
+      if session_output.include?("export OP_SESSION")
+        # Extract and set the session token
+        match = session_output.match(/export OP_SESSION_[^=]+=([^;\s]+)/)
+        if match
+          session_token = match[1]
+          ENV["OP_SESSION_github"] = session_token.gsub(/["']/, "")
+          session_success = true
+        else
+          warn "Could not extract OP_SESSION token from 1Password CLI output."
+        end
+      else
+        warn "No OP_SESSION found in 1Password CLI output."
+      end
+      wait_thr.value
+    end
+
+    session_success
+  end
+
+  private
+
+  def mona
+    @mona ||= User.find_by_login("monalisa")
+  end
+
+  def parse_args(args)
+    options = {
+      launcher: LAUNCHER_ACTIONS,
+    }
+    OptionParser.new do |opts|
+      opts.banner = "Usage: bin/setup-codespaces-copilot-swe-agent.rb [OPTIONS]"
+
+      opts.on("-l=LAUNCHER", "--launcher=LAUNCHER", "Name of launcher to use, either `actions` or `docker`") do |arg|
+        if arg != LAUNCHER_ACTIONS && arg != LAUNCHER_DOCKER
+          puts "Invalid launcher. Must be either `actions` or `docker`"
+          exit 1
+        end
+        options[:launcher] = arg
+      end
+
+      opts.on("-c", "--capi", "Set up Copilot API") do
+        options[:capi] = true
+      end
+
+      opts.on("-p", "--proxima", "Set up coding agent in Proxima") do
+        options[:proxima] = true
+      end
+
+      opts.on("-h", "--help", "Prints this help") do
+        puts opts
+        exit 1
+      end.parse!(args)
+    end
+
+    options
+  end
+
+  def envvars_to_s
+    envvars.map do |k, v|
+      k.start_with?("#") ? "\n# #{v}" : "#{k}=\"#{v}\""
+    end.join("\n")
+  end
+
+  def stdin_capi_hmac_key
+    print "\nInput the CAPI_HMAC_KEY (CAPI / Copilot Developer (Dev) API secret in 1P): "
+    STDIN.noecho(&:gets).chomp
+  end
+
+  def onep_capi_hmac_key
+    return unless setup_onep
+
+    print "\nRetrieving CAPI_HMAC_KEY from 1Password..."
+    cmd = ["op", "item", "get", "CAPI / Copilot Developer (Dev) API secret", "--format", "json"]
+    json_output, status = Open3.capture2(*cmd)
+    if !status.success?
+      warn "\nFailed to retrieve item from 1Password. Please check your 1Password CLI setup and try again."
+      return
+    end
+
+    fields = JSON.parse(json_output)["fields"]
+    credential = fields.find { |f| f["label"] == "credential" }
+    if credential && credential["value"]
+      credential["value"]
+    else
+      warn "\nCredential field not found in 1Password item."
+    end
+  end
+end
+
+# Actually start the setup process
+runner = Runner.new
+telemetry = TelemetryTracker.new
+setup_start_time = Time.now
+
+begin
+  # If we're going to use local CAPI etc, setup 1Password first
+  # This will prompt for credentials if needed, then the rest can run unattended
+  if runner.capi?
+    telemetry.track_step("setup_onep") do
+      unless runner.setup_onep
+        raise "Failed to sign in to 1Password. Check your credentials and try again."
+      end
+    end
+  end
+
+  telemetry.track_step("enable_copilot_chat") do
+    # Note this script brings in production feature flags, so any feature flag updates need to happen after this point
+    puts "\n➡️ script/enable-copilot-chat\n"
+    system("script/enable-copilot-chat")
+  end
+
+  capi_hmac_key = telemetry.track_step("get_capi_hmac_key") do
+    runner.capi_hmac_key
+  end
+
+  if runner.capi?
+    telemetry.track_step("setup_copilot_api") do
+      puts "\n➡️ script/setup-codespaces-copilot-api\n"
+      system("script/setup-codespaces-copilot-api")
+
+      puts "\n➡️ script/setup-codespaces-copilot-mission-control\n"
+      system("script/setup-codespaces-copilot-mission-control")
+
+      puts "\n➡️ Enabling model feature flags for CAPI\n"
+      system("bin/toggle-feature-flag enable copilot_api_model_rollout_claude35sonnet_integrations_no_users")
+
+      puts "\n➡️ Disabling CAPI mission control proxy feature flag\n"
+      system("bin/toggle-feature-flag disable copilot_mission_control_service_proxy")
+
+      puts "\n➡️ Disabling firewall feature flag\n"
+      system("bin/toggle-feature-flag disable copilot_swe_agent_firewall_enabled_by_default")
+
+      runner.add_env_comment("For local CAPI")
+      runner.add_env_vars({
+        "COPILOT_API_URL": "http://localhost:2206",
+        "CAPI_HMAC_KEY": "#{capi_hmac_key}",
+        "COPILOT_INTEGRATION_ID": "dev",
+      })
+    end
+  else
+    telemetry.track_step("disable_capi_session_flag") do
+      puts "\n➡️ Disabling CAPI session feature flag\n"
+      system("bin/toggle-feature-flag disable copilot_api_agent_sessions")
+    end
+  end
+
+  telemetry.track_step("enable_feature_flags") do
+    puts "\n➡️ Enabling feature flags\n"
+    system("bin/toggle-feature-flag enable copilot_swe_agent \
+      -F copilot_coding_agent_premium_requests \
+      -F copilot_global_overlay_v2 \
+      -F copilot_immersive_agent_branch_selection \
+      -F copilot_mission_control_link_to_sessions_in_repo \
+      -F coding_agent_model_selection \
+      -F coding_agent_model_selection_all_skus")
+  end
+
+  if !File.exist?("/workspaces/sweagentd")
+    telemetry.track_step("clone_and_install_sweagentd") do
+      puts "\n➡️ Cloning github/sweagentd\n"
+      system("git clone --recurse-submodules https://github.com/github/sweagentd /workspaces/sweagentd")
+      puts "\n➡️ Installing sweagentd dependencies\n"
+      system("/workspaces/sweagentd/script/install-all-deps")
+    end
+  end
+
+  integration, key = telemetry.track_step("seed_github_app") do
+    puts "\n➡️ Seeding GitHub app\n"
+    runner.seed_github_app
+  end
+
+  telemetry.track_step("install_github_app") do
+    runner.install_github_app(integration)
+  end
+
+  telemetry.track_step("allow_swe_agent_access") do
+    puts "\n➡️ Allowing SWE agent access\n"
+    runner.allow_swe_agent_access
+  end
+
+  telemetry.track_step("enable_swe_agent_policies") do
+    puts "\n➡️ Enabling SWE agent and MCP policies\n"
+    runner.enable_swe_agent_policies
+  end
+
+  if runner.proxima?
+    telemetry.track_step("enable_proxima_swe_agent") do
+      puts "\n➡️ Enabling SWE agent and MCP usage in Proxima\n"
+      system("bin/toggle-feature-flag enable -F coding_agent_in_proxima")
+
+      # Fetch the proxima user and enable policies
+      user = User.find_by_login("monalisa_avo")
+      runner.enable_swe_agent_policies(org: "avocado-gmbh-research_avo", user: user)
+    end
+  end
+
+  runner.add_env_comment("GitHub App Credentials")
+  runner.add_env_vars({
+    "GITHUB_APP_ID": integration.id,
+    "GITHUB_APP_BOT_ID": integration.bot.id,
+    "GITHUB_APP_LOGIN": integration.slug,
+    "GITHUB_BOT_LOGIN": integration.bot.login,
+    "GITHUB_APP_PRIVATE_KEY": Base64.strict_encode64(key.strip),
+    "GITHUB_SERVER_URL": "http://github.localhost/",
+    "GITHUB_API_BASE_URL": "http://api.github.localhost/",
+    "GITHUB_SERVER_URL_OVERRIDE": "http://github.localhost/",
+    "GITHUB_API_BASE_URL_OVERRIDE": "http://api.github.localhost/",
+  })
+
+  runner.add_env_comment("User and email for commits - the email below makes it look like the commit was done by Copilot")
+  runner.add_env_vars({
+    "GITHUB_COMMIT_LOGIN": "Copilot",
+    "GITHUB_COMMIT_EMAIL": "#{integration.bot.id}+#{integration.bot.login}@users.noreply.github.localhost",
+  })
+
+  runner.add_env_comment("This is the URL that the agent will use to send callbacks to - should be sweagentd")
+  runner.add_env_vars({
+    "AGENT_CALLBACK_URL": "http://localhost:2208/agent",
+    "AGENT_LAUNCHER": runner.launcher,
+  })
+
+  if runner.actions?
+    if ENV["AzureSubscriptionId"]
+      puts "\n⚠️ Environment variable 'AzureSubscriptionId' is detected and can interfere with Actions setup. Run 'unset AzureSubscriptionId' and try again.\n"
+      exit 1
+    end
+
+    telemetry.track_step("mirror_copilot_developer_action") do
+      puts "\n➡️ Mirroring github/copilot-developer-action\n"
+      system("bin/seed github_repo --nwo github/copilot-developer-action -t $GITHUB_TOKEN --depth 1 --tags latest")
+    end
+
+    telemetry.track_step("start_actions") do
+      puts "\n➡️ Starting Actions services (run start-actions if it gets stopped)"
+      system("/workspaces/actions/actions-codespaces/script/server --scenario actions-codespaces-vnext --verbose", exception: true)
+    end
+
+    telemetry.track_step("start_actions_four_nines") do
+      puts "\n➡️ Toggling Actions four-nines services\n"
+      system("/workspaces/actions/actions-dotnet/src/Scripts/toggle-four-nines on", exception: true)
+    end
+
+    # Wait a bit before registering the runner.
+    sleep(10)
+
+    telemetry.track_step("add_self_hosted_runner") do
+      puts "\n➡️ Setting up Docker self-hosted runner\n"
+      runner.add_self_hosted_runner
+    end
+
+    runner.add_env_vars({
+      "ACTIONS_DEFAULT_RUNS_ON_LABELS": "docker-self-hosted-runner",
+      "COPILOT_INTEGRATION_ID": "copilot-developer-dev",
+      "CAPI_HMAC_KEY": "#{capi_hmac_key}",
+    })
+
+    unless runner.capi?
+      puts "\n📣 Set `CAPI_HMAC_KEY_OVERRIDE` and `COPILOT_INTEGRATION_ID_OVERRIDE` as org secrets for the github org\n"
+      puts "\n📣 If you didn't set `CAPI_HMAC_KEY`, make sure to update it in your `.env`! `\n"
+    end
+  end
+
+  if runner.docker?
+    telemetry.track_step("build_docker_image") do
+      image_name = "sweagentd-runtime"
+      puts "\n➡️ Building the Docker image from sweagentd/runtime\n"
+      system("/workspaces/sweagentd/runtime npm run docker:build #{image_name}")
+      runner.add_env_comment("This is the image that the agent will use to run the container")
+      runner.add_env_vars({
+        "DOCKER_AGENT_CONTAINER_IMAGE": image_name,
+      })
+
+      runner.add_env_comment("For production CAPI")
+      runner.add_env_vars({
+        "COPILOT_INTEGRATION_ID": "copilot-developer-dev",
+        "CAPI_HMAC_KEY": "#{capi_hmac_key}",
+      })
+    end
+  end
+
+  telemetry.track_step("write_env_file") do
+    runner.write_env_file
+  end
+
+  telemetry.record_overall_metrics(setup_start_time, success: true)
+  puts "\n🎉 Done!"
+rescue => e
+  telemetry.record_overall_metrics(setup_start_time, success: false)
+  puts "\n❌ Setup failed: #{e.message}"
+  puts e.backtrace.join("\n")
+  exit 1
+end

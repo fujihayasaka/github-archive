@@ -1,0 +1,61 @@
+name: Publish action
+
+env:
+  HUSKY: 0
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "runtime/**"
+      - ".github/workflows/publish-action.yml"
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  build_and_push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: sweagentd
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+
+      - run: npm ci
+        working-directory: ./sweagentd/runtime
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_DEVELOPER_ACTION_PAT }}
+          repository: github/copilot-developer-action
+          path: copilot-developer-action
+          ref: main
+
+      - run: ./sweagentd/runtime/script/action-build ./copilot-developer-action
+        working-directory: ./
+        env:
+          EBPF_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.EBPF_DOWNLOAD_GITHUB_TOKEN }}"
+          BLACKBIRD_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.BLACKBIRD_DOWNLOAD_GITHUB_TOKEN }}"
+          AUTOFIND_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.AUTOFIND_DOWNLOAD_GITHUB_TOKEN }}"
+
+      - name: Commit changes
+        working-directory: ./copilot-developer-action
+        run: |
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+
+          SOURCE_SHA="${{ github.sha }}"
+
+          # Copy the built files over
+          # (they're already in the working directory from the build step)
+          git add .
+          if ! git diff --cached --quiet; then
+            git commit -m "Update from ${SOURCE_SHA}"
+          else
+            echo "No changes to commit"
+          fi
+          git push origin main

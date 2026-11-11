@@ -1,0 +1,39 @@
+<% view = Businesses::PeopleView.new(query: query) %>
+
+<%
+  filtered_orgs = view.organizations || []
+  orgs = this_business.organizations.by_login.partition do |org|
+    filtered_orgs.include?(org.display_login)
+  end.flatten
+%>
+
+<%= render(Primer::Alpha::SelectPanel::ItemList.new(
+  menu_id: "organization-filter",
+  aria: { label: "Organizations" },
+  select_variant: :multiple
+)) do |list| %>
+  <% orgs.each do |org| %>
+    <%
+      selected = filtered_orgs.include?(org.display_login)
+
+      # If the org is currently selected, when it's unselected, remove it from the query
+      # If the org is currently unselected, when it's selected, add it to the query
+      organizations_for_query = selected ?
+        filtered_orgs - [org.display_login] :
+        filtered_orgs + [org.display_login]
+
+      url = enterprise_paths(
+        path_type,
+        query: view.apply_query_filters(organizations: organizations_for_query)
+      )
+    %>
+
+    <% list.with_avatar_item(
+      username: org.display_login,
+      src: avatar_url_for(org),
+      href: url,
+      active: selected
+    ) %>
+  <% end %>
+
+<% end %>

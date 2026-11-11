@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# This is a wrapper for github/dogstats to set reporting endpoint, specific tags and namespace.
+# To see the potential options run the ./bin/dogstats command
+# https://github.com/github/dogstats where there is more info available.
+
+# Tags from test/test_helpers/github_test/stats.rb
+# TestEnv.branch is ENV["BUILD_BRANCH"]
+
+set_default_tags() {
+  TAGS="project:${GH_CI_RUNTIME}"
+  mb="${BUILD_BRANCH%gh/queue/master}"
+  if [ "$mb" != "$BUILD_BRANCH" ]; then
+    TAGS="${TAGS} merge_queue_branch:true"
+  else
+    TAGS="${TAGS} merge_queue_branch:false"
+  fi
+  if [ "$BUILD_BRANCH" == "master" ]; then
+    TAGS="${TAGS} master_branch:true"
+  else
+    TAGS="${TAGS} master_branch:false"
+  fi
+  export DEFAULT_TAGS="${TAGS}"
+}
+
+DOGSTATS="$(dirname "$0")/../../vendor/ci-bin/dogstats"
+
+# Check if the dogstats binary exists
+# and if not, print a warning and exit
+# without sending any metrics.
+if [ ! -x "${DOGSTATS}" ]; then
+  echo "WARN: No dogstats binary found - No metrics will be sent. Please run script/build-dogstats to install it." >&2
+  echo "Metrics NOT sent was: $*" >&2
+  exit 0
+fi
+
+set_default_tags
+
+# Check if arguments were provided.
+# Since we add additional arguments to the input, script/ci/dogstats usage will not show something useful.
+# If not, print a warning and show usage
+argv=("$@")
+if [ "${#argv[@]}" -eq 0 ]; then
+  echo "No arguments provided. Please provide arguments to dogstats." >&2
+  "$DOGSTATS" >&2
+  exit 1
+fi
+
+export DD_DOGSTATSD_URL="udp://localhost:28126"
+# If the socket exists, we can use it.
+if [ -S /var/run/datadog/dsd.socket ]; then
+  export DD_DOGSTATSD_URL="unix:///var/run/datadog/dsd.socket"
+fi
+
+"$DOGSTATS" -n ci "$@" $DEFAULT_TAGS

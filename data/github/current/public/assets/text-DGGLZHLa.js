@@ -1,0 +1,3 @@
+function e(e,t,n={}){let r=e.selectionEnd||0,i=e.value.substring(0,r),a=e.value.substring(r),o=e.value===``||i.match(/\n$/)?``:`
+`,s=n.appendNewline?`
+`:``,c=o+t+s;e.value=i+c+a;let l=r+c.length;return e.selectionStart=l,e.selectionEnd=l,e.dispatchEvent(new CustomEvent(`change`,{bubbles:!0,cancelable:!1})),e.focus(),c}function t(e,t){let n=[...e],r=new TextEncoder,i=new Uint8Array(4);for(let e=0;e<n.length;e++){let a=n[e],{written:o,read:s}=r.encodeInto(a,i);if(!o||!s)return-1;let c=o-s;if(c!==0&&(e<t&&(t-=c),e>=t))break}return t}export{e as n,t};

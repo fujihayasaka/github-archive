@@ -1,0 +1,96 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: github-production
+
+resources:
+  - ../../base/azure
+  - servicemeshingress-unicorn.yaml
+  - servicemeshingress-unicorn-api.yaml
+  - servicemeshingress-unicorn-api-graphql.yaml
+  - servicemeshingress-unicorn-api-lowprio.yaml
+  - servicemeshingress-unicorn-internal-api.yaml
+  - servicemeshingress-unicorn-lowprio.yaml
+  - ../../base/commonBase/unicorn/poddisruptionbudgets/
+  - ../../base/commonBase/unicorn-api/poddisruptionbudgets/
+  - ../../base/commonBase/unicorn-internal-api/poddisruptionbudgets/
+  - ../../base/commonBase/achievements-yolo-processor/
+
+components:
+  - ../../base/servicemesh-dotcom
+  - ../../base/istio-perf-eng
+
+configMapGenerator:
+  - name: observability-config
+    behavior: merge
+    literals:
+      - FAILBOT_HAYSTACK_URL_MESH=http://failbotg.failbotg-production.svc.cluster.local/api/needles
+      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT_INGRESS=https://otelcol-dotcom.service.iad.github.net/v1/traces
+
+# If you need to override environment variables, resource limits, or other settings for specific deployments
+# you can use the patches here to apply those changes. Each patch file should contain the necessary patches
+# to modify the respective deployment as needed. Avoid creating patches directly in this file to keep it clean.
+patches:
+  - target:
+      kind: Namespace
+      name: github-azure
+    patch: |-
+      - op: replace
+        path: "/metadata/labels/github.com~1name"
+        value: github-production
+  - target:
+      kind: Deployment
+      labelSelector: service=unicorn
+    path: patches/deployments/unicorn.yaml
+  - target:
+      kind: Deployment
+      labelSelector: service=unicorn-api
+    path: patches/deployments/unicorn-api.yaml
+  - target:
+      kind: Deployment
+      labelSelector: service=unicorn-api-lowprio
+    path: patches/deployments/unicorn-api-lowprio.yaml
+  - target:
+      kind: Deployment
+      labelSelector: service=unicorn-api-graphql
+    path: patches/deployments/unicorn-api-graphql.yaml
+  - target:
+      kind: Deployment
+      labelSelector: service=unicorn-lowprio
+    path: patches/deployments/unicorn-lowprio.yaml
+  - target:
+      kind: ConfigMap
+      name: observability-config
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          moda.github.net/canary-v2: "true"
+  - target:
+      kind: ConfigMap
+      name: unicorn-api-nginx-conf
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          moda.github.net/canary-v2: "true"
+  - target:
+      kind: ConfigMap
+      name: unicorn-nginx-conf
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          moda.github.net/canary-v2: "true"
+  - target:
+      kind: Deployment
+      name: achievements-yolo-processor
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: mysql-hosts

@@ -1,0 +1,34 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: github-shadow-lab
+
+components:
+  - ../../base/metric-attribution
+
+images:
+  - name: octofactory.service.private-us-east-1.github.net/moda-artifacts-docker/docker-nginx
+    digest: sha256:fad6ebb459e7f51d120ebe9514ee4776bca3cdeebddc37cd29cbfdd14239eb45
+
+configMapGenerator:
+  - name: observability-config
+    options:
+      disableNameSuffixHash: true
+      annotations:
+        moda.github.net/canary-v2: "true"
+    literals:
+      - GITHUB_TELEMETRY_LOGS_ENABLED="true"
+      - GH_LOG_DESTINATION="stdout"
+      - FAILBOT_HAYSTACK_URL_MESH=http://failbotg.failbotg-production.svc.cluster.local/api/needles
+      - DOGSTATSD_SOCKET="/var/run/datadog/dsd.socket"
+      - DOGSTATSD_SOCKET_ENABLED="1"
+
+resources:
+  - ../production/unicorn/
+  - ./configmaps/unicorn
+  - ./namespaces/namespace.yaml
+
+patches:
+  - path: ./deployments/unicorn.yaml
+  - path: ./services/unicorn.yaml
+  - path: ./poddisruptionbudgets/delete-pdb.yaml

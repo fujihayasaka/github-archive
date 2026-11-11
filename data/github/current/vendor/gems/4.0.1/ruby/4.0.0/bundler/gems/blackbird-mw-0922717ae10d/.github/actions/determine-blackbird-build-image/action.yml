@@ -1,0 +1,49 @@
+name: "Determine Blackbird Build Image"
+description: "Determines which Docker image to use for building Blackbird code. The version on the runner is used if it exists, otherwise one from ghcr.io will be pulled. But if there's a forced version on ghcr.io, use that one regardless, so that break-fix/rollbacks are supported."
+
+inputs:
+  ubuntu-version:
+    description: "The Ubuntu version (focal or noble)"
+    required: true
+    options:
+      - focal
+      - noble
+  profile:
+    description: "The build profile (dev or release)"
+    required: true
+    options:
+      - dev
+      - release
+
+outputs:
+  docker-image:
+    description: "The Docker image to use for the build"
+    value: ${{ steps.find-image.outputs.docker-image }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Find Blackbird Build Image
+      id: find-image
+      shell: bash
+      run: |
+        set -xeuo pipefail
+
+        docker image ls --digests
+
+        # Check if the cached version is available locally.
+        DOCKER_IMAGE="cached-${{ inputs.ubuntu-version }}-${{ inputs.profile }}"
+        if [[ -z $(docker image ls -q "${DOCKER_IMAGE}") ]]; then
+          DOCKER_IMAGE="ghcr.io/github/blackbird/blackbird-build-image:main-${{ inputs.ubuntu-version }}-${{ inputs.profile }}"
+        fi
+
+        # We need the experimental options for the manifest inspect command.
+        export DOCKER_CLI_EXPERIMENTAL=enabled
+
+        # Now we check if the ghcr.io registry has a version with the forced tag.
+        FORCED_DOCKER_IMAGE="ghcr.io/github/blackbird/blackbird-build-image:forced-${{ inputs.ubuntu-version }}-${{ inputs.profile }}"
+        if docker manifest inspect "$FORCED_DOCKER_IMAGE" > /dev/null 2>&1 ; then
+          DOCKER_IMAGE="$FORCED_DOCKER_IMAGE"
+        fi
+
+        echo "docker-image=${DOCKER_IMAGE}" >> "$GITHUB_OUTPUT"

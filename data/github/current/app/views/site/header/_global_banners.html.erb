@@ -1,0 +1,67 @@
+<%
+# Example of selective rendering based on the current request path
+#
+# First define the paths you want to render the banner on. This has to be an Array or Nil.
+#  `my_paths = ["/features/copilot", "/features/copilot/plans", "/features/preview"] if FeatureFlag.vexi.enabled?(:my_feature_flag, current_user, default: false)`
+#
+# The `allowed_on_pages?` helper is used to specify which paths the banner should be rendered on. It takes an `allowed_paths` option and an `excluded_paths` option which can be Array or Nil. Remember render is true by default.
+# Within the banner data hash, you can use the `render` key to specify which paths the banner should be rendered on.
+#  `render: allowed_on_pages?(allowed_paths: my_paths)`
+
+# And for the other banner, you can use the `render` key to specify which paths the banner should NOT be rendered on.
+#  `render: allowed_on_pages?(excluded_paths: my_paths)`
+#
+# @see app/helpers/site_helper.rb:120
+
+# Note that the `allowed_on_pages?` helper doesn't support wildcard matching
+#  `render: allowed_on_pages?(allowed_paths: ["/resources/*"]),`
+# If you want to include/exclude a whole section of the site, you can use `request.path.starts_with?("/section")`
+
+# If you want to exclude locale paths (banner shouldn't be seen in other languages),
+# you can use `render: allowed_on_pages?(excluded_paths: ["/team"]) && !params[:locale]`
+
+# Example banner
+# {
+#   uid: "my_unique_id",
+#   title: "My Banner Title",
+#   link: "https://my-url.com/?utm_source=github&utm_medium=banner&utm_campaign=my_campaign",
+#   link_label: "Click now",
+#   icon: :megaphone, # Either an Octicon
+#   icon: image_path("modules/site/global-banner/my_unique_id.svg"), # Or image asset
+#   classes: "fgColor-onEmphasis fgColor-onEmphasis fgColor-onEmphasis", #   render: allowed_on_pages?(excluded_paths: ["/team"]),
+#   enabled: FeatureFlag.vexi.enabled?(:site_my_unique_id_global_banner, current_user, default: false),
+# },
+
+  global_banners = [
+    {
+      uid: "my_uid",
+      title: "My banner title",
+      link: "https://github.com",
+      link_label: "Click me",
+      render: allowed_on_pages?(allowed_paths: ["/home"]),
+      enabled: false, # We just keep this so we don't have to delete the request_path_parametrize helper
+    },
+    {
+      uid: "roadmap_webinar_2026_q1",
+      title: "Inside GitHub’s roadmap for agentic development —",
+      link: "https://github.com/resources/events/github-roadmap-webinar-q1?utm_source=github&utm_medium=event&utm_campaign=AMER-FY26Q3-AMER-EMEA-Roadmap-Webinar-20260326&utm_content=website_banner",
+      link_label: "join the product roadmap webinar",
+      classes: "fgColor-onEmphasis",
+      render: allowed_on_pages? && !params[:locale],
+      enabled: FeatureFlag.vexi.enabled?(:site_banner_roadmap_webinar_2026_q1, current_user, default: false),
+    },
+  ]
+
+  active_global_banners = global_banners.select { |banner| banner[:enabled] }
+  active_global_banners_uids = active_global_banners.map { |banner| banner[:uid] }.join(",")
+%>
+
+<% for banner in active_global_banners %>
+  <%= render Site::GlobalBannerComponent.new(**banner) if !user_disabled_global_banner?(banner[:uid]) %>
+<% end %>
+
+<% if !logged_in? %>
+  <%= javascript_bundle("global-banner-disable.js") %>
+<% end %>
+
+<active-global-banners data-banners="<%= active_global_banners_uids %>"></active-global-banners>

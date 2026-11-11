@@ -1,0 +1,216 @@
+# typed: strict
+# frozen_string_literal: true
+
+module MergeQueues
+  # Encapsulation of all required MergeQueueEntry data to execute the Merge Queue.
+  class Entry < T::Struct
+    include MergeQueues::Group::Groupable
+
+    # This property will be determined by various factors such as branch protections, etc. Inside of the MergeQueue
+    # evaluation we only care about a single field describing state. We will need to deal with that translation while
+    # loading from the database and other sources.
+    prop :state, State
+
+    # The entry is locked, i.e. this queue uses a deploy-then-merge workflow
+    # and this entry is part of a group that is currently being deployed.
+    prop :locked, T::Boolean, default: false
+
+    # Database ID of the MergeQueueEntry.
+    prop :merge_queue_entry_id, Integer
+    prop :pull_request_number, Integer
+    prop :pull_request_id, Integer
+    prop :attempts, Integer, default: 0
+
+    # The pull_request.head_sha at time of enqueue.
+    prop :enqueued_head_sha, T.nilable(String)
+    prop :enqueued_base_sha, T.nilable(String)
+    prop :enqueued_head_ref, T.nilable(String)
+
+    # The git object identifier that the ref was created from.
+    prop :base_sha, T.nilable(String), override: :reader
+
+    # The git object identifier that includes all of the changes from the Pull Request.
+    prop :head_sha, T.nilable(String), override: :reader
+
+    # The name of the temporary ref created that is given to CI providers.
+    prop :head_ref, T.nilable(String)
+    prop :created_at, Time, override: :reader
+
+    # Flag determining if we should perform a merge operation with just this Entry.
+    prop :solo, T::Boolean, default: false
+
+    # Flag indicating if a fast merge was attempted for this entry.
+    prop :fast_forward_attempted, T::Boolean, default: false
+
+    # Stack association: entries with the same non-nil stack_id belong to the same stack.
+    prop :stack_id, T.nilable(Integer), default: nil, override: { reader: true, writer: false }
+
+    # 1-based position within the stack (1 = bottom). Used to determine ancestor/descendant relationships.
+    prop :stack_position, T.nilable(Integer), default: nil
+
+    # Whether the parent stack entry (position - 1) has been merged. Only meaningful on the
+    # lowest-position entry per stack in the queue. Position 1 entries have no parent and default to true.
+    prop :parent_stack_entry_merged, T::Boolean, default: false
+    alias parent_stack_entry_merged? parent_stack_entry_merged
+
+    # The set of requested check contexts that are awaiting a response from the CI provider.
+    prop :requested_checks, T::Array[Entry::RequestedCheck]
+
+    sig { override.returns(T::Boolean) }
+    def stacked? = stack_id.present? && stack_position.present?
+
+    sig { returns(T::Boolean) }
+    def invalidated_stack? = unmergeable? && removal_reason == RemovalReason::StackInvalidated
+
+    sig { params(other: Entry).returns(T::Boolean) }
+    def stack_descendant_of?(other)
+      return false unless stacked? && other.stacked?
+
+      stack_id == other.stack_id && stack_position.to_i > other.stack_position.to_i
+    end
+
+    sig { returns(T::Boolean) }
+    def fast_forward_not_attempted? = !fast_forward_attempted
+
+    sig { returns(T::Boolean) }
+    def temporary_ref? = head_sha != nil && head_ref != nil && head_ref != enqueued_head_ref
+
+    sig { returns(T::Boolean) }
+    def fast_forward? = head_ref != nil && head_ref == enqueued_head_ref
+
+    sig { override.returns(T::Boolean) }
+    def unmergeable?
+      state.is_a? State::Unmergeable
+    end
+
+    sig { returns(T::Boolean) }
+    def waiting?
+      state.is_a? State::Waiting
+    end
+
+    sig { override.returns(T::Boolean) }
+    def solo?
+      solo
+    end
+
+    sig { override.returns(T::Boolean) }
+    def locked?
+      locked
+    end
+
+    sig { override.returns(T::Boolean) }
+    def mergeable?
+      state.is_a? State::Mergeable
+    end
+
+    sig { returns(T::Boolean) }
+    def awaiting_checks?
+      state.is_a? State::AwaitingChecks
+    end
+
+    sig { override.returns(T::Boolean) }
+    def queued?
+      state.is_a? State::Queued
+    end
+
+    sig { returns(T::Boolean) }
+    def active_build?
+      case current_state = state
+      when Entry::State::AwaitingChecks,
+          Entry::State::Mergeable,
+          Entry::State::Unmergeable
+        true
+      when Entry::State::Queued,
+          Entry::State::Waiting
+        false
+      else
+        T.absurd(current_state)
+      end
+    end
+
+    sig { returns(T::Boolean) }
+    def merge_conflict?
+      case current_state = state
+      when State::Unmergeable
+        current_state.reason == RemovalReason::MergeConflict
+      else
+        false
+      end
+    end
+
+    sig { returns(T::Boolean) }
+    def failing_checks?
+      requested_checks.any? { |check| check.failed? && !check.retryable? }
+    end
+
+    sig { returns(T::Boolean) }
+    def timed_out_checks?
+      case current_state = state
+      when State::Unmergeable
+        current_state.reason == RemovalReason::ChecksTimedOut
+      when State::AwaitingChecks
+        requested_checks.any? { |check| check.timed_out? && !check.retryable? }
+      else
+        false
+      end
+    end
+
+    sig { returns(T::Boolean) }
+    def retryable_checks?
+      failing_checks = requested_checks.filter(&:failed_or_timed_out?)
+      return false if failing_checks.empty?
+      failing_checks.all?(&:retryable?)
+    end
+
+    sig { returns(T::Boolean) }
+    def passing_checks?
+      requested_checks.any? && requested_checks.all?(&:success?)
+    end
+
+    sig { returns(T::Set[String]) }
+    def retryable_check_contexts
+      requested_checks.filter(&:retryable?).map(&:name).to_set
+    end
+
+    sig { returns(T::Boolean) }
+    def pending_checks?
+      requested_checks.any? { |check| check.pending? && !check.timed_out? }
+    end
+
+    sig { returns(T.nilable(ActiveSupport::TimeWithZone)) }
+    def checks_requested_at
+      case current_state = state
+      when State::AwaitingChecks
+        current_state.checks_requested_at
+      end
+    end
+
+    sig { returns(T.nilable(RemovalReason)) }
+    def removal_reason
+      case current_state = state
+      when Entry::State::Unmergeable
+        current_state.reason
+      end
+    end
+
+    sig { returns(String) }
+    def to_logging_s
+      "##{pull_request_number}: #{to_state_s}"
+    end
+
+    sig { returns(String) }
+    def to_state_s
+      case current_state = state
+      when State::AwaitingChecks
+        total_checks = requested_checks.count
+        unsettled_checks = requested_checks.count { |entry| entry.pending? && !entry.timed_out? }
+        settled_checks = total_checks - unsettled_checks
+        "#{current_state.name} (#{settled_checks}/#{total_checks})"
+      when State::Unmergeable
+        "#{current_state.name} (#{current_state.reason.serialize})"
+      else
+        current_state.name
+      end
+    end
+  end
+end

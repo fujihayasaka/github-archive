@@ -1,0 +1,2 @@
+performance.mark("js-parse-end:webgl-globe-538f9a0a1b56a0ef.js");
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["22011"],{344555(u,i,h){h(383138)}},function(u){u.O(0,["50815"],function(){return u(u.s=344555)}),u.O()}]);

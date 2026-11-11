@@ -1,0 +1,510 @@
+<% page_info(title: title, selected_link: :businesses_ai_controls_mcp, sidebar: :ai_controls) %>
+
+<%# Build assignment lookup: allowlist_id => array of namespace names %>
+<% assignment_lookup = {}
+   assignments.each do |a|
+     aid = a["allowlist_id"] || a["allowlist_public_id"]
+     next unless aid
+     assignment_lookup[aid] ||= []
+     assignment_lookup[aid] << (a["namespace_name"] || a["namespace_id"])
+   end
+%>
+
+<%= render(Businesses::AiControls::ReadOnlyBannerComponent.new(is_admin: is_admin)) %>
+
+<%= render(Primer::Box.new(mt: 2)) do %>
+  <% flash_rendered! %>
+  <%# Success banner - shown via flash %>
+  <% if flash[:success] %>
+    <%= render(Primer::Alpha::Banner.new(
+      scheme: :success,
+      icon: :"check-circle",
+      dismiss_scheme: :remove,
+      data: { test_selector: "allowlist-success-banner" },
+      id: "allowlist-success-banner",
+      classes: "tmp-mb-3",
+    )) do %>
+      <%= flash[:success] %>
+    <% end %>
+  <% end %>
+
+  <%# Error banner - shown via flash %>
+  <% if flash[:error] %>
+    <%= render(Primer::Alpha::Banner.new(
+      scheme: :danger,
+      icon: :"alert",
+      dismiss_scheme: :remove,
+      data: { test_selector: "allowlist-error-banner" },
+      id: "allowlist-error-banner",
+      classes: "tmp-mb-3",
+    )) do %>
+      <%= flash[:error] %>
+    <% end %>
+  <% end %>
+
+  <%= render(Primer::Beta::Link.new(href: mcp_enterprise_ai_controls_enterprise_path(business), test_selector: "mcp-settings-back-link")) do |component| %>
+    <% component.with_leading_visual_icon(icon: :"arrow-left") %>
+    MCP
+  <% end %>
+
+  <header class="tmp-mb-6">
+    <div class="d-flex gap-2 flex-items-center flex-justify-between border-bottom pb-2 tmp-mt-3">
+      <%= render(Primer::Beta::Heading.new(tag: :h1)) { title } %>
+      <% if can_write %>
+        <%= render(Primer::Box.new(ml: :auto)) do %>
+          <%# Create Allowlist Dialog %>
+          <% content_for :head do %>
+            <style data-turbo-track="reload">
+              #create-allowlist-dialog,
+              #create-allowlist-dialog * {
+                overflow: visible !important;
+                max-height: none !important;
+              }
+              #create-allowlist-dialog .Overlay-footer,
+              #create-allowlist-dialog .Overlay-header {
+                overflow: hidden !important;
+              }
+            </style>
+          <% end %>
+          <%= render(Primer::Alpha::Dialog.new(
+            title: "Create allowlist",
+            id: "create-allowlist-dialog",
+            position: :center,
+            size: :medium_portrait,
+          )) do |dialog| %>
+            <% dialog.with_show_button(
+              scheme: :primary,
+              test_selector: "create-allowlist-button",
+            ) { "Create allowlist" } %>
+            <% dialog.with_header(show_divider: true) do %>
+              <div class="d-flex flex-items-center gap-2 width-full">
+                <%# Back button - hidden on main page, shown on sub-pages %>
+                <%= render(Primer::Beta::IconButton.new(
+                  icon: :"arrow-left",
+                  "aria-label": "Back to create allowlist",
+                  scheme: :invisible,
+                  size: :medium,
+                  test_selector: "dialog-back-button",
+                  hidden: true,
+                )) %>
+                <span class="Overlay-title">Create allowlist</span>
+              </div>
+            <% end %>
+            <% dialog.with_body do %>
+              <%= form_with url: create_mcp_allowlist_enterprise_ai_controls_enterprise_path(business), method: :post, local: true, id: "create-allowlist-form" do %>
+              <div>
+                <%# Main page - Create allowlist form %>
+                <div class="d-flex flex-column gap-3">
+                <%# Name field (required) %>
+                <%= render(Primer::Alpha::TextField.new(
+                  name: "allowlist[name]",
+                  label: "Name",
+                  required: true,
+                  placeholder: "Allowlist name",
+                  full_width: true,
+                  test_selector: "allowlist-name-input",
+                )) %>
+
+                <%# Description field %>
+                <%= render(Primer::Alpha::TextArea.new(
+                  name: "allowlist[description]",
+                  label: "Description",
+                  placeholder: "What is this allowlist all about?",
+                  full_width: true,
+                  rows: 3,
+                  test_selector: "allowlist-description-input",
+                )) %>
+
+                <%# Assign allowlist section - populated by assignment integration (issue #718) %>
+                <%= render(Primer::Box.new) do %>
+                  <%= render(Primer::Beta::Text.new(tag: :label, font_weight: :semibold, display: :block, mb: 2, id: "assign-allowlist-label")) do %>
+                    Assign allowlist
+                  <% end %>
+                  <%= render(Primer::Beta::Text.new(tag: :p, color: :muted, font_size: :small)) do %>
+                    Organizations can be assigned after the allowlist is created.
+                  <% end %>
+                <% end %>
+
+                <%# Servers section %>
+                <%= render(Primer::Box.new) do %>
+                  <%# Search and sort row %>
+                  <div class="d-flex flex-items-center tmp-mb-3 gap-2">
+                    <div class="flex-1">
+                      <%= render(Primer::Alpha::TextField.new(
+                        name: "server_search",
+                        label: "Find server",
+                        visually_hide_label: true,
+                        placeholder: "Find server",
+                        leading_visual: { icon: :search },
+                        full_width: true,
+                        test_selector: "find-server-input",
+                      )) %>
+                    </div>
+                    <%= render(Primer::Alpha::ActionMenu.new(test_selector: "server-sort-menu")) do |menu| %>
+                      <% menu.with_show_button(scheme: :default) do |button| %>
+                        <% button.with_leading_visual_icon(icon: :"sort-desc") %>
+                        Last added
+                        <% button.with_trailing_action_icon(icon: :"triangle-down") %>
+                      <% end %>
+                      <% menu.with_item(label: "Last added", checked: true) %>
+                      <% menu.with_item(label: "Name A-Z") %>
+                      <% menu.with_item(label: "Name Z-A") %>
+                    <% end %>
+                  </div>
+
+                  <%# Servers list with header and empty state %>
+                  <%= render(Primer::Beta::BorderBox.new(test_selector: "create-allowlist-servers-list")) do |box| %>
+                    <% box.with_header(py: 2, px: 3) do %>
+                      <div class="d-flex flex-justify-between flex-items-center width-full">
+                        <%= render(Primer::Beta::Text.new(tag: :span, font_weight: :semibold)) { "Servers" } %>
+                        <%= render(Primer::Beta::Button.new(
+                          scheme: :invisible,
+                          size: :small,
+                          test_selector: "add-server-button",
+                          data: { action: "click->allowlist-dialog#showAddServerPage" },
+                        )) do |button| %>
+                          <% button.with_leading_visual_icon(icon: :plus) %>
+                          Add server
+                        <% end %>
+                      </div>
+                    <% end %>
+                    <% box.with_row(py: 4, px: 3) do %>
+                      <div class="d-flex flex-column flex-items-center text-center width-full">
+                        <%= render(Primer::Beta::Octicon.new(icon: :mcp, size: :medium, color: :muted, mb: 2)) %>
+                        <%= render(Primer::Beta::Text.new(tag: :p, font_weight: :semibold, mb: 1)) { "No servers added" } %>
+                        <%= render(Primer::Beta::Text.new(tag: :p, color: :muted, font_size: :small)) do %>
+                          Add MCP servers to this allowlist to control which servers can be used.
+                        <% end %>
+                      </div>
+                    <% end %>
+                  <% end %>
+                <% end %>
+              </div>
+              <%# End of main page %>
+
+              <%# Add server sub-page - server list populated by server management integration (issue #717) %>
+              <div data-allowlist-dialog-target="addServerPage" hidden>
+                  <div class="d-flex flex-column gap-3">
+                    <%= render(Primer::Box.new) do %>
+                      <%= render(Primer::Beta::Text.new(tag: :label, font_weight: :semibold, display: :block, mb: 2, id: "select-server-label")) do %>
+                        Select server <span class="color-fg-danger">*</span>
+                      <% end %>
+                      <%= render(Primer::Beta::Text.new(tag: :p, color: :muted, font_size: :small)) do %>
+                        Server selection will be available after server management integration is complete.
+                      <% end %>
+                    <% end %>
+                  </div>
+                </div>
+                <%# End of add server sub-page %>
+              </div>
+              <% end %><%# end form_with %>
+            <% end %>
+            <% dialog.with_footer(show_divider: true) do %>
+              <%# Main page footer %>
+              <div class="d-flex flex-justify-end gap-2" data-allowlist-dialog-target="mainFooter">
+                <%= render(Primer::Beta::Button.new(
+                  scheme: :default,
+                  data: { "close-dialog-id": "create-allowlist-dialog" },
+                  test_selector: "cancel-create-button",
+                )) { "Cancel" } %>
+                <%= render(Primer::Beta::Button.new(
+                  scheme: :primary,
+                  type: :submit,
+                  form: "create-allowlist-form",
+                  test_selector: "save-allowlist-button",
+                )) { "Save" } %>
+              </div>
+              <%# Add server sub-page footer %>
+              <div class="d-flex flex-justify-end gap-2" data-allowlist-dialog-target="addServerFooter" hidden>
+                <%= render(Primer::Beta::Button.new(
+                  scheme: :default,
+                  test_selector: "add-server-cancel-button",
+                  data: { action: "click->allowlist-dialog#showMainPage" },
+                )) { "Cancel" } %>
+                <%= render(Primer::Beta::Button.new(
+                  scheme: :primary,
+                  test_selector: "add-server-confirm-button",
+                  data: { action: "click->allowlist-dialog#addSelectedServer" },
+                )) { "Add" } %>
+              </div>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    </div>
+    <%= render(Primer::Beta::Text.new(tag: :p, mb: 0, pt: 2, color: :muted)) do %>
+      Create and manage allowlists to control which MCP servers can be used by Copilot in your enterprise.
+    <% end %>
+  </header>
+
+  <% if allowlists.any? %>
+    <%# Search input %>
+    <%= render(Primer::Box.new(classes: "tmp-mb-3")) do %>
+      <%= render(Primer::Alpha::TextField.new(
+        name: "mcp_allowlist_search",
+        label: "Search allowlists",
+        visually_hide_label: true,
+        placeholder: "Search allowlists",
+        leading_visual: { icon: :search },
+        full_width: true,
+        test_selector: "mcp-allowlist-search",
+      )) %>
+    <% end %>
+
+    <%# Allowlists table %>
+    <%= render(Primer::Beta::BorderBox.new(test_selector: "mcp-allowlists-table")) do |component| %>
+      <%# Table header %>
+      <% component.with_header(py: 2, px: 3) do %>
+        <div class="d-flex flex-row width-full">
+          <div class="col-3">
+            <%= render(Primer::Beta::Text.new(font_weight: :semibold, font_size: :small)) { "Name" } %>
+          </div>
+          <div class="col-3">
+            <%= render(Primer::Beta::Text.new(font_weight: :semibold, font_size: :small)) { "Assigned to" } %>
+          </div>
+          <div class="col-2">
+            <%= render(Primer::Beta::Text.new(font_weight: :semibold, font_size: :small)) { "Last updated" } %>
+          </div>
+          <div class="col-3">
+            <%= render(Primer::Beta::Text.new(font_weight: :semibold, font_size: :small)) { "Updated by" } %>
+          </div>
+          <div class="col-1"></div>
+        </div>
+      <% end %>
+
+      <%# Allowlist rows %>
+      <% allowlists.each do |allowlist| %>
+        <% allowlist_id = allowlist["id"] || allowlist["public_id"] %>
+        <% allowlist_name = allowlist["name"] %>
+        <% allowlist_description = allowlist["description"] %>
+        <% allowlist_servers = allowlist["servers"] || [] %>
+        <% allowlist_updated_at = allowlist["updated_at"] %>
+        <% allowlist_updated_by = allowlist["updated_by"] || {} %>
+        <% assigned_names = assignment_lookup[allowlist_id] || [] %>
+        <% component.with_row(py: 3, px: 3, test_selector: "mcp-allowlist-row", data: { allowlist_id: allowlist_id }) do %>
+          <div class="d-flex flex-row width-full flex-items-center">
+            <div class="col-3">
+              <%= render(Primer::Beta::Text.new(font_weight: :semibold)) { allowlist_name } %>
+              <%= render(Primer::Beta::Text.new(tag: :div, color: :muted, font_size: :small)) { allowlist_description } %>
+              <% if allowlist_servers.any? %>
+                <%= render(Primer::Beta::Text.new(tag: :div, color: :muted, font_size: :small, mt: 1)) do %>
+                  <%= render(Primer::Beta::Octicon.new(icon: :server, mr: 1)) %>
+                  <%= pluralize(allowlist_servers.length, "server") %>
+                <% end %>
+              <% end %>
+            </div>
+            <div class="col-3">
+              <% if assigned_names.any? %>
+                <% assigned_names.each do |ns| %>
+                  <%= render(Primer::Beta::Label.new(scheme: :secondary)) { ns } %>
+                <% end %>
+              <% else %>
+                <%= render(Primer::Beta::Text.new(color: :muted)) { "Unassigned" } %>
+              <% end %>
+            </div>
+            <div class="col-2">
+              <% if allowlist_updated_at.present? %>
+                <%= render(Primer::Beta::RelativeTime.new(datetime: allowlist_updated_at, tense: :past)) %>
+              <% end %>
+            </div>
+            <div class="col-3">
+              <% if allowlist_updated_by.present? && allowlist_updated_by["login"].present? %>
+                <div class="d-flex flex-items-center">
+                  <% if allowlist_updated_by["avatar_url"].present? %>
+                    <%= render(Primer::Beta::Avatar.new(
+                      src: allowlist_updated_by["avatar_url"],
+                      alt: allowlist_updated_by["login"],
+                      size: 20
+                    )) %>
+                  <% end %>
+                  <%= render(Primer::Beta::Text.new(ml: 2)) { allowlist_updated_by["login"] } %>
+                </div>
+              <% end %>
+            </div>
+            <div class="col-1 d-flex flex-justify-end">
+              <% if can_write %>
+                <%= render(Primer::Alpha::ActionMenu.new(test_selector: "allowlist-actions-menu")) do |menu| %>
+                  <% menu.with_show_button(
+                    icon: :"kebab-horizontal",
+                    scheme: :invisible,
+                    size: :small,
+                    "aria-label": "Actions for #{allowlist_name}"
+                  ) %>
+                  <%# Edit action - triggers edit dialog %>
+                  <% menu.with_item(
+                    label: "Edit",
+                    content_arguments: {
+                      data: {
+                        show_dialog_id: "edit-allowlist-dialog-#{allowlist_id}"
+                      }
+                    }
+                  ) do |item| %>
+                    <% item.with_leading_visual_icon(icon: :pencil) %>
+                  <% end %>
+                  <% menu.with_divider %>
+                  <%# Delete action - triggers delete confirmation %>
+                  <% menu.with_item(
+                    label: "Delete",
+                    scheme: :danger,
+                    content_arguments: {
+                      data: {
+                        show_dialog_id: "delete-allowlist-dialog-#{allowlist_id}"
+                      }
+                    }
+                  ) do |item| %>
+                    <% item.with_leading_visual_icon(icon: :trash) %>
+                  <% end %>
+                <% end %>
+              <% end %>
+            </div>
+          </div>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <% if can_write %>
+      <%# Edit Dialogs - One per allowlist %>
+      <% allowlists.each do |allowlist| %>
+        <% allowlist_id = allowlist["id"] || allowlist["public_id"] %>
+        <% allowlist_name = allowlist["name"] %>
+        <% allowlist_description = allowlist["description"] %>
+        <% allowlist_servers = allowlist["servers"] || [] %>
+        <% edit_form_id = "edit-allowlist-form-#{allowlist_id}" %>
+        <%= render(Primer::Alpha::Dialog.new(
+          title: "Edit allowlist",
+          id: "edit-allowlist-dialog-#{allowlist_id}",
+          position: :center,
+          size: :medium_portrait,
+        )) do |dialog| %>
+          <% dialog.with_header(show_divider: true) %>
+          <% dialog.with_body do %>
+            <%= form_with url: update_mcp_allowlist_enterprise_ai_controls_enterprise_path(business, allowlist_id), method: :patch, local: true, id: edit_form_id do %>
+            <div class="d-flex flex-column gap-3">
+              <%# Name field (required) %>
+              <%= render(Primer::Alpha::TextField.new(
+                name: "allowlist[name]",
+                label: "Name",
+                required: true,
+                value: allowlist_name,
+                full_width: true,
+                id: "edit-allowlist-name-#{allowlist_id}",
+                test_selector: "edit-allowlist-name-input",
+              )) %>
+
+              <%# Description field %>
+              <%= render(Primer::Alpha::TextArea.new(
+                name: "allowlist[description]",
+                label: "Description",
+                value: allowlist_description,
+                full_width: true,
+                rows: 3,
+                id: "edit-allowlist-description-#{allowlist_id}",
+                test_selector: "edit-allowlist-description-input",
+              )) %>
+
+              <%# Servers section - display only, managed via separate server management (issue #717) %>
+              <%= render(Primer::Box.new(mt: 2)) do %>
+                <%= render(Primer::Beta::Text.new(tag: :label, font_weight: :semibold, display: :block, mb: 2)) do %>
+                  MCP Servers (<%= allowlist_servers.length %>)
+                <% end %>
+                <%= render(Primer::Beta::BorderBox.new(test_selector: "edit-allowlist-servers-list")) do |box| %>
+                  <% allowlist_servers.each do |server| %>
+                    <% box.with_row(py: 2, px: 3, test_selector: "server-row") do %>
+                      <div class="d-flex flex-justify-between flex-items-center width-full">
+                        <div>
+                          <%= render(Primer::Beta::Text.new(font_weight: :semibold)) { server["name"] } %>
+                          <% if server["url"].present? %>
+                            <%= render(Primer::Beta::Text.new(tag: :div, color: :muted, font_size: :small)) { server["url"] } %>
+                          <% end %>
+                        </div>
+                      </div>
+                    <% end %>
+                  <% end %>
+                  <% if allowlist_servers.empty? %>
+                    <% box.with_row(py: 3, px: 3) do %>
+                      <%= render(Primer::Beta::Text.new(color: :muted, font_size: :small)) do %>
+                        No servers in this allowlist.
+                      <% end %>
+                    <% end %>
+                  <% end %>
+                <% end %>
+              <% end %>
+            </div>
+            <% end %><%# end form_with %>
+          <% end %>
+          <% dialog.with_footer(show_divider: true) do %>
+            <div class="d-flex flex-justify-end gap-2">
+              <%= render(Primer::Beta::Button.new(
+                scheme: :default,
+                data: { "close-dialog-id": "edit-allowlist-dialog-#{allowlist_id}" },
+                test_selector: "cancel-edit-button",
+              )) { "Cancel" } %>
+              <%= render(Primer::Beta::Button.new(
+                scheme: :primary,
+                type: :submit,
+                form: edit_form_id,
+                test_selector: "save-edit-button",
+              )) { "Save changes" } %>
+            </div>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <%# Delete Confirmation Dialogs - One per allowlist %>
+      <% allowlists.each do |allowlist| %>
+        <% allowlist_id = allowlist["id"] || allowlist["public_id"] %>
+        <% allowlist_name = allowlist["name"] %>
+        <% allowlist_servers = allowlist["servers"] || [] %>
+        <% assigned_names = assignment_lookup[allowlist_id] || [] %>
+        <% delete_form_id = "delete-allowlist-form-#{allowlist_id}" %>
+        <%= render(Primer::Alpha::Dialog.new(
+          title: "Delete allowlist",
+          id: "delete-allowlist-dialog-#{allowlist_id}",
+          position: :center,
+          size: :small,
+        )) do |dialog| %>
+          <% dialog.with_header(show_divider: true) %>
+          <% dialog.with_body do %>
+            <div class="d-flex flex-column gap-3">
+              <%= render(Primer::Beta::Text.new) do %>
+                Are you sure you want to delete <strong><%= allowlist_name %></strong>?
+              <% end %>
+              <%= render(Primer::Beta::Text.new(color: :muted)) do %>
+                This action cannot be undone. <%= allowlist_servers.any? ? "#{pluralize(allowlist_servers.length, 'server')} in this allowlist will no longer be available." : "" %>
+              <% end %>
+              <% if assigned_names.any? %>
+                <%= render(Primer::Alpha::Banner.new(scheme: :warning, icon: :"alert")) do %>
+                  This allowlist is currently assigned to <strong><%= assigned_names.join(", ") %></strong>. Deleting it will remove access to these MCP servers for that organization.
+                <% end %>
+              <% end %>
+            </div>
+          <% end %>
+          <% dialog.with_footer(show_divider: true) do %>
+            <%= form_with url: destroy_mcp_allowlist_enterprise_ai_controls_enterprise_path(business, allowlist_id), method: :delete, local: true, id: delete_form_id do %>
+            <% end %>
+            <div class="d-flex flex-justify-end gap-2">
+              <%= render(Primer::Beta::Button.new(
+                scheme: :default,
+                data: { "close-dialog-id": "delete-allowlist-dialog-#{allowlist_id}" },
+                test_selector: "cancel-delete-button",
+              )) { "Cancel" } %>
+              <%= render(Primer::Beta::Button.new(
+                scheme: :danger,
+                type: :submit,
+                form: delete_form_id,
+                test_selector: "confirm-delete-button",
+              )) { "Delete allowlist" } %>
+            </div>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+  <% else %>
+    <%# Empty state %>
+    <%= render(Primer::Beta::Blankslate.new(test_selector: "mcp-allowlists-empty-state")) do |component| %>
+      <% component.with_visual_icon(icon: :server) %>
+      <% component.with_heading(tag: :h2) { "No allowlists yet" } %>
+    <% end %>
+  <% end %>
+<% end %>

@@ -1,0 +1,1 @@
+import{gm as e,lh as t}from"./main-BChbnewi.js";var n=t(e());function r(e){let t=(0,n.lazy)(e);return Object.assign(t,{preload:async()=>{await e()}})}export{r as t};

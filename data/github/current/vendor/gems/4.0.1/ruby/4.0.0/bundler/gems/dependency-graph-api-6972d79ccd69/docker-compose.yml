@@ -1,0 +1,93 @@
+version: '3'
+services:
+  aqueduct-redis:
+    image: redis:5.0.5
+  aqueduct:
+    image: ghcr.io/github/aqueduct-lite/aqueduct-lite:83b9511ed71e763114afe8035e88846ddb9df59f
+    restart: always
+    ports:
+      - "18081:18081"
+    expose:
+      - 18081
+    depends_on:
+      - aqueduct-redis
+    environment:
+      - AQUEDUCT_LITE_LISTEN_ADDRESS=0.0.0.0:18081
+      - AQUEDUCT_LITE_REDIS_ADDRESS=aqueduct-redis:6379
+      - AQUEDUCT_LITE_LOG_LEVEL=debug
+    build:
+      context: .
+      secrets:
+        - apt-auth-conf
+        - pkg-mirror-host
+    command: "bin/aqueduct-lite"
+  kafka-lite:
+    image: ghcr.io/github/kafka-lite/kafka-lite:c07cb8670c6c84e6e5e40d3def7396fd517728f7
+    restart: always
+    ports:
+      - "9092:9092"
+    expose:
+      - 9092
+    build:
+      context: .
+      secrets:
+        - apt-auth-conf
+        - pkg-mirror-host
+    command:
+      - /kafka-lite
+      - --store
+      - memory
+      - --listen-address
+      - 0.0.0.0:9092
+      - --seed-topic
+      - cp1-iad.ingest.github.dependencygraph.v0.PackageRelease:1
+      - --seed-topic
+      - cp1-iad.ingest.github.dependencygraph.v0.RepositoryManifestFileDeleted:1
+      - --seed-topic
+      - cp1-iad.ingest.github.dependencygraph.v0.RequestPushSnapshot:1
+      - --seed-topic
+      - cp1-iad.ingest.github.dependencygraph.v1.RepositoryManifestFileChange:1
+      - --seed-topic
+      - github.dependencygraph.v1.ResetManifests:1
+      - --seed-topic
+      - cp1-iad.ingest.github.v1.RepositoryArchivedStatusChanged:1
+      - --seed-topic
+      - cp1-iad.ingest.github.v1.RepositoryDeleted:1
+      - --seed-topic
+      - cp1-iad.ingest.github.v1.RepositoryVisibilityChanged:1
+      - --seed-topic
+      - ospo.v0.PackageMetadata:1
+      - --seed-topic
+      - github.repositories.v1.VisibilityChanged:1
+      - --seed-topic
+      - github.repositories.v1.Deleted:1
+      - --seed-topic
+      - package_license_gateway.clearlydefined.v0.PackageMetadata:1
+  db:
+    image: mysql:8.0
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --sql_mode=NO_ENGINE_SUBSTITUTION
+      - --information_schema_stats_expiry=0
+    environment:
+      MYSQL_DATABASE: dependency_graph_development
+      MYSQL_ALLOW_EMPTY_PASSWORD: 1
+    volumes:
+      - dgdata:/var/lib/mysql
+    ports:
+      - '3306:3306'
+    expose:
+      - 3306
+    build:
+      context: .
+      secrets:
+        - apt-auth-conf
+        - pkg-mirror-host
+
+volumes:
+  dgdata:
+secrets:
+  apt-auth-conf:
+    file: ./apt-auth-conf
+  pkg-mirror-host:
+    file: ./pkg-mirror-host

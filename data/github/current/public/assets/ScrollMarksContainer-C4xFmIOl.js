@@ -1,0 +1,1 @@
+import{lm as e}from"./main-BChbnewi.js";var t={scrollMarksContainer:`ScrollMarksContainer-module_6RuZuG_scrollMarksContainer`},n=e();const r=`find-result-marks-container`;function i(){return(0,n.jsx)(`div`,{className:t.scrollMarksContainer,id:r})}i.displayName=`ScrollMarksContainer`;export{r as n,i as t};

@@ -1,0 +1,333 @@
+#!/bin/bash
+# Elasticsearch utility functions for GitHub development environment
+
+if [ -z "${ELASTICSEARCH_SCRIPT_DIR:-}" ]; then
+    readonly ELASTICSEARCH_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+
+if [ -z "${GITHUB_WORKSPACE_ROOT:-}" ]; then
+    readonly GITHUB_WORKSPACE_ROOT="$(cd "$ELASTICSEARCH_SCRIPT_DIR/../.." && pwd)"
+fi
+
+export es_url="${es_url:-${ES_URL:-http://localhost:9400}}"
+
+ensure_user_local_bin() {
+    local user_bin="$HOME/.local/bin"
+    if [ -d "$user_bin" ] && ! echo "$PATH" | tr ':' '\n' | grep -qx "$user_bin"; then
+        export PATH="$user_bin:$PATH"
+    fi
+}
+
+# Wait for Elasticsearch to be ready
+wait_for_elasticsearch() {
+    echo "Waiting for Elasticsearch to be ready..."
+    local max_attempts=60
+    local attempt=0
+
+    while [ $attempt -lt $max_attempts ]; do
+        if curl -s "$es_url/_cluster/health" > /dev/null 2>&1; then
+            echo "Elasticsearch is ready"
+            return
+        fi
+
+        echo "Elasticsearch not ready yet, waiting... (attempt $((attempt + 1))/$max_attempts)"
+        sleep 5
+        attempt=$((attempt + 1))
+    done
+
+    echo "ERROR: Elasticsearch failed to start within expected time" >&2
+    return 1
+}
+
+# Get Elasticsearch version
+get_elasticsearch_version() {
+    local es_version_response=$(curl -s "$es_url/")
+    local es_version=$(echo "$es_version_response" | jq -r '.version.number')
+
+    if [ "$es_version" = "null" ] || [ -z "$es_version" ]; then
+        echo "ERROR: Could not detect Elasticsearch version" >&2
+        echo "Response: $es_version_response" >&2
+        return 1
+    else
+        echo "$es_version"
+    fi
+}
+
+# Apply Elasticsearch license from environment variable or file
+apply_license() {
+    echo "Checking for Elasticsearch license..."
+
+    local license_payload=""
+
+    if [ -n "${ELASTICSEARCH_LICENSE:-}" ]; then
+        license_payload="$ELASTICSEARCH_LICENSE"
+    fi
+
+    if [ -z "$license_payload" ]; then
+        echo "Elasticsearch license not present in environment variable. Check with the #elasticsearch team" >&2
+        return 0
+    fi
+
+    # Check if the license is valid JSON, if not try to fix unquoted keys/values (JS object notation)
+    if ! echo "$license_payload" | jq . > /dev/null 2>&1; then
+        echo "License payload is not valid JSON, attempting to fix..."
+
+        # Use Ruby to convert JS object notation to proper JSON.
+        # NOTE: The quote_value regex assumes string values do not contain literal
+        # commas or braces. This holds for known ES license payloads but is not a
+        # general-purpose JS→JSON converter.
+        license_payload=$(FIXUP_INPUT="$license_payload" ruby <<-'RUBY'
+		require "json"
+		
+		raw = ENV["FIXUP_INPUT"] || ""
+		
+		# Quote unquoted property names: {foo: -> {"foo":
+		fixed = raw.gsub(/([{,])(\s*)([a-zA-Z_][a-zA-Z0-9_]*)(\s*):/) { "#{$1}#{$2}\"#{$3}\"#{$4}:" }
+		
+		# Quote unquoted string values
+		fixed = fixed.gsub(/(:\s*)([^,}"\[\]]+?)(\s*[,}])/) do
+		  prefix, val, suffix = $1, $2.strip, $3
+		  if val.start_with?('"') || %w[null true false].include?(val) || val.match?(/\A-?\d+(\.\d+)?\z/)
+		    "#{$1}#{$2}#{$3}"
+		  else
+		    "#{prefix}\"#{val}\"#{suffix}"
+		  end
+		end
+		
+		begin
+		  parsed = JSON.parse(fixed)
+		  puts JSON.generate(parsed)
+		rescue JSON::ParserError => e
+		  $stderr.puts "JSON parse error after fixup: #{e.message}"
+		end
+		RUBY
+        )
+        if [ -z "$license_payload" ] || ! echo "$license_payload" | jq . > /dev/null 2>&1; then
+            echo "ERROR: Failed to parse license payload as JSON" >&2
+            return 1
+        fi
+    fi
+
+    echo "Applying Elasticsearch license"
+    local response=$(curl -s -w "%{http_code}" -X PUT "$es_url/_license" \
+        -H "Content-Type: application/json" \
+        -d "$license_payload")
+
+    local http_code="${response: -3}"
+    local response_body="${response%???}"
+
+    if [ "$http_code" = "200" ]; then
+        echo "Elasticsearch license applied successfully"
+    else
+        echo "License application returned HTTP $http_code"
+        echo "Response: $response_body"
+        return 1
+    fi
+}
+
+ensure_eland_importer() {
+    local package="eland[pytorch]==8.11.0"
+
+    if command -v eland_import_hub_model > /dev/null 2>&1; then
+        return 0
+    fi
+
+    echo "eland_import_hub_model not found, attempting to install $package for Python $(python3 -V 2>/dev/null || echo unknown)..."
+
+    if command -v pip3 > /dev/null 2>&1; then
+        if pip3 install --user --quiet --upgrade "$package"; then
+            ensure_user_local_bin
+            command -v eland_import_hub_model > /dev/null 2>&1 && return 0
+        fi
+    fi
+
+    echo "ERROR: eland_import_hub_model command not found and automatic installation failed." >&2
+    return 1
+}
+
+ensure_model_runtime_deps() {
+    local hub_pkg="huggingface-hub==0.23.0"
+    local st_pkg="sentence-transformers==2.2.2"
+
+    if command -v pip3 > /dev/null 2>&1; then
+        if pip3 install --user --quiet --upgrade "$hub_pkg" "$st_pkg"; then
+            ensure_user_local_bin
+            return 0
+        fi
+    fi
+
+    echo "ERROR: Failed to ensure Hugging Face runtime dependencies ($hub_pkg, $st_pkg)." >&2
+    return 1
+}
+
+# Determine whether a trained model already exists
+model_exists() {
+    local model_id="$1"
+    local code
+
+    code=$(curl -s -o /dev/null -w "%{http_code}" "$es_url/_ml/trained_models/$model_id")
+    [ "$code" = "200" ]
+}
+
+# Determine whether at least one deployment for the model is running
+deployment_started() {
+    local model_id="$1"
+    local state
+
+    state=$(curl -s "$es_url/_ml/trained_models/$model_id/_stats" | jq -r '.trained_model_stats[0].deployment_stats.state // empty') || return 1
+    [ "$state" = "started" ]
+}
+
+deployment_failure_reason() {
+    local model_id="$1"
+    local stats
+
+    stats=$(curl -s "$es_url/_ml/trained_models/$model_id/_stats") || return 0
+    echo "$stats" | jq -r '.trained_model_stats[0].deployment_stats.nodes[]?.routing_state.reason | select(. != null and . != "")' | paste -sd '; ' -
+}
+
+start_model_deployment() {
+    local model_id="$1"
+    local response=$(curl -s -w "%{http_code}" -X POST "$es_url/_ml/trained_models/$model_id/deployment/_start" \
+        -H 'Content-Type: application/json' \
+        -d '{"number_of_allocations":1,"threads_per_allocation":1}')
+
+    local http_code="${response: -3}"
+    local response_body="${response%???}"
+
+    if [ "$http_code" = "200" ] || [ "$http_code" = "201" ] || [ "$http_code" = "202" ]; then
+        return 0
+    fi
+
+    if [ "$http_code" = "409" ]; then
+        echo "Deployment for '$model_id' already exists; continuing to wait for it to start."
+        return 0
+    fi
+
+    echo "WARNING: Failed to start deployment for '$model_id' (HTTP $http_code). Response: $response_body" >&2
+    return 1
+}
+
+stop_model_deployment() {
+    local model_id="$1"
+    local response=$(curl -s -w "%{http_code}" -X POST "$es_url/_ml/trained_models/$model_id/deployment/_stop?force=true")
+
+    local http_code="${response: -3}"
+    local response_body="${response%???}"
+
+    if [ "$http_code" = "200" ] || [ "$http_code" = "404" ]; then
+        return 0
+    fi
+
+    echo "WARNING: Failed to stop deployment for '$model_id' (HTTP $http_code). Response: $response_body" >&2
+    return 1
+}
+
+import_model_if_needed() {
+    local model_id="$1"
+    local hub_model_id="$2"
+
+    if model_exists "$model_id"; then
+        echo "Model '$model_id' already exists. Skipping import."
+        return 0
+    fi
+
+    if ! command -v eland_import_hub_model > /dev/null 2>&1; then
+        if ! ensure_eland_importer; then
+            echo "ERROR: eland_import_hub_model command not available; cannot import model $model_id" >&2
+            return 1
+        fi
+    fi
+
+    if ! ensure_model_runtime_deps; then
+        echo "ERROR: Missing runtime dependencies for model import." >&2
+        return 1
+    fi
+
+    echo "Model '$model_id' not found. Importing from HuggingFace..."
+    eland_import_hub_model \
+        --url "$es_url" \
+        --hub-model-id "$hub_model_id" \
+        --task-type text_embedding \
+        --es-model-id "$model_id"
+}
+
+ensure_deployment_started() {
+    local model_id="$1"
+    local retry=0
+    local max_retries=1
+
+    while :; do
+        if deployment_started "$model_id"; then
+            echo "Deployment for '$model_id' is running."
+            return 0
+        fi
+
+        echo "Starting deployment for '$model_id' (attempt $((retry + 1)))..."
+        if ! start_model_deployment "$model_id"; then
+            if [ $retry -ge $max_retries ]; then
+                echo "ERROR: Unable to start deployment for '$model_id' after $((retry + 1)) attempt(s)." >&2
+                return 1
+            fi
+            echo "Retrying deployment for '$model_id' after start failure..."
+            stop_model_deployment "$model_id" > /dev/null
+            retry=$((retry + 1))
+            sleep 5
+            continue
+        fi
+
+        local attempt=0
+        local max_attempts=12
+        while [ $attempt -lt $max_attempts ]; do
+            if deployment_started "$model_id"; then
+                echo "Deployment for '$model_id' is running."
+                return 0
+            fi
+            sleep 5
+            attempt=$((attempt + 1))
+        done
+
+        local reason=$(deployment_failure_reason "$model_id")
+        if [ $retry -ge $max_retries ]; then
+            if [ -n "$reason" ]; then
+                echo "WARNING: Deployment for '$model_id' did not reach started state. Reason: $reason" >&2
+            else
+                echo "WARNING: Deployment for '$model_id' did not reach started state within expected time" >&2
+            fi
+            return 1
+        fi
+
+        if [ -n "$reason" ]; then
+            echo "Deployment for '$model_id' failed to start (reason: $reason). Retrying after a forced stop..." >&2
+        else
+            echo "Deployment for '$model_id' failed to start within expected time. Retrying after a forced stop..." >&2
+        fi
+
+        stop_model_deployment "$model_id" > /dev/null
+        retry=$((retry + 1))
+        sleep 5
+    done
+}
+
+ensure_model_ready() {
+    local model_id="$1"
+    local hub_model_id="$2"
+
+    import_model_if_needed "$model_id" "$hub_model_id" || return 1
+    ensure_deployment_started "$model_id"
+}
+
+# Get cluster status
+get_cluster_status() {
+    curl -s "$es_url/_cluster/health" | jq
+}
+
+# List inference endpoints
+list_inference_endpoints() {
+    curl -s "$es_url/_inference" | jq
+}
+
+# Check license status
+check_license() {
+    curl -s "$es_url/_license" | jq
+}

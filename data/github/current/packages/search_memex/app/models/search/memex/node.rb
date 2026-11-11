@@ -1,0 +1,48 @@
+# typed: strict
+# frozen_string_literal: true
+
+module Search
+  module Memex
+    # The base class for the components of an AST. Each component represents part of the query that will be sent
+    # to Elasticsearch in MemexProjectItemQuery.
+    class Node
+      extend T::Helpers
+      abstract!
+
+      sig { returns(T::Array[Node]) }
+      attr_accessor :children
+
+      sig { returns(T::Boolean) }
+      attr_reader :sub_issue_filter
+
+      sig { returns(T::Boolean) }
+      def sub_issue_filter?
+        @sub_issue_filter
+      end
+
+      sig { params(children: T::Array[Node]).void }
+      def initialize(children = [])
+        @children = children
+        @sub_issue_filter = T.let(false, T::Boolean)
+      end
+
+      sig { abstract.params(context: Search::Memex::Context).returns(T::Hash[T.untyped, T.untyped]) }
+      def compile(context); end
+
+      sig { abstract.returns(String) }
+      def query_string; end
+
+      sig(:final) { params(context: Search::Memex::Context).returns(T::Hash[T.untyped, T.untyped]) }
+      def compile_as_must_query(context)
+        result = compile(context)
+        if result.dig(:bool, :should)
+          # Wrap with 'bool' 'must' to ensure that it properly ANDs all field query fragments
+          # when merging them together
+          { bool: { must: [result] } }
+        else
+          result
+        end
+      end
+    end
+  end
+end

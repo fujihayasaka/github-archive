@@ -1,0 +1,52 @@
+#! /usr/bin/env bash
+
+# This script generates Go code for first-party code annotated with
+# //go:generate (for example, counterfeiter mocks and PEG parsers) and
+# third-party code (manually configured).
+set -euo pipefail
+IFS=$'\n\t'
+
+cd "$(dirname "$0")/.."
+
+# Install tools if necessary
+if [[ ! -f _tools/bin/counterfeiter ]]; then
+    script/install-tools
+fi
+
+# add _tools to PATH so `go generate` can find counterfeiter and other tools
+export PATH=$(pwd)/_tools/bin:$PATH
+
+go generate "./..."
+
+# Generate a counterfeiter mock for a third party library using the installed version.
+#
+# Arguments:
+#
+#  $1: module name (example: github.com/foo/bar)
+#  $2: Go interface name (example: AsyncProducer)
+#  $3: output file in the internal/test/mocks directory (example: fake_async_producer)
+mock_third_party() {
+    local module=$1
+    local interface=$2
+    local outfile=$3
+
+    counterfeiter -o internal/test/mocks/$outfile $(go list -f '{{.Dir}}' $module) $interface
+}
+
+# create mocks for third-party code
+mock_third_party github.com/github/blackbird/crates/client/pkg/blackbird IndexAPI fake_bb_index_api.go
+mock_third_party github.com/github/blackbird/crates/client/pkg/blackbird SearchAPI fake_bb_search_api.go
+mock_third_party github.com/github/blackbird/crates/client/pkg/blackbird CacheAPI fake_bb_cache_api.go
+mock_third_party github.com/github/blackbird/crates/client/pkg/blackbird/gen/serving/v1 ServingAPI fake_bb_serving.go
+mock_third_party github.com/IBM/sarama AsyncProducer fake_async_producer.go
+mock_third_party github.com/IBM/sarama SyncProducer fake_sync_producer.go
+mock_third_party github.com/IBM/sarama ClusterAdmin fake_cluster_admin.go
+mock_third_party github.com/github/spokes-proto/gen/go/v1/commits CommitsAPI fake_commits_api.go
+mock_third_party github.com/github/spokes-proto/gen/go/v1/objects ObjectsAPI fake_objects_api.go
+mock_third_party github.com/github/spokes-proto/gen/go/v1/references ReferencesAPI fake_references_api.go
+mock_third_party github.com/github/spokes-proto/gen/go/v1/trees TreesAPI fake_trees_api.go
+
+# These have the same name, so special case them.
+# If this keeps happening, a better approach is to put each fake in a separate package like mocks/blackbird
+counterfeiter --fake-name FakeBlackbirdClient -o internal/test/mocks/fake_bb_client.go $(go list -f '{{.Dir}}' github.com/github/blackbird/crates/client/pkg/blackbird) Client
+counterfeiter --fake-name FakeSaramaClient -o internal/test/mocks/fake_sarama_client.go $(go list -f '{{.Dir}}' github.com/IBM/sarama) Client

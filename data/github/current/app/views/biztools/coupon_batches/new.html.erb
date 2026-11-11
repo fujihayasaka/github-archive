@@ -1,0 +1,177 @@
+<% page_info title: "New Coupon Generation", selected_link: :admin_coupon_batches %>
+
+<%= render layout: "biztools/biztools" do %>
+  <%= render(Primer::Beta::BorderBox.new) do |box| %>
+    <% box.with_header do %>
+      <span class="text-bold">Create Coupon Generation Batch</span>
+    <% end %>
+
+    <% box.with_row do %>
+      <%= render(Primer::Alpha::Banner.new(scheme: :default, icon: :info)) do %>
+        <strong>Bulk coupon generation</strong>
+        <br>
+        You get a coupon! You get a coupon! Everyone gets a coupon! Create batches of coupons!
+      <% end %>
+    <% end %>
+
+    <% box.with_row do %>
+      <%= form_for(batch, url: biztools_coupon_batches_path) do |f| %>
+        <div class="d-flex flex-column gap-3">
+          <%# Prefix and Quantity %>
+          <div class="d-flex flex-column flex-md-row gap-3">
+            <div class="col-12 col-md-6">
+              <%= render(Primer::Alpha::TextField.new(
+                name: "coupon_batch[prefix]",
+                label: "Coupon code prefix",
+                value: batch.try(:prefix),
+                validation_message: error_for(batch, :prefix),
+                invalid: error_for(batch, :prefix).present?,
+                caption: "Prefix for all generated coupon codes (e.g. 'hackathon')",
+                full_width: true,
+                maxlength: 64
+              )) %>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <%= render(Primer::Alpha::TextField.new(
+                name: "coupon_batch[quantity]",
+                label: "Quantity",
+                value: batch.quantity || 10,
+                validation_message: error_for(batch, :quantity),
+                invalid: error_for(batch, :quantity).present?,
+                min: 1,
+                max: BillingCouponGeneratorJob::BATCH_LIMIT,
+                type: :number,
+                caption: "Number of coupons to generate in this batch",
+                full_width: true,
+                required: true
+              )) %>
+            </div>
+          </div>
+
+          <%# Discount %>
+          <div class="col-12 col-md-6">
+            <%= render(Primer::Alpha::TextField.new(
+              name: "coupon[discount]",
+              label: "Discount amount",
+              placeholder: "$7 or 25%",
+              caption: "Amount to discount each month.",
+              value: coupon.try(:human_discount),
+              validation_message: error_for(coupon, :discount),
+              invalid: error_for(coupon, :discount).present?,
+              full_width: true,
+              required: true
+            )) %>
+          </div>
+
+          <%# Duration and Expiration %>
+          <div class="d-flex flex-column flex-md-row gap-3">
+            <div class="col-12 col-md-6">
+              <%= render(Primer::Alpha::Select.new(
+                name: "coupon[duration]",
+                label: "Duration",
+                caption: "How long the discount applies.",
+                full_width: true
+              )) do |component| %>
+                <% Coupon.new.fun_durations.each do |label, value| %>
+                  <% component.option(label: label, value: value, selected: coupon.duration.to_s == value.to_s) %>
+                <% end %>
+              <% end %>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label class="FormControl-label" for="coupon_batch_expires_at">Expiration date</label>
+              <input
+                type="date"
+                class="form-control FormControl-input width-full"
+                id="coupon_batch_expires_at"
+                name="coupon[expires_at]"
+                min="<%= Date.tomorrow.to_s %>"
+              >
+              <p class="FormControl-caption">Coupon cannot be redeemed after this date.</p>
+            </div>
+          </div>
+
+          <%# Product target and Group %>
+          <div class="d-flex flex-column flex-md-row gap-3 tmp-mb-3">
+            <div class="flex-1">
+              <%= render(Primer::Alpha::Select.new(
+                name: "coupon_product_target",
+                label: "Product target",
+                caption: "Restrict to specific products.",
+                full_width: true,
+              )) do |component| %>
+                <% component.option(label: "All GitHub Plans", value: nil) %>
+                <% component.option(label: "GHEC Only", value: ["github.plan", "ghec"]) %>
+                <% couponable_product_targets.each do |product| %>
+                  <% component.option(label: product.name, value: [product.product_type, product.product_key]) %>
+                <% end %>
+              <% end %>
+            </div>
+            <div class="flex-1">
+              <%= render(Primer::Alpha::Select.new(
+                name: "coupon[group]",
+                label: "Group",
+                caption: "Organize coupons by category.",
+                full_width: true,
+                validation_message: error_for(coupon, :group),
+                invalid: error_for(coupon, :group).present?,
+              )) do |component| %>
+                <% component.option(label: "No group", value: nil) %>
+                <% Coupon::GROUP_NAMES.each do |group_name| %>
+                  <% component.option(label: group_name.humanize, value: group_name, selected: coupon.group == group_name) %>
+                <% end %>
+              <% end %>
+            </div>
+          </div>
+
+          <%# Staff-only application %>
+          <div class="tmp-mb-3">
+            <%= render(Primer::Alpha::CheckBox.new(
+              name: "coupon[staff_actor_only]",
+              label: "Staff-only application",
+              caption: "Only staff can apply these coupons. Users cannot redeem them themselves.",
+              value: "1",
+              checked: false
+            )) %>
+          </div>
+
+          <%# Notes - required %>
+          <div class="tmp-mb-3">
+            <%= render(Primer::Alpha::TextArea.new(
+              name: "coupon[note]",
+              label: "Notes",
+              placeholder: "Link to support ticket or billing-core issue.",
+              required: true,
+              value: coupon.try(:note),
+              validation_message: error_for(coupon, :note),
+              invalid: error_for(coupon, :note).present?,
+              full_width: true,
+              rows: 3
+            )) %>
+          </div>
+
+          <%# Tracking Issue - required %>
+          <div class="tmp-mb-3">
+            <%= render(Primer::Alpha::TextField.new(
+              name: "coupon_batch[tracking_issue]",
+              label: "Tracking issue",
+              placeholder: "owner/repo#123 or https://github.com/owner/repo/issues/123",
+              caption: "GitHub issue tracking this coupon batch. Must be an existing issue.",
+              required: true,
+              value: batch.try(:tracking_issue),
+              validation_message: error_for(batch, :tracking_issue),
+              invalid: error_for(batch, :tracking_issue).present?,
+              full_width: true
+            )) %>
+          </div>
+
+          <div class="tmp-pt-3 border-top">
+            <%= render(Primer::Beta::Button.new(type: :submit, scheme: :primary)) { "Create Batch" } %>
+            <%= render(Primer::Beta::Link.new(href: biztools_coupon_batches_path, classes: "ml-2")) { "Cancel" } %>
+          </div>
+        </div>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

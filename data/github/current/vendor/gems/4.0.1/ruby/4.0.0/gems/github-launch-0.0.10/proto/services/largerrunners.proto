@@ -1,0 +1,254 @@
+syntax = "proto3";
+package git_hub.launch.services.largerrunners;
+
+option go_package = "github.com/github/launch/services/deploy/largerrunners";
+
+import "google/protobuf/wrappers.proto";
+import "pbtypes/github.proto";
+import "services/selfhostedrunners.proto";
+
+service LargerRunners {
+  rpc ListPools(ListPoolsRequest) returns (ListPoolsResponse);
+  rpc GetPool(GetPoolRequest) returns (GetPoolResponse);
+  rpc CreatePool(CreatePoolRequest) returns (CreatePoolResponse);
+  rpc UpdatePool(UpdatePoolRequest) returns (UpdatePoolResponse);
+  rpc DeletePool(DeletePoolRequest) returns (DeletePoolResponse);
+  rpc ListPoolAgents(ListPoolAgentsRequest) returns (ListPoolAgentsResponse);
+  rpc ListMachineSpecs(ListMachineSpecsRequest) returns (ListMachineSpecsResponse);
+  rpc ListLabels(ListLabelsRequest) returns (ListLabelsResponse);
+  rpc GetTenantInfo(GetTenantInfoRequest) returns (GetTenantInfoResponse);
+  rpc ListBetaFeatures(ListBetaFeaturesRequest) returns (ListBetaFeaturesResponse);
+  rpc GetBetaFeature(GetBetaFeatureRequest) returns (GetBetaFeatureResponse);
+  rpc SetBetaFeature(SetBetaFeatureRequest) returns (SetBetaFeatureResponse);
+}
+
+message Pool {
+  int64 id = 1;
+  string name = 2;
+  PoolState state = 3;
+  string platform = 4;
+  int64 runner_group_id = 5;
+  repeated string labels = 6;
+  bool ephemeral = 7;
+  int64 runner_count = 8;
+  bool is_dev = 9;
+  ImageKey image = 10;
+  string group_name = 15;
+  bool inherited = 16;
+  MachineSpec machine_spec = 17;
+  string last_active_on = 18;
+  int64 maximum_runners = 19;
+  string machine_spec_id = 20;
+  int64 unavailable_runner_count = 21;
+  repeated PublicIP public_ips = 22;
+  bool persistent_os_disk = 24;
+  string error_code = 25;
+  bool public_ip_enabled = 26;
+  string error_details = 27;
+
+  reserved 11; // Deprecated vm_sku
+  reserved 12;
+  reserved 13; // Deprecated auto_scaling_settings
+  reserved 14; // Deprecated public_ip
+  reserved 23; // Deprecated has_migrated_network
+}
+
+enum PoolState {
+  Provisioning = 0;
+  Ready = 1;
+  Deleting = 2;
+  // missing Resetting
+  Stuck = 3;
+  ShutdownBilling = 4;
+  ShutdownSpammy = 5;
+  ShutdownNetwork = 6;
+}
+
+message ImageKey {
+  ImageSource source = 1;
+  string id = 2;
+  string version = 3;
+
+  enum ImageSource {
+    Marketplace = 0;
+    Enterprise = 1;
+    Curated = 2;
+    Custom = 3;
+  }
+}
+
+message ListPoolsRequest {
+    pbtypes.git_hub.Identity owner_id = 1;
+    pbtypes.git_hub.Identity plan_owner_id = 2;
+    pbtypes.git_hub.Identity entity_id = 3;
+    bool entity_is_private = 4;
+
+    // nullable bool, that will have 3 states:
+    // - true - only pools with the Public IPs will be returned,
+    // - false - only pools without Public IPs will be returned,
+    // - nil - all pools will be returned
+    google.protobuf.BoolValue is_public_ip_enabled = 5;
+}
+
+message ListPoolsResponse {
+  repeated Pool pools = 1;
+}
+
+message GetPoolRequest {
+    pbtypes.git_hub.Identity owner_id = 1;
+    int64 pool_id = 2;
+}
+
+message GetPoolResponse {
+    Pool pool = 1;
+}
+
+message CreatePoolRequest {
+    pbtypes.git_hub.Identity owner_id = 1;
+    string name = 2;
+    string platform = 3;
+    int64 runner_group_id = 4;
+    repeated string labels = 5;
+    ImageKey image = 7;
+    bool is_public_ip_enabled = 9;
+    string image_sas_uri = 10;
+    int64 maximum_runners = 12;
+    string machine_spec_id = 13;
+    bool persistent_os_disk = 14;
+    pbtypes.git_hub.Identity billing_owner_id = 15;
+
+    reserved 6; // Deprecated runner_count
+    reserved 8; // Deprecated vm_sku
+    reserved 11; // Deprecated auto_scaling_settings
+}
+
+message CreatePoolResponse {
+    Pool pool = 1;
+}
+
+message UpdatePoolRequest {
+    pbtypes.git_hub.Identity owner_id = 1;
+    int64 pool_id = 2;
+    string name = 3;
+    string platform = 4;
+    int64 runner_group_id = 5;
+    repeated string labels = 6;
+    bool is_public_ip_enabled = 10;
+    int64 maximum_runners = 13;
+    string machine_spec_id = 14;
+    ImageKey image = 15;
+    bool persistent_os_disk = 16;
+    
+    reserved 7; // Deprecated runner_count
+    reserved 8; // Deprecated image property
+    reserved 9; // Deprecated vm_sku
+    reserved 11; // Deprecated auto_scaling_settings
+    reserved 12; // Deprecated image_sas_uri property
+}
+
+message UpdatePoolResponse {
+    Pool pool = 1;
+}
+
+message DeletePoolRequest {
+    pbtypes.git_hub.Identity owner_id = 1;
+    int64 pool_id = 2;
+}
+
+message DeletePoolResponse {
+    string status = 1;
+    Pool pool = 2;
+}
+
+message ListPoolAgentsRequest {
+  pbtypes.git_hub.Identity owner_id = 1;
+  int64 pool_id = 2;
+}
+
+message ListPoolAgentsResponse {
+  repeated services.selfhostedrunners.Runner agents = 1;
+}
+
+message PublicIP {
+  bool enabled = 1;
+  string prefix = 2;
+  int64 length = 3;
+}
+
+message MachineSpec {
+  int64 cpu_cores = 2;
+  int64 memory_gb = 3;
+  int64 storage_gb = 4;
+  string type = 5;
+  MachineSpecGpu gpu = 7;
+  string documentation_url = 8;
+  string id = 9;
+  string architecture = 10;
+
+  reserved 1; // Deprecated vm_sku
+  reserved 6;
+}
+
+message MachineSpecGpu {
+  string name = 1;
+  uint32 count = 2;
+  uint64 memory_gb = 3;
+}
+
+message ListMachineSpecsRequest {
+    pbtypes.git_hub.Identity owner_id = 1;
+}
+
+message ListMachineSpecsResponse {
+  repeated MachineSpec machineSpecs = 1;
+}
+
+message ListLabelsRequest {
+    pbtypes.git_hub.Identity owner_id = 1;
+}
+
+message ListLabelsResponse {
+  repeated string labels = 1;
+}
+
+message GetTenantInfoRequest {
+    pbtypes.git_hub.Identity owner_id = 1;
+}
+
+message GetTenantInfoResponse {
+    string tenant_id = 1;
+    string runner_scale_unit = 2;
+}
+
+message BetaFeature {
+    string name = 1;
+    bool enabled_for_user = 2;
+    bool enabled_globally = 3;
+}
+
+message ListBetaFeaturesRequest {
+    pbtypes.git_hub.Identity owner_id = 1;
+}
+
+message ListBetaFeaturesResponse {
+   repeated BetaFeature features = 1;
+}
+
+message GetBetaFeatureRequest {
+    pbtypes.git_hub.Identity owner_id = 1;
+    string feature_name = 2;
+}
+
+message GetBetaFeatureResponse {
+  BetaFeature feature = 1;
+}
+
+message SetBetaFeatureRequest {
+    pbtypes.git_hub.Identity owner_id = 1;
+    string feature_name = 2;
+    bool enabled = 3;
+}
+
+message SetBetaFeatureResponse {
+  BetaFeature feature = 1;
+}

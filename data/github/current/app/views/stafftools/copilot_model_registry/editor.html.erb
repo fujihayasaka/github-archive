@@ -1,0 +1,497 @@
+<%# erblint:counter ButtonComponentMigrationCounter 4 %>
+<%# erblint:counter FlashMigrationCounter 1 %>
+<%
+  is_new = model.nil?
+  reference_id = model&.dig(:reference_id) || ""
+  yaml_content = local_assigns[:yaml_content_override] || model&.dig(:yaml_content) || ""
+  validation_errors = local_assigns[:validation_errors] || []
+  selected_template = local_assigns[:selected_template] || ""
+  title = is_new ? "Create New Model" : "Edit Model - #{reference_id}"
+  page_info(title: title, description: "YAML model editor")
+%>
+<%= render layout: "stafftools/stafftools" do %>
+
+  <div class="site-admin-subhead ruleless">
+    <%# Back link %>
+    <div class="tmp-mb-3">
+      <%= render(Primer::Beta::Link.new(href: stafftools_copilot_model_registry_index_path, classes: "Link--inTextBlock")) do %>
+        <%= render(Primer::Beta::Octicon.new(:"arrow-left", size: :small, mr: 1)) %>
+        Back to Model Registry
+      <% end %>
+    </div>
+
+    <%# Header %>
+    <div class="d-flex flex-items-center flex-justify-between tmp-mb-4">
+      <div>
+        <h2 class="site-admin-subhead-heading mb-1">
+          <% if is_new %>
+            <%= render(Primer::Beta::Octicon.new(:plus, size: :medium, mr: 2)) %>
+            Create New Model
+          <% else %>
+            <%= render(Primer::Beta::Octicon.new(:"file-code", size: :medium, mr: 2)) %>
+            <%= reference_id %>
+          <% end %>
+        </h2>
+        <% unless is_new %>
+          <div class="d-flex flex-items-center flex-wrap" style="gap: 8px;">
+            <% if model[:updated_by].present? %>
+              <span class="text-small color-fg-muted">
+                Last edited by <strong><%= model[:updated_by] %></strong>
+                <% if model[:updated_at] %>
+                  &middot; <%= time_ago_in_words(model[:updated_at]) %> ago
+                <% end %>
+              </span>
+            <% end %>
+            <% if model[:created_at] %>
+              <span class="text-small color-fg-muted">
+                Created <%= time_ago_in_words(model[:created_at]) %> ago
+              </span>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
+      <% unless is_new %>
+        <div class="d-flex" style="gap: 8px;">
+          <%= render(Primer::Beta::Link.new(href: stafftools_copilot_model_registry_path(reference_id), classes: "btn btn-sm")) do %>
+            <%= render(Primer::Beta::Octicon.new(:rocket, size: :small, mr: 1)) %>
+            SIMSHIP
+          <% end %>
+        </div>
+      <% end %>
+    </div>
+
+    <%# Pending change banner %>
+    <% unless is_new %>
+      <% pending = local_assigns.fetch(:pending_changes, []) %>
+      <% if pending.any? %>
+        <%= render Primer::Alpha::Banner.new(
+          icon: :"git-pull-request",
+          scheme: :warning,
+          classes: "tmp-mb-4") do %>
+          This model has <strong><%= pending.size %></strong> pending <%= pending.size == 1 ? "change" : "changes" %> awaiting review.
+          <%= link_to "View Pending Changes →", pending_changes_stafftools_copilot_model_registry_index_path(status: "pending"), class: "Link--inTextBlock text-bold" %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <%# Concurrency Conflict Warning %>
+    <% conflict = local_assigns[:concurrency_conflict] %>
+    <% if conflict %>
+      <div class="Box Box--danger tmp-mb-4">
+        <div class="Box-header color-bg-danger-emphasis color-fg-on-emphasis">
+          <strong>
+            <%= render(Primer::Beta::Octicon.new(:alert, size: :small, mr: 1)) %>
+            ⚠️ Edit Conflict — Your changes were NOT saved
+          </strong>
+        </div>
+        <div class="Box-body">
+          <p>
+            This model was modified by <strong><%= conflict[:modified_by] || "another user" %></strong>
+            (<%= time_ago_in_words(conflict[:modified_at]) %> ago) while you were editing.
+            You loaded this model <strong><%= time_ago_in_words(conflict[:your_loaded_at]) %> ago</strong>.
+          </p>
+          <p class="text-bold">
+            Your unsaved changes are preserved in the editor below. Please:
+          </p>
+          <ol class="tmp-ml-4">
+            <li><strong>Copy your YAML changes</strong> from the editor below (select all → copy)</li>
+            <li><%= link_to "Reload the editor with the latest version →", editor_stafftools_copilot_model_registry_path(reference_id), class: "text-bold Link--inTextBlock" %></li>
+            <li><strong>Re-apply your changes</strong> to the updated model</li>
+          </ol>
+        </div>
+      </div>
+    <% end %>
+
+    <%# Validation Errors %>
+    <% if validation_errors.any? %>
+      <div class="Box Box--danger tmp-mb-4">
+        <div class="Box-header">
+          <strong>
+            <%= render(Primer::Beta::Octicon.new(:alert, size: :small, mr: 1)) %>
+            Validation Errors (<%= validation_errors.size %>)
+          </strong>
+        </div>
+        <% validation_errors.each do |err| %>
+          <div class="Box-row d-flex flex-items-center">
+            <% icon = err[:severity] == "warning" ? :alert : :"stop" %>
+            <% color = err[:severity] == "warning" ? "color-fg-attention" : "color-fg-danger" %>
+            <span class="<%= color %> mr-2">
+              <%= render(Primer::Beta::Octicon.new(icon, size: :small)) %>
+            </span>
+            <div>
+              <% if err[:field].present? %>
+                <code class="text-small mr-1"><%= err[:field] %></code>
+              <% end %>
+              <span class="text-small"><%= err[:message] %></span>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
+
+    <%# PLACEHOLDER replacement banner %>
+    <% if yaml_content.include?("PLACEHOLDER") %>
+      <div id="placeholder-banner" class="flash flash-warn tmp-mb-4">
+        <%= form_with(url: new_yaml_stafftools_copilot_model_registry_index_path, method: :get, local: true, class: "d-flex flex-items-center flex-justify-between") do %>
+          <div class="d-flex flex-items-center">
+            <%= render(Primer::Beta::Octicon.new(:pencil, size: :small, mr: 2)) %>
+            <strong>This template contains PLACEHOLDER values.</strong>
+            <span class="ml-2">Enter a codename to replace them all:</span>
+          </div>
+          <div class="d-flex flex-items-center" style="gap: 8px;">
+            <input type="hidden" name="template" value="<%= selected_template %>">
+            <input type="text" name="codename" class="form-control input-sm" placeholder="e.g. DAISY" style="width: 180px;">
+            <button type="submit" class="btn btn-sm btn-primary">Replace All</button>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
+
+    <%# YAML Editor %>
+    <div class="Box tmp-mb-4">
+      <div class="Box-header d-flex flex-items-center flex-justify-between">
+        <div class="d-flex flex-items-center">
+          <%= render(Primer::Beta::Octicon.new(:"file-code", size: :small, mr: 2)) %>
+          <strong><%= is_new ? "new-model.yaml" : "#{reference_id}.yaml" %></strong>
+        </div>
+        <div class="d-flex flex-items-center" style="gap: 8px;">
+          <button class="btn btn-sm" type="submit" form="yaml-form" name="validate_only" value="1">
+            <%= render(Primer::Beta::Octicon.new(:"check-circle", size: :small, mr: 1)) %>
+            Validate
+          </button>
+        </div>
+      </div>
+      <div class="Box-body p-0">
+        <% form_url = is_new ? create_yaml_stafftools_copilot_model_registry_index_path : save_yaml_stafftools_copilot_model_registry_path(reference_id) %>
+        <% form_method = is_new ? :post : :patch %>
+        <%= form_with(url: form_url, method: form_method, local: true, id: "yaml-form") do |f| %>
+          <% unless is_new %>
+            <input type="hidden" name="reference_id" value="<%= reference_id %>">
+            <input type="hidden" name="loaded_at" value="<%= model&.dig(:updated_at)&.iso8601 %>">
+          <% end %>
+          <textarea
+            name="yaml_content"
+            id="yaml-editor"
+            spellcheck="false"
+            style="
+              width: 100%;
+              min-height: 700px;
+              padding: 16px 20px;
+              font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+              font-size: 13px;
+              line-height: 1.6;
+              border: none;
+              resize: vertical;
+              background-color: var(--bgColor-muted, #f6f8fa);
+              color: var(--fgColor-default, #1f2328);
+              tab-size: 2;
+              outline: none;
+              box-sizing: border-box;
+            "
+          ><%= yaml_content %></textarea>
+        <% end %>
+      </div>
+      <div class="Box-footer d-flex flex-items-center flex-justify-between">
+        <div class="text-small color-fg-muted">
+          <%= render(Primer::Beta::Octicon.new(:info, size: :small, mr: 1)) %>
+          <% if is_new %>
+            Paste a full model YAML definition and save to create a new model.
+          <% else %>
+            Edit the YAML above and save. Changes are validated server-side before persisting.
+          <% end %>
+        </div>
+        <div class="d-flex flex-items-center" style="gap: 8px;">
+          <% unless is_new %>
+            <%= button_to delete_yaml_stafftools_copilot_model_registry_path(reference_id),
+              method: :delete,
+              class: "btn btn-sm btn-danger",
+              data: { confirm: "Are you sure you want to delete '#{reference_id}'? This action cannot be undone." } do %>
+              <%= render(Primer::Beta::Octicon.new(:trash, size: :small, mr: 1)) %>
+              Delete
+            <% end %>
+          <% end %>
+          <button class="btn btn-sm btn-primary" type="submit" form="yaml-form">
+            <%= render(Primer::Beta::Octicon.new(:check, size: :small, mr: 1)) %>
+            <% if FeatureFlag.vexi.enabled?(:copilot_model_registry_review_workflow, default: false) %>
+              <%= is_new ? "Submit for Review" : "Submit Changes for Review" %>
+            <% else %>
+              <%= is_new ? "Create Model" : "Save Changes" %>
+            <% end %>
+          </button>
+        </div>
+      </div>
+    </div>
+
+
+
+
+    <%# Field Reference Guide %>
+    <details class="tmp-mb-4">
+      <summary class="btn btn-sm" style="cursor: pointer; list-style: none;">
+        <div class="d-flex flex-items-center">
+          <%= render(Primer::Beta::Octicon.new(:book, size: :small, mr: 2)) %>
+          <strong>Field Reference Guide</strong>
+          <span class="color-fg-muted ml-2">— Click to expand</span>
+        </div>
+      </summary>
+
+      <div class="Box tmp-mt-3">
+
+        <%# Identity & Display %>
+        <div class="Box-header color-bg-subtle">
+          <strong><%= render(Primer::Beta::Octicon.new(:"id-badge", size: :small, mr: 1)) %> Identity &amp; Display</strong>
+        </div>
+        <div class="Box-body p-0">
+          <table class="width-full" style="border-collapse: collapse;">
+            <thead>
+              <tr class="color-bg-subtle">
+                <th class="p-2 text-left text-small text-bold" style="width: 25%; border-bottom: 1px solid var(--borderColor-default);">Field</th>
+                <th class="p-2 text-left text-small text-bold" style="border-bottom: 1px solid var(--borderColor-default);">Description</th>
+                <th class="p-2 text-left text-small text-bold" style="width: 25%; border-bottom: 1px solid var(--borderColor-default);">Example</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">id</code></td>
+                <td class="p-2 text-small">Unique identifier, generated by script</td>
+                <td class="p-2 text-small color-fg-muted"><code>gpt-4o-2024-08-06</code></td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">referenceID</code></td>
+                <td class="p-2 text-small">Model ID in CAPI — the identifier sent with inference requests</td>
+                <td class="p-2 text-small color-fg-muted"><code>gpt-4o</code></td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">policyID</code></td>
+                <td class="p-2 text-small">Access control key for user permissions in the monolith</td>
+                <td class="p-2 text-small color-fg-muted"><code>gpt-4o</code></td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">version</code></td>
+                <td class="p-2 text-small">Versioned identifier (often same as referenceID)</td>
+                <td class="p-2 text-small color-fg-muted"><code>gpt-4o-2024-08-06</code></td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">name</code></td>
+                <td class="p-2 text-small">Human-readable display name shown in /models</td>
+                <td class="p-2 text-small color-fg-muted"><code>GPT-4o</code></td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">vendor</code></td>
+                <td class="p-2 text-small">Vendor string: <code>Azure OpenAI</code>, <code>OpenAI</code>, <code>Anthropic</code>, <code>Google</code>, <code>xAI</code>, <code>Cerebras</code>, etc.</td>
+                <td class="p-2 text-small color-fg-muted"><code>Azure OpenAI</code></td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">modelAvailability</code></td>
+                <td class="p-2 text-small">Rollout stage: <code>ga</code>, <code>partial-ga</code>, <code>experimental</code>, or <code>model-lab</code></td>
+                <td class="p-2 text-small color-fg-muted"><code>partial-ga</code></td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">isPreview</code></td>
+                <td class="p-2 text-small"><code>true</code> if covered by preview terms; <code>false</code> for GA models</td>
+                <td class="p-2 text-small color-fg-muted"><code>true</code></td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">isModelPickerEnabled</code></td>
+                <td class="p-2 text-small">Whether model appears in picker UX. <code>false</code> hides it but it's still callable</td>
+                <td class="p-2 text-small color-fg-muted"><code>true</code></td>
+              </tr>
+              <tr>
+                <td class="p-2"><code class="text-small">modelPickerCategory</code></td>
+                <td class="p-2 text-small">UI grouping: <code>lightweight</code>, <code>versatile</code>, or <code>powerful</code></td>
+                <td class="p-2 text-small color-fg-muted"><code>versatile</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <%# Inline Approval %>
+        <div class="Box-header color-bg-subtle" style="border-top: 1px solid var(--borderColor-default);">
+          <strong><%= render(Primer::Beta::Octicon.new(:"shield-check", size: :small, mr: 1)) %> Inline Approval</strong>
+        </div>
+        <div class="Box-body p-0">
+          <table class="width-full" style="border-collapse: collapse;">
+            <tbody>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2" style="width: 25%;"><code class="text-small">inlineApproval.enabled</code></td>
+                <td class="p-2 text-small"><code>true</code> if the model's policy requires explicit user acceptance</td>
+                <td class="p-2 text-small color-fg-muted" style="width: 25%;"><code>false</code></td>
+              </tr>
+              <tr>
+                <td class="p-2"><code class="text-small">inlineApproval.terms</code></td>
+                <td class="p-2 text-small">Markdown or text of acceptance terms (only used when enabled is <code>true</code>)</td>
+                <td class="p-2 text-small color-fg-muted"><code>""</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <%# Tokens Per Minute %>
+        <div class="Box-header color-bg-subtle" style="border-top: 1px solid var(--borderColor-default);">
+          <strong><%= render(Primer::Beta::Octicon.new(:meter, size: :small, mr: 1)) %> Tokens Per Minute</strong>
+        </div>
+        <div class="Box-body p-0">
+          <table class="width-full" style="border-collapse: collapse;">
+            <tbody>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2" style="width: 25%;"><code class="text-small">tokensPerMinute.overall</code></td>
+                <td class="p-2 text-small">Total TPM budget. 5,000,000 typical for evals; 1,000,000 for production</td>
+                <td class="p-2 text-small color-fg-muted" style="width: 25%;"><code>5000000</code></td>
+              </tr>
+              <tr>
+                <td class="p-2"><code class="text-small">integratorCategories</code></td>
+                <td class="p-2 text-small">Share of <code>overall</code> tokens per category (0–100%). <code>999</code> = unlimited TPM</td>
+                <td class="p-2 text-small color-fg-muted"><code>vscode: 999</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <%# Capabilities %>
+        <div class="Box-header color-bg-subtle" style="border-top: 1px solid var(--borderColor-default);">
+          <strong><%= render(Primer::Beta::Octicon.new(:cpu, size: :small, mr: 1)) %> Capabilities</strong>
+        </div>
+        <div class="Box-body p-0">
+          <table class="width-full" style="border-collapse: collapse;">
+            <tbody>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2" style="width: 25%;"><code class="text-small">capabilities.type</code></td>
+                <td class="p-2 text-small">Model type: <code>chat</code>, <code>completion</code>, or <code>embeddings</code></td>
+                <td class="p-2 text-small color-fg-muted" style="width: 25%;"><code>chat</code></td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">capabilities.family</code></td>
+                <td class="p-2 text-small">Internal family identifier — drives policy &amp; feature logic</td>
+                <td class="p-2 text-small color-fg-muted"><code>gpt-4o</code></td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">capabilities.tokenizer</code></td>
+                <td class="p-2 text-small">Tokenizer: <code>o200k_base</code>, <code>cl100k_base</code>, <code>api_anthropic</code>, <code>google</code></td>
+                <td class="p-2 text-small color-fg-muted"><code>o200k_base</code></td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">supports.*</code></td>
+                <td class="p-2 text-small">Feature toggles: <code>streaming</code>, <code>toolCalls</code>, <code>parallelToolCalls</code>, <code>structuredOutputs</code>, <code>dimensions</code>, <code>vision</code>, <code>adaptiveThinking</code></td>
+                <td class="p-2 text-small color-fg-muted"><code>streaming: true</code></td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">limits.*</code></td>
+                <td class="p-2 text-small"><strong>Hard</strong> runtime limits (enforced ceiling). Must not exceed provider capability</td>
+                <td class="p-2 text-small color-fg-muted"><code>maxOutputTokens: 16384</code></td>
+              </tr>
+              <tr>
+                <td class="p-2"><code class="text-small">advertisedLimits.*</code></td>
+                <td class="p-2 text-small"><strong>Soft</strong> public-facing limits (what clients see). Often lower than hard limits</td>
+                <td class="p-2 text-small color-fg-muted"><code>maxOutputTokens: 8192</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <%# Billing %>
+        <div class="Box-header color-bg-subtle" style="border-top: 1px solid var(--borderColor-default);">
+          <strong><%= render(Primer::Beta::Octicon.new(:"credit-card", size: :small, mr: 1)) %> Billing</strong>
+        </div>
+        <div class="Box-body p-0">
+          <table class="width-full" style="border-collapse: collapse;">
+            <tbody>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2" style="width: 25%;"><code class="text-small">restrictedTo</code></td>
+                <td class="p-2 text-small">Allowed Copilot plans: <code>free</code>, <code>pro</code>, <code>pro_plus</code>, <code>edu</code>, <code>business</code>, <code>enterprise</code>, <code>max</code></td>
+                <td class="p-2 text-small color-fg-muted" style="width: 25%;"><code>["pro", "business"]</code></td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">multiplier</code></td>
+                <td class="p-2 text-small">Billing cost weight: <code>0</code> = free, <code>&lt;1</code> = discounted, <code>&gt;1</code> = premium</td>
+                <td class="p-2 text-small color-fg-muted"><code>1.0</code></td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">tokensPerCostUnit</code></td>
+                <td class="p-2 text-small">Number of tokens per billing cost unit. <code>0</code> = not set</td>
+                <td class="p-2 text-small color-fg-muted"><code>1000000</code></td>
+              </tr>
+              <tr>
+                <td class="p-2"><code class="text-small">*PricePerCostUnit</code></td>
+                <td class="p-2 text-small">Token pricing fields: <code>inputTokenPricePerCostUnit</code>, <code>cacheReadTokenPricePerCostUnit</code>, <code>cacheCreationTokenPricePerCostUnit</code>, <code>outputTokenPricePerCostUnit</code></td>
+                <td class="p-2 text-small color-fg-muted"><code>0.0</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <%# Feature Flags %>
+        <div class="Box-header color-bg-subtle" style="border-top: 1px solid var(--borderColor-default);">
+          <strong><%= render(Primer::Beta::Octicon.new(:beaker, size: :small, mr: 1)) %> Feature Flags</strong>
+        </div>
+        <div class="Box-body p-0">
+          <table class="width-full" style="border-collapse: collapse;">
+            <tbody>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2" style="width: 25%;"><code class="text-small">featureFlag</code></td>
+                <td class="p-2 text-small">Primary dotcom flag — required for entity to view this model</td>
+                <td class="p-2 text-small color-fg-muted" style="width: 25%;"><code>model_registry_dotcom_gpt4o</code></td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">skipPolicyFeatureFlag</code></td>
+                <td class="p-2 text-small">Flag to bypass policy checks (use sparingly)</td>
+                <td class="p-2 text-small color-fg-muted"><code>model_registry_skip_policy_gpt4o</code></td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">warningMessageFeatureFlags</code></td>
+                <td class="p-2 text-small">Flags for high-usage and degraded-performance warning messages</td>
+                <td class="p-2 text-small color-fg-muted"><code>..._high_usage_gpt4o</code></td>
+              </tr>
+              <tr>
+                <td class="p-2"><code class="text-small">visibleFeatureFlagChecks</code></td>
+                <td class="p-2 text-small">Tiered visibility gating per integration category (rollout, prelaunch, vscode, tier1–3)</td>
+                <td class="p-2 text-small color-fg-muted">See template</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <%# Endpoints %>
+        <div class="Box-header color-bg-subtle" style="border-top: 1px solid var(--borderColor-default);">
+          <strong><%= render(Primer::Beta::Octicon.new(:server, size: :small, mr: 1)) %> Endpoints</strong>
+        </div>
+        <div class="Box-body p-0">
+          <table class="width-full" style="border-collapse: collapse;">
+            <tbody>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2" style="width: 25%;"><code class="text-small">name</code></td>
+                <td class="p-2 text-small">Unique deployment name — include region for clarity</td>
+                <td class="p-2 text-small color-fg-muted" style="width: 25%;"><code>gpt4o-eastus2-whirlpool</code></td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">provider</code></td>
+                <td class="p-2 text-small"><code>azure_openai</code>, <code>openai</code>, <code>anthropic</code>, <code>google</code>, <code>xai</code>, or <code>registry_custom</code></td>
+                <td class="p-2 text-small color-fg-muted"><code>azure_openai</code></td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">routingWeight</code></td>
+                <td class="p-2 text-small">Relative routing weight (0–100). Multiple endpoints are normalized</td>
+                <td class="p-2 text-small color-fg-muted"><code>100</code></td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">capacity.type</code></td>
+                <td class="p-2 text-small">Capacity type: <code>paygo</code>, <code>provisioned</code>, or <code>hybrid</code></td>
+                <td class="p-2 text-small color-fg-muted"><code>hybrid</code></td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--borderColor-muted);">
+                <td class="p-2"><code class="text-small">secretName</code></td>
+                <td class="p-2 text-small">Secret key containing endpoint credentials</td>
+                <td class="p-2 text-small color-fg-muted"><code>AZURE_ENDPOINT_SECRET_...</code></td>
+              </tr>
+              <tr>
+                <td class="p-2"><code class="text-small">region</code></td>
+                <td class="p-2 text-small"><code>fullName</code> (human-readable), <code>shortName</code> (logs/metrics), <code>provider</code></td>
+                <td class="p-2 text-small color-fg-muted"><code>eastus2 / eus2</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </details>
+  </div>
+<% end %>

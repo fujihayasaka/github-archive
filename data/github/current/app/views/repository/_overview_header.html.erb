@@ -1,0 +1,234 @@
+<%# erblint:counter DeprecatedComponentsCounter 1 %>
+<% page_info responsive: true %>
+
+<% content_for :responsive_meta do %>
+  <div class="d-block d-md-none mb-2 tmp-px-3 tmp-px-md-4 tmp-px-lg-5">
+    <% if repos_header_redesign_enabled? %>
+      <% details_view = Repositories::DetailsView.new(
+        repository: current_repository,
+        repository_is_offline: repository_offline?,
+        cap_view_filter: cap_view_filter,
+        viewer_can_read_repo: current_user_can_read_repo?,
+      ) %>
+      <%# Compensate missing title height with negative margin %>
+        <div class="d-flex gap-2 tmp-mt-n3 tmp-mb-3 flex-wrap">
+          <div class="d-flex flex-row gap-2" <%= test_selector "responsive-social-buttons" %>>
+            <%=
+              render(Repositories::WatchButtonComponent.new(
+              aria_id_prefix: "responsive-repository-details",
+              repository: current_repository,
+              status: subscription_status,
+            )) %>
+            <% if details_view.include_sponsor_button_fragment? %>
+              <div><%# Prevent Sponsors button from shrinking in narrow viewports %>
+                <%= render Sponsors::Repositories::FundingModalComponent.new(
+                  owner_login: current_repository.owner_display_login,
+                  repo_name: current_repository.name,
+                  icon_button: true,
+                  modal_id: "responsive-sponsor-modal",
+                  button_id: "responsive-sponsor-button",
+                ) %>
+              </div>
+            <% end %>
+            <%= render(Repositories::ForkButtonComponent.new(
+              repository: current_repository, icon_button: true,
+              forkability_error_message: logged_in? ? details_view.forkability_error_message : nil,
+            )) %>
+            <% if FeatureFlag.vexi.enabled?(:mobile_star_button_with_dropdown, default: false) %>
+              <%= render(Repositories::StarButtonComponent.new(repository: current_repository)) do |c|
+                c.with_list_menu
+              end %>
+            <% else %>
+              <%= render(Repositories::StarButtonComponent.new(repository: current_repository)) %>
+            <% end %>
+          </div>
+          <div class="d-flex flex-row gap-2">
+            <%= render partial: "files/use_this_template_button", locals: { view: view, small_button: !header_redesign_enabled?, use_left_padding: false} %>
+          </div>
+        </div>
+    <% end %>
+    <% if view.show_description? %>
+      <p class="f4 tmp-mb-3 <% if repos_header_redesign_enabled? %>color-fg-muted<% end %>">
+        <%= view.formatted_description %>
+      </p>
+    <% end %>
+    <% if view.show_website? %>
+      <div class="mb-2 d-flex flex-items-center Link--secondary">
+        <%= render Primer::Beta::Octicon.new(icon: "link", mr: 2, classes: "flex-shrink-0") %>
+        <span class="flex-auto min-width-0 css-truncate css-truncate-target width-fit">
+          <%= safe_link_to(view.website.sub(/https?:\/\//, "").strip, view.website, title: view.website, role: "link", target: "_blank", class: "text-bold") || view.website %>
+        </span>
+      </div>
+    <% end %>
+
+    <%= render_nothing_on_error do %>
+      <%= render Repositories::ViewLicensesComponent.new(repository: current_repository, options: {selector_classes: 'mb-2'})%>
+    <% end %>
+
+    <div class="tmp-mb-3">
+      <% if repos_header_redesign_enabled? %>
+        <%= render Repositories::ResponsiveDetailsComponent.new(repository: current_repository) %>
+      <% else %>
+        <%= link_to gh_stargazers_path(current_repository), class: "Link--secondary no-underline tmp-mr-3" do %>
+          <%= render Primer::Beta::Octicon.new(icon: :star, mr: 1) %>
+          <span class="text-bold"><%= social_count current_repository.stargazer_count %></span>
+          <%= "star".pluralize(current_repository.stargazer_count) %>
+        <% end %>
+        <%= link_to gh_fork_network_path(current_repository), class: "Link--secondary no-underline tmp-mr-3" do %>
+          <%= render Primer::Beta::Octicon.new(icon: :"repo-forked", mr: 1) %>
+          <span class="text-bold"><%= social_count current_repository.network_count %></span>
+          <%= "fork".pluralize(current_repository.network_count) %>
+        <% end %>
+        <%= link_to branches_path(current_repository), class: "Link--secondary no-underline tmp-mr-3 d-inline-block" do %>
+          <%= render Primer::Beta::Octicon.new(icon: "git-branch", mr: 1) %>
+          <span>Branches</span>
+        <% end %>
+        <%= link_to tags_path(current_repository.owner, current_repository), class: "Link--secondary no-underline d-inline-block" do %>
+          <%= render Primer::Beta::Octicon.new(icon: "tag", mr: 1) %>
+          <span>Tags</span>
+        <% end %>
+        <%= link_to activity_index_path(current_repository.owner, current_repository), class: "Link--secondary no-underline d-inline-block" do %>
+          <%= render Primer::Beta::Octicon.new(icon: "pulse", mr: 1) %>
+          <span>Activity</span>
+        <% end %>
+      <% end %>
+    </div>
+    <% unless repos_header_redesign_enabled? %>
+      <div class="d-flex flex-wrap gap-2">
+        <div class="flex-1">
+          <%= render(Stars::ButtonComponent.new(
+              entity: current_repository,
+              button_block: true,
+              context: "repository",
+              current_user_can_read_repo: current_user_can_read_repo?
+            )) do |c|
+              c.with_list_menu
+            end %>
+        </div>
+        <div class="flex-1">
+          <%= render(
+            Repositories::NotificationsComponent.new(
+              aria_id_prefix: "files-overview",
+              repository: current_repository,
+              button_block: true,
+              status: nil,
+              deferred_content: logged_in?,
+            ),
+          ) do |component| %>
+            <%= component.with_fallback_error do %>
+              <span class="d-block f6 text-center mt-1">
+                <%= primer_octicon(:alert, mr: 1) %>
+                Couldn't load subscription status.
+                <%= render(Primer::Beta::Button.new(scheme: :link, "data-retry-button": "")) { "Retry" } %>
+              </span>
+            <% end %>
+            <%= component.with_spinner do %>
+              <%= render(Primer::Beta::Button.new(
+                size: :small,
+                block: true,
+                classes: "tooltipped tooltipped-n",
+                disabled: true,
+                aria: { label: "Watching a repository" },
+              )) do |c| %><%# erblint:disable Primer::Accessibility::TooltippedMigration %>
+                <% c.with_leading_visual_icon(icon: "eye") %>
+                Watch
+              <% end %>
+            <% end %>
+          <% end %>
+        </div>
+        <span>
+          <%= render partial: "files/use_this_template_button", locals: { view: view, small_button: true } %>
+        </span>
+      </div>
+    <% end %>
+  </div>
+<% end %>
+
+<%# the _container_header layout will render the header for logged out users %>
+<% if logged_in? %>
+  <div id="repository-container-header" <%= test_selector("repository-container-header") %> class="tmp-pt-3 hide-full-screen" <% unless header_redesign_enabled? %>style="background-color: var(--page-header-bgColor, var(--color-page-header-bg));"<% end %> data-turbo-replace>
+    <% track_render_partial("layouts/repository/default_container/is_spammy_banner", partial_tags) do %>
+      <% if logged_in? && current_user.site_admin? && repository.owner.spammy? %>
+        <div class="<% if container_full? %> container-full <% else %> container-xl <% end %> tmp-px-3">
+          <%= render(Primer::Beta::Flash.new(scheme: :danger, spacious: true)) do %>
+            The owner of this repository is flagged <strong>spammy</strong>.
+          <% end %>
+        </div>
+      <% end %>
+    <% end %>
+
+    <% track_render_partial("layouts/repository/default_container/repository_navigation", partial_tags, trace: true) do %>
+      <div class="d-flex flex-nowrap flex-justify-end tmp-mb-3" style="gap: 1rem;">
+
+        <div class="flex-auto min-width-0 width-fit">
+          <% track_render_partial("repositories/title", partial_tags, trace: true) do %>
+            <%= render partial: "repositories/title", locals: { repository: repository } %>
+          <% end %>
+        </div>
+
+        <div id="repository-details-container" class="flex-shrink-0" data-turbo-replace style="max-width: 70%;">
+          <% track_render_partial("repositories/details", partial_tags, trace: true) do %>
+            <%= render "repositories/details", view: create_view_model(Repositories::DetailsView, {
+                  repository: repository,
+                  repository_is_offline: repository_offline?,
+                  cap_view_filter: cap_view_filter,
+                  viewer_can_read_repo: current_user_can_read_repo?,
+                }) %>
+          <% end %>
+        </div>
+      </div>
+
+      <% if header_redesign_enabled? %>
+        <div>
+          <%= render partial: "layouts/responsive_meta" %>
+          <div class="border-bottom"></div>
+        </div>
+      <% else %>
+        <%= render partial: "layouts/responsive_meta" %>
+
+        <% track_render_partial("repository/container_header/navigation", partial_tags, trace: true) do %>
+          <%= render Repositories::UnderlineNavComponent.new(repository: repository, selected_link: selected_link, display_variant: :padded, user_can_write_wiki: current_user_can_write_wiki?) %>
+        <% end %>
+      <% end %>
+
+      <%# rubocop:disable GitHub/ContentFor %>
+      <% if content_for?(:custom_navigation) %>
+        <%= content_for(:custom_navigation) %>
+      <% end %>
+    <% end %>
+  </div>
+<% end %>
+
+<%= render(UserLists::CreateDialogTemplateComponent.new) %>
+
+<h1 class='sr-only'><%= current_repository.name_with_display_owner %></h1>
+
+<% if Codespaces::Survey.show_survey_prompt_for_user_repository_page?(current_user, current_repository) %>
+  <div class="clearfix tmp-mb-3 tmp-mt-3">
+    <%= render_react_partial name: "codespaces-survey", props: {
+      surveyLink: Codespaces::Survey.survey_url(current_user),
+      surveyOpenCallbackPath: codespaces_survey_open_path,
+      surveyDismissCallbackPath: codespaces_survey_dismiss_path
+    } %>
+  </div>
+<% elsif (survey_type = ["copilot-feedback-survey", "copilot-plg-survey", "copilot-create-issue-feedback"].find { |type|
+  Copilot::FeedbackSurvey.show_survey_for_user_repository_page?(current_user, type)
+}) %>
+  <div class="clearfix tmp-mb-3 tmp-mt-3">
+    <% banner = Copilot::FeedbackSurvey.self_serve_banner(survey_type) %>
+    <%= render_react_partial name: "copilot-survey", props: {
+      bannerText: banner&.body,
+      bannerTitle: banner&.title,
+      ctaUrl: banner&.cta_url,
+      ctaText: banner&.cta_text,
+      bannerSlug: banner&.slug,
+      surveyOpenCallbackPath: copilot_feedback_survey_open_path,
+      surveyDismissCallbackPath: copilot_feedback_survey_dismiss_path
+    } %>
+  </div>
+<% end %>
+
+<% if view.blocked_contributors.any? %>
+  <%= render partial: "files/blocked_contributors", locals: { view: view } %>
+<% end %>
+<%= csrf_hidden_input_for codespaces_path, method: :post, id: "react-codespace-csrf" %>

@@ -1,0 +1,1 @@
+import{gm as e,lh as t}from"./main-BChbnewi.js";var n=t(e());const r=(0,n.createContext)(void 0);r.displayName=`AppPayloadContext`;function i(){let e=(0,n.use)(r);return e===void 0?{helpUrl:`https://docs.github.com`,findFileWorkerPath:``,findInFileWorkerPath:``,githubDevUrl:`https://github.dev`}:e}export{i as n,r as t};

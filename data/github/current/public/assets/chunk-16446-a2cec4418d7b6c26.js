@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["16446"],{538733(t,e,u){u.r(e),(0,u(221403).lB)("#clear-project-search-button",t=>{t?.setAttribute("type","button"),t?.addEventListener("click",()=>{let t=document.getElementById("project-search-input");t&&(t.value="",t.focus())})})}}]);
+//# sourceMappingURL=chunk-16446-a2cec4418d7b6c26-1b7e1659769b1c7c.js.map

@@ -1,0 +1,239 @@
+name: Tests
+on:
+  push:
+    reuse-previous-outcome: false
+  merge_group:
+    reuse-previous-outcome: false
+  workflow_dispatch:
+    reuse-previous-outcome: false
+    inputs:
+      blackbirdImage:
+        description: 'Blackbird GHCR image (defaults to main)'
+        type: string
+        required: false
+
+permissions:
+  id-token: write # for setup-goproxy OIDC
+  contents: read
+  packages: read
+
+# In the event that there is a new push to the head_ref (only defined on PR
+# events), cancel any running jobs because there are now obsolete, and wasting
+# resources.
+#
+# Via: https://docs.github.com/en/actions/using-jobs/using-concurrency#example-using-a-fallback-value
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  GITHUB_ACTOR: ${{ github.actor }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  BLACKBIRD_IMAGE: ${{ inputs.blackbirdImage }}
+
+jobs:
+  e2e_tests:
+    name: Run end-to-end tests
+    # Must match OS where blackbird c libs are built
+    runs-on: blackbird-custom-16core
+    strategy:
+      fail-fast: false
+      matrix:
+        corpus:
+          - name: blue
+            cluster: zeta
+            cache: cache-001
+            mode: dotcom
+            epoch_mode: lexical
+          - name: blue
+            cluster: zeta
+            cache: cache-001
+            mode: dotcom
+            epoch_mode: metis_embeddings
+          - name: blue
+            cluster: zeta
+            cache: cache-001
+            mode: tenant
+            epoch_mode: metis_hybrid
+          # Validate multi-region kafka brokers
+          - name: green
+            cluster: eta
+            cache: cache-002
+            mode: tenant
+            epoch_mode: metis_hybrid
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+          token: ${{ secrets.BLACKBIRD_REPO_READER_PAT }}
+      - uses: github/setup-goproxy@v1.1.0
+
+      - name: Adjust permissions
+        run: |
+          groupadd --gid 5000 builder
+          useradd --uid 5000 --gid 5000 --create-home --shell /bin/bash builder
+          echo "builder ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
+          chown -R builder:builder ./
+          git config --global --add safe.directory "$(pwd)"
+          git config --global --add safe.directory "$(pwd)/deps/spokes-proto"
+
+      - name: Write credentials files
+        run: |
+          echo "code-search-bot" > ~/.blackbird-e2e-user
+          echo "${{ secrets.BLACKBIRD_REPO_READER_PAT }}" > ~/.blackbird-e2e-token
+
+      - name: Create log directory
+        id: create-logdir
+        run: |
+          logdir=$(mktemp -d)
+          chmod 777 "$logdir"
+          echo "logdir=$logdir" >> $GITHUB_OUTPUT
+
+      - name: Log into ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{github.actor}} --password-stdin
+
+      - name: Find Docker image to build from
+        id: determine-image
+        uses: ./.github/actions/determine-blackbird-build-image
+        with:
+          ubuntu-version: focal
+          profile: release
+
+      # Secrets are not stored in this file, but instead passed directly in the
+      # environment, and also need to be passed through in the
+      # test-e2e-entrypoint file
+      - name: Create environment variables file
+        run: |
+          cat <<EOF > "$HOME/blackbird-env"
+          BLACKBIRD_BUILD_IMAGE=${{ steps.determine-image.outputs.docker-image }}
+          BLACKBIRD_BINARIES_IMAGE=ghcr.io/github/blackbird/blackbird:main
+          BLACKBIRD_MW_OUTPUT_CORPUS=${{ matrix.corpus.name }}
+          BLACKBIRD_MW_CACHE_CLUSTER=${{ matrix.corpus.cache }}
+          BLACKBIRD_CLUSTERNAME=${{ matrix.corpus.cluster }}
+          BLACKBIRD_MW_MODE=${{ matrix.corpus.mode }}
+          BLACKBIRD_MW_EPOCH_MODE=${{ matrix.corpus.epoch_mode }}
+          CI=$CI
+          EOF
+
+      - id: check-for-skip
+        name: Check for SKIP_E2E_TESTS
+        uses: github/blackbird-actions/commit-message-contains-text@main
+        with:
+          commit: ${{ github.event_name == 'push' && toJSON(github.event.head_commit) || '' }}
+          match: "SKIP_E2E_TESTS"
+
+      - run: make test-e2e | tee -a test-log.txt
+        if: ${{ steps.check-for-skip.outputs.contains != 'true' }}
+        shell: bash
+        env:
+          BLACKBIRD_BUILD_IMAGE: ${{ steps.determine-image.outputs.docker-image }}
+          BLACKBIRD_LOGDIR: ${{ steps.create-logdir.outputs.logdir }}
+          AZURE_BLACKBIRD_EMBEDDING_CANADACENTRAL_KEY: ${{ secrets.AZURE_BLACKBIRD_EMBEDDING_CANADACENTRAL_KEY }}
+          METIS_VLLM_CANADACENTRAL_KEY: ${{ secrets.METIS_VLLM_CANADACENTRAL_KEY }}
+
+      - name: Save logs
+        if: always()
+        shell: bash
+        run: |
+          logdir="${{ steps.create-logdir.outputs.logdir }}"
+          for f in $(ls "$logdir"); do
+            echo "::group:: $f"
+            cat "$logdir/$f"
+            echo "::endgroup::"
+          done
+
+      - name: Scan for error messages
+        run: |
+          ./script/extract-test-logs test-log.txt >> $GITHUB_STEP_SUMMARY
+          ./script/extract-annotations test-log.txt
+        if: failure()
+        shell: bash
+
+  e2e_tests_matrix_result:
+    runs-on: ubuntu-slim
+    needs: e2e_tests
+    if: always()
+    name: Run end-to-end tests Matrix Result
+    steps:
+      - id: aggregate-matrix
+        uses: github/blackbird-actions/aggregate-matrix-result@main
+        with:
+          job_result: ${{ needs.e2e_tests.result }}
+
+  db_tests:
+    name: Run database tests (mysql ${{ matrix.mysql.version }})
+    # Must match OS where blackbird c libs are built
+    runs-on: blackbird-custom-16core
+    strategy:
+      matrix:
+        mysql:
+          - version: 8
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+          token: ${{ secrets.BLACKBIRD_REPO_READER_PAT }}
+      - uses: github/setup-goproxy@v1.1.0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+      - uses: actions/cache@v5.0.3
+        with:
+          path: vendor
+          key: ${{ runner.os }}-go-vendor-${{ hashFiles('go.sum') }}
+      - run: make test-db
+
+  redis_tests:
+    name: Run Redis tests
+    # Must match OS where blackbird c libs are built
+    runs-on: blackbird-custom-16core
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+          token: ${{ secrets.BLACKBIRD_REPO_READER_PAT }}
+      - uses: github/setup-goproxy@v1.1.0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+      - uses: actions/cache@v5.0.3
+        with:
+          path: vendor
+          key: ${{ runner.os }}-go-vendor-${{ hashFiles('go.sum') }}
+      - run: make test-redis
+
+  go_tests:
+    name: Run Go tests
+    # Must match OS where blackbird c libs are built
+    runs-on: blackbird-custom-16core
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+          token: ${{ secrets.BLACKBIRD_REPO_READER_PAT }}
+      - uses: github/setup-goproxy@v1.1.0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+      - uses: actions/cache@v5.0.3
+        with:
+          path: vendor
+          key: ${{ runner.os }}-go-vendor-${{ hashFiles('go.sum') }}
+      - run: make test
+
+  ruby_tests:
+    name: Run Ruby client tests
+    runs-on: ubuntu-latest-xl
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+          token: ${{ secrets.BLACKBIRD_REPO_READER_PAT }}
+      - uses: ruby/setup-ruby@8d27f39a5e7ad39aebbcbd1324f7af020229645c
+        with:
+          ruby-version: "3.4.3" # Align with the github/github Ruby version: https://github.com/github/github/blob/master/config/ruby-version
+          bundler-cache: true
+      - run: make test-ruby

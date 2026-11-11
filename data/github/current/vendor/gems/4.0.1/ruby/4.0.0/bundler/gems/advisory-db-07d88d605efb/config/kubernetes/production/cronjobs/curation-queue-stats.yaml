@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: curation-queue-stats
+    annotations:
+        heaven.githubapp.com/image-placeholder: "advisory-db"
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "curation-queue-stats"
+spec:
+    schedule: "*/15 * * * *" # Every fifteen minutes
+    successfulJobsHistoryLimit: 8
+    failedJobsHistoryLimit: 8
+    jobTemplate:
+        spec:
+            activeDeadlineSeconds: 3600
+            template:
+                spec:
+                    restartPolicy: Never
+                    containers:
+                        - name: curation-queue-stats
+                          image: advisory-db
+                          command:
+                            - bin/rake
+                            - advisory_db:send_curation_queue_stats
+                          envFrom:
+                            - configMapRef:
+                                name: rails
+                            - secretRef:
+                                name: vault-secrets
+                          env:
+                            - name: ADVISORY_DB_ROLE
+                              value: "cron"
+                            - name: DOGSTATSD_HOST
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: spec.nodeName
+    concurrencyPolicy: Forbid

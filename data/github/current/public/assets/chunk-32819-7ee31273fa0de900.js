@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["32819"],{357822(e,t,u){u.r(t),(0,u(821744).on)("change","input.js-survey-contact-checkbox",function(e){let t=e.currentTarget,u=t.closest(".js-survey-question-form").querySelector(".js-survey-contact-checkbox-hidden");t.checked?u.setAttribute("disabled","true"):u.removeAttribute("disabled")})}}]);
+//# sourceMappingURL=chunk-32819-7ee31273fa0de900-acc4c412f19cb79e.js.map

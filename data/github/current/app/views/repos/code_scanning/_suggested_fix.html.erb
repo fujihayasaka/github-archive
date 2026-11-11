@@ -1,0 +1,153 @@
+<updatable-content
+  class="js-suggested-fix-partial"
+  data-channel="<%= live_update_view_channel(GitHub::WebSocket::Channels.code_scanning_alert(current_repository, alert_number: view.result.number)) %>"
+  data-url="<%= repository_code_scanning_result_path(current_repository.owner, current_repository, number: view.result.number, partial: "autofix") %>"
+  <%= test_selector("suggested-fix-partial") %>>
+  <% if !view.use_agentic_autofix && view.show_alert_with_suggested_fix? %>
+    <%= render Suggestions::SuggestedFixComponent.new(
+      create_pr_path: view.create_pr_path(current_repository, view.result),
+      suggested_fix: view.suggested_fix,
+      generated_at: view.suggested_fix_alert.state_updated_at,
+      alert_location: view.alert_instance.location,
+      alert_title: result_title(view.result),
+      alert_number: view.result.number,
+      alert_description_html: view.rich_result_message_text,
+      alert_commit_oid: view.alert_instance.commit_oid,
+      alert_code_paths_url: view.has_code_paths? ? view.code_paths_url : nil,
+      alert_rule_severity: view.result.rule_severity,
+      alert_tool_name: view.tool_display_name,
+      is_alert_closed: result_closed?(view.result),
+      repository: current_repository,
+    ) do |component| %>
+      <% component.with_standalone_alert_location do %>
+        <h2 class="sr-only">Code snippet</h2>
+        <%= render partial: "repos/scanning/location", locals: {
+          full_path: view.alert_instance.location.file_path,
+          path_link: view.code_snippet_path_link,
+          snippet_helper: view.snippet_helper(view.alert_instance.location, view.alert_instance.commit_oid),
+          tool_display_name: view.tool_display_name,
+          alert_title: result_title(view.result),
+          code_paths_url: view.has_code_paths? ? view.code_paths_url : nil,
+          classifications: view.classifications,
+          line_number: view.alert_instance.location.start_line,
+          alert_rule_severity: view.result.rule_severity,
+        } %>
+      <% end %>
+    <% end %>
+  <% else %>
+    <% if view.use_agentic_autofix %>
+      <% if view.show_create_agentic_fix? %>
+        <%= render CodeScanning::SuggestedFixBannerComponent.new(test_selector: "create-agentic-autofix-btn") do |c| %>
+          <%= render Primer::Beta::Text.new(tag: :p, m: 0) do %>
+            Speed up the remediation of this alert with
+            <%= render Primer::Beta::Link.new(
+              classes: "Link--inTextBlock",
+              href: view.suggested_fix_autofix_docs_url
+            ).with_content(view.copilot_autofix_for_tool_name) %>
+          <% end %>
+
+          <% c.with_action_assign_to_copilot_button(form_url: repository_code_scanning_generate_autofix_path(current_repository.owner, current_repository, view.result.number)) %>
+        <% end %>
+      <% elsif view.agentic_autofix_pending? %>
+        <%= render CodeScanning::SuggestedFixBannerComponent.new(state: :loading, test_selector: "agentic-autofix-pending") do |c| %>
+          <%= render Primer::Beta::Text.new(tag: :p, m: 0) do %>
+            <strong>Copilot Autofix</strong>
+            <%= render(Primer::Beta::Label.new(scheme: :secondary)) { "AI" } %>
+            <span class="color-fg-muted">is creating a pull request&hellip;</span>
+          <% end %>
+        <% end %>
+      <% elsif !view.copilot_pull_request.nil? %>
+        <%= render CodeScanning::SuggestedFixBannerComponent.new(test_selector: "agentic-autofix-completed") do |c| %>
+          <%= render Primer::Beta::Text.new(tag: :p, m: 0) do %>
+            <strong>Copilot Autofix</strong>
+            <%= render(Primer::Beta::Label.new(scheme: :secondary)) { "AI" } %>
+            <span class="color-fg-muted">
+              <%= render Primer::Beta::Link.new(
+                classes: "Link--inTextBlock",
+                href: pull_request_path(view.copilot_pull_request, current_repository),
+                data: hovercard_data_attributes_for_issue_or_pr(view.copilot_pull_request)
+              ).with_content("created a pull request") %>
+              <%= time_ago_in_words(view.copilot_pull_request.created_at) %> ago
+            </span>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% elsif view.autofix_enabled_for_tool? %>
+      <% if view.show_create_suggested_fix? %>
+        <%= render CodeScanning::SuggestedFixBannerComponent.new(test_selector: "create-autofix-btn") do |c| %>
+          <%= render Primer::Beta::Text.new(tag: :p, m: 0) do %>
+            Speed up the remediation of this alert with
+            <%= render Primer::Beta::Link.new(
+              classes: "Link--inTextBlock",
+              href: view.suggested_fix_autofix_docs_url
+            ).with_content(view.copilot_autofix_for_tool_name) %>
+          <% end %>
+
+          <% c.with_action_generate_fix_button(form_url: repository_code_scanning_generate_autofix_path(current_repository.owner, current_repository, view.result.number)) %>
+        <% end %>
+      <% elsif view.suggested_fix_alert_pending? %>
+        <%= render CodeScanning::SuggestedFixBannerComponent.new(state: :loading, test_selector: "ai-suggested-fix-pending") do |c| %>
+          <%= render Primer::Beta::Text.new(tag: :p, m: 0) do %>
+            <strong>Copilot Autofix</strong>
+            <%= render(Primer::Beta::Label.new(scheme: :secondary)) { "AI" } %>
+            <span class="color-fg-muted">is generating a fix suggestion&hellip;</span>
+          <% end %>
+        <% end %>
+      <% elsif view.suggested_fix_alert_error? %>
+        <%= render CodeScanning::SuggestedFixBannerComponent.new(state: :attention, test_selector: "ai-suggested-fix-error") do |c| %>
+          <%= render Primer::Beta::Text.new(tag: :p, m: 0) do %>
+            <%= view.copilot_autofix_for_tool_name %> attempted to generate an autofix for this alert, but wasn't able to. Please retry.
+          <% end %>
+
+          <% c.with_action_generate_fix_button(form_url: repository_code_scanning_generate_autofix_path(current_repository.owner, current_repository, view.result.number)) %>
+        <% end %>
+      <% elsif view.suggested_fix_alert_invalid? %>
+        <%= render CodeScanning::SuggestedFixBannerComponent.new(test_selector: "ai-suggested-fix-invalid") do |c| %>
+          <%= render Primer::Beta::Text.new(tag: :p, m: 0) do %>
+            <strong>Copilot Autofix</strong>
+            <%= render(Primer::Beta::Label.new(scheme: :secondary)) { "AI" } %>
+            <span class="color-fg-muted">attempted to generate an autofix for this alert, but wasn't able to. Please manually review the alert and decide on a suitable fix</span>.
+          <% end %>
+        <% end %>
+      <% elsif view.suggested_fix_rule_not_supported? %>
+        <%= render CodeScanning::SuggestedFixBannerComponent.new(disabled: true, test_selector: "ai-suggested-fix-rule-not-supported") do |c| %>
+          <%= render Primer::Beta::Text.new(tag: :p, m: 0) do %>
+            <%= view.suggested_fix_not_supported %>
+            <%= render Primer::Beta::Link.new(
+              classes: "Link--inTextBlock",
+              href: view.suggested_fix_autofix_query_lists_docs_url
+            ).with_content("is not supported by #{view.copilot_autofix_for_tool_name}") %>
+          <% end %>
+
+          <% c.with_action_generate_fix_button(form_url: repository_code_scanning_generate_autofix_path(current_repository.owner, current_repository, view.result.number)) %>
+        <% end %>
+      <% elsif view.suggested_fix_outdated? %>
+        <%= render CodeScanning::SuggestedFixBannerComponent.new(test_selector: "create-autofix-outdated") do |c| %>
+          <%= render Primer::Beta::Text.new(tag: :p, m: 0) do %>
+            The previous fix suggestion was discarded because new code was pushed affecting this alert's location.<br>
+            Request a new fix to remediate this alert with the help of
+            <%= render Primer::Beta::Link.new(
+              classes: "Link--inTextBlock",
+              href: view.suggested_fix_autofix_docs_url
+            ).with_content(view.copilot_autofix_for_tool_name) %>
+          <% end %>
+
+          <% c.with_action_generate_fix_button(form_url: repository_code_scanning_generate_autofix_path(current_repository.owner, current_repository, view.result.number)) %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <h2 class="sr-only">Code snippet</h2>
+    <%= render partial: "repos/scanning/location", locals: {
+      full_path: view.alert_instance.location.file_path,
+      path_link: view.code_snippet_path_link,
+      snippet_helper: view.snippet_helper(view.alert_instance.location, view.alert_instance.commit_oid),
+      tool_display_name: view.tool_display_name,
+      alert_title: result_title(view.result),
+      code_paths_url: view.has_code_paths? ? view.code_paths_url : nil,
+      classifications: view.classifications,
+      line_number: view.alert_instance.location.start_line,
+      alert_rule_severity: view.result.rule_severity,
+    } %>
+  <% end %>
+</updatable-content>

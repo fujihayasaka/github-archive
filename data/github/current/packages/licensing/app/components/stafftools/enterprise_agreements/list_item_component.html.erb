@@ -1,0 +1,137 @@
+<div <%= test_selector("enterprise-agreement-list-item") %>>
+  <div class="d-flex flex-row width-full flex-items-center">
+    <div class="col-3">
+      <%= render(Primer::Beta::Link.new(href: edit_stafftools_enterprise_agreement_path(@business, @enterprise_agreement), font_weight: :semibold)) { @enterprise_agreement.agreement_id } %>
+      <%= render(Primer::Beta::Text.new(tag: :div, color: :muted, font_size: :small, mt: 1, title: @enterprise_agreement.created_at.to_s)) { "Created #{@enterprise_agreement.created_at.to_date.to_fs(:long)}" } %>
+    </div>
+
+    <div class="col-3">
+      <%= render(Primer::Beta::Text.new(color: :muted)) { @enterprise_agreement.category_display_name } %>
+    </div>
+
+    <div class="col-3">
+      <%= render(Primer::Beta::Text.new(tag: :div, test_selector: "enterprise-agreement-seats")) { "#{@enterprise_agreement.seats} purchased" } %>
+      <% if @enterprise_agreement.visual_studio_bundle? %>
+        <%= render(Primer::Beta::Text.new(tag: :span, color: :muted, font_size: :small)) { pluralize(@billable_licenses, "match", "matches") } %>
+        <%= render(Primer::Beta::Text.new(tag: :span, color: :muted, font_size: :small)) { " · " } %>
+        <%= render(Primer::Beta::Text.new(tag: :span, color: :muted, font_size: :small)) { "#{@non_linked_licenses} unmatched" } %>
+      <% end %>
+    </div>
+
+    <div class="col-1">
+      <%= render(Primer::Beta::Label.new(scheme: (@enterprise_agreement.active? ? :success : :secondary))) do %>
+        <%= @enterprise_agreement.status_display_name %>
+      <% end %>
+    </div>
+
+    <div class="col-2 d-flex flex-justify-end">
+      <% if @enterprise_agreement.visual_studio_bundle? %>
+        <%= render(Primer::Alpha::ActionMenu.new) do |menu| %>
+          <% menu.with_show_button(icon: :"kebab-horizontal", scheme: :invisible, size: :small, "aria-label": "Actions for agreement #{@enterprise_agreement.agreement_id}") %>
+          <% if @enterprise_agreement.active? %>
+            <% menu.with_item(
+              label: "View assignments",
+              href: stafftools_enterprise_bundled_license_assignments_path(@business, agreement_id: @enterprise_agreement.agreement_id)
+            ) do |item| %>
+              <% item.with_leading_visual_icon(icon: :people) %>
+            <% end %>
+          <% end %>
+          <% menu.with_item(
+            label: "View events",
+            content_arguments: { "data-show-dialog-id": events_dialog_id }
+          ) do |item| %>
+            <% item.with_leading_visual_icon(icon: :log) %>
+          <% end %>
+          <% menu.with_item(
+            label: "Edit",
+            href: edit_stafftools_enterprise_agreement_path(@business, @enterprise_agreement),
+            test_selector: "edit-assignment-link"
+          ) do |item| %>
+            <% item.with_leading_visual_icon(icon: :pencil) %>
+          <% end %>
+          <% menu.with_item(
+            label: "Backfill",
+            content_arguments: { "data-show-dialog-id": backfill_dialog_id }
+          ) do |item| %>
+            <% item.with_leading_visual_icon(icon: :sync) %>
+          <% end %>
+        <% end %>
+      <% elsif !@enterprise_agreement.metered? && @enterprise_agreement.active? %>
+        <%= render(Primer::Alpha::ActionMenu.new) do |menu| %>
+          <% menu.with_show_button(icon: :"kebab-horizontal", scheme: :invisible, size: :small, "aria-label": "Actions for agreement #{@enterprise_agreement.agreement_id}") %>
+          <% menu.with_item(
+            label: "View assignments",
+            href: stafftools_enterprise_bundled_license_assignments_path(@business, agreement_id: @enterprise_agreement.agreement_id)
+          ) do |item| %>
+            <% item.with_leading_visual_icon(icon: :people) %>
+          <% end %>
+          <% menu.with_item(
+            label: "Edit",
+            href: edit_stafftools_enterprise_agreement_path(@business, @enterprise_agreement),
+            test_selector: "edit-assignment-link"
+          ) do |item| %>
+            <% item.with_leading_visual_icon(icon: :pencil) %>
+          <% end %>
+        <% end %>
+      <% else %>
+        <%= render(Primer::Beta::Link.new(href: edit_stafftools_enterprise_agreement_path(@business, @enterprise_agreement), test_selector: "edit-assignment-link")) { "Edit" } %>
+      <% end %>
+    </div>
+  </div>
+
+  <%= render(Primer::Alpha::Dialog.new(
+    id: backfill_dialog_id,
+    title: "Backfill Enterprise Agreement"
+  )) do |dialog| %>
+    <% dialog.with_body do %>
+      Are you sure you want to backfill this enterprise agreement?
+    <% end %>
+    <% dialog.with_footer do %>
+      <%= form_tag backfill_stafftools_enterprise_agreements_path(@business, id: @enterprise_agreement), method: "put" do %>
+        <%= render(Primer::Beta::Button.new(type: :submit, scheme: :primary)) { "Backfill agreement" } %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if show_events_action? %>
+    <%= render(Primer::Alpha::Dialog.new(
+      title: "Subscription Events",
+      id: events_dialog_id,
+      size: :medium_portrait
+    )) do |dialog| %>
+      <% dialog.with_body do %>
+        <% if has_events? %>
+          <div class="d-flex flex-column gap-3">
+            <div class="d-flex flex-justify-between flex-items-center">
+              <%= render(Primer::Beta::Text.new(font_weight: :semibold)) { "Total events" } %>
+              <%= render(Primer::Beta::Text.new) { events_count.to_s } %>
+            </div>
+            <hr class="color-border-muted">
+            <div class="d-flex flex-justify-between flex-items-center">
+              <div class="d-flex flex-items-center gap-2">
+                <%= render(Primer::Beta::Label.new(scheme: :success, size: :medium)) { "Assign" } %>
+              </div>
+              <%= render(Primer::Beta::Text.new) { assign_events_count.to_s } %>
+            </div>
+            <div class="d-flex flex-justify-between flex-items-center">
+              <div class="d-flex flex-items-center gap-2">
+                <%= render(Primer::Beta::Label.new(scheme: :danger, size: :medium)) { "Remove" } %>
+              </div>
+              <%= render(Primer::Beta::Text.new) { remove_events_count.to_s } %>
+            </div>
+            <% if other_events_count > 0 %>
+              <div class="d-flex flex-justify-between flex-items-center">
+                <div class="d-flex flex-items-center gap-2">
+                  <%= render(Primer::Beta::Label.new(scheme: :secondary, size: :medium)) { "Other" } %>
+                </div>
+                <%= render(Primer::Beta::Text.new) { other_events_count.to_s } %>
+              </div>
+            <% end %>
+          </div>
+        <% else %>
+          <%= render(Primer::Beta::Text.new(color: :muted)) { "No events recorded." } %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+</div>

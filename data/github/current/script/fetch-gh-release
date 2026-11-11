@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+#/ Usage: fetch-gh-release REPOSITORY [VERSION_CMD]
+#/
+#/ Fetch the specified version of a package with releases listed under <REPOSITORY> and install the binary under vendor/ci-bin
+#/ Pinned versions to fetch are specified which is specified in config/<REPOSITORY>-version and install it to vendor/ci-bin
+#/ VERSION_CMD allows overriding the commandline argument for checking the installed version of a binary ("--version" by default)
+#/
+#/ When updating pinned versions, also update the pinned cache version in github/compute-images:
+#/ https://github.com/github/compute-images/blob/7332cb1f3c0cfe641a6bd0fa2dc5a62867df0e0c/github-runners/github-full-golden-mysql8/script/bootstrap
+#/
+set -e
+
+# Fetch the built release artifact
+fetch() {
+    mkdir -p "${INSTALLDIR}"
+    pushd "${INSTALLDIR}" &>/dev/null
+
+    retries=5
+    set +e
+    for ((; retries>0; retries--)); do
+      fetch_release && break
+      sleep 45
+    done
+    set -e
+
+    popd &>/dev/null
+    ((retries == 0 )) && { echo "Failed to fetch ${TARGET} after 5 attempts"; clean_exit 1; } || return 0
+}
+
+fetch_release() {
+    repo="github/${TARGET}"
+    file="${TARGET}_Linux_x86_64.tar.gz"
+    file_with_version="${TARGET}_Linux_x86_64_${DESIRED_VERSION}.tar.gz"
+
+    if [[ -f "/opt/github_tools_cache/${file_with_version}" ]]; then
+      tar -xzf "/opt/github_tools_cache/${file_with_version}" "${TARGET}"
+      if [[ $? -eq 0 ]]; then
+        echo "Fetched ${TARGET} from github_tools_cache"
+        return 0
+      else
+        echo "Failed to extract ${TARGET} from github_tools_cache, proceeding to download from GitHub Releases"
+      fi
+    fi
+
+    # Credentials for gh cli
+    if [[ "${GITHUB_SERVER_URL}" = "${MIRROR_SERVER_URL}" ]] && [[ -n "${MIRROR_SERVER_URL}" ]]; then
+      echo "Configuring gh cli to use resiliency mirror"
+      declare -x GH_HOST="${GITHUB_SERVER_URL##*://}"
+      declare -x GH_ENTERPRISE_TOKEN="${BP_GITHUB_MIRROR_TOKEN}"
+    else
+      echo "Configuring gh cli to use dotcom"
+      declare -x GH_TOKEN="$BP_GITHUB_TOKEN"
+    fi
+
+    if [[ -n "${BP_GITHUB_TOKEN}" ]]; then
+      echo "Using DX Bot PAT"
+      declare -x GITHUB_TOKEN="${BP_GITHUB_TOKEN}"
+    fi
+
+    gh release download --clobber -R "${repo}" -p "${file}" -O "/tmp/${file}" "${DESIRED_VERSION}" || return 1
+    tar -xzf "/tmp/${file}" "${TARGET}" || return 1
+
+    return 0
+}
+
+check_release() {
+    if [[ -x "${INSTALLDIR}/${TARGET}" ]] && [[ "${DESIRED_VERSION}" = $("${INSTALLDIR}/${TARGET}" "${VERSION_CMD}") ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Syncing is sometimes insufficient and a filehandle remains open from tar extraction in fetch()
+verify_release() {
+    retries=3
+    for ((; retries>0; retries--)); do
+      check_release && break
+      sleep 5
+    done
+    (( retries == 0 )) && return 1 || return 0
+}
+
+# Return to the previous working path prior to exiting
+clean_exit() {
+  popd &>/dev/null
+  exit "${1}"
+}
+
+# show usage
+if [[ "${1}" = "--help" ]] || [[ -z "${1}" ]]; then
+    grep '^#/' <"$0" |cut -c4-
+    exit 1
+fi
+
+# Run from the parent directory relative to this script (will be restored at exit time)
+pushd "$(dirname "$0")/.." &>/dev/null
+
+INSTALLDIR="vendor/ci-bin"
+TARGET="${1}"
+VERSION_CMD="${2:---version}"
+DESIRED_VERSION=$(grep -v ^# config/"${TARGET}"-version)
+
+# If the desired release is already present, no need to continue
+if check_release; then
+    echo "${TARGET} ${DESIRED_VERSION} is up-to-date."
+    clean_exit 0
+fi
+
+# Fetch and install the desired release
+echo "Fetching a new version of ${TARGET}: ${DESIRED_VERSION}"
+fetch
+if verify_release; then
+    echo "${TARGET} installed at $(realpath "${INSTALLDIR}")."
+    clean_exit 0
+else
+    echo "Unable to install the desired version of ${TARGET}!"
+    clean_exit 1
+fi

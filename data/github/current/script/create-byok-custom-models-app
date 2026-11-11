@@ -1,0 +1,44 @@
+#!/usr/bin/env safe-ruby
+# typed: true
+# frozen_string_literal: true
+
+puts "=> Loading the environment..."
+
+require_relative "../config/environment"
+
+unless Rails.env.development?
+  puts "=> This script is only intended for development."
+  exit 1
+end
+
+class CreateByokCustomModelsApp
+  def call
+    if Apps::Privileged.integration(:byok_custom_models).present?
+      puts "=> The BYOK custom models GitHub app already exists."
+    else
+      puts "=> Creating the BYOK custom models GitHub app..."
+      integration = Apps::Privileged::ByokCustomModels.seed_database!
+      create_dot_env_file(integration)
+    end
+  end
+
+  private
+
+  def create_dot_env_file(integration)
+    File.open(dotenv_path, "w") do |file|
+      file.puts "BYOK_CUSTOM_MODELS_APP_NEXT_GLOBAL_ID=\"#{integration.next_global_id}\""
+    end
+  end
+
+  def dotenv_path
+    dotenv_path = "tmp/byok-custom-models.env.local"
+
+    puts "Saving BYOK Custom Models envvars to `#{dotenv_path}`"
+    dotenv_path
+  end
+end
+
+if __FILE__ == $0
+  CreateByokCustomModelsApp.new.call
+  puts "=> Done!"
+end

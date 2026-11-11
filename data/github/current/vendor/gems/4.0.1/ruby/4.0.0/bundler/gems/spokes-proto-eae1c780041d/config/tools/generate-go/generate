@@ -1,0 +1,32 @@
+#!/bin/bash
+#
+# Expected to execute inside the docker container built from config/tools/protoc/Dockerfile
+#
+set -e
+
+echo "Cleaning older version..."
+
+rm -rf gen/go
+
+echo "Applying template..."
+
+cp -r _template/go gen
+
+echo "Generating proto files..."
+
+# locate all .proto files under the supplied directory
+# and generate appropriate code (protobuf, Twirp etc.)
+for protofile in $(find ./proto -type f -name '*.proto'); do
+
+  # API protobuf files require additional Twirp generation step.
+  # Streaming API is a special case, isn't implemented on Twirp
+  twirp_out=
+  if [[ $protofile =~ .*_api\.proto$ ]] && [[ ! $protofile =~ streaming ]]; then
+    twirp_out="--twirp_out=$GOPATH/src"
+    twirp_out="${twirp_out} --spokes-api-base_out=$GOPATH/src"
+  fi
+
+  cmd="protoc --proto_path=proto ${twirp_out} --go_out=$GOPATH/src ${protofile}"
+  echo "$cmd"
+  $cmd
+done

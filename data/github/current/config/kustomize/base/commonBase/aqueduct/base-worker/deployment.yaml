@@ -1,0 +1,140 @@
+# Common base template for aqueduct workers - inherited by production and proxima base-workers
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aqueduct-worker
+  labels:
+    service: aqueduct-worker
+    role: production
+  annotations:
+    moda.github.net/image-placeholder: "github"
+    moda.github.net/inject-moda-env-vars-into-containers: aqueduct
+    moda.github.net/inject-otel-env-vars-into-containers: "aqueduct"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  strategy:
+    rollingUpdate:
+      maxSurge: 50%
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      service: aqueduct-worker
+      role: production
+  template:
+    metadata:
+      labels:
+        service: aqueduct-worker
+        role: production
+      annotations:
+        ad.datadoghq.com/aqueduct.checks: |
+          {
+              "openmetrics": {
+                  "init_config": {},
+                  "instances": [{
+                        "prometheus_url": "http://%%host%%:9988/metrics",
+                        "namespace": "aqueduct",
+                        "metrics": [
+                            {"aqueduct_workers_count": "workers.count"},
+                            {"aqueduct_workers_idle_count": "workers.idle.count"},
+                            {"aqueduct_workers_active_count": "workers.active.count"},
+                            {"aqueduct_workers_count_by_state": "workers.by_state.count"},
+                            {"aqueduct_workers_by_shard": "workers.by_shard.count"},
+                            {"aqueduct_active_workers_by_shard": "workers.active.by_shard.count"},
+                            {"aqueduct_active_workers_by_queue": "workers.active.by_queue.count"}
+                        ]
+                  }]
+              }
+          }
+        observability.github.com/splunk_index: prod-resque
+        fluentbit.io/parser: logfmt_sloppy
+        ad.datadoghq.com/tolerate-unready: "true"
+    spec:
+      dnsPolicy: Default
+      volumes:
+        - name: github-metadata
+          hostPath:
+            path: /etc/github/metadata.json
+        - name: resqued-pidfile
+          emptyDir: {}
+        - name: syslog
+          hostPath:
+            path: /dev/log
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 300
+      containers:
+        - name: aqueduct
+          image: github
+          readinessProbe:
+            initialDelaySeconds: 31
+            exec:
+              command: ["test", "-f", "/resqued-pidfile/resqued.ready"]
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - "bin/resqued"
+                  - "quit-and-wait"
+                  - "/resqued-pidfile/resqued.pid"
+                  - "--grace-period"
+                  - "300"
+          ports:
+            - name: metrics
+              containerPort: 9988
+              protocol: TCP
+          volumeMounts:
+            - mountPath: /etc/github/metadata.json
+              name: github-metadata
+              readOnly: true
+            - mountPath: /resqued-pidfile
+              name: resqued-pidfile
+            - mountPath: /dev/log
+              name: syslog
+              readOnly: true
+          env:
+            - name: RESQUED_WORKER_POOL_SIZE
+              value: "10"
+            - name: JOB_WORKER_GRACEFUL_MEMORY_LIMIT_IN_MB
+              value: "2560"
+            - name: RAILS_ENV
+              value: production
+            - name: FAILBOT_CONTEXT_KUBE_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: FAILBOT_CONTEXT_KUBE_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: FAILBOT_CONTEXT_KUBE_CLUSTER
+              valueFrom:
+                configMapKeyRef:
+                  key: kubernetes_cluster_name
+                  name: kube-cluster-metadata
+            - name: DOGSTATSD_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: KUBE_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: DOGSTATSD_ADDITIONAL_TAGS
+              value: "kube_deployment:WORKER"
+            - name: USE_GLB_BALANCED_MAIL
+              value: '1'
+            - name: GITHUB_CONFIG_ROLE
+              value: "WORKER"
+            - name: RESQUED_WORKER_POOL_READY_FILE
+              value: "/resqued-pidfile/resqued.ready"
+            - name: RESQUED_METRICS_SERVER_ADDRESS
+              value: "0.0.0.0:9989"
+            - name: OTEL_SERVICE_NAME
+              value: "github-WORKER"
+          envFrom:
+            - configMapRef:
+                name: observability-config
+            - configMapRef:
+                name: application-config
+            - secretRef:
+                name: vault-secrets

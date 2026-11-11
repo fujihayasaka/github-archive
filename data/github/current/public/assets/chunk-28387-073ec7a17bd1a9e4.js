@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["28387"],{814958(e,i,t){t.r(i),(0,t(821744).on)("click",".email-hidden-toggle",function(e){let i=e.currentTarget.nextElementSibling;i instanceof HTMLElement&&(i.style.display="",i.classList.toggle("expanded"),e.preventDefault())})}}]);
+//# sourceMappingURL=chunk-28387-073ec7a17bd1a9e4-632b8350a38991a9.js.map

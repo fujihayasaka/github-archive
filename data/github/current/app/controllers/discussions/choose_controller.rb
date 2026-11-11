@@ -1,0 +1,106 @@
+# typed: true
+# frozen_string_literal: true
+
+class Discussions::ChooseController < Discussions::BaseController
+  before_action :login_required_redirect_for_public_repo, only: :show
+  before_action :set_org_context_crumb, only: :show, if: :is_org_level?
+  before_action :require_create_permissions, only: :show
+
+  depends_on_clusters ApplicationRecord::Mysql1,
+    ApplicationRecord::Repositories,
+    ApplicationRecord::Collab,
+    ApplicationRecord::Configurations,
+    ApplicationRecord::Mysql2,
+    ApplicationRecord::NotificationsEntries,
+    ApplicationRecord::Mysql5,
+    ApplicationRecord::IamAbilities,
+    ApplicationRecord::Spokes,
+    ApplicationRecord::IssuesPullRequests,
+    ApplicationRecord::Memex,
+    only: [:show]
+
+  depends_on_clusters ApplicationRecord::Copilot,
+    only: [:show],
+    optional: true
+
+  preload_features [
+    :notifyd_label_subscriptions,
+    :skip_open_graph_url_encoding,
+    :stacks_toggle,
+    :otel_rack_middleware,
+    :two_factor_checkup,
+    :allow_internal_org_config_repo_if_public_repos_disabled, # Global health repo for EMU orgs
+    :global_health_files_repository_loader_new_fetch_implementation, # Global health repo for EMU orgs
+    :emu_vss_business,
+    :enterprise_banners_repo_level,
+    :api_insights_rest,
+    :copilot_conversational_ux_license_check,
+    :copilot_for_partners,
+    :copilot_cb_rollout,
+    :copilot_ce_rollout,
+    :copilot_cs_rollout,
+    :copilot_limited_rollout,
+    :copilot_pro_plus_rollout,
+    :copilot_pro_rollout,
+    :copilot_swe_agent,
+    :copilot_swe_agent_disallow,
+    :copilot_swe_agent_public_repos,
+    :repo_agents_show_upgrade_slate,
+    :owner_scoped_github_apps,
+    :interaction_limit_kv_fallback,
+    :stafftools_tenant_use_parameter,
+    :proxima_repository_advisories,
+    :copilot_natural_language_github_search,
+    :private_avatars,
+    :reserved_domain,
+    :use_billing_locked_rather_than_disabled,
+    :saml_satisfied_debug_logging,
+    :enterprise_teams_killswitch,
+    :limit_execution_time_notification_entries,
+    :limit_execution_time_indicator,
+    :notifications_remove_force_index,
+    :use_new_view_settings_authzd_policy,
+    :avoid_large_query_user_collabs_on_repos_candidate,
+    :remove_custom_role_requirement_repo_settings,
+    :remove_bill_mgr_internal_repo,
+    :application_record_attribute_access_telemetry,
+    :application_record_attribute_access_telemetry_route,
+    :copilot_api_override_url_fallback,
+    :remote_cache_repo,
+    :remote_cache_repo_rollout,
+    :react_version_mismatch_detection,
+    :dashboard_universe_2025_default,
+    :code_quality_navigation_changes,
+    :wiki_has_pages_fast_check,
+    :marketing_localization_experiment,
+  ]
+
+  def show
+    current_repository = self.current_repository
+    if current_repository && current_repository.organization_discussion.present? & !is_org_level?
+      return redirect_to org_choose_category_discussion_path(current_repository.organization)
+    end
+
+    available_categories = current_repository&.available_discussion_categories_for_actor(current_user) ||
+      DiscussionCategory.none
+    render "discussions/choose/show",
+      locals: {
+        discussion_categories: available_categories
+      }
+  end
+
+  private
+
+  def set_org_context_crumb
+    return unless header_redesign_enabled?
+    return if this_organization.nil?
+    set_nav_breadcrumb ContextRegion::Factory.build(this_organization, current_user: current_user)
+  end
+
+  def require_create_permissions
+    unless current_user.can_create_discussion?(current_repository)
+      flash[:error] = "You can't perform that action at this time."
+      redirect_to agnostic_discussions_path(org_param: org_param)
+    end
+  end
+end

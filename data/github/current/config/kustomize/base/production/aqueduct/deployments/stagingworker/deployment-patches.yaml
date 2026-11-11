@@ -1,0 +1,56 @@
+# Worker-specific patches for stagingworker
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aqueduct-worker
+  annotations:
+    moda.github.net/allow-missing-ready-pods: "1"
+spec:
+  strategy:
+    rollingUpdate:
+      maxSurge: 40%
+  template:
+    spec:
+      volumes:
+        - name: geoip2
+          emptyDir: {}
+      initContainers:
+        - name: geoip
+          image: "octofactory.service.private-us-east-1.github.net/moda-artifacts-docker/geoip2:master"
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "cp /data/geoip2/* /shared-geoip2"]
+          resources:
+            requests:
+              cpu: 50m
+          volumeMounts:
+            - name: geoip2
+              mountPath: "/shared-geoip2"
+      containers:
+        - name: aqueduct
+          args:
+            - bin/resqued
+            - --pidfile
+            - /resqued-pidfile/resqued.pid
+            - config/resqued/github-environment.rb
+            - config/resqued/github-stagingworker-kube.rb
+          volumeMounts:
+            - mountPath: /usr/share/GeoIP
+              name: geoip2
+          resources:
+            requests:
+              cpu: 4
+              memory: 13Gi
+            limits:
+              cpu: 10
+              memory: 18Gi
+          env:
+            - name: JOB_WORKER_GRACEFUL_MEMORY_LIMIT_IN_MB
+              value: "2560"
+            - name: DOGSTATSD_ADDITIONAL_TAGS
+              value: "kube_deployment:stagingworker"
+            - name: GITHUB_CONFIG_ROLE
+              value: "stagingworker"
+            - name: OTEL_SERVICE_NAME
+              value: "github-stagingworker-kube"
+            - name: OTEL_LOGGER_ENABLED
+              value: "true"

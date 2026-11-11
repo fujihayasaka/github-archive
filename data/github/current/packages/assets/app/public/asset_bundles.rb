@@ -1,0 +1,350 @@
+# typed: strict
+# frozen_string_literal: true
+
+require "json"
+
+class AssetBundles
+  class AssetVerifyError < StandardError; end
+
+  sig { void }
+  def self.verify_assets!
+    new(brotli: false).verify!
+  end
+
+  sig { returns(Symbol) }
+  attr_reader :bundler
+  sig { returns(GitHubUI::Manifest) }
+  attr_reader :ui_manifest
+  sig { returns(T::Array[String]) }
+  attr_reader :required_bundles
+  sig { returns(T::Array[String]) }
+  attr_reader :required_stylesheet_bundles
+  sig { returns(T::Array[String]) }
+  attr_reader :deferred_bundles
+
+  sig { params(assets: T.nilable(String), brotli: T::Boolean).void }
+  def initialize(assets: nil, brotli: true)
+    @ui_manifest = T.let(GitHubUI::Manifest.new(assets: assets, brotli: brotli), GitHubUI::Manifest)
+    @bundler = T.let(@ui_manifest.active_bundler, Symbol)
+    @js_data = T.let(nil, T.nilable(GitHubUI::Manifest::BundlerManifest))
+    @css_data = T.let(nil, T.nilable(GitHubUI::Manifest::BundlerManifest))
+    @bundles = T.let(nil, T.nilable(T::Array[T.any(String, Symbol)]))
+
+    @deferred_bundles = T.let(define_deferred_bundles, T::Array[String])
+    @required_bundles = T.let(define_required_bundles, T::Array[String])
+    @required_stylesheet_bundles = T.let(define_required_stylesheet_bundles, T::Array[String])
+    @required_stylesheet_bundles << "development" if Rails.env.development?
+  end
+
+  sig { params(file: String).returns(GitHubUI::Manifest::BundlerManifest) }
+  def manifest_for_file(file)
+    return js_data if file.ends_with?(".module.css")
+    return css_data if file.ends_with?(".css", ".css.js")
+
+    js_data
+  end
+
+  sig { returns(GitHubUI::Manifest::BundlerManifest) }
+  def js_data
+    return @js_data if @js_data.present?
+
+    js_bundler = @bundler
+    @js_data = @ui_manifest.manifest_for_bundler(js_bundler)
+  end
+
+  sig { returns(GitHubUI::Manifest::BundlerManifest) }
+  def css_data
+    return @css_data if @css_data.present?
+
+    css_bundler = @bundler == :vite ? "vite" : "css"
+    @css_data = @ui_manifest.manifest_for_bundler(css_bundler)
+  end
+
+  # Finds the top-level script bundles produced by Rollup during
+  # compilation. Chunk files, output from Rollup's code splitting algorithm,
+  # are not listed here.
+  #
+  # Examples
+  #
+  #   AssetBundles.get.bundles
+  #   # => ["github.js", "projects.js", ...]
+  #
+  # Returns an Array<String> of bundle names.
+  sig { returns(T::Array[T.any(String, Symbol)]) }
+  def bundles
+    return @bundles if @bundles.present?
+
+    @bundles = js_data.keys.select do |bundle|
+      !bundle.starts_with?("chunk-") &&
+      (bundle.ends_with?(".js") || bundle.ends_with?(".css"))
+    end.freeze
+  end
+
+  DEFERRABLE_BUNDLES = T.let(
+    ["github-elements.js", "element-registry.js", "notifications-global.js"].freeze,
+    T::Array[String],
+  )
+
+  sig { returns(T::Array[String]) }
+  def define_required_bundles
+    required_bundles = @bundler != :webpack ? [] : ["wp-runtime.js"]
+    behaviors_bundle = behaviors_lazy_define_enabled? && bundle_exists?("behaviors-lazy.js") ? "behaviors-lazy.js" : "behaviors.js"
+    required_bundles += ["environment.js", "github-elements.js", "element-registry.js", behaviors_bundle, "notifications-global.js"]
+    if @deferred_bundles.any? && bundle_exists?("lazy-required-loader.js")
+      required_bundles -= @deferred_bundles
+
+      required_bundles << "lazy-required-loader.js"
+    end
+    required_bundles << "development.js" if Rails.env.development?
+    required_bundles
+  end
+
+  sig { returns(T::Array[String]) }
+  def define_deferred_bundles
+    return [] unless defer_required_bundles_after_react_enabled?
+
+    deferrable_bundles = DEFERRABLE_BUNDLES.dup
+    deferrable_bundles << (behaviors_lazy_define_enabled? ? "behaviors-lazy.js" : "behaviors.js")
+    deferrable_bundles
+  end
+
+  sig { returns(T::Array[String]) }
+  def define_required_stylesheet_bundles
+    primer_bundle = primer_tailwind_compatible_enabled? ? "primer-tailwind-compatible" : "primer"
+
+    stylesheets = ["primer-primitives", primer_bundle, "global", "github"]
+    stylesheets << "tailwind" if primer_tailwind_utilities_enabled?
+    stylesheets
+  end
+
+  sig { returns(T::Boolean) }
+  def primer_tailwind_compatible_enabled?
+    FeatureFlag.vexi.enabled?("primer_tailwind_compatible", GH.identity_context.domain_actor, default: false)
+  end
+
+  sig { returns(T::Boolean) }
+  def defer_required_bundles_after_react_enabled?
+    return false unless GitHub.context[:controller] == "issues" || GitHub.context[:controller] == "voltron/issues_fragments"
+
+    FeatureFlag.vexi.enabled?("defer_required_bundles_after_react", GH.identity_context.domain_actor, default: false)
+  end
+
+  sig { returns(T::Boolean) }
+  def primer_tailwind_utilities_enabled?
+    FeatureFlag.vexi.enabled?(:primer_tailwind_utilities, GH.identity_context.domain_actor, default: false)
+  end
+
+  sig { returns(T::Boolean) }
+  def behaviors_lazy_define_enabled?
+    FeatureFlag.vexi.enabled?("behaviors_lazy_define", GH.identity_context.domain_actor, default: false)
+  end
+
+  # Returns true if the bundle's short name exists in the manifest file.
+  #
+  # name - The bundle's short name (e.g. github.js).
+  #
+  # Examples
+  #
+  #   assets = AssetBundles.get
+  #   assets.bundle_exists?("github.js")
+  #   # => true
+  #   assets.bundle_exists?("github-deadbeef.js")
+  #   # => false
+  #
+  # Returns true for bundle names in `manifest.json`.
+  sig { params(name: String).returns(T::Boolean) }
+  def bundle_exists?(name)
+    manifest_for_file(name).key?(name)
+  end
+
+  # Expands the script bundle's short name into a fingerprinted file name
+  # to be served in production. The fingerprint is a content addressable hash
+  # of the file's content.
+  #
+  # source - The bundle's short name (e.g. github.js).
+  #
+  # Examples
+  #
+  #   AssetBundles.get.expand_bundle_name("github.js")
+  #   # => "github-deadbeef.js"
+  #
+  # Returns a fingerprinted file name.
+  sig { params(source: T.any(String, Symbol)).returns(String) }
+  def expand_bundle_name(source)
+    expand_bundle(source.to_s)["src"]
+  end
+
+  # Strips the path and fingerprint from a file name to resolve it to the
+  # bundle's short name.
+  #
+  # source - The bundle's fingerprinted name (e.g. /assets/github-deadbeef.js).
+  #
+  # Examples
+  #
+  #   AssetBundles.get.bare_bundle_name("/assets/github-deadbeef.js")
+  #   # => "github.js"
+  #
+  # Returns a bundle's short name.
+  sig { params(source: String).returns(String) }
+  def bare_bundle_name(source)
+    File.basename(source).sub(/\A([\w(\-|\.)]+)-[a-f0-9]+(\.\w+)\Z/, '\1\2')
+  end
+
+  # Returns the script bundle's full URL on the CDN.
+  #
+  # source - A String bundle short name to expand (e.g. github.js).
+  # asset_host_url - A String URL to use as the asset host.
+  #
+  # Examples
+  #
+  #   AssetBundles.get.bundle_url("github.js")
+  #   # => "https://github.githubassets.com/assets/github-deadbeef.js"
+  #   # => "http://github.localhost/webpack/github.js"
+  #
+  # Returns a URL string.
+  sig { params(source: T.any(String, Symbol), asset_host_url: String, expand: T::Boolean).returns(String) }
+  def bundle_url(source, asset_host_url: GitHub.asset_host_url, expand: true)
+    assets_path = if GitHub.webpack_dev_server_enabled?
+      "webpack"
+    elsif GitHub.vite_dev_server_enabled?
+      "vite"
+    else
+      "assets"
+    end
+    filename = expand ? expand_bundle_name(source) : source
+    File.join(asset_host_url, assets_path, filename)
+  end
+
+  # Expands the bundle's required files to load.
+  #
+  # source - The bundle's short name (e.g. github.js).
+  #
+  # Examples
+  #
+  #   AssetBundles.get.expand_bundle_files("github.js")
+  #   # => [{ "src" => "github-deadbeef.js" }, { "css_src" => "github-deadbeef.module.css" }]
+  #
+  # Returns an array of files, each with a `src` key.
+  sig { params(source: String).returns(T::Array[{ src: String, blocking: T::Boolean, css_src: String }]) }
+  def expand_bundle_files(source)
+    bundle = expand_bundle(source)
+
+    return [bundle.symbolize_keys] unless bundle["files"] || bundle["cssFiles"]
+
+    js_bundles = bundle["files"].map do |file|
+      {
+        src: file,
+        blocking: bundle["blocking"] || false,
+      }
+    end
+
+    css_bundles = (bundle["cssFiles"] || []).map do |file|
+      {
+        css_src: file
+      }
+    end
+
+    js_bundles + css_bundles
+  end
+
+  # Expands the bundle's information.
+  #
+  # source - The bundle's short name (e.g. github.js).
+  #
+  # Examples
+  #
+  #   AssetBundles.get.expand_bundle("github.js")
+  #   # => { "src" => "github-deadbeef.js" }
+  sig { params(source: String).returns(T::Hash[T.any(String, Symbol), T.untyped]) }
+  def expand_bundle(source)
+    manifest_for_file(source).fetch(source)
+  end
+
+  sig { void }
+  def verify!
+    css_bundles = required_stylesheet_bundles
+    js_bundles = required_bundles
+
+    all_assets_valid = (css_bundles + js_bundles).map do |bundle|
+      expand_bundle_files(bundle).length > 0
+    end.all?(true)
+    raise AssetVerifyError.new("Asset verification failed") unless all_assets_valid
+  rescue KeyError
+    raise AssetVerifyError.new("Asset verification failed")
+  end
+
+  # Resolves dynamic CSS chunk names to their fingerprinted CSS filenames.
+  #
+  # chunk_names - Array of dynamic chunk names (e.g. ["dynamic-github-ui--repos--HomePage"])
+  #
+  # Examples
+  #
+  #   AssetBundles.get.dynamic_css_files(["dynamic-github-ui--repos--HomePage"])
+  #   # => ["dynamic-github-ui--repos--HomePage.abc123.module.css"]
+  #
+  # Returns an Array<String> of fingerprinted CSS filenames.
+  sig { params(chunk_names: T::Array[String]).returns(T::Array[String]) }
+  def dynamic_css_files(chunk_names)
+    chunk_map = js_data["__dynamicChunkMap__"]
+    return [] unless chunk_map.is_a?(Hash)
+
+    chunk_names.flat_map do |name|
+      entry = chunk_map[name]
+      next [] unless entry.is_a?(Hash)
+
+      Array(entry["css"])
+    end.uniq
+  end
+
+  # Resolves dynamic chunk names to their JS filenames for modulepreload.
+  #
+  # chunk_names - Array of dynamic chunk names (e.g. ["dynamic-github-ui--repos--HomePage"])
+  #
+  # Examples
+  #
+  #   AssetBundles.get.dynamic_js_files(["dynamic-github-ui--repos--HomePage"])
+  #   # => ["dynamic-github-ui--repos--HomePage-abc123.js", "packages_filter_Filter-def456.js"]
+  #
+  # Returns an Array<String> of JS filenames.
+  sig { params(chunk_names: T::Array[String]).returns(T::Array[String]) }
+  def dynamic_js_files(chunk_names)
+    chunk_map = js_data["__dynamicChunkMap__"]
+    return [] unless chunk_map.is_a?(Hash)
+
+    chunk_names.flat_map do |name|
+      entry = chunk_map[name]
+      next [] unless entry.is_a?(Hash)
+
+      Array(entry["js"])
+    end.uniq
+  end
+
+  # Returns sibling chunk names for the given rendered chunks.
+  #
+  # Siblings are dynamic() components imported from the same source file
+  # (typically a routes registration).  They are encoded in the build
+  # manifest by the rspack plugin under the "siblings" key of each entry
+  # in __dynamicChunkMap__.
+  #
+  # chunk_names - Array of rendered dynamic chunk names.
+  #
+  # Returns an Array<String> of chunk names that are siblings of the
+  #   rendered chunks but were NOT themselves rendered.
+  sig { params(chunk_names: T::Array[String]).returns(T::Array[String]) }
+  def dynamic_sibling_chunk_names(chunk_names)
+    chunk_map = js_data["__dynamicChunkMap__"]
+    return [] unless chunk_map.is_a?(Hash)
+
+    rendered_set = Set.new(chunk_names)
+    siblings = Set.new
+
+    chunk_names.each do |name|
+      entry = chunk_map[name]
+      next unless entry.is_a?(Hash)
+
+      Array(entry["siblings"]).each { |s| siblings.add(s) }
+    end
+
+    (siblings - rendered_set).to_a
+  end
+end

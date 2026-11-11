@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["20035"],{514958(e,i,t){t.r(i),t.d(i,{CopilotMarketingPopoverElement:()=>r});var o=t(331635),l=t(194571);class r extends HTMLElement{connectedCallback(){this.displayFirstPopover()}displayFirstPopover(){let e=document.querySelector("copilot-marketing-popover");this&&e&&this.isEqualNode(e)&&this.removeAttribute("hidden")}}r=(0,o.Cg)([(0,l.p_)("copilot-marketing-popover")],r)}}]);
+//# sourceMappingURL=chunk-20035-11d4f835a804bbb7-f3b12e2975cefaf2.js.map

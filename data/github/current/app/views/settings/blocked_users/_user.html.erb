@@ -1,0 +1,63 @@
+<% user = user_ignore.ignored %>
+<% date_format = "%b %d, %Y at %I:%M %p %Z" %>
+<li class="Box-row d-flex">
+  <div class="col-md-8">
+    <a class="Link--inTextBlock" href="<%= user_path(user) %>">
+      <%= avatar_for user, 20, class: "avatar mr-1" %>
+      <%= user.display_login %>
+    </a>
+
+    <div class="text-small color-fg-muted" style="margin-left: 28px;">
+      <% if current_organization && user_ignore.actor %>
+        Blocked by <a href="<%= user_path(user_ignore.actor) %>" class="Link--inTextBlock"><%= user_ignore.actor.display_login %></a>
+        <% if user_ignore.created_at %>
+          on <%= user_ignore.created_at.strftime(date_format) %>
+        <% end %>
+        <% if user_ignore.expires_at %>
+          • Blocked until <%= user_ignore.expires_at.strftime(date_format) %>
+        <% else %>
+          • Blocked indefinitely
+        <% end %>
+      <% elsif user_ignore.created_at %>
+        Blocked on <%= user_ignore.created_at.strftime(date_format) %> • Blocked indefinitely
+      <% end %>
+    </div>
+
+    <% if user_ignore.note.present? %>
+      <div class="mt-2 text-small" style="margin-left: 28px;">
+        Note:
+        <div class="color-fg-muted" style="margin-bottom: -12px">
+          <%= GitHub::Goomba::MarkdownPipeline.to_html(user_ignore.note) %>
+        </div>
+      </div>
+    <% end %>
+  </div>
+
+  <div class="ml-auto d-inline-flex">
+    <%= render(Primer::Alpha::ActionMenu.new(menu_id: "blocked-user-#{user.id}-actions")) do |menu| %>
+      <% menu.with_show_button(icon: "kebab-horizontal", aria: { label: "#{user.display_login} user actions" }, scheme: :invisible, classes: "btn-sm") %>
+
+      <% menu.with_item(
+        label: user_ignore.note.present? ? "Edit note" : "Add note",
+        tag: :button,
+        content_arguments: {"data-show-dialog-id": "note-dialog-#{user.id}"}
+      ) %>
+
+      <% menu.with_item(
+        label: "Unblock user",
+        href: current_organization ? organization_settings_blocked_user_path(
+          current_organization,
+          login: user.display_login,
+        ) : settings_blocked_user_path(user.display_login),
+        form_arguments: { method: :delete }
+      ) %>
+    <% end %>
+
+    <%= render IgnoredUsers::NoteComponent.new(
+      note: user_ignore.note,
+      target_user_login: user.display_login,
+      current_organization: current_organization,
+      dialog_id: "note-dialog-#{user.id}",
+    ) %>
+  </div>
+</li>

@@ -1,0 +1,1 @@
+const e=e=>{if(e){if(e.startsWith(`refs/tags/`))return`tag`;if(e.startsWith(`refs/heads/`))return`branch`}},t=(e,t)=>t===`branch`?`refs/heads/${e}`:t===`tag`?`refs/tags/${e}`:e,n=t=>{if(!t)return;if(!e(t))return t;let[,,...n]=t.split(`/`);return n.join(`/`)};export{n,t};

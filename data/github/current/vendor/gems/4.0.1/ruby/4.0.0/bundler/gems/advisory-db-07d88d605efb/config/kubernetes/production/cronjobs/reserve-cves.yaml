@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: reserve-cves
+    annotations:
+        heaven.githubapp.com/image-placeholder: "advisory-db"
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "reserve-cves"
+spec:
+    schedule: "0 3 28,29,30 12 *" # At 3:00am on the 28th, 29th, and 30th of December
+    successfulJobsHistoryLimit: 3
+    failedJobsHistoryLimit: 3
+    jobTemplate:
+        spec:
+            activeDeadlineSeconds: 3600
+            template:
+                spec:
+                    restartPolicy: Never
+                    containers:
+                        - name: reserve-cves
+                          image: advisory-db
+                          command:
+                            - bin/rake
+                            - advisory_db:reserve_cves
+                          envFrom:
+                            - configMapRef:
+                                name: rails
+                            - secretRef:
+                                name: vault-secrets
+                          env:
+                            - name: ADVISORY_DB_ROLE
+                              value: "cron"
+                            - name: DOGSTATSD_HOST
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: spec.nodeName
+    concurrencyPolicy: Forbid

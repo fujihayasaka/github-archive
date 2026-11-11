@@ -1,0 +1,504 @@
+openapi: 3.0.3
+info:
+  title: Copilot Session Log Payloads
+  version: 0.0.0
+  description: |
+    Shapes describing every JSON object that can be serialized inside the Server-Sent Events
+    body written by `CapiCopilotSessionsClient.log` when `sessionsViaProgressApi` is false.
+
+    ⚠️ DEPRECATED - This schema is deprecated and retained only for backward
+    compatibility with existing sessions. New integrations should use the
+    copilot namespace instead.
+
+    This schema defines the payload structure for progress updates with:
+    - namespace: "sessions-legacy"
+    - kind: "log"
+    - version: 0
+
+    The actual HTTP body is a text frame formatted as `data: <json>\n\n`, where `<json>` is
+    one of the schemas documented here.
+
+paths: {}
+
+components:
+  schemas:
+    SessionLogSseEnvelope:
+      type: string
+      description: |
+        Server-Sent Events record emitted by the log call. The string always has the shape
+        `data: <json>\n\n`, with `<json>` being a serialized `SessionLogsContent` value.
+
+    SessionLogsContent:
+      oneOf:
+        - $ref: "#/components/schemas/SessionsChatCompletionChunk"
+        - $ref: "#/components/schemas/SessionsChatCompletionMessageParam"
+      description: JSON object embedded inside the SSE data frame. This is the object logged to represent session activity.
+
+    SessionsChatCompletionChunk:
+      allOf:
+        - $ref: "#/components/schemas/ChatCompletionChunk"
+        - $ref: "#/components/schemas/AgentIdBag"
+      description: Chat completion chunk with optional agent ID
+
+    SessionsChatCompletionMessageParam:
+      oneOf:
+        - allOf:
+            - $ref: "#/components/schemas/SessionsUserMessageParam"
+            - $ref: "#/components/schemas/AgentIdBag"
+        - allOf:
+            - $ref: "#/components/schemas/ChatCompletionToolMessageParam"
+            - $ref: "#/components/schemas/AgentIdBag"
+      description: Either a user-authored message or a tool response, plus optional agent metadata.
+
+    SessionsUserMessageParam:
+      allOf:
+        - $ref: "#/components/schemas/ChatCompletionUserMessageParam"
+        - type: object
+          properties:
+            source:
+              type: string
+              description: |
+                The component which was the source of the user message.
+                - `jit-instruction`: The message was injected by something which adds automated instructions for the agent
+                - `command-{id}`: The message was injected as a result of a command with the given id
+                - `string`: Some other source
+      description: User message parameter with optional source field
+
+    AgentIdBag:
+      type: object
+      properties:
+        agentId:
+          type: string
+          description: Optional ID of the agent invocation that produced the log entry.
+      description: Container for agent ID
+
+    ChatCompletionChunk:
+      type: object
+      required:
+        - id
+        - choices
+        - created
+        - model
+        - object
+      properties:
+        id:
+          type: string
+          description: Unique identifier for the streamed chat completion.
+        choices:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatCompletionChunkChoice"
+          description: Streamed fragments emitted by the model and tool calls.
+        created:
+          type: integer
+          format: int64
+          description: Unix timestamp (in seconds) for when the chunk was created.
+        model:
+          type: string
+          description: Model identifier that generated the chunk.
+        object:
+          type: string
+          enum:
+            - chat.completion.chunk
+          description: Discriminator identifying the payload as an OpenAI chat completion chunk. always 'chat.completion.chunk'
+        service_tier:
+          type: string
+          enum:
+            - auto
+            - default
+            - flex
+            - scale
+            - priority
+          nullable: true
+          description: Processing tier used for serving the request.
+        system_fingerprint:
+          type: string
+          description: Backend fingerprint for determinism tracking.
+        usage:
+          $ref: "#/components/schemas/CompletionUsage"
+          nullable: true
+          description: An optional field containing token usage statistics (typically only present on the last chunk)
+
+    ChatCompletionChunkChoice:
+      type: object
+      required:
+        - delta
+        # - finish_reason
+        - index
+      properties:
+        delta:
+          $ref: "#/components/schemas/ChatCompletionChunkDelta"
+          description: Incremental message payload plus Copilot-specific reasoning metadata.
+        finish_reason:
+          type: string
+          enum:
+            - stop
+            - length
+            - tool_calls
+            - content_filter
+            - function_call
+          nullable: true
+          description: Reason token generation stopped for this choice.
+        index:
+          type: integer
+          description: Position of the choice within the chunk.
+        logprobs:
+          $ref: "#/components/schemas/ChatCompletionLogprobs"
+          nullable: true
+          description: Log probability information for the choice
+
+    ChatCompletionChunkDelta:
+      type: object
+      description: Incremental message payload plus Copilot-specific reasoning metadata.
+      properties:
+        content:
+          type: string
+          nullable: true
+          description: The contents of the chunk message
+        function_call:
+          $ref: "#/components/schemas/FunctionCall"
+          description: Deprecated and replaced by tool_calls
+        refusal:
+          type: string
+          nullable: true
+          description: The refusal message generated by the model
+        role:
+          type: string
+          enum:
+            - developer
+            - system
+            - user
+            - assistant
+            - tool
+          description: The role of the author of this message
+        tool_calls:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatCompletionChunkToolCall"
+          description: Tool calls generated by the model
+        reasoning_opaque:
+          type: string
+          description: Token used to resume the model's hidden reasoning state.
+        reasoning_text:
+          type: string
+          description: Human-readable reasoning trace emitted by o-series models.
+        encrypted_content:
+          type: string
+          nullable: true
+          description: Encrypted serialization of the model's internal state.
+
+    ChatCompletionChunkToolCall:
+      type: object
+      required:
+        - index
+      properties:
+        index:
+          type: integer
+          description: Relative order of the tool call within the chunk.
+        id:
+          type: string
+          description: Server-provided tool call identifier.
+        function:
+          $ref: "#/components/schemas/ToolCallFunction"
+          description: Function tool call details.
+        type:
+          type: string
+          enum:
+            - function
+          description: Discriminator identifying the tool call type. always 'function'
+
+    ToolCallFunction:
+      type: object
+      properties:
+        arguments:
+          type: string
+          description: JSON string with tool arguments (may be redacted before logging).
+        name:
+          type: string
+          description: Name of the function tool the model decided to call.
+
+    FunctionCall:
+      type: object
+      description: Deprecated function-call representation kept for backward compatibility.
+      deprecated: true
+      properties:
+        arguments:
+          type: string
+          description: JSON string with function arguments (may be redacted before logging).
+        name:
+          type: string
+          description: Name of the function the model decided to call.
+
+    ChatCompletionLogprobs:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatCompletionTokenLogprob"
+          nullable: true
+          description: List of message content tokens with log probability information.
+        refusal:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatCompletionTokenLogprob"
+          nullable: true
+          description: List of message refusal tokens with log probability information.
+
+    ChatCompletionTokenLogprob:
+      type: object
+      required:
+        - token
+        - bytes
+        - logprob
+        - top_logprobs
+      properties:
+        token:
+          type: string
+          description: The text of the token.
+        bytes:
+          type: array
+          items:
+            type: integer
+            format: int32
+          nullable: true
+          description: Byte representation of the token.
+        logprob:
+          type: number
+          description: The log probability of this token.
+        top_logprobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/TopLogprob"
+          description: List of the most probable tokens at this position with their log probabilities.
+
+    TopLogprob:
+      type: object
+      required:
+        - token
+        - bytes
+        - logprob
+      properties:
+        token:
+          type: string
+          description: The text of the token.
+        bytes:
+          type: array
+          items:
+            type: integer
+            format: int32
+          nullable: true
+          description: Byte representation of the token.
+        logprob:
+          type: number
+          description: The log probability of this token.
+
+    CompletionUsage:
+      type: object
+      required:
+        - prompt_tokens
+        - completion_tokens
+        - total_tokens
+      properties:
+        prompt_tokens:
+          type: integer
+          description: Tokens present in the prompt.
+        completion_tokens:
+          type: integer
+          description: Tokens generated in the response segment.
+        total_tokens:
+          type: integer
+          description: Sum of prompt and completion tokens.
+        completion_tokens_details:
+          $ref: "#/components/schemas/CompletionTokensDetails"
+          description: Detailed breakdown of completion token usage.
+        prompt_tokens_details:
+          $ref: "#/components/schemas/UsagePromptTokensDetails"
+          description: Detailed breakdown of prompt token usage.
+
+    CompletionTokensDetails:
+      type: object
+      properties:
+        accepted_prediction_tokens:
+          type: integer
+          description: Tokens contributing to the accepted prediction.
+        audio_tokens:
+          type: integer
+          description: Tokens used for audio generation.
+        reasoning_tokens:
+          type: integer
+          description: Tokens used for internal model reasoning.
+        rejected_prediction_tokens:
+          type: integer
+          description: Tokens from rejected predictions.
+
+    UsagePromptTokensDetails:
+      type: object
+      properties:
+        audio_tokens:
+          type: integer
+          description: Tokens used for audio input in the prompt.
+        cached_tokens:
+          type: integer
+          description: Tokens retrieved from cache in the prompt.
+    ChatCompletionUserMessageParam:
+      type: object
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+          enum:
+            - user
+          description: Role of the message author.
+        content:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                $ref: "#/components/schemas/ChatCompletionContentPart"
+          description: Message content, either as a string or structured parts.
+        name:
+          type: string
+          description: An optional name for the participant
+        source:
+          type: string
+          description: Identifier of the runtime component that injected the message.
+
+    ChatCompletionContentPart:
+      oneOf:
+        - $ref: "#/components/schemas/ChatCompletionContentPartText"
+        - $ref: "#/components/schemas/ChatCompletionContentPartImage"
+        - $ref: "#/components/schemas/ChatCompletionContentPartInputAudio"
+        - $ref: "#/components/schemas/ChatCompletionContentPartFile"
+      description: A part of the message content, which can be text, image, audio, or file.
+
+    ChatCompletionContentPartText:
+      type: object
+      required:
+        - type
+        - text
+      properties:
+        type:
+          type: string
+          enum:
+            - text
+          description: Discriminator identifying the content part type. always 'text'
+        text:
+          type: string
+          description: The text content of the message part.
+
+    ChatCompletionContentPartImage:
+      type: object
+      required:
+        - type
+        - image_url
+      properties:
+        type:
+          type: string
+          enum:
+            - image_url
+          description: Discriminator identifying the content part type. always 'image_url'
+        image_url:
+          $ref: "#/components/schemas/ImageUrl"
+          description: The URL of the image.
+
+    ImageUrl:
+      type: object
+      required:
+        - url
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Either a URL of the image or the base64 encoded image data
+        detail:
+          type: string
+          enum:
+            - auto
+            - low
+            - high
+          description: Level of detail for the image generation.
+
+    ChatCompletionContentPartInputAudio:
+      type: object
+      required:
+        - type
+        - input_audio
+      properties:
+        type:
+          type: string
+          enum:
+            - input_audio
+          description: Discriminator identifying the content part type. always 'input_audio'
+        input_audio:
+          $ref: "#/components/schemas/InputAudio"
+          description: The input audio payload.
+
+    InputAudio:
+      type: object
+      required:
+        - data
+        - format
+      properties:
+        data:
+          type: string
+          description: Base64-encoded audio payload.
+        format:
+          type: string
+          enum:
+            - wav
+            - mp3
+          description: Audio format of the input audio.
+
+    ChatCompletionToolMessageParam:
+      type: object
+      required:
+        - role
+        - content
+        - tool_call_id
+      properties:
+        role:
+          type: string
+          enum:
+            - tool
+          description: Role of the message author.
+        content:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                $ref: "#/components/schemas/ChatCompletionContentPartText"
+          description: Message content, either as a string or structured parts.
+        tool_call_id:
+          type: string
+          description: Identifier of the tool call that produced this message.
+
+    ChatCompletionContentPartFile:
+      type: object
+      required:
+        - type
+        - file
+      properties:
+        type:
+          type: string
+          enum:
+            - file
+          description: Discriminator identifying the content part type. always 'file'
+        file:
+          $ref: "#/components/schemas/ChatCompletionContentPartFileData"
+          description: The file data payload.
+
+    ChatCompletionContentPartFileData:
+      type: object
+      properties:
+        file_data:
+          type: string
+          description: Base64 encoded file bytes when the file is streamed inline.
+        file_id:
+          type: string
+          description: Identifier of an uploaded file referenced by the message.
+        filename:
+          type: string
+          description: Original file name supplied by the caller.

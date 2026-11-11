@@ -1,0 +1,1 @@
+const e=`GLOBAL_NAV_USER_MENU`;export{e as t};

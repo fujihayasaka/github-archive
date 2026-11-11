@@ -1,0 +1,89 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Script to list all endpoints (Rails routes and Sinatra API endpoints)
+# in a tab-delimited format:
+#   METHOD\tPATH\tCONTROLLER\tACTION\tSOURCE
+
+require "open3"
+
+def to_camel_case(str)
+  str.split("/").map { |part| part.split("_").map(&:capitalize).join }.join("::")
+end
+
+def parse_rails_routes
+  routes = []
+  output, status = Open3.capture2("bin/rails", "routes")
+  return routes unless status.success?
+
+  output.each_line do |line|
+    # Format: name  METHOD  PATH  controller#action
+    # Some lines may not have a name, and paths may be very long
+    parts = line.strip.split(/\s+/)
+    next if parts.size < 3
+
+    # Find the HTTP method (GET, POST, PUT, PATCH, DELETE)
+    method_idx = parts.find_index { |p| %w[GET POST PUT PATCH DELETE].include?(p) }
+    next unless method_idx
+
+    method = parts[method_idx]
+    path = parts[method_idx + 1]
+    controller_action = parts[method_idx + 2]
+
+    next unless path && controller_action
+    next if controller_action.start_with?("redirect(")
+
+    controller, action = controller_action.split("#", 2)
+    controller_camel = to_camel_case(controller)
+
+    routes << {
+      method: method,
+      path: path,
+      controller: controller_camel,
+      action: action,
+      source: "rails"
+    }
+  end
+
+  routes
+end
+
+def parse_api_routes
+  routes = []
+  output, status = Open3.capture2("bin/rake", "api:routes")
+  return routes unless status.success?
+
+  output.each_line do |line|
+    line = line.strip
+    # Skip namespace headers and empty lines
+    next if line.empty? || line.start_with?("###")
+
+    # Format: "    METHOD /path/to/endpoint"
+    match = line.match(/^(GET|POST|PUT|PATCH|DELETE)\s+(.+)$/)
+    next unless match
+
+    method = match[1]
+    path = match[2]
+
+    routes << {
+      method: method,
+      path: path,
+      controller: nil,
+      action: nil,
+      source: "api"
+    }
+  end
+
+  routes
+end
+
+# Collect and print all routes
+all_routes = []
+all_routes.concat(parse_rails_routes)
+all_routes.concat(parse_api_routes)
+
+all_routes.each do |route|
+  controller = route[:controller] || ""
+  action = route[:action] || ""
+  puts "#{route[:method]}\t#{route[:path]}\t#{controller}\t#{action}"
+end

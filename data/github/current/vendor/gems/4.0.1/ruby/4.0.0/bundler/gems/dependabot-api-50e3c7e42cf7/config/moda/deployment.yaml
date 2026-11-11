@@ -1,0 +1,99 @@
+environments:
+  - name: production
+    require_pipeline: true
+    extra_start_message: |
+      🚨 Please keep an eye on:
+      - 📈 [Deployment dashboard](https://app.datadoghq.com/dashboard/mzk-f93-u7m/dependabot-deployment-confidence?tpl_var_stamp%5B0%5D=dotcom)
+      - 💂 [Sentry recent issues](https://sentry.io/organizations/github/issues/?project=1861010&statsPeriod=1h) and [new issues](https://sentry.io/organizations/github/releases/{{RELEASE_SHA}}/?project=1861010)
+    extra_completed_message: ":tada:"
+    cluster_selector:
+      profile: general
+      region: iad
+    service_mesh:
+      enabled: true
+    timeout: 600
+    canaryable: true
+  - name: staff-wus2-01
+    require_pipeline: true
+    extra_start_message: |
+      🚨 Please keep an eye on:
+      - 📈 [Deployment dashboard](https://app.datadoghq.com/dashboard/mzk-f93-u7m/dependabot-deployment-confidence?tpl_var_stamp%5B0%5D=staff-wus2-01)
+      - 💂 [Sentry recent issues](https://sentry.io/organizations/github/issues/?project=1861010&statsPeriod=1h&environment=staff-wus2-01) and [new issues](https://sentry.io/organizations/github/releases/{{RELEASE_SHA}}/?project=1861010&environment=staff-wus2-01)
+    cluster_selector:
+      profile: proxima
+      stamp: staff-wus2-01
+    service_mesh:
+      enabled: true
+    timeout: 600
+    canaryable: false
+
+auto_start_pipeline: production_rollout
+required_builds:
+  - dependabot-api / dependabot-api
+  - dependabot-api-docker-image / dependabot-api-docker-image
+required_review_tasks:
+  - deploy
+ok_for_moda_to_remove_from_deprecating_clusters: true
+default_branch: main
+notifications:
+  slack_channels:
+    - "#dependabot-deployment-ops"
+
+proxima:
+  environment_pattern:
+    service_mesh:
+      enabled: true
+    timeout: 600
+    extra_start_message: |
+      🚨 Please keep an eye on:
+      - 📈 [Deployment dashboard](https://app.datadoghq.com/dashboard/mzk-f93-u7m/dependabot-deployment-confidence?tpl_var_stamp%5B0%5D={{stamp}})
+      - 💂 [Sentry recent issues](https://sentry.io/organizations/github/issues/?project=1861010&statsPeriod=1h&environment={{stamp}}) and [new issues](https://sentry.io/organizations/github/releases/{{RELEASE_SHA}}/?project=1861010&environment={{stamp}})
+  rollout_pattern:
+    - kind: deployment
+      start_message: |
+        :rocket: We're deploying {{app}}/{{ref}} to `{{stamp}}`!
+      config:
+        timeout: 600
+
+pipelines:
+  production_rollout:
+    append_proxima_stamps: true
+    thread_notifications: true
+    notify_users_via_dm: false
+    timeout: 3600
+    stages:
+      - name: ring-0
+        kind: concurrent_group
+        config:
+          environment: production
+        stages:
+        - name: canary
+          kind: canary_deployment
+          start_message: |
+            :rocket: We're deploying {{app}}/{{ref}} to `canary`!
+          config:
+            environment: production
+            hosts: canary
+            timeout: 300
+        - name: staff-wus2-01
+          kind: deployment
+          start_message: |
+            :rocket: We're deploying {{app}}/{{ref}} to `staff-wus2-01`!
+          config:
+            environment: staff-wus2-01
+            timeout: 600
+        gates:
+        - kind: timer
+          duration: 300
+      - name: dotcom
+        kind: deployment
+        start_message: |
+          :rocket: We're deploying {{app}}/{{ref}} to production
+        config:
+          timeout: 600
+          environment: production
+        gates:
+        - kind: acknowledgement
+          blocking: false
+        - kind: timer
+          duration: 600

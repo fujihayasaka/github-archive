@@ -1,0 +1,60 @@
+#!/usr/bin/env ruby
+#                                __  __
+#   ___  _ __   ___        ___  / _|/ _|
+#  / _ \| '_ \ / _ \_____ / _ \| |_| |_
+# | (_) | | | |  __/_____| (_) |  _|  _|
+#  \___/|_| |_|\___|      \___/|_| |_|
+#
+# One-off script to set `package_manager` and `package_name` columns of dg_package_versions table
+#
+# Usage: script/one_off/backfill-package-release-manager-and-name [-w]
+
+require_relative "../../config/environment"
+require "optparse"
+
+# Script populates package manager and name columns in package versions table
+# Backfills data by copying it over from packages table
+
+options = { update: false }
+OptionParser.new do |opts|
+  opts.on("-w", "--write", "Populate package name and manager columns for Package Releases") do
+    options[:update] = true
+  end
+
+  opts.on("--package-id=ID", "Package Id to start processing from") do |package_id|
+    options[:package_id] = package_id.to_i
+  end
+end.parse!(Array(ARGV))
+
+def process_package_versions(options)
+  begin
+    ActiveRecord::Base.connected_to(role: :reading) do
+      start_id = options[:package_id].nil? ? 0 : options[:package_id].to_i
+      puts "Starting Package import at #{start_id}"
+
+      package_versions_updated = 0
+
+      Package.in_batches(of: 100, start: start_id) do |batch|
+        batch.each do |package|
+          puts "\n Processing package ID #{package.id} \n"
+          package.releases.in_batches(of: 100) do |releases|
+
+            ActiveRecord::Base.connected_to(role: :writing) do
+              releases.update_all(package_manager: package.package_manager, package_name: package.name) if options[:update]
+            end
+
+            package_versions_updated += releases.size
+            puts "\n Processed #{package_versions_updated} package versions \n"
+          end
+        end
+      end
+      puts "\n #{options[:update] ? "Updated" : "Would have updated"} package name and package manager for #{package_versions_updated} package versions \n"
+    end
+  rescue => e
+    puts "Exception!"
+    Failbot.report(e)
+    raise e
+  end
+end
+
+process_package_versions(options)

@@ -1,0 +1,67 @@
+# typed: true
+# frozen_string_literal: true
+
+module GitHub
+  module Config
+    module CodeScanning
+
+      # String URL of the turboscan service
+      attr_accessor :turboscan_url
+      # Sets the HMAC key used to authenticate with the turboscan service
+      attr_accessor :turboscan_hmac_key
+      # Sets S3 Bucket for uploading files for turboscan
+      attr_accessor :turboscan_s3_bucket
+
+      # Details for Azure Storage for turboscan
+      attr_accessor :turboscan_azure_container
+      attr_accessor :turboscan_azure_account_name
+      attr_accessor :turboscan_azure_account_key
+      attr_accessor :turboscan_azure_storage_dns_suffix
+      attr_accessor :turboscan_azure_storage_tenant_id
+      attr_accessor :turboscan_azure_storage_client_id
+      attr_accessor :turboscan_azure_storage_client_secret
+
+      # Details for Azure Storage for turboquality
+      attr_accessor :turboquality_azure_container
+      attr_accessor :turboquality_azure_account_name
+      attr_accessor :turboquality_azure_account_key
+      attr_accessor :turboquality_azure_blob_host
+
+      def is_code_scanning_bot?(user)
+        user && user.bot? && user.integration.id == Apps::Privileged::CodeScanning.id
+      end
+
+
+      attr_accessor :turboghas_url, :turboghas_hmac_key
+      attr_accessor :turboquality_url, :turboquality_hmac_key
+
+
+      def dynamic_service_url(app_name, service_port, path, env: nil, service_name: nil, local_port: nil, use_mesh_on_dotcom: false)
+        environment_variable = env.present? ? env : "#{app_name.upcase}_URL"
+        return ENV[environment_variable] if ENV[environment_variable].present?
+
+        return "http://localhost:#{local_port || service_port}#{path}" if !Rails.env.production? || GitHub.single_tenant_enterprise?  # rubocop:disable GitHub/DoNotBranchOnRailsEnv
+
+        if GitHub.multi_tenant_enterprise? || use_mesh_on_dotcom
+          stamp = Proxima.current_stamp || "production"
+          if GitHub.environment.fetch("SERVICE_MESH_ENABLED", "false") == "true" && GitHub.environment.fetch("#{app_name.upcase}_DISABLE_SERVICE_MESH", "false") != "true"
+            # Some apps may expose multiple services on a single Istio address
+            # the service name should be provided to differentiate between them
+            return "http://#{service_name || app_name}.#{app_name}-#{stamp}.svc.cluster.local:#{service_port}#{path}"
+          elsif GitHub.multi_tenant_enterprise?
+            # Since console hosts and review labs are not currently part of the service mesh, we override the URL to a
+            # non-Istio address for easier debugging.
+            # This hack can be removed when non-Kubernetes hosts and review lab are added to the mesh, or the console
+            # hosts are moved to Kubernetes.
+            # For dotcom, we'll fallback to the non-mesh URL that includes -production and .iad.github.net.
+            return "https://#{app_name}.service.#{stamp}.github.net#{path}"
+          end
+        end
+
+        "https://#{app_name}-production.service.iad.github.net#{path}"
+      end
+    end
+  end
+
+  extend Config::CodeScanning
+end

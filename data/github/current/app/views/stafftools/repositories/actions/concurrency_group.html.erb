@@ -1,0 +1,127 @@
+<%= render(Primer::Beta::BorderBox.new) do |box| %>
+  <% box.with_header do %>
+    <span class="text-bold">
+      Concurrency Group: <code><%= group_name %></code>
+      <% if use_lab_run_service? %>
+        <%= render(Primer::Beta::Label.new(scheme: :attention, ml: 2)) { "Lab" } %>
+      <% end %>
+    </span>
+  <% end %>
+  <% box.with_body do %>
+    <div class="tmp-mb-3">
+      <%= link_to "← Back to Concurrency Groups",
+        actions_concurrency_groups_stafftools_repository_path(
+          current_repository.owner,
+          current_repository,
+          use_lab: use_lab_run_service? ? "true" : nil
+        ),
+        class: "Link--secondary" %>
+    </div>
+
+    <% if error %>
+      <%= render(Primer::Alpha::Banner.new(scheme: :danger, icon: "alert", classes: "tmp-mb-3")) do %>
+        Error loading concurrency group status: <%= error %>
+      <% end %>
+    <% elsif group_status %>
+      <%= render(Primer::Beta::BorderBox.new(classes: "tmp-mb-3")) do |box| %>
+        <% box.with_header(font_weight: :bold) do %>
+          Currently Acquired
+        <% end %>
+        <% if group_status.acquired_instance && group_status.acquired_instance.instance_id.present? %>
+          <%
+            acquired_instance_id = group_status.acquired_instance.instance_id
+            acquired_check_suite_id = check_suite_ids_by_instance[acquired_instance_id]
+          %>
+          <% box.with_row do %>
+            <div class="d-flex flex-justify-between flex-items-center width-full">
+              <span class="text-bold" style="flex: 4;">Instance ID</span>
+              <span class="text-bold" style="flex: 3;">Acquired At</span>
+              <span class="text-bold" style="flex: 1;">Actions</span>
+            </div>
+          <% end %>
+          <% box.with_row do %>
+            <div class="d-flex flex-justify-between flex-items-center width-full">
+              <div style="flex: 4;">
+                <code><%= acquired_instance_id %></code>
+              </div>
+              <div style="flex: 3;">
+                <% if group_status.acquired_instance.acquired_at && group_status.acquired_instance.acquired_at.seconds > 0 %>
+                  <%= time_ago_in_words(Time.at(group_status.acquired_instance.acquired_at.seconds)) %> ago
+                  <span class="text-small color-fg-muted">
+                    (<%= Time.at(group_status.acquired_instance.acquired_at.seconds).utc.strftime("%Y-%m-%d %H:%M:%S UTC") %>)
+                  </span>
+                <% else %>
+                  <span class="color-fg-muted">N/A</span>
+                <% end %>
+              </div>
+              <div style="flex: 1;">
+                <% if acquired_check_suite_id %>
+                  <%= link_to "View",
+                    actions_workflow_execution_stafftools_repository_path(
+                      current_repository.owner,
+                      current_repository,
+                      check_suite_id: acquired_check_suite_id
+                    ),
+                    class: "btn btn-sm" %>
+                <% else %>
+                  <span class="color-fg-muted">—</span>
+                <% end %>
+              </div>
+            </div>
+          <% end %>
+        <% else %>
+          <% box.with_row do %>
+            <p class="color-fg-muted mb-0">No instance currently holds this concurrency group.</p>
+          <% end %>
+        <% end %>
+      <% end %>
+
+      <%= render(Primer::Beta::BorderBox.new) do |box| %>
+        <% box.with_header(font_weight: :bold) do %>
+          Waiting Queue (<%= group_status.waiting_instances.size %> items)
+        <% end %>
+        <% if group_status.waiting_instances.any? %>
+          <% box.with_row do %>
+            <div class="d-flex flex-justify-between flex-items-center width-full">
+              <span class="text-bold" style="flex: 1;">Position</span>
+              <span class="text-bold" style="flex: 4;">Instance ID</span>
+              <span class="text-bold" style="flex: 1;">Actions</span>
+            </div>
+          <% end %>
+          <% group_status.waiting_instances.sort_by(&:position).each do |item| %>
+            <% waiting_check_suite_id = check_suite_ids_by_instance[item.instance_id] %>
+            <% box.with_row do %>
+              <div class="d-flex flex-justify-between flex-items-center width-full">
+                <div style="flex: 1;"><%= item.position %></div>
+                <div style="flex: 4;"><code><%= item.instance_id %></code></div>
+                <div style="flex: 1;">
+                  <% if waiting_check_suite_id %>
+                    <%= link_to "View",
+                      actions_workflow_execution_stafftools_repository_path(
+                        current_repository.owner,
+                        current_repository,
+                        check_suite_id: waiting_check_suite_id
+                      ),
+                      class: "btn btn-sm" %>
+                  <% else %>
+                    <span class="color-fg-muted">—</span>
+                  <% end %>
+                </div>
+              </div>
+            <% end %>
+          <% end %>
+        <% else %>
+          <% box.with_row do %>
+            <p class="color-fg-muted mb-0">No instances waiting for this concurrency group.</p>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% else %>
+      <div class="blankslate">
+        <%= render Primer::Beta::Octicon.new(icon: "workflow", size: :medium) %>
+        <h3>Concurrency group not found</h3>
+        <p>The concurrency group "<%= group_name %>" was not found or has no active state.</p>
+      </div>
+    <% end %>
+  <% end %>
+<% end %>

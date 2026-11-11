@@ -1,0 +1,309 @@
+#!/usr/bin/env safe-ruby
+# frozen_string_literal: true
+
+require_relative "../config/environment"
+require_relative "./seeds/objects"
+
+unless Rails.env.development?
+  raise "This is a dev-only script"
+end
+
+# Parse arguments
+valid_modes = %w[--with-cca]
+valid_flags = %w[--with-mcp-server]
+mode = ARGV.first
+
+if mode && !valid_modes.include?(mode) && !valid_flags.include?(mode)
+  warn "Usage: script/setup-triage-agent [mode] [flags]"
+  warn ""
+  warn "Modes (optional, defaults to fake local mode):"
+  warn "  (none)        Set up with fake local mode (enables issues_triage_agent_local_dev)"
+  warn "  --with-cca    Set up with Copilot Coding Agent integration"
+  warn "                (requires Coding Agent Development Codespace with 32-core 256GB machine type)"
+  warn ""
+  warn "Flags:"
+  warn "  --with-mcp-server  Set up the GitHub MCP server remote on port 9042"
+  exit 1
+end
+
+# If no mode provided, or the first arg is a flag, default to fake local mode
+if mode.nil? || valid_flags.include?(mode)
+  flags = ARGV || []
+  mode = nil
+else
+  flags = ARGV[1..] || []
+end
+
+setup_mcp_server = flags.include?("--with-mcp-server")
+
+if mode == "--with-cca"
+  # Run the Copilot SWE agent setup script
+  puts "Running Copilot SWE agent setup..."
+  system("cd /workspaces/github && script/setup-codespaces-copilot-swe-agent-v2 --capi") || abort("Failed to run setup-codespaces-copilot-swe-agent-v2")
+
+  # Check if the dotcom server is running, start it if not
+  unless system("curl -s -o /dev/null http://github.localhost")
+    puts "Starting dotcom server..."
+    system("script/dx/server-start") || abort("Failed to start dotcom server")
+    puts "Started dotcom server, run `script/dx/server-stop` to stop"
+
+    puts "Enabling custom agent feature flags..."
+    FeatureFlag.vexi_management.enable_feature_flag(:copilot_swe_agent_custom_agent_as_api)
+    FeatureFlag.vexi_management.enable_feature_flag(:copilot_swe_agent_custom_agent_permissions)
+    puts "=> Enabled :copilot_swe_agent_custom_agent_as_api"
+    puts "=> Enabled :copilot_swe_agent_custom_agent_permissions"
+
+    puts "Starting sweagentd server..."
+    system("cd /workspaces/sweagentd && script/server") || abort("Failed to start sweagentd server")
+
+    puts ""
+    if system("curl -s -o /dev/null http://localhost:2206")
+      puts "copilot-api is running on port 2206 in the background."
+      puts "To stop the copilot-api server, run `overmind stop copilot-api`."
+    else
+      puts "Warning: copilot-api does not appear to be running on port 2206."
+    end
+    puts ""
+    if system("curl -s -o /dev/null http://localhost:2209")
+      puts "sweagentd Twirp server is running on port 2209."
+    else
+      puts "Warning: sweagentd Twirp server does not appear to be running on port 2209."
+    end
+  end
+else
+  # Check if the server is running (required for repository creation)
+  unless system("script/overmind-running")
+    warn "Error: The development server is not running."
+    warn ""
+    warn "Please start the server first with:"
+    warn "  script/server"
+    warn ""
+    warn "Then run this script again."
+    exit 1
+  end
+end
+
+# Determine the correct URL for the running server.
+# When script/server starts, it writes the actual GH_HOSTNAME (which may include
+# a non-standard port) to tmp/.server.env. If GH_HOSTNAME in the current shell
+# doesn't include a port, read it from the server env file so our output URLs
+# match where the server is actually reachable.
+server_env_file = File.join(Rails.root, "tmp", ".server.env")
+dev_server_url = GitHub.url
+if File.exist?(server_env_file)
+  File.readlines(server_env_file).each do |line|
+    if line.start_with?("GH_HOSTNAME=")
+      hostname = line.strip.delete_prefix("GH_HOSTNAME=")
+      unless hostname.empty?
+        scheme = GitHub.ssl ? "https" : "http"
+        dev_server_url = "#{scheme}://#{hostname}"
+      end
+      break
+    end
+  end
+end
+
+puts "Setting up Triage Agent development environment..."
+
+puts "Setting up feature flags..."
+
+# Triage Agent feature flags
+FeatureFlag.vexi_management.enable_feature_flag(:issues_triage_agent)
+puts "=> Enabled :issues_triage_agent"
+
+FeatureFlag.vexi_management.enable_feature_flag(:copilot_swe_agent_enable_repos_by_default)
+puts "=> Enabled :copilot_swe_agent_enable_repos_by_default"
+
+FeatureFlag.vexi_management.enable_feature_flag(:issues_triage_agent_debug)
+puts "=> Enabled :issues_triage_agent_debug"
+
+FeatureFlag.vexi_management.enable_feature_flag(:issues_triage_agent_new_config)
+puts "=> Enabled :issues_triage_agent_new_config"
+
+FeatureFlag.vexi_management.enable_feature_flag(:issue_cca_visualization)
+puts "=> Enabled :issue_cca_visualization"
+
+FeatureFlag.vexi_management.enable_feature_flag(:issue_triage_agent_assignment)
+puts "=> Enabled :issue_triage_agent_assignment"
+
+FeatureFlag.vexi_management.enable_feature_flag(:issues_triage_use_mission_control_tasks)
+puts "=> Enabled :issues_triage_use_mission_control_tasks"
+
+if mode != "--with-cca"
+  puts "Running with fake local mode"
+  FeatureFlag.vexi_management.enable_feature_flag(:issues_triage_agent_local_dev)
+  puts "=> Enabled :issues_triage_agent_local_dev"
+end
+
+# Clone the triage-agent repository next to github and github-ui
+triage_agent_path = "/workspaces/triage-agent"
+if File.exist?(triage_agent_path)
+  puts "=> triage-agent repository already exists at #{triage_agent_path}"
+else
+  puts "Cloning triage-agent repository..."
+  system("git", "clone", "https://github.com/github/triage-agent.git", triage_agent_path) || abort("Failed to clone triage-agent repository")
+  puts "=> Cloned triage-agent to #{triage_agent_path}"
+end
+
+puts ""
+puts "Other relevant repositories you may want to clone:"
+puts "  - https://github.com/github/sweagentd"
+puts "  - https://github.com/github/copilot-mission-control"
+
+# Create the sandbox repository under the github organization
+puts "Creating triage-agent-sandbox repository..."
+
+monalisa = Seeds::Objects::User.monalisa
+org = Seeds::Objects::Organization.github(admin: monalisa)
+repo_name = "triage-agent-sandbox"
+
+repo = Repository.nwo("#{org.login}/#{repo_name}")
+
+unless repo
+  GH::Context.enabled do
+    repo = Seeds::Objects::Repository.create(
+      owner_name: org.login,
+      repo_name: repo_name,
+      setup_master: true,
+      is_public: false,
+      description: "Sandbox repository for testing the Triage Agent"
+    )
+  end
+end
+
+puts "=> Created #{dev_server_url}/#{repo.name_with_display_owner}"
+
+# Add the triage-agent.md file
+puts "Adding .github/issues/triage-agent.md..."
+
+triage_prompt = <<~MARKDOWN
+---
+on:
+  issue-create: true
+allowed-actions: ["*"]
+---
+# Issue Triage Instructions
+
+When triaging issues in this repository, follow these guidelines:
+
+## Labels to Apply
+- `bug` - For bug reports
+- `enhancement` - For feature requests
+- `question` - For questions or support requests
+- `documentation` - For documentation improvements
+
+## Priority Assessment
+- **High**: Security issues, data loss, or complete feature breakage
+- **Medium**: Functionality issues with workarounds available
+- **Low**: Minor issues, cosmetic problems, or nice-to-haves
+
+## Response Template
+Thank the user for their report and acknowledge the issue within 24 hours.
+MARKDOWN
+
+begin
+  GH::Context.enabled do
+    Seeds::Objects::Commit.create(
+      repo: repo,
+      committer: monalisa,
+      message: "Add triage agent instructions",
+      branch_name: repo.default_branch,
+      files: { ".github/issues/triage-agent.md" => triage_prompt }
+    )
+  end
+  puts "=> Added .github/issues/triage-agent.md"
+rescue => e
+  puts "=> Warning: Could not add file (#{e.message}). The repository may already have this file."
+end
+
+# Create a repo where monalisa has no push permission.
+# We use a separate org where monalisa is a regular member (not admin),
+# so the org's default "read" permission applies and she can't push.
+puts ""
+puts "Creating triage-agent-no-push repository..."
+
+no_push_org_admin = Seeds::Objects::User.create(login: "triage-no-push-admin", email: "triage-no-push-admin@github.test.com")
+no_push_org = Seeds::Objects::Organization.create(login: "triage-test-org", admin: no_push_org_admin)
+no_push_org.add_member(monalisa)
+
+no_push_repo_name = "triage-agent-no-push"
+no_push_repo = Repository.nwo("#{no_push_org.login}/#{no_push_repo_name}")
+
+unless no_push_repo
+  GH::Context.enabled do
+    no_push_repo = Seeds::Objects::Repository.create(
+      owner_name: no_push_org.login,
+      repo_name: no_push_repo_name,
+      setup_master: true,
+      is_public: false,
+      description: "Test repository where monalisa has no push permission"
+    )
+  end
+end
+
+puts "=> Created #{dev_server_url}/#{no_push_repo.name_with_display_owner}"
+
+# Add triage-agent.md to the no-push repo
+begin
+  GH::Context.enabled do
+    Seeds::Objects::Commit.create(
+      repo: no_push_repo,
+      committer: no_push_org_admin,
+      message: "Add triage agent instructions",
+      branch_name: no_push_repo.default_branch,
+      files: { ".github/issues/triage-agent.md" => triage_prompt }
+    )
+  end
+  puts "=> Added .github/issues/triage-agent.md to #{no_push_repo_name}"
+rescue => e
+  puts "=> Warning: Could not add file to #{no_push_repo_name} (#{e.message})."
+end
+
+# Verify monalisa's permissions on the no-push repo
+puts "  #{no_push_repo_name}: can push? #{no_push_repo.pushable_by?(monalisa)}"
+puts "  #{no_push_repo_name}: can pull? #{no_push_repo.pullable_by?(monalisa)}"
+
+if setup_mcp_server
+  puts ""
+  puts "Enabling MCP server feature flags..."
+  FeatureFlag.vexi_management.enable_feature_flag(:remote_mcp_test_toolset)
+  puts "=> Enabled :remote_mcp_test_toolset"
+  FeatureFlag.vexi_management.enable_feature_flag(:remote_mcp_triage_tool_enabled)
+  puts "=> Enabled :remote_mcp_triage_tool_enabled"
+
+  puts ""
+  puts "Setting up GitHub MCP server remote on port 9042..."
+
+  mcp_repo_path = "/workspaces/github-mcp-server-remote"
+
+  unless File.exist?(File.join(mcp_repo_path, "cmd/http/main.go"))
+    puts "=> github/github-mcp-server-remote is not cloned yet, running setup..."
+    system("cd /workspaces/github && script/setup-github-mcp-server") || abort("Failed to run script/setup-github-mcp-server")
+  end
+
+  puts "=> Starting GitHub MCP server on port 9042..."
+  pid = spawn(
+    {
+      "OTEL_RESOURCE_ATTRIBUTES" => "service.name=github-mcp-server-remote",
+      "GITHUB_TELEMETRY_LOGS_LEVEL" => "debug",
+      "GITHUB_API_URL" => GitHub.api_url.to_s,
+      "PORT" => "9042",
+      # This bypasses the PAT scope filter that hides the tool.
+      # Without it, the ghu_ token is treated as an OAuth token and the scope filter may block it.
+      "CCA_TOKEN" => "1"
+    },
+    "go", "run", "./cmd/http/main.go",
+    chdir: mcp_repo_path
+  )
+  Process.detach(pid)
+  puts "=> GitHub MCP server remote started on port 9042 (PID #{pid})"
+  puts ""
+  puts "⚠️  Make sure the MCP server URL in Issues::Domain::Triage#github_mcp_server_config"
+  puts "   (packages/issues/app/public/issues/domain/triage.rb) points to:"
+  puts "     http://localhost:9042/mcp"
+end
+
+puts ""
+puts "Triage Agent development environment is ready!"
+puts "Repository: #{dev_server_url}/#{repo.name_with_display_owner}"
+puts "No-push repo: #{dev_server_url}/#{no_push_repo.name_with_display_owner} (monalisa has read-only access)"

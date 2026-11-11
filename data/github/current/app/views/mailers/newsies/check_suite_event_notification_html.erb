@@ -1,0 +1,74 @@
+<% content_for :header do %>
+  <%= @message.heading %>
+<% end %>
+
+<%= render(Mail::BorderedRowComponent.new) do %>
+  <%= render(Mail::HeaderTitleComponent.new(title: @message.workflow_run_jobs_conclusion_description, icon: "actions.png")) %>
+
+  <%= render(Mail::ContainerComponent.new) do %>
+    <%= render(Mail::ButtonComponent.new(
+      text: "View workflow run",
+      url: @message.url_view_workflow_run_with_tracking_params,
+      classes: "btn-large btn-primary",
+      outlook_safe: true))
+    %>
+  <% end %>
+  <%= render(Mail::SpacerComponent.new(size: 32)) %>
+<% end %>
+
+<%
+  display_all_runs = @message.check_runs.count <= Newsies::Emails::CheckSuiteEventNotification::MAX_JOBS_PER_EMAIL
+  latest_runs = @message.check_runs.first(Newsies::Emails::CheckSuiteEventNotification::MAX_JOBS_PER_EMAIL)
+%>
+<% if latest_runs.any? %>
+  <%= render(Mail::BorderedRowComponent.new(last: display_all_runs, skip_padding: true)) do %>
+    <table class="width-full text-left">
+      <thead>
+        <tr>
+          <th scope="col" class="tmp-pl-3 tmp-py-3 tmp-p-sm-4" style="width: 24px">Status</th>
+          <th scope="col" class="tmp-p-3" style="width: 100%">Job</th>
+          <th scope="col" class="tmp-pr-3 tmp-py-3" style="white-space: nowrap">Annotations</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% latest_runs.each do |check_run| %>
+          <tr>
+            <td class="tmp-pl-3 tmp-py-3 tmp-p-sm-4">
+              <img src="<%= mailer_static_asset_path(@message.conclusion_icon_path(check_run)) %>" alt="<%= check_run.display_name %>" height="24" width="24">
+            </td>
+            <td class="tmp-p-3" style="width: 100%">
+              <p class="mb-0">
+                <b><%= @message.workflow_run_name_with_attempt %></b> / <%= check_run.display_name %>
+                <br>
+                <%= @message.detailed_conclusion_description(check_run) %>
+              </p>
+            </td>
+            <td class="tmp-pr-3 tmp-py-3" style="white-space: nowrap">
+              <% if check_run.annotation_count > 0 %>
+                <a href="<%= @message.url_annotation_with_tracking_params %>">
+                  <img src="<%= mailer_static_asset_path("images/email/icons/report-gray.png") %>" alt="annotations for <%= @message.workflow_name_with_attempt %> / <%= check_run.display_name %>" width="16" height="16">
+                  <span class="d-table-cell v-align-middle text-gray-light"> <%= check_run.annotation_count %> </span>
+                </a>
+              <% end %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+<% end %>
+
+<% unless display_all_runs %>
+  <%= render(Mail::BorderedRowComponent.new(last: true)) do %>
+    <%= render(Mail::RowComponent.new(classes: "v-align-middle")) do %>
+      <a href="<%= @message.url_view_all_job_statuses_with_tracking_params %>" class="text-emphasized color-fg-accent">
+        View all <%= @message.check_runs.count %> job statuses
+      </a>
+    <% end %>
+  <% end %>
+  <%= render(Mail::SpacerComponent.new(size: 16)) %>
+<% end %>
+
+<% content_for :footer_text do %>
+  <%= @message.footer_html %>
+<% end %>

@@ -1,0 +1,1 @@
+import{lm as e,wp as t}from"./main-BChbnewi.js";var n={Box:`Panel-module_13TKFW_Box`},r=e();const i=({children:e,className:i,...a})=>(0,r.jsx)(`div`,{className:t(n.Box,i),...a,children:e});i.displayName=`Panel`;export{i as t};

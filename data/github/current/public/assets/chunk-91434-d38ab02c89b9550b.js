@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["91434"],{195665(i,t,a){var u=a(331635),s=a(194571),c=a(43076),e=a(133601),l=a(30329);class b extends HTMLElement{async connectedCallback(){if((0,e.KG)())return;let i=await (0,c.bG)();i&&i.Analytics&&(0,l.fz)()}}(0,u.Cg)([(0,s.p_)("microsoft-analytics")],b)}}]);
+//# sourceMappingURL=chunk-91434-d38ab02c89b9550b-080f680caf771939.js.map

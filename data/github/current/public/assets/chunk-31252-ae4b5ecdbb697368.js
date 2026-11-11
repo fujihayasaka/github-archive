@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([["31252"],{887263(t,e,i){i.r(e);var u=i(649481);(0,i(740893).JW)(".js-form-toggle-target",async function(t,e){try{await e.text()}catch{return}let i=t.closest(".js-form-toggle-container").querySelector(".js-form-toggle-target[hidden]");i.hidden=!1,t.hidden=!0;let r=t.getAttribute("data-sr-feedback")||"";r&&(0,u.i)(r),i?.querySelector("input[type=submit], button[type=submit]")?.focus()})}}]);
+//# sourceMappingURL=chunk-31252-ae4b5ecdbb697368-5ab1d8baa6c18882.js.map

@@ -1,0 +1,138 @@
+# rubocop:todo GitHub/EnforcePackageAppStructure
+# typed: true
+# frozen_string_literal: true
+
+class BusinessUserAccountUpdateAttributesJob < ApplicationJob
+  queue_as :business_user_account_update_attributes
+
+  MAX_CONCURRENT_JOBS = 1
+  RESTRAINT_LOCK_TTL = 5.minutes
+  LOCK_KEY = "business-user-account-update-attributes-job:"
+
+  MAX_RETRY_ATTEMPTS = 3
+  RETRY_DELAY = 5.minutes
+  JITTER = 0.25
+
+  # P99 for the job is 30 seconds. Restraint lock will prevent the job from running simultaneously.
+  ENQUEUE_INTERVAL = 30.seconds.to_i
+
+  retry_on_dirty_exit
+  retry_on_recoverable_exceptions
+
+  retry_on(ActiveRecord::RecordNotFound, wait: RETRY_DELAY, attempts: MAX_RETRY_ATTEMPTS, jitter: JITTER) do |_job, error|
+    Failbot.report(error)
+  end
+
+  # When we can't acquire a lock, it likely means multiple jobs are queued for the same business,
+  # possibly due to user_account_ids being specified (which bypasses deduplication). After exhausting
+  # retries, re-enqueue without user_account_ids to consolidate updates and reduce lock contention.
+  # Delete this UnableToLock block when business_update_attributes_job_enqueue_no_users ships
+  retry_on(GitHub::Restraint::UnableToLock, wait: RETRY_DELAY, attempts: MAX_RETRY_ATTEMPTS, jitter: JITTER) do |job, error|
+    # Job can be called with positional business arg or kwargs - handle both cases
+    first_arg = job.arguments.first
+    if first_arg.is_a?(Hash)
+      # Called with kwargs only: perform_later(business_id: x, user_account_ids: y)
+      business_id = first_arg[:business_id]
+      user_account_ids = first_arg[:user_account_ids]
+    else
+      # Called with positional arg: perform_later(business, user_account_ids: y)
+      business_id = first_arg&.id
+      user_account_ids = job.arguments.second&.dig(:user_account_ids)
+    end
+
+    if business_id && user_account_ids.present?
+      # Re-enqueue without user_account_ids to process all users, using deduplication
+      business = Business.find_by(id: business_id)
+      BusinessUserAccountUpdateAttributesJob.enqueue(business) if business
+    else
+      Failbot.report(error)
+    end
+  end
+
+  resolve_tenant_context do |args|
+    if args.is_a?(Business)
+      args
+    else
+      Business.find_by(id: args[:business_id])
+    end
+  end
+
+  # This job takes information about user accounts from the business, and saves that information to the user accounts.
+  #
+  # Only one job will run at a time for each business. If another job is already running, this job will queue
+  # another job to run when the current job finishes. This is to prevent thousands of jobs from being queued
+  # when a large business is updated.
+  #
+  # business - Required Business for which BusinessUserAccounts will be updated
+  # user_account_ids - Optional Array of Integers to restrict update to a set of
+  #                    BusinessUserAccounts
+  def perform(business = nil, business_id: nil, user_account_ids: nil)
+    @business = business || Business.find_by(id: business_id)
+    return unless @business.present?
+    return unless @business.include_attributes_on_user_account?
+    return if @business.kill_switch_enabled?(self.class.name, feature_flag: :enterprise_teams_killswitch, log_fields: {
+      "gh.business.user_account_ids": user_account_ids,
+    })
+
+    begin
+      enqueue_followup = T.let(false, T::Boolean)
+      lock!(@business.id) do
+        # A single user account can have multiple updates. In order to avoid deadlocks, save each update in a separate transaction.
+        user_attributes = BusinessUserAccount::UpdateAttributes.new(business: @business, user_account_ids: user_account_ids)
+
+        with_write do
+          user_attributes.save_roles
+          user_attributes.save_licenses
+          user_attributes.save_cost_centers
+        end
+
+        # Check if this job is only processing a subset of the required updates
+        enqueue_followup = user_attributes.updates_exceed_batch_size?
+      end
+
+      BusinessUserAccountUpdateAttributesJob.enqueue(@business) if enqueue_followup
+    rescue GitHub::Restraint::UnableToLock
+      # With feature flag enabled: immediately enqueue a full update instead of retrying.
+      # This allows enqueue_once_per_interval to deduplicate multiple lock failures within
+      # the 30-second window, rather than spacing out retries over 15+ minutes.
+      if FeatureFlag.vexi.enabled?(:business_update_attributes_job_enqueue_no_users, @business, default: false)
+        BusinessUserAccountUpdateAttributesJob.enqueue(@business)
+      else
+        # Without feature flag: let retry_on handle it with retries
+        raise
+      end
+    end
+  end
+
+  # Public: Enqueue a job to update the user accounts for a business. Will run after a delay, and will not
+  # enqueue if there is already a job for the business scheduled to run within the next 30 seconds.
+  #
+  # business - Required Business for which BusinessUserAccounts will be updated
+  # user_account_ids - Optional Array of Integers to restrict update to a set of
+  #                    BusinessUserAccounts (ignored when feature flag is enabled)
+  #
+  # Returns nothing
+  def self.enqueue(business, user_account_ids: nil)
+    # If feature flag is enabled, always enqueue without user_account_ids for proper deduplication
+    if FeatureFlag.vexi.enabled?(:business_update_attributes_job_enqueue_no_users, business, default: false)
+      user_account_ids = nil
+    end
+
+    args = { business_id: business.id, user_account_ids: user_account_ids }
+    enqueue_once_per_interval(kwargs: args, interval: ENQUEUE_INTERVAL)
+  end
+
+  private
+
+  def restraint
+    @restraint ||= GitHub::Restraint.new
+  end
+
+  # Private: Use a GitHub::Restraint to prevent simultaneous updates
+  def lock!(business_id)
+    restraint_key = "#{LOCK_KEY}#{business_id}"
+    restraint.lock!(restraint_key, MAX_CONCURRENT_JOBS, RESTRAINT_LOCK_TTL) do
+      yield
+    end
+  end
+end

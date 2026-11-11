@@ -1,0 +1,23 @@
+#!/bin/bash
+
+set -eu
+. "$(dirname $0)/../script/citools"
+
+export COMPOSE_FILE=${COMPOSE_FILE:-docker-compose.yml:docker-compose.cibuild.yml}
+export COMPOSE_DOCKER_CLI_BUILD=1
+export DOCKER_BUILDKIT=1
+
+function cleanup() {
+  echo
+  output_fold "Shutting down services..." docker compose down
+}
+
+trap cleanup EXIT
+
+if [ -f "/.github-full-larger-runner" ]; then
+  # Note: Ensure the `os` value matches the underlying Dockerfile OS... eg, correct Ubuntu version.
+  ruby /usr/local/bin/create-pkg-mirror-files --pkg-mirror-file --os focal --apt-auth-file
+fi
+
+output_fold "Bootstrapping container..." docker compose build
+docker compose run --rm web-ci ./script/test-activejob-scheduled-jobs

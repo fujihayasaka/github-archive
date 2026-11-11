@@ -1,0 +1,106 @@
+<%
+  page_info(title: "Copilot Policies", description: "Manage Copilot policy cache")
+%>
+<%= render layout: "stafftools/stafftools" do %>
+  <div class="site-admin-subhead ruleless">
+    <h2 class="site-admin-subhead-heading">Copilot Policy Cache Management</h2>
+    <p class="color-fg-muted">
+      Manage the minimum version for Copilot user policy cache validation.
+      Bumping the version will invalidate all user caches, forcing them to rebuild on their next request.
+    </p>
+  </div>
+  <% unless dynamic_enabled %>
+    <%= render Primer::Alpha::Banner.new(
+      icon: :alert,
+      scheme: :warning,
+      test_selector: "copilot-policies-feature-flag-warning",
+      classes: "tmp-mt-3 tmp-mb-3") do %>
+      <strong>Feature flag disabled:</strong> Dynamic policy cache versioning is not enabled.
+      The cache version is currently controlled by code constants.
+      Enable the <code>copilot_dynamic_policy_cache_version</code> feature flag to use this page.
+    <% end %>
+  <% end %>
+  <%= render(Primer::Beta::BorderBox.new(classes: "tmp-mb-4")) do |component| %>
+    <% component.with_header do %>
+      <h3 class="f4">Current Status</h3>
+    <% end %>
+    <% component.with_row do %>
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div>
+          <strong>Current Version</strong>
+          <p class="color-fg-muted mb-0 text-small">The version written to new caches</p>
+        </div>
+        <code class="f4"><%= current_version %></code>
+      </div>
+    <% end %>
+    <% component.with_row do %>
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div>
+          <strong>Minimum Version</strong>
+          <p class="color-fg-muted mb-0 text-small">Caches below this version are invalidated</p>
+        </div>
+        <code class="f4"><%= minimum_version %></code>
+      </div>
+    <% end %>
+    <% component.with_row do %>
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div>
+          <strong>Stored Version in KV</strong>
+          <p class="color-fg-muted mb-0 text-small">Raw value from the Copilot KV store</p>
+        </div>
+        <code class="f4"><%= stored_version || "Not set" %></code>
+      </div>
+    <% end %>
+    <% component.with_row do %>
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div>
+          <strong>Dynamic Versioning</strong>
+          <p class="color-fg-muted mb-0 text-small">Whether the KV store is used for version checks</p>
+        </div>
+        <% if dynamic_enabled %>
+          <%= render(Primer::Beta::Label.new(scheme: :success)) { "Enabled" } %>
+        <% else %>
+          <%= render(Primer::Beta::Label.new(scheme: :secondary)) { "Disabled" } %>
+        <% end %>
+      </div>
+    <% end %>
+  <% end %>
+  <% if dynamic_enabled %>
+    <%= render(Primer::Beta::BorderBox.new) do |component| %>
+      <% component.with_header do %>
+        <h3 class="f4">Bump Cache Version</h3>
+      <% end %>
+      <% component.with_body do %>
+        <%= render Primer::Alpha::Banner.new(
+          icon: :alert,
+          scheme: :danger,
+          test_selector: "copilot-policies-bump-warning",
+          classes: "tmp-mb-3") do %>
+          <strong>Warning:</strong> Bumping the cache version will invalidate <strong>ALL</strong> Copilot user policy caches.
+          Users will rebuild their cache on their next request (synchronously or asynchronously depending on feature flags).
+          Only do this when necessary, such as when a policy change requires immediate re-evaluation.
+        <% end %>
+        <%= form_with url: stafftools_copilot_policies_path, method: :post, local: true do |f| %>
+          <div class="form-group">
+            <div class="form-group-header">
+              <label for="reason">Reason for bump</label>
+            </div>
+            <div class="form-group-body">
+              <%= f.text_area :reason,
+                  class: "form-control width-full",
+                  rows: 3,
+                  required: true,
+                  placeholder: "e.g., Shipped new policy X that requires cache re-evaluation for all users" %>
+            </div>
+            <p class="note">
+              This reason will be logged for audit purposes. Be specific about why this bump is needed.
+            </p>
+          </div>
+          <%= f.submit "Bump Cache Version",
+              class: "btn btn-danger tmp-mt-3",
+              data: { confirm: "Are you sure you want to invalidate ALL Copilot user policy caches? This action cannot be undone." } %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

@@ -1,0 +1,174 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Compares monolith endpoints (from script/list-endpoints) against production traffic
+# and outputs endpoints that were not observed in production.
+#
+# Usage:
+#   script/find-unused-endpoints > unused-endpoints.tsv
+#   script/find-unused-endpoints --monolith=custom.tsv --prod=prod.tsv
+#
+# The production output is based on the results of this kusto query:
+#
+# github_v1_request
+# | summarize count() by http_method, api_route, controller_action, controller
+# | order by count_ desc
+#
+# See current query here:
+# https://dataexplorer.azure.com/clusters/gh-analytics.eastus/databases/hydro?query=H4sIAAAAAAAAA03MSwrDMAxF0XlWoWEKmWRFwh8RG2IrlZ8KLV1804wyvVzOVlE88mtlk6fLwPSl4a0Fqx%2BhpN4xPyi%2BqQAHN0HRvFA4Kps6ZDmXDtN9F%2BOQULXf04mpZbE%2FcFlMWUb6AZajvdZ1AAAA
+
+require "set"
+require "optparse"
+
+# Exclusion patterns for routes that should be filtered out of unused results.
+# Each entry can match against path (regex) or controller (string prefix).
+# Format: { path: /regex/, controller: "Prefix::" }
+EXCLUSION_PATTERNS = [
+  # View component preview routes
+  { path: %r{^/component_preview_actions(/|$)} }, # view component dev endpoint
+  { path: %r{^/lookbook(/|$)} }, # lookbook dev endpoint
+  { path: %r{^/github/collect\(\.:format\)$} }, # collect controller in development only
+  { controller: "StatusLolrails" }, # status endpoint, used for readiness probes
+  { path: %r{^/_} }, # internal endpoints (e.g., /_perf_profiling, /_chatops)
+  { controller: "Internal::" }, # stafftools internal endpoints
+  { controller: "Stafftools::" }, # stafftools endpoints (not reliably logged in prod)
+].freeze
+
+def excluded_route?(path, controller)
+  EXCLUSION_PATTERNS.any? do |pattern|
+    (pattern[:path] && path&.match?(pattern[:path])) ||
+      (pattern[:controller] && controller&.start_with?(pattern[:controller]))
+  end
+end
+
+MONOLITH_FILE = "monolith-endpoints.tsv"
+PROD_FILE = "prod-endpoints.tsv"
+
+options = {
+  monolith: MONOLITH_FILE,
+  prod: PROD_FILE,
+}
+
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: script/find-unused-endpoints [options]"
+
+  opts.on("--monolith=FILE", "Path to monolith endpoints TSV (default: #{MONOLITH_FILE})") do |f|
+    options[:monolith] = f
+  end
+
+  opts.on("--prod=FILE", "Path to production endpoints TSV (default: #{PROD_FILE})") do |f|
+    options[:prod] = f
+  end
+
+  opts.on("-h", "--help", "Show this help message") do
+    puts opts
+    exit
+  end
+end
+
+parser.parse!
+
+Endpoint = Struct.new(:method, :path, :controller, :action, keyword_init: true) do
+  def api?
+    path&.start_with?("/api/") || controller&.start_with?("Api::")
+  end
+
+  def normalized_path
+    # Strip optional format suffix (.:format) and trailing parens
+    path&.gsub(/\(\.:format\)$/, "")&.gsub(/\(\)$/, "")
+  end
+
+  def normalized_controller
+    # Remove Controller suffix and ensure consistent formatting
+    ctrl = controller.to_s
+    ctrl = ctrl.sub(/Controller$/, "")
+    ctrl.downcase
+  end
+
+  def match_key
+    if api?
+      # For API endpoints, match on method + normalized path
+      [:api, method&.upcase, normalized_path]
+    else
+      # For Rails endpoints, match on controller + action only.
+      # We exclude HTTP method because production logs may record POST for
+      # form submissions that Rails interprets as DELETE/PUT/PATCH via _method.
+      [:rails, normalized_controller, action]
+    end
+  end
+end
+
+def parse_monolith_endpoints(file)
+  endpoints = []
+
+  File.foreach(file).with_index do |line, _|
+    line = line.chomp
+    next if line.empty?
+
+    parts = line.split("\t")
+    method, path, controller, action = parts
+
+    endpoints << Endpoint.new(
+      method: method,
+      path: path,
+      controller: controller,
+      action: action
+    )
+  end
+
+  endpoints
+end
+
+def parse_prod_endpoints(file)
+  endpoints = []
+
+  File.foreach(file) do |line|
+    line = line.chomp
+    next if line.empty?
+
+    parts = line.split("\t")
+    # prod-endpoints.tsv has columns: METHOD, PATH, ACTION, CONTROLLER
+    method, path, action, controller = parts
+
+    endpoints << Endpoint.new(
+      method: method,
+      path: path.to_s.empty? ? nil : path,
+      controller: controller,
+      action: action.to_s.empty? ? nil : action
+    )
+  end
+
+  endpoints
+end
+
+def build_lookup_set(endpoints)
+  set = Set.new
+  endpoints.each do |endpoint|
+    set.add(endpoint.match_key)
+  end
+  set
+end
+
+# Parse both files
+monolith_endpoints = parse_monolith_endpoints(options[:monolith])
+prod_endpoints = parse_prod_endpoints(options[:prod])
+
+# Build lookup set from production endpoints
+prod_lookup = build_lookup_set(prod_endpoints)
+
+# Find unused endpoints (excluding filtered routes)
+unused = monolith_endpoints.reject do |endpoint|
+  prod_lookup.include?(endpoint.match_key) ||
+    excluded_route?(endpoint.path, endpoint.controller)
+end
+
+# Output header
+puts %w[METHOD PATH CONTROLLER ACTION].join("\t")
+
+# Output unused endpoints
+unused.each do |endpoint|
+  puts [endpoint.method, endpoint.path, endpoint.controller, endpoint.action].join("\t")
+rescue Errno::EPIPE
+  # Handle broken pipe (e.g., when piping to head)
+  exit 0
+end

@@ -1,0 +1,1 @@
+function e(e,t){let n=`/orgs/${encodeURIComponent(e)}/sso`,r=t.pathname+t.search+t.hash;return`${n}?return_to=${encodeURIComponent(r)}`}export{e as t};

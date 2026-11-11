@@ -1,0 +1,106 @@
+<div class="container-lg tmp-px-3 tmp-py-4 js-artifact-files"
+  data-signed-url-endpoint="<%= workflow_run_artifact_signed_url_path(workflow_run_id: workflow_run.id, artifact_id: artifact.id) %>"
+  data-current-page="<%= files.current_page %>"
+  data-per-page="<%= files.per_page %>"
+  data-total-pages="<%= files.total_pages %>"
+  data-msg-download-aria-prefix="Download "
+  data-msg-compressed-label="compressed"
+  data-msg-compressed-title="DEFLATE compressed"
+>
+  <template class="js-file-icon-template"><%= primer_octicon(:file, size: :small) %></template>
+  <template class="js-download-icon-template"><%= primer_octicon(:download, size: :small) %></template>
+  <nav class="tmp-mb-3" aria-label="Artifact files breadcrumb">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item">
+        <a href="<%= workflow_run_path(id: workflow_run.id, user_id: workflow_run.repository.owner, repository: workflow_run.repository) %>">
+          Run #<%= workflow_run.run_number %>
+        </a>
+      </li>
+      <li class="breadcrumb-item" aria-current="page">
+        Artifact: <%= artifact.name %>
+      </li>
+    </ol>
+  </nav>
+
+  <div class="Box">
+    <div class="Box-header">
+      <h2 class="Box-title">
+        <%= primer_octicon("file-zip", classes: "mr-2") %>
+        <%= artifact.name %>
+        <span class="color-fg-muted text-normal">
+          (<%= total_files %> file<%= total_files == 1 ? "" : "s" %>)
+        </span>
+      </h2>
+    </div>
+    <div class="Box-body">
+      <% if files.empty? %>
+        <div class="blankslate">
+          <p>No files found in artifact</p>
+        </div>
+      <% else %>
+        <div class="tmp-mb-3 tmp-pr-4 subnav-search width-full" role="search">
+          <input
+            type="search"
+            class="form-control subnav-search-input input-contrast width-full tmp-pr-5 js-artifact-files-search"
+            placeholder="Search files by name"
+            aria-label="Search files by name"
+            autocomplete="off"
+            spellcheck="false"
+          >
+          <%= primer_octicon(:search, classes: "subnav-search-icon") %>
+        </div>
+
+        <ul class="list-style-none js-artifact-files-list">
+          <% files.each do |file| %>
+            <li class="d-flex flex-items-center py-2 border-bottom">
+              <span class="mr-2 color-fg-muted flex-shrink-0">
+                <%= primer_octicon(:file, size: :small) %>
+              </span>
+              <span class="flex-auto min-width-0 text-small" style="word-break: break-all;">
+                <%= file.path %>
+              </span>
+              <span class="ml-2 text-small color-fg-muted no-wrap flex-shrink-0">
+                <%= number_to_human_size(file.size) %>
+                <% if file.compression_method == 8 %>
+                  <%= render Primer::Beta::Label.new(scheme: :secondary, ml: 1) do %>
+                    compressed
+                  <% end %>
+                <% end %>
+              </span>
+              <%= render Primer::Beta::Button.new(
+                tag: :button,
+                scheme: :link,
+                type: :button,
+                ml: 2,
+                classes: "flex-shrink-0 artifact-file-download-link",
+                data: {
+                  file_name: File.basename(file.path),
+                  byte_range_start: file.byte_range_start,
+                  byte_range_end: file.byte_range_end,
+                  compressed_size: file.compressed_size,
+                  uncompressed_size: file.size,
+                  needs_decompression: file.compression_method == 8,
+                },
+                "aria-label": "Download #{file.path}"
+              ) do %>
+                <%= primer_octicon(:download, size: :small) %>
+              <% end %>
+            </li>
+          <% end %>
+        </ul>
+
+        <% if files.total_pages > 1 %>
+          <%# UI pagination is local to the fetched list for now; backend pagination can be added later. %>
+          <div class="d-flex flex-justify-center tmp-mt-3 js-artifact-pagination">
+            <%= pagination_html_cache[files.current_page.to_s] || helpers.will_paginate(files, class: "pagination", role: "navigation", "aria-label": "Artifact files pagination") %>
+          </div>
+        <% end %>
+
+        <script type="application/json" class="js-artifact-files-cache"><%= json_escape(artifact_files_cache.to_json).html_safe %></script> <%# rubocop:disable Rails/OutputSafety -- json_escape already neutralises injection vectors %>
+        <% pagination_html_cache.each do |page_num, html| %>
+          <template class="js-artifact-pagination-template" data-page="<%= page_num %>"><%= html %></template>
+        <% end %>
+      <% end %>
+    </div>
+  </div>
+</div>
