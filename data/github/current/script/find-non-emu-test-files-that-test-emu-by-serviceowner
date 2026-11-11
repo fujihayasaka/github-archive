@@ -1,0 +1,52 @@
+#!/usr/bin/env safe-ruby
+# frozen_string_literal: true
+
+require "open3"
+
+BAD_PATTERNS = [
+  "skip_with_all_emus",
+  "with_all_emus_only",
+  "multitenant_only",
+  "skip_in_multitenant_mode",
+  "test_in_multitenancy_mode?",
+  "test_with_all_emus?",
+  "GitHub.single_tenant_enterprise"
+]
+
+TEST_FILENAME_FILTER = %r{
+  test/lib/git_auth/|
+  test/platform/|
+  test/integration/api/|
+  test/integration/.*controller|
+  controller_test|
+  packages/.*/test/integration/|
+  packages/.*/test/services/|
+  packages/data/test/models/media/
+}x
+
+service = ARGV[0]
+if service.nil? || service.strip.empty?
+  warn "Usage: #{$0} <service_name>"
+  exit 1
+end
+
+service = "github/#{service}" unless service.start_with?("github/")
+
+# Get all test files for the service
+test_files = []
+Open3.popen3("./bin/serviceowners-ls-files", service) do |_stdin, stdout, _stderr, _wait_thr|
+  stdout.each_line do |line|
+    line = line.strip
+    next unless line.include?("test")
+    next if line =~ TEST_FILENAME_FILTER
+    test_files << line
+  end
+end
+
+# Scan each test file for bad patterns
+test_files.each do |file|
+  content = File.read(file)
+  if BAD_PATTERNS.any? { |pat| content.include?(pat) }
+    puts file
+  end
+end

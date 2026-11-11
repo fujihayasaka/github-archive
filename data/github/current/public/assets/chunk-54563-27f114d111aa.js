@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([[54563],{54563:(u,i,t)=>{t.d(i,{softNavigate:()=>_});var b=t(65432),h=t(7332);let _=(u,i)=>{(0,b.SC)("turbo"),(0,h.YR)(u,{...i})}}}]);
+//# sourceMappingURL=54563-d2bfd876a77f.js.map

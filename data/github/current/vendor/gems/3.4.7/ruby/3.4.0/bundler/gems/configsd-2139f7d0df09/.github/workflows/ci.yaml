@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    reuse-previous-outcome: true
+  workflow_dispatch:
+  merge_group:
+    reuse-previous-outcome: true
+    types: [checks_requested]
+
+permissions:
+  id-token: write # for setup-goproxy
+  contents: read
+  packages: read
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - uses: github/setup-goproxy@v1.1.0
+    - uses: actions/setup-go@v6
+      with:
+        go-version-file: go.mod
+    - name: Install common-utils
+      uses: github/go-server/.github/composite-actions/install-devcontainer-feature@main
+      with:
+        feature_package: ghcr.io/github/features/common-utils:0
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Install mysql
+      uses: github/go-server/.github/composite-actions/install-devcontainer-feature@main
+      with:
+        feature_package: ghcr.io/github/features/mysql:1
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+    - run: make build
+    - run: make test
+    - run: make integration-test
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: github/setup-goproxy@v1.1.0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: github/go-linter@main
+        with:
+          go-version: v1.25
+          working-directory: ./
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: ShellCheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: ./script

@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([[99970],{4051:(t,i,e)=>{(0,e(21403).lB)(".js-octocaptcha-parent",function(t){let i=t.querySelector(".js-octocaptcha-form-submit");t.addEventListener("input",()=>u(t,i)),t.addEventListener("change",()=>u(t,i))});function u(t,i){t.checkValidity()?i.disabled=!1:i.disabled=!0}}},t=>{t.O(0,[43784],()=>t(t.s=4051)),t.O()}]);
+//# sourceMappingURL=marketing-signup-716eb215d802.js.map

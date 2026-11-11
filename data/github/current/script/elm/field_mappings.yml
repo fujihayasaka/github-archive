@@ -1,0 +1,193 @@
+# ELM Schema Validator Field Mappings Configuration
+#
+# This file defines how protobuf field names map to database column names
+# for ELM export+import migration API endpoints.
+#
+# 🚨 VALIDATION ERROR QUICK FIX GUIDE:
+#
+# ERROR: "Missing in DB" errors → Add to known_gaps section below
+# WARNING: "Missing in API" errors → Add to field_mappings section below
+# NOTE: "Compatibility" errors → Review export/import field alignment
+#
+# Example fixes:
+# field_mappings:
+#   your_api_type:
+#     protobuf_field_name: database_column_name
+#
+# known_gaps:
+#   your_api_type:
+#     extra_field: "Reason why this field exists in protobuf but not DB"
+#
+# missing_required_fields:
+#   your_api_type:
+#     - field_name  # Reason why this field is required but missing in DB
+#
+# compatibility_issues:
+#   your_api_type:
+#     missing_in_export:
+#       - field_name  # Reason why export and import protobufs don't match
+#     missing_in_import:
+#       - field_name  # Reason why export and import protobufs don't match
+
+# Import-only APIs that don't require corresponding export APIs
+# These are initialization or action APIs that create new data without needing export functionality
+import_only_apis:
+  - wiki_initialization  # Wiki initialization API for live edits during migration (no export needed)
+  # Add other import-only APIs as needed
+  # Example: - repository_initialization
+  # Example: - project_setup
+
+# DAG infrastructure field filtering rules
+# These fields are used for dependency tracking between systems and are not stored in core business tables
+dag_filtering:
+  # Field name suffixes to automatically filter out
+  ignore_suffixes:
+    - "_resource_id"  # e.g., repository_resource_id, check_suite_resource_id
+  # Specific field names to filter out
+  ignore_fields:
+    - "resource_id"
+    - "source_resource_id"
+
+# Model mappings: api_type -> ActiveRecord model class name
+model_mappings:
+  commit_status_check: Status
+  check_runs: CheckRun
+  check_suites: CheckSuite
+  issue_events: IssueEvent
+  assets: Asset
+  repository_topics: RepositoryTopic
+  actions_settings: Repository    # Uses Repository model with actions_* methods
+  repository_settings: Repository # Uses Repository model with settings methods
+  settings: Organization          # Uses Organization model for org settings
+  wiki_initialization: Wiki       # Wiki initialization API for live edits during migration
+
+# Specific field mappings: protobuf_field -> database_column
+# These represent intentional differences in naming between protobuf and database
+field_mappings:
+  commit_status_check:
+    commit_sha: sha  # Protobuf uses commit_sha, database uses sha
+
+  # Add new mappings here as they are discovered and approved
+  # Each mapping should be reviewed and documented with the business reason
+
+# Compatibility issues between export and import APIs
+# These track cases where export APIs don't provide all fields that import APIs expect
+compatibility_issues:
+  check_runs:
+    missing_in_export:
+      - source_resource_id  # Import API expects this but export API doesn't provide it
+    explanation: "Export API needs to include source_resource_id for proper import processing"
+
+  commit_status_check:
+    missing_in_export:
+      - avatar_url         # Import API expects this but export API doesn't provide it
+      - source_resource_id # Import API expects this but export API doesn't provide it
+    explanation: "Export API needs to include avatar_url and source_resource_id for proper import processing"
+
+# Known gaps that require explicit decisions
+# These fields exist in protobuf but not in database - each needs action:
+# - Add to database schema (preferred)
+# - Map to existing field (add to field_mappings)
+# - Document as intentional omission with business justification
+known_gaps:
+  commit_status_check:
+    # Fields in protobuf but not in database - need decisions:
+    github_id: "GitHub.com ID - not applicable in GHES. Consider: remove from proto or add ghes_id field"
+    avatar_url: "User avatar URL - computed field, not stored. Consider: remove from proto or mark as computed"
+    html_url: "Status HTML URL - computed field. Consider: remove from proto or mark as computed"
+
+  check_runs:
+    github_id: "GitHub.com ID - not applicable in GHES. Consider: remove from proto or add ghes_id field"
+    head_sha: "Commit SHA - computed field derived from associated commit. Consider: remove or mark as computed"
+    html_url: "Check run HTML URL - computed field. Consider: remove from proto or mark as computed"
+
+  check_suites:
+    github_id: "GitHub.com ID - not applicable in GHES. Consider: remove from proto or add ghes_id field"
+    creator_id: "Creator user ID - consider adding to database if needed for business logic"
+    pull_request_numbers: "Array of PR numbers - computed field. Consider: remove or mark as computed"
+    before: "Before SHA - computed field from associated commit range. Consider: remove or mark as computed"
+    after: "After SHA - computed field from associated commit range. Consider: remove or mark as computed"
+    url: "Check suite URL - computed field. Consider: remove from proto or mark as computed"
+
+  actions_settings:
+    actions_permission: "Actions permission level - computed/derived field. Consider: add to repository model or mark as computed"
+    allows_github_owned_actions: "Boolean for GitHub-owned actions - computed field. Consider: add to repository model"
+    allows_verified_actions: "Boolean for verified actions - computed field. Consider: add to repository model"
+    patterns: "Action patterns array - computed field. Consider: add to repository model or separate table"
+
+  assets:
+    repository_id: "Repository ID - should map via repository_resource_id but missing from DAG filtering"
+    uploader_id: "Uploader user ID - computed field. Consider: add to asset model if needed"
+    asset_type: "Asset type enum - computed field. Consider: add to asset model"
+    file_name: "Asset file name - computed field. Consider: add to asset model"
+    content_type: "MIME content type - computed field. Consider: add to asset model"
+    markdown_url: "Markdown representation URL - computed field. Consider: remove or mark as computed"
+    signed_download_url: "Signed download URL - computed field with expiry. Consider: remove or mark as computed"
+    updated_at: "Last update timestamp - should exist in database. Consider: verify field mapping"
+
+  issue_events:
+    url: "Issue event URL - computed field. Consider: remove from proto or mark as computed"
+    pull_request_url: "PR URL when event relates to PR - computed field. Consider: remove or mark as computed"
+    issue_url: "Issue URL - computed field. Consider: remove from proto or mark as computed"
+    actor_url: "Actor profile URL - computed field. Consider: remove from proto or mark as computed"
+    issue_event_metadata_json: "Event metadata JSON - computed field. Consider: add to database if needed"
+
+  repository_topics:
+    name: "Topic name - computed field from associated topic. Consider: remove or mark as computed"
+    url: "Topic URL - computed field. Consider: remove from proto or mark as computed"
+
+  repository_settings:
+    repository_settings: "Top-level settings wrapper field - protobuf structure artifact. Consider: remove wrapper or flatten structure"
+
+# Required fields that should be added to protobuf definitions
+# These are database fields marked as NOT NULL or with presence validators
+# that are missing from the protobuf definitions
+missing_required_fields:
+  commit_status_check:
+    - repository_id   # Maps from repository_resource_id via DAG resolution
+    # sha is already mapped from commit_sha
+
+  check_runs:
+    - repository        # Association field - maps from repository_resource_id via DAG resolution
+    - check_suite_id    # Maps from check_suite_resource_id via DAG resolution
+
+  check_suites:
+    - github_app_id     # May need to be added or have default value
+    - repository_id     # Maps from repository_resource_id via DAG resolution
+    - rerequestable     # Boolean field with default
+    - check_runs_rerunnable  # Boolean field with default
+    - hidden            # Boolean field with default
+    - explicit_completion    # Boolean field with default
+
+  actions_settings:
+    - name              # Repository name - core field
+    - owner_id          # Repository owner ID - core field
+    - public_fork_count # Public fork count - computed field
+    - user_hidden       # Boolean for user visibility - core field
+    - maintained        # Boolean for maintenance status - core field
+    - template          # Boolean for template repository - core field
+    - world_writable_wiki # Boolean for wiki permissions - core field
+
+  assets:
+    - oid               # Object ID - core identifier field
+
+  issue_events:
+    - actor             # Actor user association - core field
+    - repository_id     # Repository ID - maps from repository_resource_id via DAG resolution
+    - user_hidden       # Boolean for user visibility - core field
+
+  repository_topics:
+    - topic             # Topic association - core field
+    - repository        # Repository association - core field
+    - user_id           # User ID who added topic - core field
+    - repository_id     # Repository ID - maps from repository_resource_id via DAG resolution
+    - topic_id          # Topic ID - core identifier field
+
+  repository_settings:
+    - name              # Repository name - core field
+    - owner_id          # Repository owner ID - core field
+    - public_fork_count # Public fork count - computed field but marked as required
+    - user_hidden       # Boolean for user visibility - core field
+    - maintained        # Boolean for maintenance status - core field
+    - template          # Boolean for template repository - core field
+    - world_writable_wiki # Boolean for wiki permissions - core field

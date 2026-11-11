@@ -1,0 +1,57 @@
+#!/bin/bash
+
+set -e
+
+[ -f /etc/app-env ] || [ "$FAST_DEV_LOOP" = "1" ] || exec "$(pwd)/script/app-env" $0 $@
+
+[ -n "${BUILD_STARTED_AT}" ] || export BUILD_STARTED_AT=$(date +%s)
+
+cd "$(dirname "$0")/.."
+
+pids=()
+log_prefix="tmp/lint.${BUILD_STARTED_AT}"
+
+t() {
+  local log="${log_prefix}.${#pids[*]}"
+  echo "+ $@" >"$log"
+  set +e
+  (time "$@") >>"$log" 2>&1 &
+  set -e
+  pids+=("$!")
+}
+
+summary() {
+  local status=0
+  for pid in "${pids[@]}"; do
+    wait "$pid" || status=$?
+  done
+
+  for f in "$log_prefix"*; do
+    cat "$f"
+    echo
+    rm -f "$f"
+  done
+  return $status
+}
+
+if [ "$CI_MODE" = "true" ]; then
+  RUBO_FORMAT="--format AdvisoryDB::JankyFormatter"
+fi
+
+if [ ${1:-""} = "--fix" ]; then
+  t yarn rubocop -A $RUBO_FORMAT
+  t yarn lintcss --fix
+  t yarn lintjs --fix
+  t yarn linterb --autocorrect
+else
+  t yarn rubocop $RUBO_FORMAT
+  t yarn lintcss
+  t yarn lintjs
+  t yarn linterb
+fi
+
+if [ "$CI_MODE" != "true" ]; then
+  t bin/rails test test/ruby_version_matches_test.rb
+fi
+
+summary

@@ -1,0 +1,86 @@
+name: Run Dependabot Full Path E2E Tests on Proxima
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        required: true
+        type: string
+        description: Proxima stamp name (e.g., "test-prodsdc01")
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+    secrets:
+      DEPENDABOT_TESTING_BOT_PROXIMA_TOTP:
+        description: "dependabot-testing-bot's TOTP token"
+        required: true
+      DEPENDABOT_TESTING_BOT_PASSWORD:
+        description: "dependabot-testing-bot's password"
+        required: true
+      DEPENDABOT_TESTING_BOT_PAT:
+        description: "dependabot-testing-bot's PAT"
+        required: true
+      SLACK_FIRST_RESPONDER_BOT_API_TOKEN:
+        description: "Slack API token for sending alerts"
+        required: true
+      DATADOG_KEY:
+        description: "Data Dog API Key"
+        required: true
+
+defaults:
+  run:
+    working-directory: test/e2e
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_HOST: https://${{ inputs.environment }}.ghe.com
+      GITHUB_FEATURE_USERNAME: dependabot-testing-bot
+      GITHUB_FEATURE_PASSWORD: ${{ secrets.DEPENDABOT_TESTING_BOT_PASSWORD }}
+      GITHUB_FEATURE_LOGIN_TWO_FACTOR_TOTP: ${{ secrets.DEPENDABOT_TESTING_BOT_PROXIMA_TOTP }}
+      GITHUB_FEATURE_BUSINESSNAME: ${{ inputs.environment }}
+      SSO_LOGIN_EMAIL: dependabot-testing-bot@github.com
+      SSO_LOGIN: true
+      SSO_LOGIN_TYPE: okta
+      DATADOG_KEY: ${{ secrets.DATADOG_API_KEY }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+        with:
+          repository: "github/github"
+          token: ${{ secrets.DEPENDABOT_TESTING_BOT_PAT }}
+
+      - name: Install Dependencies
+        run: |
+          npm install
+          npx playwright install --with-deps
+
+      - name: Run Tests
+        run: |
+          npx playwright test ./spec/dependabot --grep="@proxima" --config=./spec/dependabot/dependabot.config.ts --workers=5 --retries=5 --grep-invert=organizations
+
+      - name: Archive artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ inputs.environment }}
+          path: |
+            test/e2e/test-results/**/*
+
+      - name: Notify in Slack
+        env:
+          CHANNEL_ID: CKE86M8V9 # dependabot-ops channel
+          MESSAGE: ":rotating_light: E2E Test ${{ github.workflow }} failed for ${{ inputs.environment }}: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run> - Please investigate and update"
+        if: ${{ failure() }}
+        run: |
+          curl -X POST \
+            --url "https://slack.com/api/chat.postMessage" \
+            --data "{\"channel\":\"$CHANNEL_ID\",\"text\":\"$MESSAGE\"}" \
+            --header "Authorization: Bearer ${{ secrets.SLACK_FIRST_RESPONDER_BOT_API_TOKEN }}" \
+            --header "Content-Type: application/json; charset=utf-8"
+
+permissions:
+  contents: read

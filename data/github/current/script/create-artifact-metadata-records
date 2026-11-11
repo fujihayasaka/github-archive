@@ -1,0 +1,213 @@
+#!/usr/bin/env safe-ruby
+# typed: true
+# frozen_string_literal: true
+
+require_relative "../config/environment"
+
+unless Rails.env.development?
+  abort "This can only be run in development"
+end
+
+class CreateArtifactRecords
+  def initialize(repository_names)
+    @repository_names = repository_names
+    @repositories = []
+  end
+
+  def call
+    find_or_create_repositories
+    create_records
+    display_results
+  end
+
+  private
+
+  def find_or_create_repositories
+    @repository_names.each do |repo_name|
+      repository = Repository.nwo(repo_name)
+      if repository
+        puts "Found existing repository: #{repo_name}"
+        @repositories << repository
+      else
+        puts "Repository '#{repo_name}' not found, creating..."
+        repository = create_repository(repo_name)
+        @repositories << repository if repository
+      end
+    end
+
+    if @repositories.empty?
+      abort "Error: No valid repositories found or created"
+    end
+  end
+
+  def create_repository(repo_name)
+    owner_name, repo_name_only = repo_name.split("/", 2)
+
+    unless owner_name && repo_name_only
+      puts "Error: Invalid repository format '#{repo_name}'. Use OWNER/REPO format."
+      return nil
+    end
+
+    # Find or create the owner
+    owner = find_or_create_owner(owner_name)
+    return nil unless owner
+
+    begin
+      repository = ::Repository.handle_creation(
+        owner.organization? ? owner.admins.first : owner,
+        owner.login,
+        {
+          name: repo_name_only,
+          public: true,
+          template: false
+        },
+        synchronous: true
+      ).repository
+
+      repository.reset_memoized_attributes
+      repository.setup_git_repository
+
+      puts "✓ Created repository: #{repository.nwo}"
+      repository
+    rescue => e
+      puts "Error creating repository '#{repo_name}': #{e.message}"
+      nil
+    end
+  end
+
+  def find_or_create_owner(owner_name)
+    # Try to find existing user or organization
+    owner = User.find_by(login: owner_name) || Organization.find_by(login: owner_name)
+
+    if owner
+      puts "  Found existing owner: #{owner_name} (#{owner.class.name})"
+      return owner
+    end
+
+    # Create a new user if not found
+    puts "  Creating new user: #{owner_name}"
+    User.create!(
+      login: owner_name,
+      email: "#{owner_name}@example.com"
+    )
+  rescue => e
+    puts "Error finding/creating owner '#{owner_name}': #{e.message}"
+    nil
+  end
+
+  def create_records
+    @repositories.each do |repository|
+      puts "Processing repository: #{repository.nwo}"
+
+      # Create shared metadata for both storage and deployment records
+      metadata = create_artifact_metadata(repository)
+
+      create_artifact_storage_record(repository, metadata)
+      puts "  ✓ Created artifact storage record"
+
+      create_artifact_deployment_record(repository, metadata)
+      puts "  ✓ Created artifact deployment record with runtime risk tags"
+    end
+  end
+
+  def create_artifact_metadata(repository)
+    version = "1.2.3"
+
+    ArtifactMetadata.create!(
+      tenant_id: repository.tenant_id || 1,
+      owner_id: repository.owner_id,
+      repository_id: repository.id,
+      attestation_id: 1,
+      digest: "sha256:#{SecureRandom.hex(32)}",
+      name: "#{repository.name}-#{version}",
+      version: version,
+      status: "active"
+    )
+  end
+
+  def create_artifact_storage_record(repository, metadata)
+    registry_url = "https://registry.example.com"
+
+    ArtifactStorageRecord.create!(
+      artifact_metadata: metadata,
+      registry_url: registry_url,
+      artifact_url: "#{registry_url}/bar/#{metadata.name}",
+      registry_repository_name: "bar",
+      source_registry: "jfrog-artifactory"
+    )
+  end
+
+  def create_artifact_deployment_record(repository, metadata)
+    cluster = "moda-1"
+    environment = "production"
+
+    # Create deployment record with proper owner_id link
+    deployment_record = ArtifactDeploymentRecord.create!(
+      artifact_metadata_id: metadata.id,  # Explicit foreign key
+      owner_id: repository.owner_id,      # Set owner_id as per schema
+      cluster: cluster,
+      deployment_name: "prod-deploy-1",
+      logical_environment: environment,
+      physical_environment: "us-west-2"
+    )
+
+    # Create runtime risk tags with proper deployment_record_id link
+    sample_runtime_risks = [
+      ArtifactDeploymentRecord::CRITICAL_RESOURCE,
+      ArtifactDeploymentRecord::INTERNET_EXPOSED
+    ]
+
+    sample_runtime_risks.each do |risk|
+      ArtifactDeploymentRecordTag.create!(
+        deployment_record_id: deployment_record.id,  # Explicit foreign key
+        tag_name: "runtime-risk",
+        tag_value: risk
+      )
+    end
+
+    # Create some custom tags as well
+    custom_tags = [
+      { name: "environment", value: "production" },
+      { name: "team", value: "platform" }
+    ]
+
+    custom_tags.each do |tag|
+      ArtifactDeploymentRecordTag.create!(
+        deployment_record_id: deployment_record.id,  # Explicit foreign key
+        tag_name: tag[:name],
+        tag_value: tag[:value]
+      )
+    end
+
+    puts "    ✓ Created #{sample_runtime_risks.length} runtime risk tags"
+    puts "    ✓ Created #{custom_tags.length} custom tags"
+
+    deployment_record
+  end
+
+  def display_results
+    puts "\n#{"=" * 50}"
+    puts "Artifact Records Creation Complete!"
+    puts "=" * 50
+    puts "Processed #{@repositories.count} repository(ies):"
+    @repositories.each do |repo|
+      puts "  - #{repo.nwo}"
+      puts "    URL: http://github.localhost/#{repo.nwo}"
+    end
+    puts "\nRecord types created:"
+    puts "  - Storage records"
+    puts "  - Deployment records"
+    puts "  - Runtime risk tags (critical-resource, internet-exposed)"
+    puts "  - Custom deployment tags (environment, team)"
+    puts ""
+  end
+end
+
+if __FILE__ == $0
+  if ARGV.empty?
+    puts "Usage: #{$0} OWNER/REPO [OWNER/REPO2 ...]"
+    puts "Example: #{$0} monalisa/octoapp github/octoapp-pro"
+    exit 1
+  end
+  CreateArtifactRecords.new(ARGV).call
+end

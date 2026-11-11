@@ -1,0 +1,399 @@
+#!/usr/bin/env safe-ruby
+# frozen_string_literal: true
+
+#/ This script is useful for offloading the language and project stats computation from the ernicorn into a child
+#/ process, reimplementing the linguist and scout CLIs without the libgit2 dependency.
+#/
+#/ See OptionParser below for usage.
+
+require "linguist"
+require "scout/project_analysis"
+require "scout/repository"
+require "scout/stack"
+require "scout/tech_stack"
+require "gitrpc"
+require "gitrpc/backend/readers/attribute_reader"
+require "gitrpc/backend/readers/object_reader"
+require "optparse"
+require "strscan"
+
+def die(msg, exitstatus = 1)
+  $stderr.puts "git-language-project-stats: #{msg}"
+  exit exitstatus
+end
+
+class Native
+  attr_accessor :path
+
+  def initialize(path)
+    @path = path
+  end
+
+  def spawn(command, *argv)
+    argv = ["git", command, *argv]
+    cmd = Progeny::Command.new(*argv)
+    if cmd.success?
+      cmd.out
+    else
+      die("failed to run `#{command}`: #{cmd.err}")
+    end
+  end
+
+  # Duck type GitRPC::Native#spawn_piped
+  def spawn_piped(argv)
+    Progeny::Command.spawn_with_pipes(*argv)
+  end
+end
+
+class Cache
+  LINGUIST_GITRPC_CACHE_VERSION = "v3:gitrpc:#{Linguist::VERSION}"
+  SCOUT_GITRPC_CACHE_VERSION = "v0:gitrpc:#{Scout::VERSION}"
+
+  attr_accessor :git_dir
+
+  def initialize(write_cache = true)
+    @git_dir = ENV["GIT_DIR"] || get_git_dir
+    @write_cache = write_cache
+  end
+
+  def get_git_dir
+    cmd = Progeny::Command.new("git", "rev-parse", "--git-dir")
+    if cmd.success?
+      cmd.out.strip
+    else
+      die("path is not a repository")
+    end
+  end
+
+  def pathname(filename)
+    File.join(@git_dir, filename)
+  end
+
+  def load_language_cache_file
+    version, oid, cache = load_cache_file(Scout::CacheHelper::LANGUAGE_CACHE_PATH)
+    if [Scout::CacheHelper::LANGUAGE_STATS_CACHE_VERSION, LINGUIST_GITRPC_CACHE_VERSION].include?(version)
+      [cache, oid]
+    else
+      [nil, nil]
+    end
+  end
+
+  def write_language_cache_file(oid, cache)
+    write_cache_file(
+      Scout::CacheHelper::LANGUAGE_CACHE_PATH,
+      [
+        LINGUIST_GITRPC_CACHE_VERSION,
+        oid,
+        cache
+      ]
+    )
+  end
+
+  def load_project_cache_file
+    version, oid, cache = load_cache_file(Scout::CacheHelper::PROJECTS_CACHE_PATH)
+    if [Scout::CacheHelper::PROJECTS_STATS_CACHE_VERSION, SCOUT_GITRPC_CACHE_VERSION].include?(version)
+      [cache, oid]
+    else
+      [nil, nil]
+    end
+  end
+
+  def write_project_cache_file(oid, cache)
+    write_cache_file(
+      Scout::CacheHelper::PROJECTS_CACHE_PATH,
+      [
+        SCOUT_GITRPC_CACHE_VERSION,
+        oid,
+        cache
+      ]
+    )
+  end
+
+  def load_cache_file(filename)
+    Marshal.load(Zlib::Inflate.inflate(File.read(pathname(filename))))
+  rescue ::SystemCallError, ::Zlib::DataError, ::Zlib::BufError, ::TypeError => e
+    nil
+  end
+
+  def write_cache_file(filename, cache)
+    return unless @write_cache
+    tmp_filename = "#{@git_dir}/.#{filename}-#$$-#{(Time.now.to_f * 100000).to_i}"
+    File.open(tmp_filename, "wb") { |f| f.write(Zlib::Deflate.deflate(Marshal.dump(cache))) }
+    File.rename(tmp_filename, pathname(filename))
+  end
+end
+
+module LanguageStats
+  class Repository < Linguist::Source::Repository
+    def initialize(path)
+      @native = Native.new(path)
+    end
+
+    def path
+      @native.path
+    end
+
+    def diff(old_commit, new_commit)
+      args = ["diff-tree", "-z", "-r", "--raw", "--end-of-options"]
+      args << (old_commit.nil? ? empty_tree : old_commit)
+      args << (new_commit.nil? ? empty_tree : new_commit)
+      res = @native.spawn(*args).chomp
+      Diff.new(res)
+    end
+
+    def empty_tree
+      args = ["rev-parse", "--show-object-format"]
+      res = @native.spawn(*args).chomp
+      GitRPC::HashAlgorithm.from_sym(res).empty_tree
+    end
+
+    def get_tree_size(commit_id, limit = nil)
+      args = ["ls-tree", "-r", "--object-only", "-z"]
+      args << "--max-count=#{limit}" unless limit.nil? || limit < 0
+      args.push("--end-of-options", commit_id)
+      @native.spawn(*args).split("\0").count
+    end
+
+    def load_attributes_for_path(path, attr_names)
+      if @attr_reader && @attr_reader.attributes != attr_names
+        @attr_reader.close
+        @attr_reader = nil
+      end
+
+      @attr_reader ||= GitRPC::Backend::AttributeReader.new(@native, source: @attr_source, attributes: attr_names)
+      @attr_reader.get_attributes(path)
+    end
+
+    def load_blob(blob_id, max_size)
+      if @obj_reader && @obj_reader.limit != max_size
+        @obj_reader.limit = max_size
+      end
+
+      @obj_reader ||= GitRPC::Backend::ObjectReader.new(@native, limit: max_size)
+      obj = @obj_reader.object(blob_id, :contents, true)
+      [obj[:data], obj[:size]]
+    end
+
+    def set_attribute_source(commit_id)
+      if @attr_reader && @attr_reader.source != commit_id
+        @attr_reader.close
+        @attr_reader = nil
+      end
+
+      @attr_source = commit_id
+    end
+
+    def close_readers
+      @attr_reader.close unless @attr_reader.nil?
+      @obj_reader.close unless @obj_reader.nil?
+
+      @attr_reader = @obj_reader = nil
+    end
+  end
+
+  class Diff < Linguist::Source::Diff
+    def initialize(raw_tree_diff)
+      delta_map = {}
+      scanner = StringScanner.new(raw_tree_diff)
+
+      # Scan for raw diff info
+      while scanner.scan(GitRPC::Diff::DiffTreeParser::RAW_MATCHER)
+        delta = Delta.new(scanner)
+        delta_map[delta.new_file[:path]] = delta
+      end
+
+      # TODO: to mimic the legacy Rugged/libgit2 implementation, we don't
+      # actually check whether the delta is binary. It is possible to do
+      # that, though, by adding a '--numstat' to the diff, scanning the
+      # result with 'GitRPC::Diff::DiffTreeParser::NUMSTAT_MATCHER', and
+      # marking files with "-" for additions/deletions as binary.
+
+      @deltas = delta_map.values
+    end
+
+    def each_delta(&block)
+      @deltas.each(&block)
+    end
+  end
+
+  class Delta < Linguist::Source::Diff::Delta
+    attr_reader :status, :old_file, :new_file
+
+    def initialize(match, binary = false)
+      @status = GitRPC::Diff::StatusMethods::LABELS[match["status"]].to_sym
+      @status = :modified if @status == :changed # Linguist expects type changes with status "modified"
+
+      @binary = binary
+      @old_file = {
+        oid: match["old_oid"],
+        mode: match["old_mode"].to_i(8),
+        path: match["src_path"]
+      }
+      @new_file = {
+        oid: match["new_oid"],
+        mode: match["new_mode"].to_i(8),
+        path: match["dst_path"] || match["src_path"]
+      }
+    end
+
+    def binary?
+      @binary
+    end
+  end
+end
+
+module ProjectStats
+  class CacheHelper < Scout::CacheHelper
+    def initialize(cache, write_cache = true)
+      @cache = cache
+      @git_dir = @cache.git_dir
+    end
+
+    def load_stacks_map_from_cache
+      @cache.load_project_cache_file
+    end
+
+    def load_languages_from_cache
+      @cache.load_language_cache_file
+    end
+
+    def save_stacks_cache(oid, cache)
+      @cache.write_project_cache_file(oid, cache)
+    end
+  end
+
+  class Repository < Scout::Repository
+    def initialize(commit_oid, write_cache = true)
+      cache = Cache.new(write_cache)
+      super(LanguageStats::Repository.new(cache.git_dir), commit_oid)
+      @cache_helper = CacheHelper.new(cache, write_cache)
+    end
+  end
+
+  class ProjectAnalysis < Scout::ProjectAnalysis
+    def initialize(commit_oid, forced_rescan = false, write_cache = true)
+      @commit_oid = commit_oid
+      @forced_rescan = forced_rescan
+      @repo = Repository.new(commit_oid, write_cache)
+    end
+  end
+end
+
+class GitLanguageStats
+  def initialize(commit_oid, incremental = true, tree_size = Linguist::Repository.MAX_TREE_SIZE, write_cache = true)
+    @cache = Cache.new(write_cache)
+    @commit_oid = commit_oid
+    @incremental = incremental
+    @tree_size = tree_size
+  end
+
+  def linguist
+    source = LanguageStats::Repository.new(@cache.git_dir)
+    repo = Linguist::Repository.new(source, @commit_oid, @tree_size)
+
+    if @incremental
+      old_stats, old_commit_oid = load_language_stats
+      if old_stats && old_commit_oid
+        repo.load_existing_stats(old_commit_oid, old_stats)
+      end
+    end
+
+    result = yield repo
+    save_language_stats(@commit_oid, repo.cache)
+    result
+  ensure
+    repo&.repository&.close_readers
+  end
+
+  def load_language_stats
+    @cache.load_language_cache_file
+  end
+
+  def save_language_stats(oid, cache)
+    @cache.write_language_cache_file(oid, cache)
+  end
+end
+
+class GitProjectStats
+  def initialize(commit_oid, forced_rescan = false, write_cache = true)
+    @commit_oid = commit_oid
+    @forced_rescan = forced_rescan
+    @write_cache = write_cache
+  end
+
+  def stacks_list
+    analysis = ProjectStats::ProjectAnalysis.new(@commit_oid, @forced_rescan, @write_cache)
+    analysis.get_repository_projects.map(&:to_h)
+  ensure
+    analysis&.repo&.repository&.close_readers
+  end
+end
+
+def git_language_project_stats(args)
+  force = false
+  commit = nil
+  tree_size = Linguist::Repository::MAX_TREE_SIZE
+  write_cache = true
+
+  parser = OptionParser.new do |opts|
+    opts.banner = <<~HELP
+    Detect language type and project stacks for a given Git repository.
+
+    Usage:
+    git-language-project-stats [OPTIONS] stats|breakdown|stacks-list
+    git-language-project-stats [--tree-size=<size>] [--force] [--disable-write-cache] --commit=<commit> stats
+    git-language-project-stats [--tree-size=<size>] [--force] [--disable-write-cache] --commit=<commit> breakdown
+    git-language-project-stats [--force] [--disable-write-cache] --commit=<commit> stacks-list
+    HELP
+
+    # git-help overrides `--help` with a blank manual page
+    opts.on("-h", "--help") do
+      puts opts
+      exit 0
+    end
+
+    opts.on("-f", "--force", "Force a full rescan") do
+      force = true
+    end
+
+    opts.on("-c", "--commit=COMMIT", "Commit to index") do |oid|
+      commit = oid
+    end
+
+    opts.on("-t", "--tree-size=NUMBER", Integer, "Maximum number of files scanned to detect languages (default: #{Linguist::Repository::MAX_TREE_SIZE})") do |size|
+      tree_size = size
+    end
+
+    opts.on("--disable-write-cache", "Disable writing to on-disk linguist cache") do
+      write_cache = false
+    end
+  end
+
+  args = parser.parse!(args)
+  raise "requires a valid commit oid" if commit.nil?
+
+  subcommand = args.pop
+  case subcommand
+  when "stats"
+    incremental = !force
+    wrapper = GitLanguageStats.new(commit, incremental, tree_size, write_cache)
+    wrapper.linguist do |linguist|
+      puts JSON.dump(linguist.languages)
+    end
+  when "breakdown"
+    incremental = !force
+    wrapper = GitLanguageStats.new(commit, incremental, tree_size, write_cache)
+    wrapper.linguist do |linguist|
+      puts JSON.dump(linguist.breakdown_by_file)
+    end
+  when "stacks-list"
+    wrapper = GitProjectStats.new(commit, force, write_cache)
+    puts JSON.dump(wrapper.stacks_list)
+  else
+    die("invalid subcommand: #{subcommand}")
+  end
+rescue => e
+  die(e.message)
+end
+
+git_language_project_stats(ARGV)

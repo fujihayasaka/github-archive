@@ -1,0 +1,604 @@
+#!/usr/bin/env bash
+#/ Usage: script/proxima-stamp-onboarding --stamp <STAMP> [--service <SERVICE>] [--help]
+#/ Creates a new Proxima stamp overlay configuration for Kustomize or adds a service to existing environments.
+#/
+#/  --stamp <STAMP>
+#/      (required) The stamp/environment name. Use "all" to target all existing environments.
+#/      For new environments: prod-apac-01, staging-emea-02
+#/      For service creation: "all" (creates service in all existing environments)
+#/  --service <SERVICE>
+#/      (optional) The service name to create (e.g., public-api, worker, internal-api).
+#/      If provided, creates service overlays instead of new environment.
+#/  --help
+#/      Shows this help
+#/
+#/ Examples:
+#/   # Create new environment
+#/   script/proxima-stamp-onboarding --stamp prod-apac-01
+#/
+#/   # Create service in all existing environments
+#/   script/proxima-stamp-onboarding --stamp all --service public-api
+#/
+#/   # Create service in specific environment
+#/   script/proxima-stamp-onboarding --stamp prod-ae-01 --service worker
+
+root="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." >/dev/null 2>&1 && pwd )"
+cd "$root"
+
+set -e
+
+stamp_name=""
+service_name=""
+
+while [[ "$#" -gt 0 ]]; do
+  key="$1"
+  shift
+
+  case "$key" in
+    --stamp)
+      stamp_name="$1"
+      shift
+      ;;
+    --service)
+      service_name="$1"
+      shift
+      ;;
+    --name)
+      # Keep backwards compatibility
+      stamp_name="$1"
+      shift
+      ;;
+    --help)
+      grep '^#/' "$0" | cut -c4-
+      exit 0 ;;
+    *)
+      echo "Unknown parameter: $key"
+      echo "Use --help for usage information"
+      exit 1 ;;
+  esac
+done
+
+if [ -z "$stamp_name" ]; then
+  echo "❌ Error: --stamp parameter is required"
+  echo "Use --help for usage information"
+  exit 1
+fi
+
+# Function to get all existing environments
+get_existing_environments() {
+  find config/kustomize/overlays -maxdepth 1 -type d -not -path "config/kustomize/overlays" | sed 's|config/kustomize/overlays/||' | sort
+}
+
+# Function to get all existing services
+get_existing_services() {
+  if [ ! -d "config/kustomize/base/services" ]; then
+    return
+  fi
+  find config/kustomize/base/services -maxdepth 1 -type d -not -path "config/kustomize/base/services" | sed 's|config/kustomize/base/services/||' | sort
+}
+
+# Function to create service base if it doesn't exist
+create_service_base() {
+  local service="$1"
+  local service_base_dir="config/kustomize/base/services/$service"
+
+  if [ -d "$service_base_dir" ]; then
+    echo "✅ Service base already exists: $service_base_dir"
+    return 0
+  fi
+
+  echo "🚀 Creating service base: $service"
+
+  # Create directory structure
+  mkdir -p "$service_base_dir/deployments"
+  mkdir -p "$service_base_dir/services"
+  mkdir -p "$service_base_dir/configmaps"
+
+  # Create kustomization.yaml
+  cat > "$service_base_dir/kustomization.yaml" << EOF
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../common
+  - deployments/deployment.yaml
+  - services/service.yaml
+  - configmaps/config.yaml
+
+namePrefix: $service-
+
+labels:
+  - includeSelectors: true
+    pairs:
+      app.kubernetes.io/component: $service
+      app.kubernetes.io/part-of: $service
+EOF
+
+  # Create deployment.yaml
+  cat > "$service_base_dir/deployments/deployment.yaml" << EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: $service
+      component: $service
+  template:
+    metadata:
+      labels:
+        app: $service
+        component: $service
+    spec:
+      containers:
+        - name: $service
+          image: $service
+          # Add ports as needed:
+          # ports:
+          #   - name: http
+          #     containerPort: 8080
+          # Add resource limits as needed:
+          # resources:
+          #   requests:
+          #     memory: "128Mi"
+          #     cpu: "100m"
+          #   limits:
+          #     memory: "256Mi"
+          #     cpu: "200m"
+          # Add health checks as needed:
+          # readinessProbe:
+          #   httpGet:
+          #     path: /health
+          #     port: http
+          #   initialDelaySeconds: 5
+          #   periodSeconds: 10
+EOF
+
+  # Create service.yaml
+  cat > "$service_base_dir/services/service.yaml" << EOF
+apiVersion: v1
+kind: Service
+metadata:
+  name: service
+spec:
+  selector:
+    app: $service
+    component: $service
+  # Add ports as needed:
+  # ports:
+  #   - name: http
+  #     port: 80
+  #     targetPort: http
+  type: ClusterIP
+  # Change type for external access:
+  # type: LoadBalancer
+EOF
+
+  # Create config.yaml
+  cat > "$service_base_dir/configmaps/config.yaml" << EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config
+data:
+  DD_SERVICE: "$service"
+  # Add additional configuration variables as needed:
+  # PORT: "8080"
+EOF
+
+  echo "✅ Created service base: $service_base_dir"
+}
+
+# Function to add service to environment overlay's kustomization.yaml
+add_service_to_environment() {
+  local env="$1"
+  local service="$2"
+  local main_kustomization="config/kustomize/overlays/$env/kustomization.yaml"
+
+  # Check if service is already in the resources list
+  if grep -q "^  - $service\s*$" "$main_kustomization" 2>/dev/null; then
+    return 0  # Service already exists in resources
+  fi
+
+  # Find the resources section and add the service
+  if [ -f "$main_kustomization" ]; then
+    # Create a temporary file to build the new kustomization.yaml
+    local temp_file
+    temp_file=$(mktemp)
+    local in_resources_section=false
+    local added_service=false
+
+    while IFS= read -r line; do
+      # Check if we're entering the resources section
+      if [[ "$line" =~ ^resources: ]]; then
+        in_resources_section=true
+        echo "$line" >> "$temp_file"
+      # Check if we're leaving the resources section (next top-level key)
+      elif [[ "$line" =~ ^[a-zA-Z] ]] && [ "$in_resources_section" = true ]; then
+        # Add service before the next section if not already added
+        if [ "$added_service" = false ]; then
+          echo "  - $service" >> "$temp_file"
+          added_service=true
+        fi
+        in_resources_section=false
+        echo "$line" >> "$temp_file"
+      # Check if this is the comment line where we should add the service before it
+      elif [ "$in_resources_section" = true ] && [[ "$line" =~ ^[[:space:]]*#.*Add\ new\ services\ here ]] && [ "$added_service" = false ]; then
+        echo "  - $service" >> "$temp_file"
+        echo "$line" >> "$temp_file"
+        added_service=true
+      # Add service if we're in resources section and this is a resource line (alphabetical order)
+      elif [ "$in_resources_section" = true ] && [[ "$line" =~ ^[[:space:]]*-[[:space:]] ]] && [ "$added_service" = false ]; then
+        # Check if we should add our service alphabetically
+        local current_service
+        current_service=$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*//' | sed 's/[[:space:]]*#.*//')
+        if [[ "$service" < "$current_service" ]]; then
+          echo "  - $service" >> "$temp_file"
+          echo "$line" >> "$temp_file"
+          added_service=true
+        else
+          echo "$line" >> "$temp_file"
+        fi
+      else
+        echo "$line" >> "$temp_file"
+      fi
+    done < "$main_kustomization"
+
+    # If we're still in resources section at end of file, add service
+    if [ "$in_resources_section" = true ] && [ "$added_service" = false ]; then
+      echo "  - $service" >> "$temp_file"
+      added_service=true
+    fi
+
+    # Replace the original file
+    mv "$temp_file" "$main_kustomization"
+
+    if [ "$added_service" = true ]; then
+      echo "✅ Added service '$service' to environment '$env' kustomization.yaml"
+    fi
+  fi
+}
+
+# Function to create service overlay for an environment
+create_service_overlay() {
+  local env="$1"
+  local service="$2"
+  local overlay_dir="config/kustomize/overlays/$env/$service"
+
+  if [ -d "$overlay_dir" ]; then
+    echo "⚠️  Service overlay already exists: $overlay_dir"
+    return 0
+  fi
+
+  echo "🚀 Creating service overlay: $env/$service"
+
+  # Create directory structure
+  mkdir -p "$overlay_dir/patches"
+
+  # Create kustomization.yaml
+  cat > "$overlay_dir/kustomization.yaml" << EOF
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../../base/services/$service
+EOF
+
+  # Add commented-out patch examples
+  cat >> "$overlay_dir/kustomization.yaml" << EOF
+
+# Patch Examples (uncomment to activate)
+# patches:
+#   - path: patches/deployment.yaml
+#     target:
+#       kind: Deployment
+#       name: deployment
+#   - path: patches/service.yaml
+#     target:
+#       kind: Service
+#       name: service
+#   - path: patches/configmap.yaml
+#     target:
+#       kind: ConfigMap
+#       name: config
+
+# Instructions:
+# 1. Uncomment the patches section above to apply patches
+# 2. Create corresponding patch files in the patches/ directory
+# 3. Run: make kustomize
+# 4. Compare base vs patched resources in the generated output
+EOF
+
+  # Create deployment patch template
+  cat > "$overlay_dir/patches/deployment.yaml" << EOF
+# Deployment Patch Example
+# This file patches the base deployment configuration with environment-specific changes
+# Only include the fields you want to modify from the base deployment
+
+# Example: Environment-specific deployment modifications
+# Uncomment to patch the deployment with custom settings:
+# This will modify the base deployment to add or override specific values
+#
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: deployment                 # Must match the base deployment name
+# spec:
+#   replicas: 3                     # Override base replica count
+#   template:
+#     spec:
+#       containers:
+#         - name: $service
+#           resources:
+#             requests:
+#               memory: "256Mi"      # Override base memory request
+#               cpu: "200m"         # Override base CPU request
+#             limits:
+#               memory: "512Mi"      # Override base memory limit
+#               cpu: "400m"         # Override base CPU limit
+
+# Instructions:
+# 1. Uncomment the configuration above to apply the patch
+# 2. Add only the deployment fields you want to change
+# 3. Run: make kustomize
+# 4. Compare base vs patched deployment in the generated output
+EOF
+
+  # Create service patch template
+  cat > "$overlay_dir/patches/service.yaml" << EOF
+# Service Patch Example
+# This file patches the base service configuration with environment-specific changes
+# Only include the fields you want to modify from the base service
+
+# Example: Environment-specific service modifications
+# Uncomment to patch the service with custom settings:
+# This will modify the base service to add or override specific values
+#
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: service                    # Must match the base service name
+# spec:
+#   type: ClusterIP                  # Override base service type
+#   ports:
+#     - name: http
+#       port: 8080                   # Override base port
+#       targetPort: http
+
+# Instructions:
+# 1. Uncomment the configuration above to apply the patch
+# 2. Add only the service fields you want to change
+# 3. Run: make kustomize
+# 4. Compare base vs patched service in the generated output
+EOF
+
+  # Create configmap patch template
+  cat > "$overlay_dir/patches/configmap.yaml" << EOF
+# ConfigMap Patch Example
+# This file patches the base configmap configuration with environment-specific changes
+# Only include the fields you want to modify or add to the base configmap
+
+# Example: Environment-specific configuration variables
+# Uncomment to patch the configmap with custom environment variables:
+# This will modify the base config to add or override specific values
+#
+# apiVersion: v1
+# kind: ConfigMap
+# metadata:
+#   name: config                     # Must match the base configmap name
+# data:
+#   DD_SERVICE: "$service"         # Override base value
+#   PORT: ""                         # Override base value
+
+# Instructions:
+# 1. Uncomment the configuration above to apply the patch
+# 2. Add only the environment variables you want to change or add
+# 3. Run: make kustomize
+# 4. Compare base vs patched configmap in the generated output
+EOF
+
+  echo "✅ Created service overlay: $overlay_dir"
+}
+
+# Main logic
+if [ -n "$service_name" ]; then
+  # Service creation mode
+
+  # Validate service name format
+  if [[ ! "$service_name" =~ ^[a-z0-9-]+$ ]]; then
+    echo "❌ Error: Service name should only contain lowercase letters, numbers, and hyphens"
+    echo "Examples: public-api, worker, internal-api"
+    exit 1
+  fi
+
+  # Create service base
+  create_service_base "$service_name"
+
+  if [ "$stamp_name" = "all" ]; then
+    # Create service in all existing environments
+    echo "🚀 Creating service '$service_name' in all existing environments"
+
+    existing_envs=$(get_existing_environments)
+    if [ -z "$existing_envs" ]; then
+      echo "❌ Error: No existing environments found in config/kustomize/overlays/"
+      exit 1
+    fi
+
+    for env in $existing_envs; do
+      create_service_overlay "$env" "$service_name"
+      add_service_to_environment "$env" "$service_name"
+    done
+
+    echo ""
+    echo "✅ Successfully created service '$service_name' in all environments"
+    echo ""
+    echo "📁 Created service base:"
+    echo "   config/kustomize/base/services/$service_name/"
+    echo ""
+    echo "📁 Created service overlays:"
+    for env in $existing_envs; do
+      echo "   config/kustomize/overlays/$env/$service_name/"
+    done
+
+  else
+    # Create service in specific environment
+    if [ ! -d "config/kustomize/overlays/$stamp_name" ]; then
+      echo "❌ Error: Environment '$stamp_name' does not exist"
+      echo "Available environments:"
+      get_existing_environments | sed 's/^/  - /'
+      exit 1
+    fi
+
+    create_service_overlay "$stamp_name" "$service_name"
+    add_service_to_environment "$stamp_name" "$service_name"
+
+    echo ""
+    echo "✅ Successfully created service '$service_name' in environment '$stamp_name'"
+    echo ""
+    echo "📁 Created files:"
+    echo "   config/kustomize/base/services/$service_name/ (if not existed)"
+    echo "   config/kustomize/overlays/$stamp_name/$service_name/"
+  fi
+
+else
+  # Environment creation mode (original functionality)
+
+  # Validate stamp name format (basic validation)
+  if [[ ! "$stamp_name" =~ ^[a-z0-9-]+$ ]]; then
+    echo "❌ Error: Stamp name should only contain lowercase letters, numbers, and hyphens"
+    echo "Examples: prod-apac-01, staging-emea-02, lab-cus-03"
+    exit 1
+  fi
+
+  overlay_dir="config/kustomize/overlays/$stamp_name"
+
+  # Check if overlay already exists
+  if [ -d "$overlay_dir" ]; then
+    echo "❌ Error: Overlay for stamp '$stamp_name' already exists at $overlay_dir"
+    exit 1
+  fi
+
+  echo "🚀 Creating new Proxima stamp overlay: $stamp_name"
+
+  # Get all existing services
+  existing_services=$(get_existing_services)
+  if [ -z "$existing_services" ]; then
+    echo "❌ Error: No existing services found in config/kustomize/base/services/"
+    exit 1
+  fi
+
+  # Create directory structure
+  mkdir -p "$overlay_dir/patches/configmaps"
+
+  # Build resources list for kustomization.yaml
+  resources_list=""
+  for service in $existing_services; do
+    resources_list="$resources_list  - $service\n"
+  done
+
+  # Create environment-level kustomization.yaml
+  cat > "$overlay_dir/kustomization.yaml" << EOF
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+EOF
+
+  # Add each service as a resource
+  for service in $existing_services; do
+    echo "  - $service" >> "$overlay_dir/kustomization.yaml"
+  done
+
+  # Add comment for future service additions
+  echo "  # Add new services here when onboarded to this environment" >> "$overlay_dir/kustomization.yaml"
+
+  # Add proxima base and commented-out patch examples
+  cat >> "$overlay_dir/kustomization.yaml" << EOF
+  - ../../base/proxima
+
+# Environment-Level Patch Examples (uncomment to activate)
+# patches:
+#   - path: patches/configmaps/environment.yaml
+#     target:
+#       kind: ConfigMap
+#       name: shared-config
+
+# Instructions:
+# 1. Uncomment the patches section above to apply environment-level patches
+# 2. Create corresponding patch files in the patches/ directory
+# 3. Run: make kustomize
+# 4. Compare base vs patched resources in the generated output
+EOF
+
+  # Create environment patch template
+  cat > "$overlay_dir/patches/configmaps/environment.yaml" << EOF
+# ConfigMap Patch Example
+# This file patches the base configmap configuration with environment-specific changes
+# Only include the fields you want to modify or add to the base configmap
+
+# Example: Environment-specific configuration variables
+# Uncomment to patch the configmap with custom environment variables:
+# This will modify the base shared-config to add or override specific values
+#
+# apiVersion: v1
+# kind: ConfigMap
+# metadata:
+#   name: shared-config              # Must match the base configmap name
+# data:
+#   DEBUG_ENABLED: "false"          # Override base value
+
+# Instructions:
+# 1. Uncomment the configuration above to apply the patch
+# 2. Add only the environment variables you want to change or add
+# 3. Run: make kustomize
+# 4. Compare base vs patched configmap in the generated output
+EOF
+
+  # Create service-specific overlays for all existing services
+  created_files=()
+  created_files+=("$overlay_dir/kustomization.yaml")
+  created_files+=("$overlay_dir/patches/configmaps/environment.yaml")
+
+  for service in $existing_services; do
+    echo "  📦 Creating service overlay for: $service"
+    create_service_overlay "$stamp_name" "$service"
+    created_files+=("$overlay_dir/$service/kustomization.yaml")
+    created_files+=("$overlay_dir/$service/patches/deployment.yaml")
+    created_files+=("$overlay_dir/$service/patches/service.yaml")
+    created_files+=("$overlay_dir/$service/patches/configmap.yaml")
+  done
+
+  echo "✅ Successfully created Proxima stamp overlay: $stamp_name"
+  echo ""
+  echo "📁 Created files:"
+  for file in "${created_files[@]}"; do
+    echo "   $file"
+  done
+  echo ""
+  echo "📦 Created service overlays for: $(echo "$existing_services" | tr ' ' ', ')"
+fi
+
+echo ""
+echo "==> Generating Kubernetes manifests <=="
+make kustomize
+
+if [ -n "$service_name" ]; then
+  echo ""
+  echo "📝 Next steps for service '$service_name':"
+  echo "   1. Customize the base service configuration in config/kustomize/base/services/$service_name/"
+  echo "   2. Uncomment and adjust environment-specific patches in the overlay directories"
+  echo "   3. Activate patches by uncommenting the patches section in kustomization.yaml files"
+  echo "   4. Test with 'make kustomize' to build and verify the configuration"
+else
+  echo ""
+  echo "📝 Next steps for environment '$stamp_name':"
+  echo "   1. Uncomment and edit $overlay_dir/patches/configmaps/environment.yaml to add stamp-specific configuration"
+  echo "   2. Activate patches by uncommenting the patches section in kustomization.yaml files"
+  echo "   3. Adjust service-specific patches in service overlay directories (e.g., $overlay_dir/<service>/patches/)"
+  echo "   4. Test the configuration with 'make kustomize'"
+  echo ""
+  echo "💡 Tip: All patches start as commented-out educational examples for safety"
+  echo "💡 Tip: Look at existing overlays like 'prod-ae-01' for configuration examples"
+fi

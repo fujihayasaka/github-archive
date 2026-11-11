@@ -1,0 +1,44 @@
+#!/bin/bash
+set -e
+
+echo "*** Setup GHCR"
+cd /workspaces/github
+script/setup-codespaces-packages
+
+echo "*** Modifying launch to not use results service"
+cd /workspaces/actions/launch
+linenumber=$(grep -n -E "func UsingResultsService\(\) bool {$" pkg/launchconfig/globalcfg.go | sed -E 's/(.*):.*/\1/')
+if [ -n "$linenumber" ]; then # Allow for this script having run before
+  sed -i "${linenumber},${linenumber}s/$/ return false } \/*/" pkg/launchconfig/globalcfg.go
+  sed -i "${linenumber},$(( linenumber + 8 ))s/^}/ } *\//" pkg/launchconfig/globalcfg.go
+fi
+
+echo "*** Setup Actions"
+echo "*** Optional: in another pane do: watch -d -n 1 kubectl get deployments"
+cd /workspaces/actions/actions-codespaces
+script/setup --scenario actions-three-nines-inner-loop
+
+echo "*** Opting out of actions-results service"
+cd /workspaces/github
+bin/toggle-feature-flag enable actions_opt_out_results_service
+
+echo "*** Setup npm-registry"
+echo "export ADDR=:8004" > /workspaces/packages/npm-registry/.env
+
+echo "*** Creating /workspaces/logs"
+mkdir -p /workspaces/logs
+
+echo "*** Modifying RMS as per https://github.com/github/package-registry-team/issues/7439"
+cd /workspaces/packages/registry-metadata
+# Hard to make git apply work when copy-pasting a diff file from markdown, due to whitespace I think.
+# So the following sed command replaces the function IsFeatureEnabledGlobally with a return true, nil
+# Dependent on the existing closing brace being within 40 lines of the start
+linenumber=$(grep -n -E "cachingClient\) IsFeatureEnabledGlobally.*{$" rms/features/client.go | sed -E 's/(.*):.*/\1/')
+if [ -n "$linenumber" ]; then # Allow for this script having run before
+  sed -i "${linenumber},${linenumber}s/$/ return true, nil } \/*/" rms/features/client.go
+  sed -i "${linenumber},$(( linenumber + 50 ))s/^}/ } *\//" rms/features/client.go
+fi
+
+cd /workspaces/github
+
+echo "***"

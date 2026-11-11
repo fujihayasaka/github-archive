@@ -1,0 +1,48 @@
+#!/bin/bash
+
+# script/start-containers: Launch the containers required for local development
+
+set -e
+
+GRN='\033[1;32m'
+RED='\033[1;31m'
+NC='\033[0m'
+
+if [[ "$DG_CODESPACE_COMPOSE" == "1" ]]; then
+  echo -e "${GRN}This Codespace is configured to run in Codespace Compose mode! Skipping script/start-containers${NC}"
+  exit 0
+fi
+
+cd "$(dirname "$0")/.."
+source script/_env
+
+if github_github_codespace; then
+  echo -e "${GRN}This is a github/github Codespace! Please ensure dotcom is running. Skipping script/start-containers${NC}"
+  exit 0
+fi
+
+# -d will stop the containers
+while getopts "dh" arg; do
+  case $arg in
+    d)  SHOULD_STOP=1 ;;
+    *) ;;
+  esac
+done
+
+if ! docker compose 1>/dev/null 2>/dev/null; then
+  echo -e "${RED}'docker compose' returns an error.${NC}"
+  echo -e "You may need to install the Docker Compose CLI V2:"
+  echo -e "  https://docs.docker.com/compose/cli-command/"
+  echo -e "Output:\n"
+  exec docker compose
+fi
+
+
+if [[ -n "$SHOULD_STOP" ]]; then
+  exec docker compose down
+else
+  if [[ -n "$GITHUB_TOKEN" ]]; then
+    docker login ghcr.io -u token --password "$GITHUB_TOKEN"
+  fi
+  exec docker compose up -d
+fi

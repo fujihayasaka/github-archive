@@ -1,0 +1,869 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SARIF 2.1.0 for GitHub Autofix",
+  "$id": "https://raw.githubusercontent.com/github/codeml-autofix/main/go/pkg/sarif/sarif_v2_1_0_schema.json",
+  "description": "A schema detailing the sections of the SARIF 2.1.0 specification that are used by GitHub Autofix.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "description": "The URI of the JSON schema corresponding to the version.",
+      "type": "string",
+      "format": "uri"
+    },
+    "version": {
+      "description": "Autofix only supports SARIF version 2.1.0."
+    },
+    "runs": {
+      "description": "This must be present for all submitted SARIF files, though it may be an empty array.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/run"
+      }
+    }
+  },
+  "definitions": {
+    "artifact": {
+      "description": "A single artifact. In some cases, this artifact might be nested within another artifact.",
+      "type": "object",
+      "properties": {
+        "location": {
+          "description": "The location of the artifact.",
+          "$ref": "#/definitions/artifactLocation"
+        },
+        "contents": {
+          "description": "The contents of the artifact.",
+          "$ref": "#/definitions/artifactContent"
+        }
+      }
+    },
+    "artifactLocation": {
+      "type": "object",
+      "properties": {
+        "uri": {
+          "description": "A URI indicating the location of an artifact. If relative, it should be relative to the root of the GitHub repository being analyzed. If absolute, either a working directory should be provided for the invocation or a checkout URI should be provided when submitting the SARIF to allow code scanning to match artifacts up with files in the repository.",
+          "type": "string",
+          "format": "uri-reference"
+        },
+        "uriBaseId": {
+          "description": "A string which indirectly specifies the absolute URI with respect to which a relative URI in the \"uri\" property is interpreted.",
+          "type": "string"
+        },
+        "index": {
+          "description": "The index within the run artifacts array of the artifact object associated with the artifact location.",
+          "type": "integer",
+          "default": -1,
+          "minimum": -1
+        }
+      },
+      "required": ["index"]
+    },
+    "artifactChange": {
+      "description": "A change to a single artifact.",
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "artifactLocation": {
+          "description": "The location of the artifact to change.",
+          "$ref": "#/definitions/artifactLocation"
+        },
+
+        "replacements": {
+          "description": "An array of replacement objects, each of which represents the replacement of a single region in a single artifact specified by 'artifactLocation'.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": false,
+          "items": {
+            "$ref": "#/definitions/replacement"
+          }
+        },
+
+        "properties": {
+          "description": "Key/value pairs that provide additional information about the change.",
+          "$ref": "#/definitions/propertyBag"
+        }
+      },
+
+      "required": ["artifactLocation", "replacements"]
+    },
+    "artifactContent": {
+      "description": "Represents the contents of an artifact.",
+      "type": "object",
+      "properties": {
+        "text": {
+          "description": "UTF-8-encoded content from a text artifact.",
+          "type": "string"
+        }
+      }
+    },
+    "codeFlow": {
+      "type": "object",
+      "properties": {
+        "threadFlows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/threadFlow"
+          }
+        }
+      }
+    },
+    "conversion": {
+      "description": "Describes how a converter transformed the output of a static analysis tool from the analysis tool's native output format into the SARIF format.",
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "tool": {
+          "description": "A tool object that describes the converter.",
+          "$ref": "#/definitions/tool"
+        }
+      },
+      "required": ["tool"]
+    },
+    "fix": {
+      "description": "A proposed fix for the problem represented by a result object. A fix specifies a set of artifacts to modify. For each artifact, it specifies a set of bytes to remove, and provides a set of new bytes to replace them.",
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "description": {
+          "description": "A message that describes the proposed fix, enabling viewers to present the proposed change to an end user.",
+          "$ref": "#/definitions/message"
+        },
+
+        "artifactChanges": {
+          "description": "One or more artifact changes that comprise a fix for a result.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/definitions/artifactChange"
+          }
+        },
+
+        "properties": {
+          "description": "Key/value pairs that provide additional information about the fix.",
+          "$ref": "#/definitions/propertyBag"
+        }
+      },
+      "required": ["artifactChanges"]
+    },
+    "invocation": {
+      "type": "object",
+      "properties": {
+        "workingDirectory": {
+          "description": "The working directory for the invocation, used to relativize absolute paths.",
+          "$ref": "#/definitions/artifactLocation"
+        },
+        "toolExecutionNotifications": {
+          "description": "A list of runtime conditions detected by the tool during the analysis.",
+          "type": "array",
+          "minItems": 0,
+          "uniqueItems": false,
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/notification"
+          }
+        },
+        "exitCode": {
+          "description": "The process exit code.",
+          "type": "integer"
+        },
+        "exitCodeDescription": {
+          "description": "The reason for the process exit.",
+          "type": "string"
+        },
+        "executionSuccessful": {
+          "description": "Specifies whether the tool's execution completed successfully.",
+          "type": "boolean"
+        }
+      },
+      "required": ["executionSuccessful"]
+    },
+    "location": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": -1,
+          "default": -1
+        },
+        "physicalLocation": {
+          "$ref": "#/definitions/physicalLocation"
+        },
+        "message": {
+          "$ref": "#/definitions/message"
+        }
+      }
+    },
+    "message": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "markdown": {
+          "type": "string"
+        }
+      }
+    },
+    "multiformatMessageString": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "markdown": {
+          "type": "string"
+        }
+      },
+      "required": ["text"]
+    },
+    "notification": {
+      "description": "Describes a condition relevant to the tool itself, as opposed to being relevant to a target being analyzed by the tool.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "locations": {
+          "description": "The locations relevant to this notification.",
+          "type": "array",
+          "minItems": 0,
+          "uniqueItems": true,
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/location"
+          }
+        },
+
+        "message": {
+          "description": "A message that describes the condition that was encountered.",
+          "$ref": "#/definitions/message"
+        },
+
+        "level": {
+          "description": "A value specifying the severity level of the notification.",
+          "default": "warning",
+          "enum": ["none", "note", "warning", "error"],
+          "type": "string"
+        },
+
+        "threadId": {
+          "description": "The thread identifier of the code that generated the notification.",
+          "type": "integer"
+        },
+
+        "timeUtc": {
+          "description": "The Coordinated Universal Time (UTC) date and time at which the analysis tool generated the notification.",
+          "type": "string",
+          "format": "date-time"
+        },
+
+        "exception": {
+          "description": "The runtime exception, if any, relevant to this notification.",
+          "$ref": "#/definitions/exception"
+        },
+
+        "descriptor": {
+          "description": "A reference used to locate the descriptor relevant to this notification.",
+          "$ref": "#/definitions/reportingDescriptorReference"
+        },
+
+        "associatedRule": {
+          "description": "A reference used to locate the rule descriptor associated with this notification.",
+          "$ref": "#/definitions/reportingDescriptorReference"
+        },
+
+        "properties": {
+          "description": "Key/value pairs that provide additional information about the notification.",
+          "$ref": "#/definitions/notificationPropertyBag"
+        }
+      },
+
+      "required": ["message"]
+    },
+    "propertyBag": {
+      "description": "Key/value pairs that provide additional information about the object.",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "tags": {
+          "description": "A set of distinct strings that provide additional information.",
+          "type": "array",
+          "minItems": 0,
+          "uniqueItems": true,
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "exception": {
+      "description": "Describes a runtime exception encountered during the execution of an analysis tool.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "A string that identifies the kind of exception, for example, the fully qualified type name of an object that was thrown, or the symbolic name of a signal."
+        },
+
+        "message": {
+          "description": "A message that describes the exception.",
+          "type": "string"
+        },
+
+        "stack": {
+          "description": "The sequence of function calls leading to the exception.",
+          "$ref": "#/definitions/stack"
+        },
+
+        "innerExceptions": {
+          "description": "An array of exception objects each of which is considered a cause of this exception.",
+          "type": "array",
+          "minItems": 0,
+          "uniqueItems": false,
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/exception"
+          }
+        },
+
+        "properties": {
+          "description": "Key/value pairs that provide additional information about the exception.",
+          "$ref": "#/definitions/propertyBag"
+        }
+      }
+    },
+    "stack": {
+      "description": "A call stack that is relevant to a result.",
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "message": {
+          "description": "A message relevant to this call stack.",
+          "$ref": "#/definitions/message"
+        },
+
+        "frames": {
+          "description": "An array of stack frames that represents a sequence of calls, rendered in reverse chronological order, that comprise the call stack.",
+          "type": "array",
+          "minItems": 0,
+          "uniqueItems": false,
+          "items": {
+            "$ref": "#/definitions/stackFrame"
+          }
+        },
+
+        "properties": {
+          "description": "Key/value pairs that provide additional information about the stack.",
+          "$ref": "#/definitions/propertyBag"
+        }
+      },
+      "required": ["frames"]
+    },
+
+    "stackFrame": {
+      "description": "A function call within a stack trace.",
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "location": {
+          "description": "The location to which this stack frame refers.",
+          "$ref": "#/definitions/location"
+        },
+
+        "module": {
+          "description": "The name of the module that contains the code of this stack frame.",
+          "type": "string"
+        },
+
+        "threadId": {
+          "description": "The thread identifier of the stack frame.",
+          "type": "integer"
+        },
+
+        "parameters": {
+          "description": "The parameters of the call that is executing.",
+          "type": "array",
+          "minItems": 0,
+          "uniqueItems": false,
+          "default": [],
+          "items": {
+            "type": "string",
+            "default": []
+          }
+        },
+
+        "properties": {
+          "description": "Key/value pairs that provide additional information about the stack frame.",
+          "$ref": "#/definitions/propertyBag"
+        }
+      }
+    },
+    "physicalLocation": {
+      "type": "object",
+      "properties": {
+        "artifactLocation": {
+          "$ref": "#/definitions/artifactLocation"
+        },
+        "region": {
+          "$ref": "#/definitions/region"
+        },
+        "contextRegion": {
+          "description": "Specifies a portion of the artifact that encloses the region. Allows a viewer to display additional context around the region.",
+          "$ref": "#/definitions/region"
+        }
+      }
+    },
+    "notificationPropertyBag": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {}
+    },
+    "resultPropertyBag": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "reportingDescriptorPropertyBag": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "runPropertyBag": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "region": {
+      "type": "object",
+      "properties": {
+        "startLine": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "startColumn": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "endLine": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "endColumn": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "snippet": {
+          "description": "The portion of the artifact contents within the specified region.",
+          "$ref": "#/definitions/artifactContent"
+        }
+      }
+    },
+    "replacement": {
+      "description": "The replacement of a single region of an artifact.",
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "deletedRegion": {
+          "description": "The region of the artifact to delete.",
+          "$ref": "#/definitions/region"
+        },
+
+        "insertedContent": {
+          "description": "The content to insert at the location specified by the 'deletedRegion' property.",
+          "$ref": "#/definitions/artifactContent"
+        },
+
+        "properties": {
+          "description": "Key/value pairs that provide additional information about the replacement.",
+          "$ref": "#/definitions/propertyBag"
+        }
+      },
+
+      "required": ["deletedRegion"]
+    },
+    "reportingDescriptor": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Referenced from other parts of the SARIF file, and may also be used in URLs.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Is displayed for the purpose of filtering results.",
+          "type": "string"
+        },
+        "shortDescription": {
+          "description": "Is displayed by Code Scanning alongside associated results. Note that only the text contents of this field is used, the markdown content is ignored.",
+          "$ref": "#/definitions/multiformatMessageString"
+        },
+        "fullDescription": {
+          "description": "Is displayed by Code Scanning alongside associated results. Note that only the text contents of this field is used, the markdown content is ignored.",
+          "$ref": "#/definitions/multiformatMessageString"
+        },
+        "defaultConfiguration": {
+          "description": "Used by Code Scanning to provide fallback values when more specific values are not provided for a particular result.",
+          "$ref": "#/definitions/reportingConfiguration"
+        },
+        "helpUri": {
+          "description": "This is recorded by Code Scanning for potential future use, but is not currently actively used.",
+          "type": "string",
+          "format": "uri"
+        },
+        "help": {
+          "description": "Is displayed by Code Scanning alongside associated results. Markdown can be provided for this field.",
+          "$ref": "#/definitions/multiformatMessageString"
+        },
+        "properties": {
+          "description": "The tags property is used to allow filtering results in the Code Scanning user interface. For example, it is possible to filter to all results from reportingDescriptors that have the tag \"security\". Additionally a \"precision\" property is also accepted, and used for ordering of results; possible values are \"very-high\", \"high\", \"medium\", \"low\" and \"unknown\".",
+          "$ref": "#/definitions/reportingDescriptorPropertyBag"
+        }
+      }
+    },
+    "reportingConfiguration": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "description": "If provided, Code Scanning will use this when a more specific result level is not available.",
+          "default": "warning",
+          "type": "string",
+          "enum": ["none", "note", "warning", "error"]
+        }
+      }
+    },
+    "reportingDescriptorReference": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "index": {
+          "type": "integer",
+          "default": -1,
+          "minimum": -1
+        },
+        "toolComponent": {
+          "description": "A reference used to locate the toolComponent associated with the descriptor.",
+          "$ref": "#/definitions/toolComponentReference"
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "ruleId": {
+          "description": "Code Scanning does not require identifying a corresponding rule for each result, but it is highly recommended to provide a good user experience. Providing a rule identifier allows for filtering results by rule.",
+          "type": "string"
+        },
+        "ruleIndex": {
+          "description": "Code Scanning does not require identifying a corresponding rule for each result, but it is highly recommended to provide a good user experience. Providing a rule identifier allows for filtering results by rule.",
+          "type": "integer",
+          "default": -1,
+          "minimum": -1
+        },
+        "rule": {
+          "description": "Code Scanning does not require identifying a corresponding rule for each result, but it is highly recommended to provide a good user experience. Providing a rule identifier allows for filtering results by rule.",
+          "$ref": "#/definitions/reportingDescriptorReference"
+        },
+        "level": {
+          "description": "If a level is specified it will override the default severity defined by the rule (if any).",
+          "default": "warning",
+          "enum": ["none", "note", "warning", "error"]
+        },
+        "message": {
+          "description": "Providing a message is required. Code Scanning will display this message as the title of the result.",
+          "$ref": "#/definitions/message"
+        },
+        "locations": {
+          "description": "This must be included for Code Scanning to display a result. Code Scanning will use this property to decide which file to display with the result. Only the first value of this array is used; all other values are ignored.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/location"
+          }
+        },
+        "guid": {
+          "description": "A stable, unique identifer for the result in the form of a GUID.",
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+        },
+        "correlationGuid": {
+          "description": "A stable, unique identifier for the equivalence class of logically identical results to which this result belongs, in the form of a GUID.",
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+        },
+        "partialFingerprints": {
+          "description": "Providing partial fingerprints is required for Code Scanning to accurately identify which results are the same across commits and branches. You can either provide them youself or, if using the GitHub Actions Code Scanning Upload Action (TODO: Decide what the real name of this will be and link to it.) they will be added to your SARIF file automatically before upload.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "codeFlows": {
+          "description": "If code flows are provided, Code Scanning will allow expanding them in the user interface for the relevant result.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/codeFlow"
+          }
+        },
+        "relatedLocations": {
+          "description": "Code Scanning will link to related locations when they are embedded in the result message.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/location"
+          }
+        },
+        "suppressions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/suppression"
+          }
+        },
+        "fixes": {
+          "description": "An array of 'fix' objects, each of which represents a proposed fix to the problem indicated by the result.",
+          "type": "array",
+          "minItems": 0,
+          "uniqueItems": true,
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/fix"
+          }
+        },
+        "properties": {
+          "description": "Key/value pairs that provide additional information about the result.",
+          "$ref": "#/definitions/resultPropertyBag"
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "properties": {
+        "tool": {
+          "description": "This should be provided to allow Code Scanning to filter results by tool and provide information about the source of a result.",
+          "$ref": "#/definitions/tool"
+        },
+        "results": {
+          "description": "This must be provided with all Code Scanning SARIF submissions.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/result"
+          }
+        },
+        "invocations": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/invocation"
+          }
+        },
+        "conversion": {
+          "description": "A conversion object that describes how a converter transformed an analysis tool's native reporting format into the SARIF format.",
+          "$ref": "#/definitions/conversion"
+        },
+        "versionControlProvenance": {
+          "description": "Specifies the revision in version control of the artifacts that were scanned.",
+          "type": "array",
+          "minItems": 0,
+          "uniqueItems": true,
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/versionControlDetails"
+          }
+        },
+        "artifacts": {
+          "description": "An array of artifact objects relevant to the run.",
+          "type": "array",
+          "minItems": 0,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/definitions/artifact"
+          }
+        },
+        "automationDetails": {
+          "description": "Automation details that describe this run.",
+          "$ref": "#/definitions/runAutomationDetails"
+        },
+        "properties": {
+          "description": "Key/value pairs that provide additional information about the run.",
+          "$ref": "#/definitions/runPropertyBag"
+        }
+      },
+      "required": ["tool", "results"]
+    },
+    "runAutomationDetails": {
+      "description": "Information that describes a run's identity and role within an engineering system process.",
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "A hierarchical string that uniquely identifies this object's containing run object.",
+          "type": "string"
+        }
+      }
+    },
+    "suppression": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "description": "If provided and set to \"accepted\" the result will be updated to \"Closed\" in the code scanning user interface."
+        }
+      }
+    },
+    "threadFlow": {
+      "type": "object",
+      "properties": {
+        "locations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/threadFlowLocation"
+          }
+        }
+      },
+      "required": ["locations"]
+    },
+    "threadFlowLocation": {
+      "type": "object",
+      "properties": {
+        "location": {
+          "$ref": "#/definitions/location"
+        }
+      }
+    },
+    "tool": {
+      "type": "object",
+      "properties": {
+        "driver": {
+          "$ref": "#/definitions/toolComponent"
+        },
+
+        "extensions": {
+          "description": "Tool extensions that contributed to or reconfigured the analysis tool that was run.",
+          "type": "array",
+          "minItems": 0,
+          "uniqueItems": true,
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/toolComponent"
+          }
+        }
+      }
+    },
+    "toolComponent": {
+      "type": "object",
+      "properties": {
+        "guid": {
+          "description": "A unique identifer for the tool component in the form of a GUID.",
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+        },
+        "name": {
+          "description": "Providing a tool name is required by Code Scanning. It is used for identifying which results belong to which tools for filtering purporses.",
+          "type": "string"
+        },
+        "fullName": {
+          "description": "The name of the tool component along with its version and any other useful identifying information, such as its locale.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Providing a version number allows Code Scanning to track when results may have changed due to a tool version change rather than a change in the code being analyzed. Note that Code Scanning uses the semanticVersion field in preference to this one.",
+          "type": "string"
+        },
+        "semanticVersion": {
+          "description": "Providing a version number allows Code Scanning to track when results may have changed due to a tool version change rather than a change in the code being analyzed.",
+          "type": "string"
+        },
+        "rules": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/reportingDescriptor"
+          }
+        },
+        "notifications": {
+          "description": "An array of reportingDescriptor objects relevant to the notifications related to the configuration and runtime execution of the tool component.",
+          "type": "array",
+          "minItems": 0,
+          "uniqueItems": true,
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/reportingDescriptor"
+          }
+        },
+        "properties": {
+          "description": "Key/value pairs that provide additional information about the tool component.",
+          "$ref": "#/definitions/propertyBag"
+        }
+      }
+    },
+    "toolComponentReference": {
+      "description": "Identifies a particular toolComponent object, either the driver or an extension.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "description": "An index into the referenced toolComponent in tool.extensions.",
+          "type": "integer",
+          "default": -1,
+          "minimum": -1
+        },
+
+        "guid": {
+          "description": "The 'guid' property of the referenced toolComponent.",
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+        }
+      }
+    },
+    "versionControlDetails": {
+      "description": "Specifies the information necessary to retrieve a desired revision from a version control system.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repositoryUri": {
+          "description": "The absolute URI of the repository.",
+          "type": "string",
+          "format": "uri"
+        },
+        "revisionId": {
+          "description": "A string that uniquely and permanently identifies the revision within the repository.",
+          "type": "string"
+        },
+        "branch": {
+          "description": "The name of a branch containing the revision.",
+          "type": "string"
+        }
+      },
+      "required": ["repositoryUri"]
+    },
+    "metricResult": {
+      "type": "object",
+      "properties": {
+        "ruleId": {
+          "type": "string"
+        },
+        "ruleIndex": {
+          "type": "integer",
+          "default": -1,
+          "minimum": -1
+        },
+        "rule": {
+          "$ref": "#/definitions/reportingDescriptorReference"
+        },
+        "value": {
+          "type": "number"
+        },
+        "baseline": {
+          "type": ["number", "null"]
+        },
+        "location": {
+          "$ref": "#/definitions/location"
+        },
+        "message": {
+          "$ref": "#/definitions/message"
+        }
+      },
+      "required": ["value"]
+    }
+  }
+}

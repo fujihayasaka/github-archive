@@ -1,0 +1,22 @@
+# typed: strict
+# frozen_string_literal: true
+
+require_relative "k_v/data_store"
+
+module TrustSafety
+  class KV
+    OWNER = "github/trust_safety_engineering"
+
+    @kv = T.let(nil, T.nilable(GitHub::KV))
+
+    sig { returns(GitHub::KV) }
+    def self.store
+      return @kv if @kv
+
+      config = GitHub::KV.config.dup
+      config.table_name = TrustSafety::KV::DataStore.table_name
+
+      @kv = GitHub::KV.new(config: config) { ApplicationRecord::Domain::Spam.connection }
+    end
+  end
+end

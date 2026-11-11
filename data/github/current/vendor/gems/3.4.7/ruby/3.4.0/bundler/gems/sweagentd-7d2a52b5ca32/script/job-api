@@ -1,0 +1,376 @@
+#!/bin/bash
+#
+# SWE Agent Job Management Script
+#
+# This script provides a unified interface for managing SWE Agent jobs and memories.
+# It supports local development, staging, and production environments.
+# For production and staging, it can automatically use GitHub CLI authentication.
+#
+# Usage:
+#   script/job-api [--production|--staging[=environment]] [--version=<version>] <command> <repo_owner>/<repo_name> [args...]
+#
+# Commands:
+#   new <repo> <json_payload>           - Create a new job
+#   get <repo> <job_id>                 - Get job details
+#   get <repo> session <session_id>     - Get session details
+#   cancel <repo> <job_id>              - Cancel a job
+#   cancel <repo> session <session_id>  - Cancel a session
+#
+# Options:
+#   --production                        - Use production environment
+#   --staging[=environment]             - Use staging environment (default: staging)
+#                                         Valid environments: staging, jedi-knight, sith-lord
+#   --local                             - Use local development environment (default)
+#   --version=<version>                 - API version to use (v0, v1, default) - uses v1 if not specified
+#
+# Environment Variables:
+#   USER_TOKEN                          - Token for production/staging API (auto-detected from gh CLI if not set)
+#   MONALISA_PAT                        - Token for local development (Codespace)
+#   JOB_API_BASE_URL                    - Override API base URL
+#
+# Examples:
+#   script/job-api new github/private-server '{"problem_statement":"create a nice readme"}'
+#   script/job-api get github/private-server 12345
+#   script/job-api --version=v0 get github/private-server 12345
+#   script/job-api --version=default get github/private-server 12345
+
+set -e
+
+# Function to show help
+show_help() {
+    cat << 'EOF'
+SWE Agent Job Management Script
+
+Usage:
+  script/job-api [--production|--staging[=environment]] [--version=<version>] <command> <repo_owner>/<repo_name> [args...]
+
+Commands:
+  new <repo> <json_payload>           - Create a new job
+  get <repo> <job_id>                 - Get job details
+  get <repo> session <session_id>     - Get session details
+  cancel <repo> <job_id>              - Cancel a job
+  cancel <repo> session <session_id>  - Cancel a session
+
+Options:
+  --production                        - Use production environment
+  --staging[=environment]             - Use staging environment (default: staging)
+                                        Valid environments: staging, jedi-knight, sith-lord
+  --local                             - Use local development environment (default)
+  --version=<version>                 - API version to use (v0, v1, default) - defaults to v1
+  --help, -h                          - Show this help message
+
+Environment Variables:
+  USER_TOKEN                          - Token for production/staging API (auto-detected from gh CLI if not set)
+  MONALISA_PAT                        - Token for local development (Codespace, default)
+  JOB_API_BASE_URL                    - Override API base URL
+
+Examples:
+  script/job-api new github/private-server '{"problem_statement":"create a nice readme"}'
+  script/job-api get github/private-server 12345
+  script/job-api get github/private-server session abc123
+  script/job-api --staging cancel github/private-server 12345
+  script/job-api --staging=jedi-knight get github/private-server 12345
+  script/job-api --staging=sith-lord cancel github/private-server 12345
+  script/job-api --production cancel github/private-server 12345
+  script/job-api --proxima=staffship-01 new coding-agent-test/test-cca '{"problem_statement":"create a nice readme"}'
+  script/job-api --version=v0 get github/private-server 12345
+  script/job-api --version=default get github/private-server 12345
+EOF
+}
+
+# Configuration
+SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
+cd "$SCRIPT_DIR"
+
+# Default API base URLs
+PRODUCTION_API_BASE_URL="https://api.githubcopilot.com/agents/swe"
+STAGING_API_BASE_URL="https://api.githubcopilot.com/agents/swe-staging"
+LOCAL_API_BASE_URL="http://localhost:2208"
+# e.g. https://copilot-api.test-prodweu01.ghe.com/agents/swe/jobs/coding-agent-test/test-cca
+PROXIMA_API_BASE_URL="https://copilot-api.<tenant>.ghe.com/agents/swe"
+
+# Parse command line options
+LOCAL_MODE=true
+STAGING_MODE=false
+PROXIMA_MODE=false
+STAGING_ENVIRONMENT="staging"  # Default staging environment
+API_VERSION="v1"  # Default to v1
+PROXIMA_TENANT=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --production)
+            LOCAL_MODE=false
+            STAGING_MODE=false
+            shift
+            ;;
+        --staging)
+            LOCAL_MODE=false
+            STAGING_MODE=true
+            STAGING_ENVIRONMENT="staging"
+            shift
+            ;;
+        --staging=*)
+            LOCAL_MODE=false
+            STAGING_MODE=true
+            STAGING_ENVIRONMENT="${1#*=}"
+            # Validate staging environment
+            if [[ "$STAGING_ENVIRONMENT" != "staging" && "$STAGING_ENVIRONMENT" != "jedi-knight" && "$STAGING_ENVIRONMENT" != "sith-lord" ]]; then
+                echo "Error: Invalid staging environment '$STAGING_ENVIRONMENT'. Valid environments are: staging, jedi-knight, sith-lord" >&2
+                exit 1
+            fi
+            shift
+            ;;
+        --proxima=*)
+            LOCAL_MODE=false
+            PROXIMA_MODE=true
+            PROXIMA_TENANT="${1#*=}"
+            shift
+            ;;
+        --local)
+            LOCAL_MODE=true
+            STAGING_MODE=false
+            shift
+            ;;
+        --version=*)
+            API_VERSION="${1#*=}"
+            if [[ "$API_VERSION" != "v0" && "$API_VERSION" != "v1" && "$API_VERSION" != "default" ]]; then
+                echo "Error: Invalid API version '$API_VERSION'. Valid versions are: v0, v1, default" >&2
+                exit 1
+            fi
+            shift
+            ;;
+        --help|-h)
+            show_help
+            exit 0
+            ;;
+        -*)
+            echo "Unknown option: $1" >&2
+            show_help
+            exit 1
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# Function to set up environment based on mode
+setup_environment() {
+    # Build API URLs with version
+    local version_path=""
+    if [ "$API_VERSION" != "default" ]; then
+        version_path="/$API_VERSION"
+    fi
+    
+    local production_url="https://api.githubcopilot.com/agents/swe${version_path}"
+    # Build staging URL based on environment
+    local staging_url_suffix=""
+    if [ "$STAGING_ENVIRONMENT" != "staging" ]; then
+        staging_url_suffix="-${STAGING_ENVIRONMENT}"
+    fi
+    local staging_url="https://api.githubcopilot.com/agents/swe-staging${staging_url_suffix}${version_path}"
+    local local_url="http://localhost:2208${version_path}"
+    
+    if [ "$LOCAL_MODE" = true ]; then
+        # Local development mode
+        export USER_TOKEN="${MONALISA_PAT}"
+        export JOB_API_BASE_URL="${JOB_API_BASE_URL:-$local_url}"
+        
+        if [ -z "${MONALISA_PAT}" ]; then
+            echo "Error: MONALISA_PAT environment variable is required for local mode." >&2
+            echo "If you are not in a Codespace, please set this variable before running the script." >&2
+            exit 1
+        fi
+    elif [ "$STAGING_MODE" = true ]; then
+        # Staging mode
+        export JOB_API_BASE_URL="${JOB_API_BASE_URL:-$staging_url}"
+        
+        if [ -z "${USER_TOKEN}" ]; then
+            # Try to get token from GitHub CLI
+            if command -v gh >/dev/null 2>&1; then
+                echo "USER_TOKEN not found, attempting to get token from GitHub CLI..." >&2
+                export USER_TOKEN=$(gh auth token 2>/dev/null)
+                if [ -z "${USER_TOKEN}" ]; then
+                    echo "Error: Could not get token from GitHub CLI. Please run 'gh auth login' or set USER_TOKEN environment variable." >&2
+                    exit 1
+                fi
+            else
+                echo "Error: USER_TOKEN environment variable is required for staging mode." >&2
+                echo "Please set this variable with an appropriately scoped token or install GitHub CLI." >&2
+                exit 1
+            fi
+        fi
+    elif [ "$PROXIMA_MODE" = true ]; then
+        # Proxima mode
+        if [ -z "$PROXIMA_TENANT" ]; then
+            echo "Error: Proxima tenant must be provided with --proxima=<tenant>" >&2
+            exit 1
+        fi
+
+        # Set JOB_API_BASE_URL for Proxima based off of PROXIMA_API_BASE_URL
+        local proxima_url="${PROXIMA_API_BASE_URL//<tenant>/$PROXIMA_TENANT}${version_path}"
+        export JOB_API_BASE_URL="${JOB_API_BASE_URL:-$proxima_url}"
+
+        if [ -z "${USER_TOKEN}" ]; then
+            echo "Error: USER_TOKEN environment variable is required for proxima mode." >&2
+            echo "Please set this variable with an appropriately scoped token." >&2
+            exit 1
+        fi
+    else
+        # Production mode
+        export JOB_API_BASE_URL="${JOB_API_BASE_URL:-$production_url}"
+        
+        if [ -z "${USER_TOKEN}" ]; then
+            # Try to get token from GitHub CLI
+            if command -v gh >/dev/null 2>&1; then
+                echo "USER_TOKEN not found, attempting to get token from GitHub CLI..." >&2
+                export USER_TOKEN=$(gh auth token 2>/dev/null)
+                if [ -z "${USER_TOKEN}" ]; then
+                    echo "Error: Could not get token from GitHub CLI. Please run 'gh auth login' or set USER_TOKEN environment variable." >&2
+                    exit 1
+                fi
+            else
+                echo "Error: USER_TOKEN environment variable is required for production mode." >&2
+                echo "Please set this variable with an appropriately scoped token or install GitHub CLI." >&2
+                exit 1
+            fi
+        fi
+    fi
+}
+
+# Function to create a new job
+cmd_new() {
+    if [ "$#" -ne 2 ]; then
+        echo "Usage: script/job-api [--production|--staging[=environment]] [--version=<version>] new <repo_owner>/<repo_name> <json_payload>" >&2
+        exit 1
+    fi
+    
+    local repo="$1"
+    local json_payload="$2"
+    
+    if [ "$LOCAL_MODE" = true ]; then
+        curl -i  -L \
+            -H "Authorization: Bearer ${USER_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            --data "$json_payload" \
+            "$JOB_API_BASE_URL/jobs/$repo"
+    else
+        curl -i  -L \
+            -H "Copilot-Integration-Id: copilot-developer-dev" \
+            -H "Authorization: Bearer ${USER_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            --data "$json_payload" \
+            "$JOB_API_BASE_URL/jobs/$repo"
+    fi
+}
+
+# Function to get job or session details
+cmd_get() {
+    if [ "$#" -lt 2 ]; then
+        echo "Usage: script/job-api [--production|--staging[=environment]] [--version=<version>] get <repo_owner>/<repo_name> <job_id>" >&2
+        echo "       script/job-api [--production|--staging[=environment]] [--version=<version>] get <repo_owner>/<repo_name> session <session_id>" >&2
+        exit 1
+    fi
+    
+    local repo="$1"
+    shift
+    
+    local session_url_part=""
+    if [ "$1" == "session" ]; then
+        session_url_part="/session"
+        shift
+    fi
+    
+    if [ "$#" -ne 1 ]; then
+        echo "Usage: script/job-api [--production|--staging[=environment]] [--version=<version>] get <repo_owner>/<repo_name> <job_id>" >&2
+        echo "       script/job-api [--production|--staging[=environment]] [--version=<version>] get <repo_owner>/<repo_name> session <session_id>" >&2
+        exit 1
+    fi
+    
+    local id="$1"
+    
+    if [ "$LOCAL_MODE" = true ]; then
+        curl -i  -L \
+            -H "Authorization: Bearer ${USER_TOKEN}" \
+            --request "GET" \
+            "$JOB_API_BASE_URL/jobs/${repo}${session_url_part}/$id"
+    else
+        curl -i  -L \
+            -H "Copilot-Integration-Id: copilot-developer-dev" \
+            -H "Authorization: Bearer ${USER_TOKEN}" \
+            --request "GET" \
+            "$JOB_API_BASE_URL/jobs/${repo}${session_url_part}/$id"
+    fi
+}
+
+# Function to cancel a job or session
+cmd_cancel() {
+    if [ "$#" -lt 2 ]; then
+        echo "Usage: script/job-api [--production|--staging[=environment]] [--version=<version>] cancel <repo_owner>/<repo_name> <job_id>" >&2
+        echo "       script/job-api [--production|--staging[=environment]] [--version=<version>] cancel <repo_owner>/<repo_name> session <session_id>" >&2
+        exit 1
+    fi
+    
+    local repo="$1"
+    shift
+    
+    local url_path=""
+    if [ "$1" == "session" ]; then
+        if [ "$#" -ne 2 ]; then
+            echo "Usage: script/job-api [--production|--staging[=environment]] [--version=<version>] cancel <repo_owner>/<repo_name> session <session_id>" >&2
+            exit 1
+        fi
+        url_path="/session/$2"
+    else
+        if [ "$#" -ne 1 ]; then
+            echo "Usage: script/job-api [--production|--staging[=environment]] [--version=<version>] cancel <repo_owner>/<repo_name> <job_id>" >&2
+            exit 1
+        fi
+        url_path="/$1"
+    fi
+    
+    if [ "$LOCAL_MODE" = true ]; then
+        curl -i  -L \
+            -H "Authorization: Bearer ${USER_TOKEN}" \
+            --request "POST" \
+            "$JOB_API_BASE_URL/jobs/${repo}${url_path}/cancel"
+    else
+        curl -i  -L \
+            -H "Copilot-Integration-Id: copilot-developer-dev" \
+            -H "Authorization: Bearer ${USER_TOKEN}" \
+            --request "POST" \
+            "$JOB_API_BASE_URL/jobs/${repo}${url_path}/cancel"
+    fi
+}
+
+# Main command dispatch
+if [ "$#" -lt 2 ]; then
+    echo "Error: Insufficient arguments" >&2
+    show_help
+    exit 1
+fi
+
+setup_environment
+
+command="$1"
+shift
+
+case "$command" in
+    new)
+        cmd_new "$@"
+        ;;
+    get)
+        cmd_get "$@"
+        ;;
+    cancel)
+        cmd_cancel "$@"
+        ;;
+    *)
+        echo "Error: Unknown command '$command'" >&2
+        show_help
+        exit 1
+        ;;
+esac

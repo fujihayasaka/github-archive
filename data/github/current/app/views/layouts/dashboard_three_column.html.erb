@@ -1,0 +1,76 @@
+<% content_for :head do %>
+  <%= stylesheet_bundle "github" %>
+<% end %>
+
+<% is_home_page = current_page?(home_path) || current_page?(dashboard_path) %>
+
+<% content_for :dashboard_sub_layout do %>
+  <%
+    dashboard_universe_active = dashboard_universe_enabled? && !FeatureFlag.vexi.enabled?(:disable_dashboard_lists, current_user, default: false)
+    if dashboard_universe_active
+      feed_content_classes = "pt-4 d-flex feed-content flex-justify-center flex-column flex-xl-row"
+      main_classes = "flex-1"
+      right_column_classes = "feed-right-column d-block mb-5"
+    else
+      feed_content_classes = "pt-4 d-flex feed-content flex-justify-center border-bottom"
+      main_classes = "flex-auto"
+      right_column_classes = "feed-right-sidebar mb-5"
+    end
+  %>
+  <div class="color-bg-default">
+    <% if user_can_switch_contexts? %>
+      <aside class="hide-xl hide-lg width-full border-bottom p-3" aria-label="Account context">
+        <%= render Dashboard::ContextSwitcherComponent.new(
+          current_context: current_context,
+          user_can_create_orgs: user_can_create_organizations?,
+          id: "switch_dashboard_context_three_column",
+        ) %>
+      </aside>
+    <% end %>
+
+    <%= render(Site::EnterpriseBannersComponent.new) %>
+
+    <div class="d-md-flex feed-background" style="min-height: 100vh;">
+      <aside data-turbo="false" class="feed-left-sidebar col-md-4 col-lg-3 color-border-muted border-bottom hide-md hide-sm border-right color-bg-default" aria-label="Account">
+        <%= yield :left_column %>
+      </aside>
+
+      <div class="flex-auto col-md-8 col-lg-8 px-3 px-sm-3 px-md-0">
+        <%= yield :hero %>
+
+        <div class="d-md-flex">
+          <div class="<%= feed_content_classes %>">
+            <%
+              feed_main_classes = "overflow-x-hidden d-flex flex-auto flex-column
+                            #{is_home_page ? 'dashboard-route' : 'feed-route'}
+                            #{dashboard_universe_enabled? ? 'feed-main__universe' : 'feed-main'}"
+            %>
+            <div class="<%= feed_main_classes %>">
+              <% if dashboard_universe_enabled? %>
+                <div class="feed-main__universe--spinner">
+                  <%= render(Primer::Beta::Spinner.new(flex: 1)) %> <%# rubocop:disable GitHub/RailsViewRenderLiteral %>
+                </div>
+              <% end %>
+              <main class="<%= main_classes %>">
+                <%= yield %>
+              </main>
+              <% unless dashboard_universe_active %>
+                <%= render "site/footer", cookie_consent_enabled: @cookie_consent_enabled, no_horizontal_padding: true %>
+              <% end %>
+            </div>
+            <% if content_for?(:right_column) %>
+              <aside class="<%= right_column_classes %>" aria-label="Explore">
+                <%= yield :right_column %>
+              </aside>
+            <% end %>
+          </div>
+        </div>
+
+        <% if dashboard_universe_active %>
+          <%= render "site/footer", cookie_consent_enabled: @cookie_consent_enabled, no_horizontal_padding: true %>
+        <% end %>
+      </div>
+    </div>
+  </div>
+<% end %>
+<%= render template: "layouts/dashboard" %>

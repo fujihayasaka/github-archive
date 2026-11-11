@@ -1,0 +1,77 @@
+<%# erblint:counter DeprecatedComponentsCounter 1 %>
+<% if page && deployment.present? && !repository.archived? %>
+  <div class="Box mb-2 p-3 gap-3 d-flex flex-items-center flex-wrap" <%= test_selector "deployment-status" %>>
+    <div class="d-flex flex-column flex-auto" style="max-width: 550px">
+      <span class="text-bold">Your site is live at <a class="Link--inTextBlock" href="<%= page.url %>"><%= page.url %></a></span>
+      <% if workflow_run.present? %>
+        <span class="f6 color-fg-muted m-0">
+          Last <a class="Link--inTextBlock" href="<%= "#{repository_path(repository)}/actions/runs/#{workflow_run.id}" %>">deployed</a>
+          by <%= avatar_for(actor, 14, class: "v-align-middle") %> <a class="Link--inTextBlock" href="/<%= actor_href %>"><%= actor&.display_login %></a>
+          <% if started_at.present? %>
+            <%= render Primer::Beta::RelativeTime.new(datetime: started_at, tense: :past) %>
+          <% else %>
+            now
+          <% end %>
+        </span>
+      <% end %>
+    </div>
+
+    <div class="d-flex flex-nowrap gap-2">
+      <%= render Primer::ButtonComponent.new(tag: :a, href: page.url, target: "_blank", classes: "flex-self-start") do %>
+        <%= render Primer::Beta::Octicon.new(icon: "link-external") %>
+        Visit site
+      <% end %>
+
+      <% if FeatureFlag.vexi.enabled?(:pages_unpublish_outside_of_menu, repository.owner, default: false) %>
+        <%= render Primer::Beta::Button.new(
+          classes: "Button--danger",
+          data: {
+            show_dialog_id: "pages-unpublish-site-dialog",
+          }
+        ) do %>
+          Unpublish site
+        <% end %>
+        <%= render Primer::Alpha::Dialog.new(
+          title: "Unpublish #{repository.name_with_display_owner}",
+          id: "pages-unpublish-site-dialog",
+        ) do |dialog| %>
+          <% dialog.with_body do %>
+            <p>
+              Unpublishing will remove this GitHub Pages site and prevent it from being served,
+              but it will not prevent it from being rebuilt. To completely disable the site,
+              <% if page.build_type == "workflow" %>
+                remove the GitHub Actions workflow that builds the page.
+              <% else %>
+                set source branch to <strong>None</strong>.
+              <% end %>
+            </p>
+          <% end %>
+
+          <% dialog.with_footer(show_divider: true) do %>
+            <%=
+              button_to(
+                "Unpublish site",
+                pages_delete_deployment_path(repository: repository, user_id: repository.owner),
+                class: "btn flex-self-start Button--danger",
+                method: :delete,
+            ) %>
+          <% end %>
+        <% end %>
+      <% else %>
+        <%= render(Primer::Alpha::ActionMenu.new) do |menu| %>
+          <% menu.with_show_button(icon: "kebab-horizontal", "aria-label": "Additional site options") %>
+          <% menu.with_item do %>
+            <%=
+              button_to(
+                "Unpublish site",
+                pages_delete_deployment_path(repository: repository, user_id: repository.owner),
+                class: "dropdown-item btn-link Button--danger",
+                method: :delete
+              )
+            %>
+          <% end %>
+        <% end %>
+      <% end %>
+    </div>
+  </div>
+<% end %>

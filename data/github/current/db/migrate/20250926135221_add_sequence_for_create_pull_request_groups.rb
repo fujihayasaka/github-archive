@@ -1,0 +1,18 @@
+# typed: true
+# frozen_string_literal: true
+
+# This migration was generated using `script/generate-vitess-migrations`, for more information please visit https://thehub.github.com/epd/engineering/products-and-services/dotcom/data-partitioning/vitess-for-application-developers/#vitess-migrations-within-the-monolith
+
+class AddSequenceForCreatePullRequestGroups < ActiveRecord::Migration[8.1]
+  self.use_connection_class(ApplicationRecord::VT)
+
+  def change
+    create_table :pull_request_groups_id_seq, comment: "vitess_sequence", id: false, charset: "utf8mb4", collation: "utf8mb4_unicode_520_ci" do |t|
+      t.column :id, :bigint, primary_key: true, auto_increment: false, unsigned: true, null: false, default: nil
+      t.column :next_id, :bigint, unsigned: true
+      t.column :cache, :bigint, unsigned: true
+    end
+
+    create_sequence(:pull_request_groups_id_seq)
+  end
+end

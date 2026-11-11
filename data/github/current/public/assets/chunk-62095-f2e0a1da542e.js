@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([[3201,6315,9389,16902,28773,28970,31146,37415,38074,45338,48727,50531,57293,57431,58281,60229,62095,64492,65404,73369,73560,73575,76413,76512,83846,85243,90920,91472],{4066:(i,a,t)=>{var u=t(7123),n=t(28278),s=t(61832);function h(){return(0,n.jsx)(s.s,{})}try{h.displayName||(h.displayName="NavigationTestNav")}catch{}(0,u.k)("navigation-test-nav",{Component:h})}}]);
+//# sourceMappingURL=lazy-react-partial-navigation-test-nav-bb7366d40d20.js.map

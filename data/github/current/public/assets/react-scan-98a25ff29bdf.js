@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([[53558],{36145:(u,i,n)=>{var h=n(39219);"undefined"!=typeof window&&(0,h.scan)({dangerouslyForceRunInProduction:!0})}},u=>{u.O(0,[43934,39219],()=>u(u.s=36145)),u.O()}]);
+//# sourceMappingURL=react-scan-5a1df54a5d87.js.map

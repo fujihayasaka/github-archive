@@ -1,0 +1,1 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([[90614],{20472:(u,i,h)=>{h(83138)}},u=>{u.O(0,[83138],()=>u(u.s=20472)),u.O()}]);

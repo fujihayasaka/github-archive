@@ -1,0 +1,83 @@
+<%# erblint:counter DeprecatedComponentsCounter 2 %>
+<%# erblint:counter DeprecatedComponentsCounter 2 %>
+<%
+  page_info(
+    title: view.page_title,
+    breadcrumb_owner: view.organization,
+    breadcrumb: "Packages"
+  )
+%>
+
+<% content_for :header_title do %>
+  <a class="Header-link" href="<%= user_path(view.organization) %>"><%= view.organization.to_s %></a>
+<% end %>
+
+<% content_for :site_banner do %>
+  <%= render Billing::SalesTaxBannerComponent.new(account: view.organization, current_user: current_user) %>
+<% end %>
+
+<% content_for :site_banner do %>
+  <%= render Organizations::NewTermsOfServiceRequiredComponent.new(organization: view.organization) %>
+<% end %>
+
+<% if current_user && view.organization %>
+  <%= render Primer::Alpha::IncludeFragment.new(src: organization_onboarding_trial_banner_path(view.organization)) %>
+<% end %>
+
+<div itemscope itemtype="http://schema.org/Organization">
+  <%= render partial: "orgs/packages/header", locals: {
+    organization: view.organization,
+    view: create_view_model(Orgs::OverviewView, organization: view.organization),
+  } %>
+
+  <% if FeatureFlag.vexi.enabled?(:artifact_registry_ui, view.organization, default: false) %>
+    <div class="mt-n3 border-bottom">
+      <%= render(Primer::Experimental::PageLayout.new(outer_spacing: :none, inner_spacing: :normal, column_gap: :none)) do |layout| %>
+        <% layout.with_pane_region(width: :wide, divider: :line) do %>
+          <div class="d-none d-md-block" style="min-height: 80vh">
+            <%= render(ArtifactRegistry::SidebarNavComponent.new(
+              organization: view.organization,
+              selected_tab: :github_packages,
+            )) %>
+          </div>
+          <div class="d-md-none">
+            <%= render(ArtifactRegistry::SidebarNavComponent.new(
+              organization: view.organization,
+              selected_tab: :github_packages,
+            )) %>
+          </div>
+        <% end %>
+
+        <% layout.with_content_region(width: :lg, px: 4) do %>
+          <% if PackageRegistryHelper.show_packages_blankslate? %>
+            <%= render partial: "registry/packages/ghes_enable_packages_blankslate" %>
+          <% else %>
+            <div class="js-pinned-items-reorder-container">
+              <% if view.organization.spammy? && current_user.site_admin? %>
+                <%= render(Primer::Beta::Flash.new(scheme: :danger, mb: 4)) do %>
+                  This organization is flagged <strong>spammy</strong>.
+                <% end %>
+              <% end %>
+
+              <%= render partial: "registry/packages/list", locals: { owner: view.organization, packages: packages, params: params } %>
+            </div>
+          <% end %>
+        <% end %>
+      <% end %>
+    </div>
+  <% else %>
+    <% if PackageRegistryHelper.show_packages_blankslate? %>
+      <%= render partial: "registry/packages/ghes_enable_packages_blankslate" %>
+    <% else %>
+      <div class="container-lg p-responsive clearfix js-pinned-items-reorder-container">
+        <% if view.organization.spammy? && current_user.site_admin? %>
+          <%= render(Primer::Beta::Flash.new(scheme: :danger, mb: 4)) do %>
+            This organization is flagged <strong>spammy</strong>.
+          <% end %>
+        <% end %>
+
+        <%= render partial: "registry/packages/list", locals: { owner: view.organization, packages: packages, params: params } %>
+      </div>
+    <% end %>
+  <% end %>
+</div>

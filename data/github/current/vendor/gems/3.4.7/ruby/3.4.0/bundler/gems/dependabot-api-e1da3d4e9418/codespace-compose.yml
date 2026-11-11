@@ -1,0 +1,41 @@
+version: 0
+codespaces:
+  github:
+    repo: github/github
+    branch: master
+    machine: xLargePremiumLinux
+    devcontainer_path: ".devcontainer/devcontainer.json"
+    network:
+      ports: # A list of port numbers to share between the Codespaces that are running.
+        - 3000 # http
+        - 9092 # hydro
+        - 8075 # cred file transfer
+        - 5008 # kredz (twirp)
+      local_ports:
+        - 80:80
+    exec: |
+      echo 'export DEPENDABOT_INTERNAL_URL="http://localhost:3001"' >> ~/.bashrc
+      echo 'export DEPENDABOT_HMAC_KEY="dotcomhmac"' >> ~/.bashrc
+      echo 'export USE_API_PATH_PREFIX=1' >> ~/.bashrc
+      cd /workspaces/github/
+      ./bin/create-dependabot-github-app.rb
+      ./bin/build-ctags
+      cd tmp
+      screen -dm -S config-server python3 -m http.server 8075
+
+  dependabot-api:
+    repo: github/dependabot-api
+    branch: main
+    machine: xLargePremiumLinux
+    network:
+      ports: # A list of port numbers to share between the Codespaces that are running.
+        - 3001 # http
+    exec: |
+      echo 'export HYDRO_KAFKA_BROKERS="127.0.0.1:9092"' >> ~/.bashrc
+      sudo sh -c 'echo "127.0.0.1 db" >> /etc/hosts'
+      sudo sh -c 'echo "127.0.0.1 api.github.localhost" >> /etc/hosts'
+      sudo sh -c 'echo "127.0.0.1 github.localhost" >> /etc/hosts'
+      sudo sh -c 'echo "127.0.0.1 host.docker.internal" >> /etc/hosts'
+      sudo sh -c 'echo "127.0.0.1 kafka-lite.localhost" >> /etc/hosts'
+      cd /workspaces/dependabot-api
+      wget -O .env.local http://127.0.0.1:8075/dependabot.env.local

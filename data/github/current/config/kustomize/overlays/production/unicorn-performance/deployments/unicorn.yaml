@@ -1,0 +1,215 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    moda.github.net/allow-missing-ready-pods: "false"
+    moda.github.net/cluster-preferences: |
+      {
+        "dotcom-1-ash1-iad": {
+          "spec": {
+            "replicas": 19,
+            "template": {
+              "spec": {
+                "affinity": {
+                  "nodeAffinity": {
+                    "preferredDuringSchedulingIgnoredDuringExecution": [
+                      {
+                        "weight": 1,
+                        "preference": {
+                          "matchExpressions": [
+                            {
+                              "key": "kubernetes.github.com/pool",
+                              "operator": "In",
+                              "values": [
+                                "performance-testing"
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "dotcom-3-ash1-iad": {
+          "spec": {
+            "replicas": 14
+          }
+        },
+        "dotcom-8-ac4-iad": {
+          "spec": {
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "unicorn",
+                    "env": [
+                      {
+                        "name": "REDIS_RATE_LIMITER_TIMEOUT",
+                        "value": "0.2"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "dotcom-7-ac4-iad": {
+          "spec": {
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "unicorn",
+                    "env": [
+                      {
+                        "name": "REDIS_RATE_LIMITER_TIMEOUT",
+                        "value": "0.2"
+                      },
+                      {
+                        "name": "RATE_LIMITER_CIRCUIT_BREAKER_SLEEP_WINDOW_SECONDS",
+                        "value": "10"
+                      },
+                      {
+                        "name": "RATE_LIMITER_CIRCUIT_BREAKER_REQUEST_VOLUME_THRESHOLD",
+                        "value": "5"
+                      },
+                      {
+                        "name": "RATE_LIMITER_CIRCUIT_BREAKER_ERROR_THRESHOLD_PERCENTAGE",
+                        "value": "25"
+                      },
+                      {
+                        "name": "RATE_LIMITER_CIRCUIT_BREAKER_WINDOW_SIZE_IN_SECONDS",
+                        "value": "10"
+                      },
+                      {
+                        "name": "RATE_LIMITER_CIRCUIT_BREAKER_BUCKET_SIZE_IN_SECONDS",
+                        "value": "1"
+                      },
+                      {
+                        "name": "LOCAL_WRITE_V2",
+                        "value": "true"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "dotcom-7-va3-iad": {
+          "spec": {
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "degrader",
+                    "env": [
+                      {
+                        "name": "DEGRADER_MODE",
+                        "value": "reo"
+                      },
+                      {
+                        "name": "DEGRADER_REO_URL",
+                        "value": "https://reliability-experiment-orchestrator-production.service.ash1-iad.github.net"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+  name: unicorn
+spec:
+  selector:
+    matchLabels:
+      service: unicorn-performance
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 100%
+  template:
+    metadata:
+      labels:
+        service: unicorn-performance
+        moda.github.net/reliability-test-engine: degrader
+    spec:
+      containers:
+        - name: nginx
+          env:
+            - name: NGINX_ENVSUBST_OUTPUT_DIR
+              value: /etc/nginx/
+            - name: NGINX_ENVSUBST_FILTER
+              value: REPOSD_MIRROR_
+            # This Value must be number from 0 to 100
+            # one of 0 or 100 are probably the value you want
+            - name: REPOSD_MIRROR_PERCENT
+              valueFrom:
+                secretKeyRef:
+                  name: vault-secrets
+                  key: REPOSD_MIRROR_PERCENT
+          volumeMounts:
+            - mountPath: /etc/nginx/conf.d/
+              name: nginx-conf
+            - mountPath: /etc/nginx/
+              name: nginx-conf
+              $patch: delete
+            - mountPath: /etc/nginx/templates/
+              name: nginx-mirror-conf
+        - name: voltron
+        - name: degrader
+          image: octofactory.service.private-us-east-1.github.net/moda-artifacts-docker/degrader:5e3e254166dc3e64531fa05ce88f81fbbd74a35e
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: degrader
+            - name: DOGSTATSD_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: STATSD_ADDR
+              value: $(DOGSTATSD_HOST):28125
+          volumeMounts:
+            - mountPath: /etc/degrader/
+              name: degrader-config
+          resources:
+            requests:
+              cpu: 20m
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+        - name: unicorn
+          env:
+            - name: KUBE_DEPLOYMENT_NAME
+              value: unicorn-performance
+            - name: OTEL_SERVICE_NAME
+              value: github-$(KUBE_DEPLOYMENT_NAME)
+            - name: LUC_PERFORMANCE
+              value: "1"
+            - name: DOGSTATSD_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: MYSQL_MAX_EXECUTION_TIME_MYSQL1_READONLY
+              value: "10000"
+            - name: USERS_CACHE_CONNECT
+              value: '0'
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          operator: Equal
+          value: performance-testing
+      volumes:
+        - configMap:
+            name: unicorn-mirror-conf-performance
+          name: nginx-mirror-conf
+        - configMap:
+            name: degrader-config-unicorn-performance
+          name: degrader-config

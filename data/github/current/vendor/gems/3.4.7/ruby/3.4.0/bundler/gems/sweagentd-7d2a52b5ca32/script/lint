@@ -1,0 +1,86 @@
+#!/bin/bash
+
+# script/lint Runs golangci-lint on the current repository.
+
+set -e
+
+# Get configuration from environment variables (set by workflow) or fallback to parsing workflow file
+cmdVersion="${LINT_VERSION:-$(sed -n 's/^[[:space:]]*LINT_VERSION:[[:space:]]*\(.*\)$/\1/p' .github/workflows/lint.yml)}"
+lint_args="${LINT_ARGS:-$(sed -n 's/^[[:space:]]*LINT_ARGS:[[:space:]]*\(.*\)$/\1/p' .github/workflows/lint.yml)}"
+goerrorslint_pkgs="${GOERRORSLINT_PKGS:-$(sed -n 's/^[[:space:]]*GOERRORSLINT_PKGS:[[:space:]]*\(.*\)$/\1/p' .github/workflows/lint.yml)}"
+
+
+glob="./..."
+# if args are provided, use them as the glob pattern
+if [ $# -gt 0 ]; then
+  glob="$*"
+  # when using command line args as glob, clear lint_args to avoid duplication
+  lint_args=""
+elif [ -n "$lint_args" ]; then
+  glob="$lint_args"
+  # when using lint_args as glob, clear it to avoid duplication
+  lint_args=""
+fi
+
+
+check_golangci_version() {
+    # Use provided version or default to latest stable
+    local defaultCmdVersion="v2.5.0"  # Set a reasonable default
+    if [ -z "$cmdVersion" ]; then
+      cmdVersion="$defaultCmdVersion"
+    fi
+
+    INFO "Checking for existing golangci-lint version: $cmdVersion"
+    # newer versions of golangci-lint have a --version flag, but older versions don't
+    if command -v golangci-lint >/dev/null 2>&1 && (golangci-lint --version | grep "$cmdVersion" &> /dev/null || golangci-lint | grep "$cmdVersion" &> /dev/null); then
+      INFO "found golangci-lint version $cmdVersion"
+      return
+    fi
+
+    INFO "No golangci-lint found with version $cmdVersion, Installing.."
+    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(go env GOPATH)/bin "${cmdVersion}"
+}
+
+FATAL() {
+    echo -e "${FATAL}$1${NC}"
+    exit 1
+}
+
+INFO() {
+       echo -e "${INFO}$1${NC}"
+}
+
+check_golangci_version
+
+gobin_path="${GOBIN:-$(go env GOPATH)/bin}"
+
+# Create a custom version of golangci lint with our custom linters
+INFO "Creating custom gcl with plugins"
+${gobin_path}/golangci-lint custom
+
+# Build the golangci-lint command with optional config file
+golangci_cmd=("${PWD}/bin/custom-gcl" "run")
+
+if [ -n "$linter_config_file" ]; then
+  INFO "Running golangci-lint with config file: ${linter_config_file} and lint args: ${lint_args}"
+  golangci_cmd+=("--config" "$linter_config_file")
+else
+  INFO "Running golangci-lint with default config and lint args: ${lint_args}"
+fi
+
+# Add any additional lint args
+if [ -n "$lint_args" ]; then
+  golangci_cmd+=($lint_args)
+fi
+
+# Add the glob pattern
+golangci_cmd+=($glob)
+
+# Execute the command
+"${golangci_cmd[@]}"
+
+INFO "Running only goerrorslint"
+
+# Now run the goerrorslint linter only.  This is temporary while we spin this up, so that we don't have one giant PR that changes everything at once.
+${PWD}/bin/custom-gcl run --enable-only goerrorslint ${goerrorslint_pkgs}
+INFO "Linting complete"

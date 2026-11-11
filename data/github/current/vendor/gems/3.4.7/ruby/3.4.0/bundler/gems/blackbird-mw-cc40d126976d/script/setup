@@ -1,0 +1,121 @@
+#! /usr/bin/env bash
+#
+#/ Usage: script/setup [--spokes] [--down]
+#/
+#/ This script manages a docker compose environment of services required by
+#/ blackbird-mw including: spokesd (optional), mysql, redis, kafka, and
+#/ blackbird. It also does initial one-time setup activies like creating the
+#/ required kafka topics and seeding the database.
+#/
+#/ --spokes  - Also setup the spokes docker compose environment
+#/ --down    - Don't setup containers, just stop and destroy any existing ones.
+#/
+#/ Environment variables:
+#/
+#/ BLACKBIRD_SRCDIR - github/blackbird source tree, containing `Dockerfile`s for
+#/     building Blackbird images for tests. If this is not set, an image is
+#/     pulled from GHCR instead.
+#/
+#/ BLACKBIRD_IMAGE - When $BLACKBIRD_SRCDIR is not set, the name of the
+#/     image to pull from GHCR (see ../docker-compose.yml).
+#/     Default: `ghcr.io/github/blackbird/blackbird:main`.
+#/
+#/ BLACKBIRD_USE_LOCAL_DEBUG_BUILD - When set and not empty or "0", use an
+#/     existing build of blackbird in `$BLACKBIRD_SRCDIR/target/debug` instead
+#/     of running the build in Docker. `make build` must already have been run
+#/     in `$BLACKBIRD_SRCDIR`, and the machine must be compatible with the VM
+#/     (same OS, same libc version).
+
+
+set -euo pipefail
+IFS=$'\n\t'
+
+function usage {
+    grep "^#/" "${BASH_SOURCE[0]}" | cut -c 4-
+}
+
+cd "$(dirname "$0")/.."
+
+spokes=false
+down=false
+env=development
+while (( $# )); do
+    case $1 in
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        --spokes)
+            spokes=true
+            ;;
+        --down)
+            down=true
+            ;;
+        *)
+            usage
+            exit 1
+            ;;
+    esac
+    shift
+done
+
+overlays=('-f' 'docker-compose.yml' '-f' 'docker-compose.mw.yml')
+
+# Start fresh every time
+docker compose "${overlays[@]}" down -v --remove-orphans
+
+if [[ "$down" == "true" ]]; then
+    exit 0
+fi
+
+# Make sure we have the latest images for all the the containers we are going to run.
+docker compose "${overlays[@]}" pull --quiet
+
+# Bootstrap and run spokesd's docker compose environment
+if $spokes; then
+    git submodule update --init
+    pushd deps/spokes-proto
+    # NOTE: noisy spokes-proto bootstrap silenced until we can get a --quiet option: https://github.com/github/spokes-proto/pull/261
+    script/bootstrap --pristine > /dev/null 2>&1 # NB: clones https://github.com/git-tfs/git-tfs.github.com as repo_id: 1
+    script/clone-repo https://github.com/go-git/go-git-fixtures --sha a03e4cc8537c7efb96694b2cc796d8a23d657475 # repo_id: 2
+    script/clone-repo https://github.com/go-git/go-git-fixtures --sha a03e4cc8537c7efb96694b2cc796d8a23d657475 # repo_id: 3 (just for flushing)
+    script/clone-repo https://github.com/mojombo/grit --sha 5608567286e64a1c55c5e7fcd415364e04f8986e           # repo_id: 4 (for testing delta indexing)
+    script/clone-repo https://github.com/github/grit --sha 13d5737ee6de729ed85d951cccaa3127cd22dcde            # repo_id: 5 (for testing delta indexing)
+    script/clone-repo https://github.com/rewinfrey/java-test --sha 19706a438d247482a4e4745a4b14288f06b2df0d    # repo_id: 6 (for testing force push indexing)
+    script/clone-repo https://github.com/mbellani/code-search-test --sha 0e09ba85005a883aeedeb8b9b37f4e4a7f820929 # repo_id: 7 (for testing epoch branching)
+    script/generate-certs > /dev/null 2>&1
+    docker compose up -d --quiet-pull > /dev/null 2>&1
+    docker network ls
+    popd
+fi
+
+# Optionally build blackbird from source instead of using a pre-built image
+if [[ -n "${BLACKBIRD_USE_LOCAL_DEBUG_BUILD:+x}"
+      && "${BLACKBIRD_USE_LOCAL_DEBUG_BUILD}" != ""
+      && "${BLACKBIRD_USE_LOCAL_DEBUG_BUILD}" != "0" ]]; then
+    if [[ -z "${BLACKBIRD_SRCDIR:+x}" ]]; then
+        echo "BLACKBIRD_SRCDIR must be set when BLACKBIRD_USE_LOCAL_BUILD is set."
+        exit 1
+    fi
+    if [[ $OSTYPE == "darwin"* ]]; then
+        echo "BLACKBIRD_USE_LOCAL_BUILD is unsupported on Mac: a MacOS build won't run on Linux in Docker."
+        exit 1
+    fi
+
+    overlays+=('-f' 'docker-compose.blackbird-use-local-debug-build.yml')
+elif [[ -n "${BLACKBIRD_SRCDIR:+x}" ]]; then  # if the variable is set
+    overlays+=('-f' 'docker-compose.build-blackbird.yml')
+fi
+
+pwd
+echo "build docker images: docker compose ${overlays[@]} build"
+docker compose ${overlays[@]} build
+echo "Running the blackbird-mw docker compose overlays for $env: ${overlays[@]}"
+args=()
+args+=('up' '--no-recreate' '-d')
+if [[ "${CI:-false}" == "true" ]]; then
+    args+=('--quiet-pull')
+fi
+
+docker compose "${overlays[@]}" "${args[@]}"
+echo "The docker compose environment is setup and running"

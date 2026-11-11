@@ -1,0 +1,75 @@
+<%
+  can_verify_email = verification_enabled && email.unverified?
+  can_manage_subscription = GitHub.email_preference_center_enabled?(current_user) &&
+    email.verified?
+  show_divider = can_verify_email || can_manage_subscription || social_info.present?
+%>
+
+<%= render(Primer::Alpha::ActionMenu.new(menu_id: "manage-email-#{email.id}")) do |menu| %>
+  <% menu.with_show_button(icon: :"kebab-horizontal", scheme: :invisible, "aria-label": "Manage email #{display_email}") %>
+  <% if can_verify_email %>
+    <% menu.with_item(
+      label: email.bouncing? ? "Verify email" : "Resend verification email",
+      tag: :button,
+      href: request_verification_user_email_path(email.user, email),
+      form_arguments: { method: :post },
+      ) %>
+  <% end %>
+  <% if can_manage_subscription %>
+    <% menu.with_item(
+      label: "Manage email preferences",
+      tag: :a,
+      href: settings_email_subscriptions_path(email: email.email),
+      ) %>
+  <% end %>
+  <% if social_info %>
+    <% social_disconnect_tooltip = "You must set a password first before you can disconnect this email from its identity provider." %>
+    <% menu.with_item(
+      label: "Disconnect from #{social_info[:provider].to_s.downcase.camelize}",
+      tag: :button,
+      disabled: social_disconnect_disabled,
+      content_arguments: {
+        aria: { label: social_disconnect_tooltip },
+        data: {
+          confirm: social_disconnect_disabled ? social_disconnect_tooltip : nil,
+          show_dialog_id: social_disconnect_disabled ? nil : "disconnect-social-email-#{email.id}"
+        }
+      }
+    ) %>
+  <% end %>
+  <% if show_divider %>
+    <% menu.with_divider %>
+  <% end %>
+  <% menu.with_item(
+    label: "Delete",
+    tag: :button,
+    scheme: deletion_disabled ? :default : :danger,
+    disabled: deletion_disabled,
+    href: user_email_path(email.user, email),
+    form_arguments: { method: :delete },
+    content_arguments: {
+      aria: { label: deletion_tooltip },
+      data: { confirm: deletion_disabled ? deletion_tooltip : deletion_message }
+    }
+  ) %>
+<% end %>
+
+<% if social_info && !social_disconnect_disabled %>
+  <%= form_tag unlink_social_identity_user_email_path(email.user, email), method: :put do %>
+    <%= render(Primer::Alpha::Dialog.new(
+        title: "Disconnect from #{social_info[:provider].to_s.downcase.camelize}",
+        id: "disconnect-social-email-#{email.id}",
+        size: :medium_portrait,
+      )) do |dialog| %>
+
+      <% dialog.with_body do %>
+        <p>This will disconnect <%= email.email %> from your social identity provider. You will no longer be able to use it as a password alternative.</p>
+      <% end %>
+
+      <% dialog.with_footer do %>
+        <%= render(Primer::Beta::Button.new(data: { "close-dialog-id": "disconnect-social-email-#{email.id}" })) { "Cancel" } %>
+        <%= render(Primer::Beta::Button.new(type: :submit, scheme: :danger)) { "Disconnect" } %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

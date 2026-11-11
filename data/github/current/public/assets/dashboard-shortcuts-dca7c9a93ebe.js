@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([[39239],{90902:(e,t,i)=>{(0,i(21403).lB)(".js-favorites-details-component",{constructor:HTMLDetailsElement,initialize(e){e.addEventListener("toggle",()=>{var t;t=document.querySelector(".dashboard-sidebar"),e.open?t.classList.remove("overflow-auto"):t.classList.add("overflow-auto")})}})}},e=>{e.O(0,[43784],()=>e(e.s=90902)),e.O()}]);
+//# sourceMappingURL=dashboard-shortcuts-839fb17c9b30.js.map

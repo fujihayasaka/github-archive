@@ -1,0 +1,245 @@
+syntax = "proto3";
+
+package github.secretscanning.v2;
+
+option go_package = "github.com/github/secret-scanning-proto/gen/go/v2/api";
+option ruby_package = "GitHub::Proto::SecretScanning::Api::V2";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+import "types/v1/owners.proto";
+
+service CustomPatternAPI {
+  rpc GetPatternMatches(GetPatternMatchesRequest) returns (GetPatternMatchesResponse);  
+  rpc GetCustomPattern(GetCustomPatternRequest) returns (GetCustomPatternResponse);
+  rpc CreateCustomPattern(CreateCustomPatternRequest) returns (CreateCustomPatternResponse);
+  rpc UpdateCustomPattern(UpdateCustomPatternRequest) returns (UpdateCustomPatternResponse);
+  rpc DeleteCustomPattern(DeleteCustomPatternRequest) returns (google.protobuf.Empty);  
+  rpc PublishCustomPattern(PublishCustomPatternRequest) returns (google.protobuf.Empty);
+}
+
+message GetPatternMatchesRequest {
+  string source_string = 1;
+  string secret_type = 2 [deprecated = true];
+  string expression = 3;
+  PostProcessing post_processing = 4;
+  string display_name = 5;
+}
+
+message GetPatternMatchesResponse {
+  repeated PatternMatch pattern_matches = 2;
+  CustomPatternError error = 3;
+  CustomPatternWarning warning = 4;
+}
+
+message CustomPatternError {
+  string message = 1;
+  CustomPatternErrorType error_type = 2;
+  uint32 error_index = 3;
+}
+
+message CustomPatternWarning {
+  enum Type {
+    UNKNOWN = 0;
+    UNBOUNDED_WILDCARD = 1;
+  }
+
+  Type type = 1;
+}
+
+message PatternMatch {
+  string match = 1;
+  uint64 start = 2;
+  uint64 end = 3;
+}
+
+message CustomPatternIdsSelector {
+  repeated uint64 ids = 1;
+}
+
+message CustomPatternBusinessSelector {
+  uint64 business_id = 1;
+}
+
+message CustomPatternOrgSelector {
+  uint64 owner_id = 1;
+}
+
+message CustomPatternRepoSelector {
+  uint64 repository_id = 1;
+}
+
+message CustomPatternReposSelector {
+  repeated uint64 repository_id = 1;
+}
+
+message CustomPatternScanSelector {
+  uint64 repository_id = 1;
+  uint64 owner_id = 2;
+  uint64 business_id = 3;
+}
+
+message GetCustomPatternRequest {
+  uint64 id = 1;
+  oneof selector {
+    CustomPatternOrgSelector org_selector = 3;
+    CustomPatternRepoSelector repo_selector = 4;
+    CustomPatternBusinessSelector business_selector = 5;
+  }
+}
+
+message GetCustomPatternResponse {
+  SecretScanCustomPattern custom_pattern = 1;
+  // last_scan includes the information about the latest scan that occurred for this pattern, including the type of scan.
+  LastScan last_scan = 2;
+}
+
+message CustomPatternBusinessScope {
+  uint64 business_id = 1;
+}
+
+message CustomPatternOrgScope {
+  uint64 owner_id = 1;
+}
+
+message CustomPatternRepoScope {
+  uint64 repository_id = 1;
+}
+
+message SecretScanCustomPattern {
+  oneof scope {
+    CustomPatternOrgScope org_scope = 1;
+    CustomPatternRepoScope repo_scope = 2;
+    CustomPatternBusinessScope business_scope = 14;
+  }
+  string secret_type = 3 [deprecated=true];
+  string expression = 4;
+  string display_name = 5;
+  string slug = 6;
+  PostProcessing post_processing = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+  uint64 id = 11;
+  uint64 created_by_id = 12;
+  CustomPatternState state = 13;
+  uint64 updated_by_id = 15;
+  repeated uint64 dry_run_repositories = 16;
+  string row_version = 17;
+  bool push_protection_enabled = 18;
+}
+
+message CreateCustomPatternRequest {
+    oneof scope {
+      CustomPatternOrgScope org_scope = 1;
+      CustomPatternRepoScope repo_scope = 2;
+      CustomPatternBusinessScope business_scope = 8;
+    }
+    string expression = 3;
+    string display_name = 4;
+    string slug = 5 [deprecated = true];
+    PostProcessing post_processing = 6;
+    uint64 created_by_id = 7;
+    uint64 origin_id = 9;
+    repeated string feature_flags = 10;
+    repeated uint64 dry_run_repositories = 11;
+    uint32 max_dry_run_repositories = 12;
+}
+
+message CreateCustomPatternResponse {
+  SecretScanCustomPattern custom_pattern = 1;
+  CustomPatternError error = 2;
+  CustomPatternWarning warning = 3;
+}
+
+message UpdateCustomPatternRequest {
+    reserved 3;
+    uint64 id = 1;
+    string expression = 2;
+    PostProcessing post_processing = 4;
+    uint64 updated_by_id = 5;
+    PostUpdateCustomPatternAction post_update_action = 6;
+    repeated uint64 dry_run_repositories = 7;
+    string row_version = 8;
+    repeated string feature_flags = 9 [deprecated = true];
+    uint32 max_dry_run_repositories = 10;
+    UpdateCustomPatternChangeType change_type = 11;
+    uint64 owner_id = 12;
+    github.secretscanning.types.v1.OwnerScope owner_scope = 13;
+}
+
+message UpdateCustomPatternResponse {
+  SecretScanCustomPattern custom_pattern = 1;
+  CustomPatternError error = 2;
+  CustomPatternWarning warning = 3;
+}
+
+message DeleteCustomPatternRequest {
+  uint64 id = 1;
+  uint64 deleted_by_id = 2;
+  PostUpdateCustomPatternAction post_delete_action = 3;
+  string row_version = 4;
+  repeated string feature_flags = 5 [deprecated = true];
+  uint64 owner_id = 6;
+  github.secretscanning.types.v1.OwnerScope owner_scope = 7;
+}
+
+message PublishCustomPatternRequest {
+  uint64 id = 1;
+  string row_version = 2;
+  repeated string feature_flags = 3 [deprecated = true];
+  uint64 updated_by_id = 4;
+  uint64 owner_id = 5;
+  github.secretscanning.types.v1.OwnerScope owner_scope = 6;
+}
+
+message PostProcessing {
+  string start_delimiter = 1;
+  string end_delimiter = 2;
+  repeated string must_match = 3;
+  repeated string must_not_match = 4;
+}
+
+enum PostUpdateCustomPatternAction {
+  RESOLVE_ALERTS = 0;
+  DELETE_ALERTS = 1;
+}
+
+enum UpdateCustomPatternChangeType {
+  DRY_RUN = 0;
+  PUBLISH = 1;
+}
+
+enum CustomPatternState {
+  PUBLISHED = 0;
+  DELETED = 1;
+  DISABLED = 2;
+  UNPUBLISHED = 3;
+}
+
+enum CustomPatternErrorType {
+  NONE = 0;
+  CONFIG_LOAD = 1;
+  COMPILE_DB = 2;
+  START_DELIMITER = 3;
+  END_DELIMITER = 4;
+  DISPLAY_NAME = 5;
+  MUST_MATCH = 6;
+  MUST_NOT_MATCH = 7;
+  ROW_VERSION_MISMATCH = 8;
+  DB_SIZE = 9;
+  DB_SIZE_CALCULATION = 10;
+}
+
+message LastScan {
+  enum Type {
+    UNKNOWN = 0;
+    DRY_RUN = 1;
+    BACKFILL = 2;
+  }
+  Type type = 1;
+  oneof id {
+    uint64 scan = 2;
+    uint64 job_group = 3;
+  }
+}

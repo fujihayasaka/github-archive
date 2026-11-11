@@ -1,0 +1,322 @@
+#!/bin/bash
+#
+# Custom Agent API Script
+#
+# This script provides a unified interface for managing custom agents.
+# It supports local development, staging, and production environments.
+# For production and staging, it can automatically use GitHub CLI authentication.
+#
+# Usage:
+#   script/custom-agent-api [--production|--staging[=environment]] <command> <repo_owner>/<repo_name> [args...]
+#
+# Commands:
+#   list <repo> [--exclude-invalid-config]  - List custom agents for a repository
+#   get <repo> <agent_name>             - Get custom agent details
+#
+# Options:
+#   --production                        - Use production environment
+#   --staging[=environment]             - Use staging environment (default: staging)
+#                                         Valid environments: staging, jedi-knight, sith-lord
+#   --local                             - Use local development environment (default)
+#
+# Environment Variables:
+#   USER_TOKEN                          - Token for production/staging API (auto-detected from gh CLI if not set)
+#   MONALISA_PAT                        - Token for local development (Codespace)
+#   CUSTOM_AGENT_API_BASE_URL           - Override API base URL
+#
+# Examples:
+#   script/custom-agent-api list github/private-server
+#   script/custom-agent-api get github/private-server my-custom-agent
+#   script/custom-agent-api --staging list github/private-server
+#   script/custom-agent-api --production get github/private-server my-custom-agent
+
+set -e
+
+# Function to show help
+show_help() {
+    cat << 'EOF'
+Custom Agent API Script
+
+Usage:
+  script/custom-agent-api [--production|--staging[=environment]] <command> <repo_owner>/<repo_name> [args...]
+
+Commands:
+  list <repo> [--exclude-invalid-config]  - List custom agents for a repository
+  get <repo> <agent_name>             - Get custom agent details
+
+Options:
+  --production                        - Use production environment
+  --staging[=environment]             - Use staging environment (default: staging)
+                                        Valid environments: staging, jedi-knight, sith-lord
+  --local                             - Use local development environment (default)
+  --help, -h                          - Show this help message
+
+Environment Variables:
+  USER_TOKEN                          - Token for production/staging API (auto-detected from gh CLI if not set)
+  MONALISA_PAT                        - Token for local development (Codespace, default)
+  CUSTOM_AGENT_API_BASE_URL           - Override API base URL
+
+Examples:
+  script/custom-agent-api list github/private-server
+  script/custom-agent-api list github/private-server --exclude-invalid-config
+  script/custom-agent-api get github/private-server my-custom-agent
+  script/custom-agent-api --staging list github/private-server
+  script/custom-agent-api --staging=jedi-knight get github/private-server my-custom-agent
+  script/custom-agent-api --staging=sith-lord get github/private-server my-custom-agent
+  script/custom-agent-api --production get github/private-server my-custom-agent
+  script/custom-agent-api --proxima=staffship-01 list coding-agent-test/test-cca
+EOF
+}
+
+# Configuration
+SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
+cd "$SCRIPT_DIR"
+
+# Default API base URLs
+PRODUCTION_API_BASE_URL="https://api.githubcopilot.com/agents/swe"
+STAGING_API_BASE_URL="https://api.githubcopilot.com/agents/swe-staging"
+LOCAL_API_BASE_URL="http://localhost:2208"
+# e.g. https://copilot-api.test-prodweu01.ghe.com/agents/swe
+PROXIMA_API_BASE_URL="https://copilot-api.<tenant>.ghe.com/agents/swe"
+
+# Parse command line options
+LOCAL_MODE=true
+STAGING_MODE=false
+PROXIMA_MODE=false
+STAGING_ENVIRONMENT="staging"  # Default staging environment
+PROXIMA_TENANT=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --production)
+            LOCAL_MODE=false
+            STAGING_MODE=false
+            shift
+            ;;
+        --staging)
+            LOCAL_MODE=false
+            STAGING_MODE=true
+            STAGING_ENVIRONMENT="staging"
+            shift
+            ;;
+        --staging=*)
+            LOCAL_MODE=false
+            STAGING_MODE=true
+            STAGING_ENVIRONMENT="${1#*=}"
+            # Validate staging environment
+            if [[ "$STAGING_ENVIRONMENT" != "staging" && "$STAGING_ENVIRONMENT" != "jedi-knight" && "$STAGING_ENVIRONMENT" != "sith-lord" ]]; then
+                echo "Error: Invalid staging environment '$STAGING_ENVIRONMENT'. Valid environments are: staging, jedi-knight, sith-lord" >&2
+                exit 1
+            fi
+            shift
+            ;;
+        --proxima=*)
+            LOCAL_MODE=false
+            PROXIMA_MODE=true
+            PROXIMA_TENANT="${1#*=}"
+            shift
+            ;;
+        --local)
+            LOCAL_MODE=true
+            STAGING_MODE=false
+            shift
+            ;;
+        --help|-h)
+            show_help
+            exit 0
+            ;;
+        -*)
+            echo "Unknown option: $1" >&2
+            show_help
+            exit 1
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# Function to set up environment based on mode
+setup_environment() {
+    # Build staging URL based on environment
+    local staging_url_suffix=""
+    if [ "$STAGING_ENVIRONMENT" != "staging" ]; then
+        staging_url_suffix="-${STAGING_ENVIRONMENT}"
+    fi
+    local staging_url="${STAGING_API_BASE_URL}${staging_url_suffix}"
+    
+    if [ "$LOCAL_MODE" = true ]; then
+        # Local development mode
+        export USER_TOKEN="${MONALISA_PAT}"
+        export CUSTOM_AGENT_API_BASE_URL="${CUSTOM_AGENT_API_BASE_URL:-$LOCAL_API_BASE_URL}"
+        
+        if [ -z "${MONALISA_PAT}" ]; then
+            echo "Error: MONALISA_PAT environment variable is required for local mode." >&2
+            echo "If you are not in a Codespace, please set this variable before running the script." >&2
+            exit 1
+        fi
+    elif [ "$STAGING_MODE" = true ]; then
+        # Staging mode
+        export CUSTOM_AGENT_API_BASE_URL="${CUSTOM_AGENT_API_BASE_URL:-$staging_url}"
+        
+        if [ -z "${USER_TOKEN}" ]; then
+            # Try to get token from GitHub CLI
+            if command -v gh >/dev/null 2>&1; then
+                echo "USER_TOKEN not found, attempting to get token from GitHub CLI..." >&2
+                export USER_TOKEN=$(gh auth token 2>/dev/null)
+                if [ -z "${USER_TOKEN}" ]; then
+                    echo "Error: Could not get token from GitHub CLI. Please run 'gh auth login' or set USER_TOKEN environment variable." >&2
+                    exit 1
+                fi
+            else
+                echo "Error: USER_TOKEN environment variable is required for staging mode." >&2
+                echo "Please set this variable with an appropriately scoped token or install GitHub CLI." >&2
+                exit 1
+            fi
+        fi
+    elif [ "$PROXIMA_MODE" = true ]; then
+        # Proxima mode
+        if [ -z "$PROXIMA_TENANT" ]; then
+            echo "Error: Proxima tenant must be provided with --proxima=<tenant>" >&2
+            exit 1
+        fi
+
+        # Set CUSTOM_AGENT_API_BASE_URL for Proxima based off of PROXIMA_API_BASE_URL
+        local proxima_url="${PROXIMA_API_BASE_URL//<tenant>/$PROXIMA_TENANT}"
+        export CUSTOM_AGENT_API_BASE_URL="${CUSTOM_AGENT_API_BASE_URL:-$proxima_url}"
+
+        if [ -z "${USER_TOKEN}" ]; then
+            echo "Error: USER_TOKEN environment variable is required for proxima mode." >&2
+            echo "Please set this variable with an appropriately scoped token." >&2
+            exit 1
+        fi
+    else
+        # Production mode
+        export CUSTOM_AGENT_API_BASE_URL="${CUSTOM_AGENT_API_BASE_URL:-$PRODUCTION_API_BASE_URL}"
+        
+        if [ -z "${USER_TOKEN}" ]; then
+            # Try to get token from GitHub CLI
+            if command -v gh >/dev/null 2>&1; then
+                echo "USER_TOKEN not found, attempting to get token from GitHub CLI..." >&2
+                export USER_TOKEN=$(gh auth token 2>/dev/null)
+                if [ -z "${USER_TOKEN}" ]; then
+                    echo "Error: Could not get token from GitHub CLI. Please run 'gh auth login' or set USER_TOKEN environment variable." >&2
+                    exit 1
+                fi
+            else
+                echo "Error: USER_TOKEN environment variable is required for production mode." >&2
+                echo "Please set this variable with an appropriately scoped token or install GitHub CLI." >&2
+                exit 1
+            fi
+        fi
+    fi
+}
+
+# Function to list custom agents for a repository
+cmd_list() {
+    local exclude_invalid_config=false
+    local repo=""
+    
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --exclude-invalid-config)
+                exclude_invalid_config=true
+                shift
+                ;;
+            -*)
+                echo "Error: Unknown option '$1' for list command" >&2
+                echo "Usage: script/custom-agent-api [--production|--staging[=environment]] list <repo_owner>/<repo_name> [--exclude-invalid-config]" >&2
+                exit 1
+                ;;
+            *)
+                if [ -z "$repo" ]; then
+                    repo="$1"
+                else
+                    echo "Error: Too many arguments for list command" >&2
+                    echo "Usage: script/custom-agent-api [--production|--staging[=environment]] list <repo_owner>/<repo_name> [--exclude-invalid-config]" >&2
+                    exit 1
+                fi
+                shift
+                ;;
+        esac
+    done
+    
+    if [ -z "$repo" ]; then
+        echo "Usage: script/custom-agent-api [--production|--staging[=environment]] list <repo_owner>/<repo_name> [--exclude-invalid-config]" >&2
+        exit 1
+    fi
+    
+    # Build query parameter
+    local query_param=""
+    if [ "$exclude_invalid_config" = true ]; then
+        query_param="?exclude_invalid_config=true"
+    fi
+    
+    if [ "$LOCAL_MODE" = true ]; then
+        curl -i  -L \
+            -H "Authorization: Bearer ${USER_TOKEN}" \
+            -H "Accept: application/json" \
+            --request "GET" \
+            "$CUSTOM_AGENT_API_BASE_URL/custom-agents/${repo}${query_param}"
+    else
+        curl -i  -L \
+            -H "Copilot-Integration-Id: copilot-developer-dev" \
+            -H "Authorization: Bearer ${USER_TOKEN}" \
+            -H "Accept: application/json" \
+            --request "GET" \
+            "$CUSTOM_AGENT_API_BASE_URL/custom-agents/${repo}${query_param}"
+    fi
+}
+
+# Function to get custom agent details
+cmd_get() {
+    if [ "$#" -ne 2 ]; then
+        echo "Usage: script/custom-agent-api [--production|--staging[=environment]] get <repo_owner>/<repo_name> <agent_name>" >&2
+        exit 1
+    fi
+    
+    local repo="$1"
+    local agent_name="$2"
+    
+    if [ "$LOCAL_MODE" = true ]; then
+        curl -i  -L \
+            -H "Authorization: Bearer ${USER_TOKEN}" \
+            -H "Accept: application/json" \
+            --request "GET" \
+            "$CUSTOM_AGENT_API_BASE_URL/custom-agents/${repo}/${agent_name}"
+    else
+        curl -i  -L \
+            -H "Copilot-Integration-Id: copilot-developer-dev" \
+            -H "Authorization: Bearer ${USER_TOKEN}" \
+            -H "Accept: application/json" \
+            --request "GET" \
+            "$CUSTOM_AGENT_API_BASE_URL/custom-agents/${repo}/${agent_name}"
+    fi
+}
+
+# Main command dispatch
+if [ "$#" -lt 2 ]; then
+    echo "Error: Insufficient arguments" >&2
+    show_help
+    exit 1
+fi
+
+setup_environment
+
+command="$1"
+shift
+
+case "$command" in
+    list)
+        cmd_list "$@"
+        ;;
+    get)
+        cmd_get "$@"
+        ;;
+    *)
+        echo "Error: Unknown command '$command'" >&2
+        show_help
+        exit 1
+        ;;
+esac

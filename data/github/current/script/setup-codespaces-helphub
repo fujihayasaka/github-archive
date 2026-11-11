@@ -1,0 +1,69 @@
+#!/bin/bash
+set -e
+
+# This script sets up the github/helphub repository for a github/github codespace.
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+ORANGE='\033[0;33m'
+NC='\033[0m' # No Color
+
+# Function to print help message
+help() {
+   echo "Sets up the github/helphub repository in a github/github codespace."
+   echo
+   echo "Usage: setup-codespaces-helphub [-d|w|h] "
+   echo "Options:"
+   echo "-d     Before starting, delete the existing helphub directory in the codespace."
+   echo "-w     Add the helphub repo as a workspace in VS Code."
+   echo "-h     Print this help message."
+   echo
+}
+
+# Get the options
+while getopts ":hdw" opt; do
+   case $opt in
+      h) # display help message
+         help
+         exit;;
+      d) # Delete the repository if it exists
+         DELETE_REPO=true;;
+      w) # Add the repository as a workspace in VS Code
+         ADD_TO_WORKSPACE=true;;
+     :)
+      echo "Error: Option -$OPTARG requires an argument."
+      exit 1;;
+     \?) # Invalid option
+         echo "Error: Invalid option -$OPTARG"
+         exit 1;;
+   esac
+done
+
+# If the helphub repo already exists and the delete argument hasn't been specified, echo a warning and exit.
+if [[ -d "/workspaces/helphub" && -z "$DELETE_REPO" ]]; then
+  echo -e "${RED}The helphub directory already exists in this codespace.${NC} \nYou can rerun the setup script with the -d argument to force the deletion of the existing repository."
+  exit 1
+fi
+
+if [ "$DELETE_REPO" = true ]; then
+  echo -e "\n${GREEN}➡️ Deleting the existing helphub repo...\n${NC}"
+  rm -rf /workspaces/helphub
+fi
+
+# Do a shallow clone of helphub to the same dir as the github/github repo.
+echo -e "\n${GREEN}➡️ Cloning helphub repo...\n${NC}"
+git clone https://github.com/github/helphub /workspaces/helphub
+
+# Set up helphub
+echo -e "\n${GREEN}➡️ Setting up helphub...\n${NC}"
+( cd /workspaces/helphub ; script/setup; )
+
+# Add the helphub repo as a workspace in VS Code
+if [ "$ADD_TO_WORKSPACE" = true ]; then
+   echo -e "\n${GREEN}➡️ Adding helphub to VS Code workspace...\n${NC}"
+   code --add /workspaces/helphub
+fi
+
+echo -e ""
+echo -e "${GREEN}🎉🎉 FINISHED! The helphub repo has been set up! 🎉🎉"
+echo -e ""

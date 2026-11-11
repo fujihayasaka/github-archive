@@ -1,0 +1,168 @@
+<%# erblint:counter DeprecatedInPrimerCounter 2 %>
+
+<% if has_active_self_serve_trial? %>
+  <div class="d-flex flex-justify-between flex-items-start mb-3">
+    <%= render(Primer::Beta::Subhead.new(hide_border: true)) do |subhead| %>
+      <% subhead.with_heading(tag: :h3, classes: "h4") do %>Self-Serve GHAS Trial<% end %>
+    <% end %>
+    <div class="d-flex">
+      <%= form_with url: extend_trial_form_path, method: :patch, local: true, class: "mr-2" do |form| %>
+        <input type="hidden" name="operation_id" value="extend_trial">
+        <%= render(Primer::Beta::Button.new(
+          size: :small,
+          scheme: :primary,
+          type: :submit,
+          test_selector: "extend-self-serve-trial-btn",
+          "data-confirm": "This will extend the trial by 7 days, for a maximum of 60 days from today."
+        )) do %>
+          Extend Trial
+        <% end %>
+      <% end %>
+      <%= form_with url: end_trial_form_path, method: :patch, local: true do |form| %>
+        <input type="hidden" name="operation_id" value="expire_trial">
+        <%= render(Primer::Beta::Button.new(
+          size: :small,
+          scheme: :danger,
+          type: :submit,
+          "data-confirm": "Are you sure you want to expire this trial?\n\nThis will immediately end the trial and remove Advanced Security access without billing the customer.",
+          test_selector: "expire-self-serve-trial-btn"
+        )) do %>
+          Expire Trial
+        <% end %>
+      <% end %>
+    </div>
+  </div>
+  <%= render(Primer::Alpha::Banner.new(variant: :default, icon: :check, mb: 3)) do %>
+    <strong>Trial Active</strong>
+  <% end %>
+
+  <dl class="form-group">
+    <dt><label>Total trial duration</label></dt>
+    <dd class="f4 mb-3"><%= current_trial_duration_days %> days</dd>
+  </dl>
+
+  <dl class="form-group">
+    <dt><label>Expiration date</label></dt>
+    <dd class="f4 mb-3"><%= expires_at&.strftime("%B %d, %Y at %l:%M %p %Z") %></dd>
+  </dl>
+<% else %>
+  <%= render(Primer::Beta::Subhead.new(hide_border: true)) do |subhead| %>
+    <% subhead.with_heading(tag: :h3, classes: "h4") do %>Self-Serve GHAS Trial Settings<% end %>
+  <% end %>
+  <% if ineligibility_reasons.any? %>
+    <%= render(Primer::Alpha::Banner.new(variant: :warning, icon: :alert)) do %>
+      <strong>Trial cannot be started:</strong>
+      <ul class="pl-3 mt-2 mb-0">
+        <% ineligibility_reasons.each do |reason| %>
+          <li><%= reason %></li>
+        <% end %>
+      </ul>
+    <% end %>
+  <% else %>
+    <%= render(Primer::Alpha::Banner.new(variant: :success, icon: :check)) do %>
+      <strong>Enterprise is eligible for self-serve GHAS trial</strong>
+    <% end %>
+  <% end %>
+<% end %>
+
+<% if unified_trials_enabled? %>
+  <%# Trial History Section %>
+  <%= render(Primer::Beta::Subhead.new(hide_border: true, mt: 4)) do |subhead| %>
+    <% subhead.with_heading(tag: :h3, classes: "h4") do %>Trial History (Per SKU)<% end %>
+  <% end %>
+
+  <%= render(Primer::Alpha::Banner.new(variant: :default, icon: :info, mb: 3)) do %>
+    <strong>Note:</strong> Self-serve GHAS trial eligibility is evaluated per SKU (Secret Protection and Code Security separately).
+  <% end %>
+
+  <% [secret_protection_trial, code_security_trial].each do |trial| %>
+    <% details = trial_details(trial: trial) %>
+    <% sku_name = sku_display_name(trial: trial) %>
+
+    <%= render(Primer::Beta::BorderBox.new(mb: 3, test_selector: "trial-history-#{sku_name.parameterize}")) do |box| %>
+      <% box.with_header do %>
+        <div class="d-flex flex-justify-between flex-items-center">
+          <h4 class="h5 mb-0"><%= sku_name %></h4>
+          <% if details[:eligible] %>
+            <%= render(Primer::Beta::Label.new(scheme: :success)) { "Eligible" } %>
+          <% else %>
+            <%= render(Primer::Beta::Label.new(scheme: :attention)) { "Ineligible" } %>
+          <% end %>
+        </div>
+      <% end %>
+
+      <% box.with_row do %>
+        <dl class="form-group mb-0">
+          <dt><label>Trial Count</label></dt>
+          <dd class="f4 mb-3">
+            <strong><%= details[:trial_count] %></strong> of <%= details[:trial_count_limit] %> trials used
+          </dd>
+        </dl>
+
+        <% if details[:last_trial_ended_at].present? %>
+          <dl class="form-group mb-0">
+            <dt><label>Last Trial Ended</label></dt>
+            <dd class="f4 mb-3"><%= details[:last_trial_ended_at].strftime("%B %d, %Y") %></dd>
+          </dl>
+        <% end %>
+
+        <% if details[:within_cooldown_period] %>
+          <dl class="form-group mb-0">
+            <dt><label>Cooldown Period</label></dt>
+            <dd class="f4 mb-3">
+              <%= render(Primer::Beta::Label.new(scheme: :attention)) do %>
+                <%= details[:remaining_cooldown_days] %> days remaining
+              <% end %>
+              <div class="text-small text-gray mt-1">
+                Cooldown period: <%= details[:cooldown_period_days] %> days after trial ends
+              </div>
+            </dd>
+          </dl>
+        <% end %>
+
+        <dl class="form-group mb-0">
+          <dt><label>Current Seats</label></dt>
+          <dd class="f4 mb-3"><%= details[:current_seats] %></dd>
+        </dl>
+
+        <% if details[:trial_count] == 1 %>
+          <dl class="form-group mb-0">
+            <dt><label>Second Trial Seat Limit</label></dt>
+            <dd class="f4 mb-3">
+              <%= details[:second_trial_max_seats] %> seats
+              <% if details[:seat_limit_exceeded] %>
+                <%= render(Primer::Beta::Label.new(scheme: :danger)) { "Exceeded" } %>
+              <% end %>
+            </dd>
+          </dl>
+        <% end %>
+
+        <dl class="form-group mb-0">
+          <dt><label>GHAS Usage</label></dt>
+          <dd class="f4 mb-3">
+            <% if details[:ghas_in_use] %>
+              <%= render(Primer::Beta::Label.new(scheme: :attention)) { "In Use" } %>
+              <div class="text-small text-gray mt-1">Must have zero GHAS usage to start trial</div>
+            <% else %>
+              <%= render(Primer::Beta::Label.new(scheme: :success)) { "Not In Use" } %>
+            <% end %>
+          </dd>
+        </dl>
+
+        <% unless details[:eligible] %>
+          <dl class="form-group mb-0">
+            <dt><label>Ineligibility Reasons</label></dt>
+            <dd class="f4 mb-0">
+              <ul class="pl-3 mt-2 mb-0">
+                <% format_ineligibility_reasons(details: details).each do |reason| %>
+                  <li class="text-small"><%= reason %></li>
+                <% end %>
+              </ul>
+            </dd>
+          </dl>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>
+

@@ -1,0 +1,204 @@
+#!/bin/bash
+# Diagnostic script to capture git state during push operations
+# Called from .git/hooks/pre-push to help debug slow pushes
+# Output is redirected to a log file by the hook
+
+# Only run on Linux and in Codespaces
+if [[ "$(uname -s)" != "Linux" ]] || [[ -z "$CODESPACE_NAME" ]]; then
+  exit 0
+fi
+
+# Get remote and branch being pushed to (passed from pre-push hook)
+remote="$1"
+url="$2"
+
+echo "=========================================="
+echo "Push started at: $(date -Iseconds)"
+echo "Remote: $remote"
+echo "URL: $url"
+current_branch=$(git rev-parse --abbrev-ref HEAD)
+echo "Current branch: $current_branch"
+
+# Try to find what this branch is based on
+upstream=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null)
+if [ -n "$upstream" ]; then
+  echo "Upstream: $upstream"
+fi
+
+# Check merge base with origin/master (common base branch)
+fork_point=$(git merge-base --fork-point origin/master 2>/dev/null || git merge-base origin/master HEAD 2>/dev/null)
+if [ -n "$fork_point" ]; then
+  echo "Fork point from origin/master: $(git log -1 --format='%h - %s (%ar)' "$fork_point" 2>/dev/null || echo "$fork_point")"
+fi
+
+echo "=========================================="
+echo ""
+
+echo "--- Shallow State ---"
+is_shallow=$(git rev-parse --is-shallow-repository)
+echo "Is shallow: $is_shallow"
+
+if [ -f .git/shallow ]; then
+  shallow_count=$(wc -l < .git/shallow)
+  echo "Shallow file exists: yes"
+  echo "Shallow file size: $shallow_count lines"
+  echo "Sample shallow commits:"
+  head -5 .git/shallow
+else
+  echo "Shallow file exists: no"
+fi
+echo ""
+
+echo "--- Git Protocol ---"
+protocol_version=$(git config --get protocol.version || echo 'not set (using default)')
+echo "Protocol version config: $protocol_version"
+echo "Git version: $(git --version)"
+echo ""
+
+echo "--- Repository Stats ---"
+ref_count=$(git show-ref | wc -l)
+branch_count=$(git branch -a | wc -l)
+pack_count=$(ls .git/objects/pack/*.pack 2>/dev/null | wc -l)
+
+echo "Local ref count: $ref_count"
+echo "Local branch count: $branch_count"
+echo "Pack file count: $pack_count"
+echo "Pack sizes:"
+if ls .git/objects/pack/*.pack >/dev/null 2>&1; then
+  ls -lh .git/objects/pack/*.pack 2>/dev/null | awk '{print "  " $5, $9}' | sort -hr | head -5
+else
+  echo "  No pack files found"
+fi
+echo ""
+
+echo "--- Object Database ---"
+git count-objects -vH 2>/dev/null || echo "  (count-objects failed)"
+echo ""
+
+echo "--- Recent History Depth ---"
+oldest_commit=$(git log --reverse --format=%ci --max-count=1 2>/dev/null || echo 'unknown')
+echo "Oldest commit in local history: $oldest_commit"
+echo ""
+
+echo "--- Git Index and Recent Operations ---"
+echo "Index:"
+ls -lh .git/index 2>/dev/null || echo "  (not found)"
+echo ""
+
+echo "Recent git operation timestamps:"
+ls -l .git/FETCH_HEAD .git/ORIG_HEAD 2>/dev/null || echo "  (no recent operations found)"
+echo ""
+
+echo "--- Recent Git Activity ---"
+echo "Recent fetches/pulls:"
+if [ -f .git/FETCH_HEAD ]; then
+  echo "  Last fetch: $(stat -c '%y' .git/FETCH_HEAD 2>/dev/null || echo 'unknown')"
+  head -20 .git/FETCH_HEAD 2>/dev/null || echo "  (no fetch data)"
+else
+  echo "  No recent fetches"
+fi
+echo ""
+
+echo "Recent git operations (last 100 reflog entries):"
+git reflog --format='%gD %gs (%cr)' --max-count=100 2>/dev/null || echo "  (not available)"
+echo ""
+
+echo "--- Remote Configuration ---"
+remote_url=$(git remote get-url "$remote" 2>/dev/null || echo 'unknown')
+fetch_refspec=$(git config --get "remote.$remote.fetch" || echo 'default')
+
+echo "Remote URL: $remote_url"
+echo "Fetch refspec: $fetch_refspec"
+echo ""
+
+echo "--- What's Being Pushed ---"
+# Read stdin which contains: <local ref> <local sha1> <remote ref> <remote sha1>
+# Timeout prevents hanging if run manually without stdin
+if read -r -t 1 local_ref local_sha remote_ref remote_sha; then
+  zero_sha="0000000000000000000000000000000000000000"
+
+  # Process each line of push info
+  while true; do
+    if [ "$local_sha" = "$zero_sha" ]; then
+      echo "  Deleting: $remote_ref"
+    elif [ "$remote_sha" = "$zero_sha" ]; then
+      echo "  New branch: $remote_ref (from $local_ref)"
+    else
+      echo "  Updating: $remote_ref"
+      commits=$(git rev-list --count "$remote_sha..$local_sha" 2>/dev/null || echo '?')
+      echo "    Commits to push: $commits"
+    fi
+
+    # Try to read next line, exit loop if no more data
+    read -r local_ref local_sha remote_ref remote_sha || break
+  done
+else
+  echo "  (no push data available)"
+fi
+echo ""
+
+echo "--- System State ---"
+echo "Available memory:"
+free -h 2>/dev/null || echo "  (not available)"
+echo ""
+
+echo "CPU usage:"
+top -bn1 2>/dev/null | grep "Cpu(s)" | head -n1 || echo "  (not available)"
+echo ""
+
+echo "Disk space:"
+df -h /workspaces 2>/dev/null | tail -n1 || echo "  (not available)"
+echo ""
+
+echo "Disk I/O stats for .git:"
+echo "  Filesystem type: $(stat -f -c %T .git 2>/dev/null || echo 'unknown')"
+echo "  Mount options: $(findmnt -n -o OPTIONS --target .git 2>/dev/null || echo 'unknown')"
+echo ""
+
+echo "Git directory performance test:"
+time_start=$(date +%s%N)
+ls -la .git/objects/pack/*.idx &>/dev/null
+time_end=$(date +%s%N)
+time_ms=$(( (time_end - time_start) / 1000000 ))
+echo "  Time to list pack indices: ${time_ms}ms"
+echo ""
+
+echo "Load average:"
+uptime || echo "  (not available)"
+echo ""
+
+echo "--- Codespace Info ---"
+echo "Codespace name: ${CODESPACE_NAME:-not set}"
+
+# Read the actual devcontainer config that was used from Codespaces metadata
+config_file="/workspaces/.codespaces/shared/read-config.json"
+if [ -f "$config_file" ]; then
+  devcontainer_name=$(jq -r '.configuration.name // "unknown"' "$config_file" 2>/dev/null || echo "unknown")
+  cpus=$(jq -r '.configuration.hostRequirements.cpus // "unknown"' "$config_file" 2>/dev/null || echo "unknown")
+
+  echo "Codespace machine: $cpus cores"
+  echo "Devcontainer: $devcontainer_name"
+else
+  echo "Codespace machine: unknown"
+  echo "Devcontainer: unknown (config file not found)"
+fi
+
+# Codespace creation time (when the Codespace was originally created)
+if [ -n "$CODESPACE_NAME" ]; then
+  codespace_created=$(gh codespace view --codespace "$CODESPACE_NAME" --json createdAt -q '.createdAt' 2>/dev/null || echo 'unknown')
+  echo "Codespace created: $codespace_created"
+fi
+
+# Container boot time and uptime (when this container was started)
+echo "Container boot time: $(uptime -s 2>/dev/null || echo 'not available')"
+echo "Container uptime: $(uptime -p 2>/dev/null || echo 'not available')"
+
+echo ""
+echo "--- Git Config Details ---"
+git config --list | grep -E '(push|fetch|pack|core\.(compression|preloadindex|fscache)|transfer)' || echo "  (no relevant config)"
+echo ""
+
+echo "--- Timing Marker ---"
+echo "Pre-push diagnostics completed at: $(date -Iseconds)"
+echo "Actual push starting now..."
+echo ""

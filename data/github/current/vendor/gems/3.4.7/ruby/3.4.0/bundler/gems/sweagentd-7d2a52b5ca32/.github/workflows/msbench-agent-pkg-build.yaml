@@ -1,0 +1,128 @@
+name: "MSBench Built-In Agent Package Build"
+
+env:
+  HUSKY: 0
+
+on:
+  workflow_dispatch:
+    inputs:
+      UploadToBlob:
+        description: "Upload packages to Azure Blob Storage"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+  schedule:
+    - cron: "0 22 * * *" # Run nightly at 10 PM UTC
+
+jobs:
+  agent-pkg-build:
+    env:
+      AUTOFIND_DOWNLOAD_GITHUB_TOKEN: ${{ secrets.AUTOFIND_DOWNLOAD_GITHUB_TOKEN }}
+      STORAGE_ACCOUNT: cpdagentpkgstorage
+      TEST_CONTAINER: test-agent-packages
+      CCA_CONTAINER: github-coding-agent-packages
+      CLI_CONTAINER: github-copilot-cli-packages
+    runs-on: ubuntu-latest
+    environment: msbench
+    permissions:
+      id-token: write # for azure/login
+      contents: read # for actions/checkout
+      packages: read # for autofind and package downloads
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+      - name: Set version environment variable
+        run: |
+          BRANCH_NAME="${{ github.ref_name }}"
+          BRANCH_NAME="${BRANCH_NAME//\//-}"
+          BRANCH_NAME="${BRANCH_NAME//\\/-}"
+          echo "VERSION=${BRANCH_NAME}-$(date -u +"%Y%m%d-%H%M%S")" >> $GITHUB_ENV
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: |
+            runtime/package-lock.json
+            runtime/benchmarks/msbench/agent_pkg/cpd-msbench-runner/package-lock.json
+      - name: Build runtime and cpd-msbench-runner
+        working-directory: ./script
+        run: ./build-all
+      - name: Azure Login
+        uses: azure/login@a65d910e8af852a8061c627c456678983e180302 #v2.2.0
+        with:
+          client-id: "${{ vars.CPD_ID_CLIENT_ID }}" # id-cpd-ci
+          tenant-id: "${{ vars.CPD_ID_TENANT_ID }}"
+          subscription-id: "${{ vars.CPD_ID_SUBSCRIPTION_ID }}"
+      - name: Build and publish CCA package
+        working-directory: ./runtime/benchmarks/msbench
+        run: |
+          ./build-and-copy-cpd.sh
+          mkdir -p /tmp/github-coding-agent-pkg-${VERSION}
+          cd agent_pkg
+          zip -r /tmp/github-coding-agent-pkg-${VERSION}/agent_pkg.zip .
+          cp ../runner.sh /tmp/github-coding-agent-pkg-${VERSION}/
+      - name: Build and publish CLI package
+        working-directory: ./runtime/benchmarks/msbench
+        run: |
+          ./build-and-copy-cli.sh
+          mkdir -p /tmp/github-copilot-cli-pkg-${VERSION}
+          cd agent_pkg
+          zip -r /tmp/github-copilot-cli-pkg-${VERSION}/agent_pkg.zip .
+          cp ../runner-cli.sh /tmp/github-copilot-cli-pkg-${VERSION}/runner.sh
+      - name: Upload CCA package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: github-coding-agent-pkg-${{ env.VERSION }}
+          path: /tmp/github-coding-agent-pkg-${{ env.VERSION }}
+      - name: Upload CLI package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: github-copilot-cli-pkg-${{ env.VERSION }}
+          path: /tmp/github-copilot-cli-pkg-${{ env.VERSION }}
+      - name: Upload CCA package to Azure Blob Storage
+        if: ${{ inputs.UploadToBlob == 'true' }}
+        run: |
+          az storage blob upload-batch \
+            --account-name ${{ env.STORAGE_ACCOUNT }} \
+            --auth-mode login \
+            --destination ${{ env.CCA_CONTAINER }} \
+            --destination-path github-coding-agent-pkg-${{ env.VERSION }} \
+            --source /tmp/github-coding-agent-pkg-${{ env.VERSION }}
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "github-coding-agent-pkg-${{ env.VERSION }}" > /tmp/latest-cca.txt
+            az storage blob upload \
+              --account-name ${{ env.STORAGE_ACCOUNT }} \
+              --auth-mode login \
+              --container-name ${{ env.CCA_CONTAINER }} \
+              --name latest.txt \
+              --file /tmp/latest-cca.txt \
+              --overwrite
+          else
+            echo "Skipping latest.txt update for CCA (branch ${{ github.ref_name }})"
+          fi
+      - name: Upload CLI package to Azure Blob Storage
+        if: ${{ inputs.UploadToBlob == 'true' }}
+        run: |
+          az storage blob upload-batch \
+            --account-name ${{ env.STORAGE_ACCOUNT }} \
+            --auth-mode login \
+            --destination ${{ env.CLI_CONTAINER }} \
+            --destination-path github-copilot-cli-pkg-${{ env.VERSION }} \
+            --source /tmp/github-copilot-cli-pkg-${{ env.VERSION }}
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "github-copilot-cli-pkg-${{ env.VERSION }}" > /tmp/latest-cli.txt
+            az storage blob upload \
+              --account-name ${{ env.STORAGE_ACCOUNT }} \
+              --auth-mode login \
+              --container-name ${{ env.CLI_CONTAINER }} \
+              --name latest.txt \
+              --file /tmp/latest-cli.txt \
+              --overwrite
+          else
+            echo "Skipping latest.txt update for CLI (branch ${{ github.ref_name }})"
+          fi

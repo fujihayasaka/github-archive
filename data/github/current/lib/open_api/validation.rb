@@ -1,0 +1,42 @@
+# typed: true
+# frozen_string_literal: true
+
+module OpenApi
+  module Validation
+    autoload :Validator, "open_api/validation/validator"
+    autoload :RequestValidator, "open_api/validation/request_validator"
+    autoload :ResponseValidator, "open_api/validation/response_validator"
+    autoload :SchemaValidator, "open_api/validation/schema_validator"
+    autoload :Error, "open_api/validation/error"
+    autoload :SchemaError, "open_api/validation/error"
+    autoload :MissingRequiredKeysError, "open_api/validation/missing_required_keys_error"
+    autoload :TooManyPropertiesError, "open_api/validation/too_many_properties_error"
+    autoload :InvalidAdditionalPropertiesError, "open_api/validation/invalid_additional_properties_error"
+    autoload :InvalidAllOfError, "open_api/validation/invalid_all_of_error"
+    autoload :InvalidAnyOfError, "open_api/validation/invalid_any_of_error"
+    autoload :InvalidNullableError, "open_api/validation/invalid_nullable_error"
+    autoload :InvalidOneOfError, "open_api/validation/invalid_one_of_error"
+    autoload :InvalidTypeError, "open_api/validation/invalid_type_error"
+    autoload :RequestValidationSettings, "open_api/validation/request_validation_settings"
+    autoload :ResponseValidationSettings, "open_api/validation/response_validation_settings"
+    autoload :ValidationResult, "open_api/validation/validation_result"
+    autoload :PathNotFoundError, "open_api/validation/path_not_found_error"
+    autoload :OperationNotFoundError, "open_api/validation/operation_not_found_error"
+    autoload :MissingRequiredPathParameterError, "open_api/validation/missing_required_path_parameter_error"
+    autoload :MissingRequiredQueryParameterError, "open_api/validation/missing_required_query_parameter_error"
+    autoload :UnsupportedQueryParameterError, "open_api/validation/unsupported_query_parameter_error"
+    autoload :UnsupportedMediaTypeError, "open_api/validation/unsupported_media_type_error"
+    autoload :InvalidResponseStatusError, "open_api/validation/invalid_response_status_error"
+    autoload :InvalidResponseContentError, "open_api/validation/invalid_response_content_error"
+    autoload :UnsupportedResponseMediaTypeError, "open_api/validation/unsupported_response_media_type_error"
+    autoload :MaxItemsError, "open_api/validation/max_items_error"
+    autoload :MinItemsError, "open_api/validation/min_items_error"
+    autoload :MinNumberError, "open_api/validation/min_number_error"
+    autoload :MaxNumberError, "open_api/validation/max_number_error"
+    autoload :MaxStringLengthError, "open_api/validation/max_string_length_error"
+    autoload :MinStringLengthError, "open_api/validation/min_string_length_error"
+    autoload :InvalidEnumMemberError, "open_api/validation/invalid_enum_member_error"
+    autoload :InvalidPatternError, "open_api/validation/invalid_pattern_error"
+    autoload :InvalidFormatError, "open_api/validation/invalid_format_error"
+  end
+end

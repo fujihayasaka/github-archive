@@ -1,0 +1,93 @@
+<div class="flex-md-row flex-column flex-md-items-center"<%= test_selector("dependabot-grouped-security_updates") %>>
+  <% if security_configs_enabled_for_org? %>
+    <dependabot-settings-toggle>
+      <%= render(Primer::Box.new(display: :flex, direction: :row, align_items: :center, gap: 4)) do %>
+        <%= render(Primer::Box.new(display: :inline_flex, direction: :column, flex: 1)) do %>
+          <div class="mb-md-0 mb-2 flex-auto">
+            <div class="text-medium text-semibold">Grouped security updates</div>
+            <%= render(Primer::Beta::Text.new(tag: :p, mt: 1, mb: 2, mr: 3, color: :muted, font_size: :small)) do %>
+              Groups all available updates that resolve a Dependabot alert into one pull request (per package manager and directory of requirement manifests). This option may be overridden by group rules specified in dependabot.yml -
+              <%= render(Primer::Beta::Link.new(href: helpers.docs_url("code-security/configuration-dependabot.yml-groups", ghec: !!(owner&.is_a?(Business) && !GitHub.enterprise?)), classes: "Link--inTextBlock")) { "Learn how to group updates." } %>
+            <% end %>
+          </div>
+        <% end %>
+        <%= form_tag security_analysis_update_path(@owner), class: "js-setting-toggle d-flex flex-items-center", data: { remote: true, target: "dependabot-settings-toggle.settingForm" }, method: :put do %>
+          <input type="hidden" value="disabled" name="vulnerability_updates_grouping_new_repos" id="vulnerability_updates_grouping_new_repos" data-target="dependabot-settings-toggle.settingInput">
+          <span class="status-indicator js-status-indicator">
+            <%= render(Primer::Beta::Octicon.new(icon: "check")) %>
+            <%= render(Primer::Beta::Octicon.new(icon: "x")) %>
+          </span>
+          <%= render(
+            Primer::Alpha::ToggleSwitch.new(
+              size: :small,
+              checked: @owner.vulnerability_updates_grouping_enabled_for_new_repos?,
+              csrf_token: "",
+              aria: { label: "Grouped security updates" },
+              test_selector: "vulnerability-updates-grouping-enable-new-checkbox",
+              data: {
+                action: "click:dependabot-settings-toggle#toggleSetting",
+                target: "dependabot-settings-toggle.settingsToggleSwitch"
+              }
+            )
+          ) %>
+        <% end %>
+      <% end %>
+    </dependabot-settings-toggle>
+  <% else %>
+    <div class="d-flex flex-md-row flex-md-justify-between flex-column pt-3 pb-2">
+      <div class="mb-md-0 mb-2 mr-3">
+        <div class="text-medium text-semibold">Grouped security updates</div>
+        <p class="mb-0">
+          Groups all available updates that resolve a Dependabot alert into one pull request (per package manager and directory of requirement manifests). This option may be overridden by group rules specified in dependabot.yml -
+          <%= render(Primer::Beta::Link.new(href: helpers.docs_url("code-security/configuration-dependabot.yml-groups", ghec: !!(owner&.is_a?(Business) && !GitHub.enterprise?)), classes: "Link--inTextBlock")) { "Learn how to group updates." } %>
+        </p>
+        <% if GitHub.enterprise? %>
+          <p class="mb-0 color-fg-muted text-small">Contact your <%= GitHub.flavor %> administrators to <%= link_to "#{GitHub.dependabot_enabled? ? "disable" : "enable"} Dependabot grouped security updates", "#{GitHub.enterprise_admin_help_url(skip_version: true)}/github-actions/enabling-github-actions-for-github-enterprise-server/setting-up-dependabot-updates", class: "Link--inTextBlock" %>.</p>
+        <% end %>
+      </div>
+      <% if GitHub.dependabot_enabled? %>
+        <div>
+          <div class="BtnGroup d-flex flex-shrink-0">
+            <%= form_tag security_analysis_update_path(@owner), method: :put do %>
+              <%= render(SecurityAnalysis::SettingsDialogComponent.new(
+                summary_button_text: "Disable all",
+                confirm_button_text: "Disable grouped security updates",
+                disabled: button_disabled_no_repos(include_public_repos: true),
+                scheme: :danger,
+                title: button_disabled_no_repos_title("Disable grouped security updates", include_public_repos: true),
+                button_aria_label: "Disable all grouped security updates",
+                dialog_text: "You're about to disable grouped security updates on all #{user_or_org_text(@owner, false)}.",
+                input_name: "vulnerability_updates_grouping",
+                input_value: "disable_all",
+                checkbox_name: "vulnerability_updates_grouping_new_repos",
+                checkbox_id: "dialog-vulnerability-updates-grouping-disable-all",
+                checkbox_condition: false,
+                checkbox_label: "Enable by default for new repositories",
+                test_selector: "vulnerability-updates-grouping-disable-all-button"
+              )) %>
+            <% end %>
+
+            <%= form_tag security_analysis_update_path(@owner), method: :put do %>
+              <%= hidden_field_tag :show_update_tip, params[:show_update_tip].presence %>
+              <%= render(SecurityAnalysis::SettingsDialogComponent.new(
+                summary_button_text: "Enable all",
+                confirm_button_text: "Enable grouped security updates",
+                disabled: button_disabled_no_repos(include_public_repos: true),
+                title: button_disabled_no_repos_title("Enable grouped security updates", include_public_repos: true),
+                button_aria_label: "Enable all grouped security updates",
+                dialog_text: "You're about to enable grouped security updates on all #{user_or_org_text(@owner, false)}. Grouped security updates require the dependency graph, Dependabot alerts, Dependabot security updates and Dependabot security updates, so we'll also turn that on for all repositories.",
+                input_name: "vulnerability_updates_grouping",
+                input_value: "enable_all",
+                checkbox_name: "vulnerability_updates_grouping_new_repos",
+                checkbox_id: "dialog-vulnerability-updates-grouping-enable-all",
+                checkbox_condition: true,
+                checkbox_label: "Enable by default for new repositories",
+                test_selector: "vulnerability-updates-grouping-enable-all-button"
+              )) %>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+  </div>
+  <% end %>
+</div>

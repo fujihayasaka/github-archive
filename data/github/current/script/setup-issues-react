@@ -1,0 +1,46 @@
+#!/usr/bin/env safe-ruby
+# frozen_string_literal: true
+
+require_relative "../script/seeds/runners/issues_react"
+require_relative "../config/environment"
+
+unless Rails.env.development?
+  raise "This is a dev-only script"
+end
+
+disable_ssr = ARGV.include?("--disable-ssr")
+generate_seed_data = !ARGV.include?("--skip-seed-data")
+
+puts "Setting up feature flags..."
+
+# Issues React specific flags
+FeatureFlag.vexi_management.enable_feature_flag(:issues_react_global_add)
+FeatureFlag.vexi_management.enable_feature_flag(:issues_lazy_load_comment_box_suggestions)
+
+# SSR
+if disable_ssr
+  FeatureFlag.vexi_management.enable_feature_flag(:disable_issues_react_ssr)
+end
+
+# Live Updates
+FeatureFlag.vexi_management.enable_feature_flag(:pull_request_sub_triggers)
+FeatureFlag.vexi_management.enable_feature_flag(:pull_request_single_subscription)
+FeatureFlag.vexi_management.enable_feature_flag(:use_pull_request_subscriptions_enabled)
+
+monalisa = User.find_by_login("monalisa")
+
+# Dismisses the initial notice about the Projects feature so we don't have to guess
+# if we need to dismiss it or not in the E2E tests.
+monalisa.dismiss_notice("projects_beta_splash")
+
+if generate_seed_data
+  puts "Seeding issues react..."
+  Seeds::Runner::IssuesReact.execute({ minimal: true })
+
+  puts "Repairing Elastometer indexes..."
+  Elastomer::App.run ["repair"]
+else
+  puts "Skipping issues react seed data..."
+end
+
+puts "Issues React is setup!"

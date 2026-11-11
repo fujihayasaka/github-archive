@@ -1,0 +1,44 @@
+#!/bin/bash
+
+# wait_for_db_healthy waits 30 seconds for the mysql DB to output that it is ready for connections *twice*
+# mysql bootstrapping goes through 2 phases of bootstrap where it spins up a temporary server which is dropped
+# this can lead to odd behavior if connections occur _too early_
+function wait_for_mysql_ready_twice() {
+  echo "waiting for DB container ${1} to restart at least once..."
+
+  for i in {1..30}
+  do
+    ready_count=$(docker logs ${1} 2>&1 | grep 'mysqld: ready for connections.' | wc -l)
+    if [ "$ready_count" = "2" ]; then
+      echo "db is ready"
+      return
+    fi
+    echo "$1 is not ready...ready count: ${ready_count}"
+    sleep 1
+  done
+
+  echo "DB never returned ready..."
+  return 1
+}
+
+# wait_for_db_healthy waits 30 seconds for the DB to health check as "healthy"
+# according to docker health checks.  When it becomes healthy, it returns
+# if the DB never becomes healthy, no error is returned.
+function wait_for_db_healthy() {
+  echo "waiting for DB container ${1} to become healthy..."
+
+  for i in {1..30}
+  do
+    status=$(docker inspect --format "{{json .State.Health }}" ${1} | jq -r '.Status')
+    if [ "$status" = "healthy" ]; then
+      echo "db is healthy..."
+      wait_for_mysql_ready_twice "${1}"
+      sleep 5 # wait a little longer before registering we're actually healthy
+      return
+    fi
+    echo "$1 is not healthy...current_status: ${status}"
+    sleep 1
+  done
+
+  echo "DB never returned healthy..."
+}

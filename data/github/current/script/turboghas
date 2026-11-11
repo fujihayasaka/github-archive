@@ -1,0 +1,29 @@
+#!/bin/bash
+#/ Usage: script/turboghas-server
+#/
+#/ Runs turboghas service.
+set -euo pipefail
+
+# only allow one turboghas to run at a time so that skeema never races itself
+[ -z "${TG_RUNNING:-}" ] && exec env TG_RUNNING=1 flock -en "$0" "$0" "$@"
+
+export BROKERS=127.0.0.1:9092
+export MYSQL_ADDR=localhost:3306
+export MYSQL_DB_NAME=github_development_turboghas
+
+VERSION="$(bin/safe-ruby -e 'puts Gem::Specification.find_by_name("turboghas-client").metadata["commit"]')"
+
+docker run --rm --network host \
+  -e BROKERS \
+  -e MYSQL_ADDR \
+  -e MYSQL_DB_NAME \
+  -w /work/schemas \
+  "ghcr.io/github/turboghas/turboghas:tools-${VERSION}" \
+  /bin/bash -c 'skeema push github --skip-lint --allow-unsafe && skeema push github_test --skip-lint --allow-unsafe'
+
+docker run --init --rm --network host \
+  -e BROKERS \
+  -e MYSQL_ADDR \
+  -e MYSQL_DB_NAME \
+  "ghcr.io/github/turboghas/turboghas:${VERSION}" \
+  -processor

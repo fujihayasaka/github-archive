@@ -1,0 +1,44 @@
+#!/bin/bash
+set -e
+
+# This script sets up code quality for a github/github codespace. It runs:
+#   1. Turboquality and the Twirp server
+#   2. Turbomock
+#   3. Seeds an example repo where code quality is enabled
+#
+# It can optionally start the code quality pull request analysis processor if "pr" is passed as an argument.
+
+setup_turboquality() {
+  if [ -d /workspaces/turboquality ]; then
+    echo -e "\n==== turboquality already exists in /workspaces/turboquality ===="
+  else
+    echo -e '\n==== Cloning turboquality into /workspaces/turboquality ===='
+    gh repo clone github/turboquality /workspaces/turboquality
+  fi
+
+  pushd /workspaces/turboquality
+  echo -e '\n==== Bootstrapping turboquality services ===='
+  script/setup
+  make build
+
+  echo -e "Starting turboquality Twirp server in the background..."
+  bin/twirpserver &
+
+  popd
+}
+
+setup_turboquality
+
+# Check if pull request analysis processor should be started
+if [ "$1" = "pr" ]; then
+  echo -e "Starting code quality pull request analysis processor in background..."
+  bin/code-quality-pull-request-analysis-processor &
+fi
+
+echo -e ""
+echo -e "Starting turbomock in background..."
+turbomock &
+
+echo -e ""
+echo -e "Creating code quality repo..."
+bin/seed code_quality

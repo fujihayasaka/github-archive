@@ -1,0 +1,55 @@
+#!/bin/bash
+set -e
+# This script sets up the github/kredz repository for a github/github Codespace
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m' # No Color
+
+giturl=$(script/gh-clone-url github/kredz)
+branch="main"
+
+while getopts "b:" opt; do
+  case $opt in
+    b)
+      branch=$OPTARG;;
+    \?)
+      echo "Usage: $0 [-b <branch>]"
+      exit 0
+      ;;
+  esac
+done
+
+log() {
+  if $1; then
+    echo -e "${GREEN}$2 completed successfully.${NC}"
+  else
+    echo -e "${RED}Failed to $2.${NC}"
+    exit 1
+  fi
+}
+
+setup_repo() {
+  if ! test -f "/workspaces/kredz/.git/config"; then
+    git clone -b "$branch" "$giturl" /workspaces/kredz
+  else
+    cd /workspaces/kredz
+    git fetch origin "$branch"
+    git switch -C "$branch" origin/"$branch"
+    git reset --hard origin/"$branch"
+    git clean -qfdx
+  fi
+}
+
+setup() {
+  cd /workspaces/kredz
+  mkdir -p tmp
+
+  script/setup | tee tmp/setup.log || exit 1
+
+  # Currently chatops doesnt work in a github/github codespace, comment out
+  sed -i 's/^chatops:/# &/g' Procfile
+}
+
+log setup_repo "setup github/kredz repository"
+log setup "setup github/kredz"

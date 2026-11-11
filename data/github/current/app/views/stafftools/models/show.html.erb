@@ -1,0 +1,325 @@
+<% page_info title: "@#{user.display_login} · GitHub Models · Stafftools", selected_link: :github_models %>
+
+<%= render Primer::Beta::Subhead.new do |subhead| %>
+  <% subhead.with_heading(tag: :h2, display: :flex, align_items: :center) do %>
+    <span>
+      <%= link_to "GitHub Models", stafftools_models_path %>
+      / <%= link_to user.display_login, stafftools_user_models_path(user), class: "Link--primary" %>
+    </span>
+
+    <% if is_high_profile %>
+      <%= render Primer::Beta::Label.new(scheme: :severe, ml: 2, test_selector: "high-profile-label") do %>
+        <%= render Primer::Beta::Link.new(
+          href: "https://github.com/github/trust-safety/blob/main/docs/operations/escalation-procedures/high-profile-escalation.md",
+          id: "high-profile-link",
+          underline: false,
+          classes: "fgColor-severe",
+        ) do |link| %>
+          <% link.with_tooltip(text: high_profile_reason) %>
+          High Profile
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <% if GitHub.spamminess_check_enabled? && user.spammy? %>
+      <%= render Primer::Beta::Label.new(scheme: :danger, ml: 2, test_selector: "spammy-label") do %>
+        <%= render Primer::Beta::Link.new(
+          href: Spam.url_for_account_login(user.login),
+          id: "spammy-link",
+          underline: false,
+          classes: "fgColor-danger",
+        ) do |link| %>
+          <% link.with_tooltip(text: user.spammy_reason) if user.spammy_reason.present? %>
+          Spammy
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <% if is_new_account %>
+      <%= render Primer::Beta::Label.new(scheme: :warning, ml: 2, test_selector: "new-account-label") do %>
+        <%= render Primer::Beta::Link.new(
+          href: stafftools_user_overview_path(user),
+          id: "new-account-link",
+          underline: false,
+          classes: "fgColor-attention",
+        ) do |link| %>
+          <% link.with_tooltip(text: "Created on #{user.created_at.to_formatted_s(:date)}") %>
+          New Account
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <% if GitHub.spamminess_check_enabled? && !user.spammy? %>
+      <%= render Primer::Beta::Label.new(scheme: :default, ml: 2, test_selector: "hammy-label") do %>
+        <%= render Primer::Beta::Link.new(
+          href: Spam.url_for_account_login(user.login),
+          underline: false,
+          scheme: :secondary,
+        ).with_content("Not Spammy") %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>
+
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |border_box| %>
+  <% border_box.with_header do |h| %>
+    <% h.with_title(tag: :h2) do %>
+      Models access
+    <% end %>
+  <% end %>
+
+  <% border_box.with_row do %>
+    <div class="d-flex flex-justify-between flex-items-center">
+      <div class="pr-2">
+        <div class="d-flex flex-items-start flex-items-center">
+          <label for="user_can_access" class="mr-2">
+            Can @<%= user.display_login %> access GitHub Models?
+          </label>
+        </div>
+        <p class="note">
+          <span <%= test_selector("models-access-reason") %>>
+            <% if access_result.reason.present? %>
+              No because: <%= access_result.reason %>
+            <% else %>
+              Yes, this <%= account_type %> has access.
+            <% end %>
+          </span>
+          &middot; <%= auths_count %> Models auth <%= "attempt".pluralize(auths_count) %>
+        </p>
+      </div>
+      <div class="d-flex flex-justify-end position-relative">
+        <%= render Primer::Beta::Octicon.new(
+          icon: (access_result.accessible? ? "check-circle-fill" : "x-circle-fill"),
+          color: (access_result.accessible? ? :success : :danger),
+        )%>
+      </div>
+    </div>
+  <% end %>
+
+  <% border_box.with_row(display: :flex, align_items: :center) do %>
+    <div class="flex-auto">
+      <% if blocked %>
+        This will remove the administrative block for this <%= account_type %>.
+      <% else %>
+        This will block Models access for this <%= account_type %>.
+      <% end %>
+      <%= link_to "Learn about adding and removing Models blocks", "https://github.com/github/models/blob/main/docs/adrs/01-db-backed-abuse-blocks.md", class: "Link--inTextBlock" %>.
+    </div>
+    <%= render Primer::Alpha::Dialog.new(
+      id: "block-models-dialog",
+      title: "#{blocked ? 'Restore' : 'Prevent'} GitHub Models access for #{user}",
+      size: :medium_portrait,
+    ) do |dialog| %>
+      <% dialog.with_show_button(scheme: :danger) { blocked ? "Allow access" : "Block access" } %>
+      <% dialog.with_header(show_divider: true) %>
+      <%= render Primer::Alpha::Dialog::Body.new(p: 3) do %>
+        <% if !blocked && user.hammy? %>
+          <%= render(Primer::Alpha::Banner.new(scheme: :danger)) do %>
+            This <%= account_type %> has been marked <%= link_to "hammy", "https://github.com/github/glossary/blob/42d44aba4899538bca18df33d90771fe13a244ca/README.md#hammy-hamflagged-whitelisted-account", class: "Link--inTextBlock" %>.
+            You will not be able to block this <%= account_type %> from Models.
+          <% end %>
+        <% end %>
+
+        <%= primer_form_with(url: stafftools_user_models_block_path(user.display_login), method: blocked ? :delete : :post) do |form| %>
+          <%= render GitHubModels::Stafftools::UserBlockForm.new(form,
+            blocked: blocked,
+            latest_reason: blocks.first&.reason,
+          ) %>
+        <% end %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>
+
+<% if blocks.any? %>
+  <%= render(Primer::Beta::BorderBox.new(padding: :condensed, mt: 3)) do |border_box| %>
+    <% border_box.with_header do |h| %>
+      <% h.with_title(tag: :h2) do %>
+        Block history
+      <% end %>
+    <% end %>
+
+    <% blocks.each do |block| %>
+      <% border_box.with_row(display: :flex, justify_content: :space_between, align_items: :center) do %>
+        <div class="pr-2">
+          <div class="d-flex flex-items-start flex-items-center text-bold">
+            Blocked from Models by @<%= block.actor || User.ghost %>&nbsp;<%= time_ago_in_words_js(block.created_at) %>
+          </div>
+          <p class="note"><%= block.reason %></p>
+        </div>
+        <%= render Primer::Beta::Label.new(
+          scheme: block.active? ? :danger : :warning,
+        ).with_content(block.active? ? "Active" : "Revoked") %>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>
+
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed, mt: 3)) do |border_box| %>
+  <% border_box.with_header do |h| %>
+    <% h.with_title(tag: :h2) do %>
+      Models billing
+    <% end %>
+  <% end %>
+
+  <% border_box.with_row do %>
+    <div class="d-flex flex-justify-between flex-items-center">
+      <div class="pr-2">
+        <div class="d-flex flex-items-start flex-items-center">
+          <label for="user_can_access" class="mr-2">
+            Enabled GitHub Models billing?
+          </label>
+        </div>
+        <p class="note">If false, <%= render(Primer::Beta::Link.new(href: "https://docs.github.com/en/github-models/use-github-models/prototyping-with-ai-models#rate-limits", underline: true)) { "free rate limits" } %> applies where users can still continue to use GitHub Models but requests are now rate limited.</p>
+      </div>
+      <div class="d-flex flex-justify-end position-relative" <%= test_selector("models-enabled-billing") %>>
+        <%= render Primer::Beta::Octicon.new(
+          icon: (enabled_models_billing ? "check-circle-fill" : "x-circle-fill"),
+          color: (enabled_models_billing ? :success : :danger),
+        )%>
+        <%= enabled_models_billing %>
+      </div>
+    </div>
+  <% end %>
+
+  <% border_box.with_row do %>
+    <div class="d-flex flex-justify-between flex-items-center">
+      <div class="pr-2">
+        <div class="d-flex flex-items-start flex-items-center">
+          <label for="user_can_access" class="mr-2">
+            Can @<%= user.display_login %> see GitHub Models billing toggle? (can_show_models_billing?)
+          </label>
+        </div>
+      </div>
+      <div class="d-flex flex-justify-end position-relative" <%= test_selector("models-can-show-models-billing") %>>
+        <%= render Primer::Beta::Octicon.new(
+          icon: (can_show_models_billing ? "check-circle-fill" : "x-circle-fill"),
+          color: (can_show_models_billing ? :success : :danger),
+        )%>
+        <%= can_show_models_billing %>
+      </div>
+    </div>
+  <% end %>
+
+  <% border_box.with_row do %>
+    <div class="d-flex flex-justify-between flex-items-center">
+      <div class="pr-2">
+        <div class="d-flex flex-items-start flex-items-center">
+          <label for="user_can_access" class="mr-2">
+            Can @<%= user.display_login %> enable models billing? (can_enable_models_billing?)
+          </label>
+        </div>
+      </div>
+      <div class="d-flex flex-justify-end position-relative" <%= test_selector("models-can-enable-billing") %>>
+        <%= render Primer::Beta::Octicon.new(
+          icon: (can_enable_models_billing ? "check-circle-fill" : "x-circle-fill"),
+          color: (can_enable_models_billing ? :success : :danger),
+        )%>
+        <%= can_enable_models_billing %>
+      </div>
+    </div>
+  <% end %>
+
+  <% border_box.with_row do %>
+    <div class="d-flex flex-justify-between flex-items-center">
+      <div class="pr-2">
+        <div class="d-flex flex-items-start flex-items-center">
+          <label for="user_can_access" class="mr-2">
+           Credit card or PayPal as payment method?
+          </label>
+        </div>
+      </div>
+      <div class="d-flex flex-justify-end position-relative" <%= test_selector("models-has-payment-method") %>>
+        <%= render Primer::Beta::Octicon.new(
+          icon: (has_payment_method ? "check-circle-fill" : "x-circle-fill"),
+          color: (has_payment_method ? :success : :danger),
+        )%>
+        <%= has_payment_method %>
+      </div>
+    </div>
+  <% end %>
+
+  <% if user.customer.present? %>
+    <% border_box.with_row do %>
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="pr-2">
+          <div class="d-flex flex-items-start flex-items-center">
+            <label for="user_can_access" class="mr-2">
+              Can proceed with models usage?
+            </label>
+          </div>
+        </div>
+        <div class="d-flex flex-justify-end position-relative">
+          <%= render Primer::Beta::Button.new(tag: :a, href: stafftools_billing_can_proceed_with_usage_path(customer_id: user.customer.id, product: "models", sku: "models_inference")) do %>
+            Check canProceedWithUsage
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+  <% end %>
+<% end %>
+
+<div class="d-flex flex-md-row flex-justify-between gap-3">
+  <%= render Primer::Beta::BorderBox.new(
+    padding: :condensed,
+    mt: 3,
+    classes: "col-md-6",
+    test_selector: "duplicate-email-accounts",
+  ) do |border_box| %>
+    <% border_box.with_header do |h| %>
+      <% h.with_title(tag: :h2) do %>
+        <%= render Primer::Beta::Link.new(
+          href: duplicates_stafftools_user_emails_path(user),
+          underline: false,
+          scheme: :primary,
+        ).with_content("Other users with the same email") %>
+      <% end %>
+    <% end %>
+
+    <% if duplicate_emails.empty? %>
+      <% border_box.with_row do %>
+        No other accounts were found that share this <%= account_type %>'s email address.
+      <% end %>
+    <% end %>
+
+    <% duplicate_emails.each do |user_email| %>
+      <% border_box.with_row do %>
+        <%= link_to user_email.user.display_login, stafftools_user_models_path(user_email.user) %>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <%= render(Primer::Beta::BorderBox.new(padding: :condensed, mt: 3, classes: "col-md-6")) do |border_box| %>
+    <% border_box.with_header do |h| %>
+      <% h.with_title(tag: :h2) do %>
+        Resources
+      <% end %>
+    <% end %>
+
+    <% border_box.with_row do %>
+      <%= link_to "#{user.display_login} Splunk logs", splunk_search_url("index=* gh.actor.id=#{user.id}") %>
+    <% end %>
+
+    <% border_box.with_row do %>
+      <%= link_to "Abuse investigation dashboard", "https://dataexplorer.azure.com/dashboards/d447dea4-cf16-49d0-83c8-602d5925f50b?p-_startTime=24hours&p-_endTime=now&p-_binSize=v-30#324b069d-fd90-4705-819d-a1eb286edf61" %>
+    <% end %>
+
+    <% border_box.with_row do %>
+      <%= link_to "Backend metrics dashboard", "https://dataexplorer.azure.com/dashboards/4c0215a4-f81d-4f56-b5bc-1a76546d3bc8?p-_start_time=30minutes&p-_end_time=now#ea8f7969-b285-4779-9aee-6f4762b1638e" %>
+    <% end %>
+  <% end %>
+</div>
+
+<div class="mt-4">
+  <h2 class="mb-2">Billing</h2>
+
+  <%= render GitHubModels::Users::BillingUsageComponent.new(
+    user: user,
+    can_enable_models_billing: can_enable_models_billing,
+    has_payment_method: has_payment_method,
+    billing_enabled: billing_enabled,
+    models_billing_disabled_by_non_payment_method_reason: models_billing_disabled_by_non_payment_method_reason,
+    in_stafftools: true
+  ) %>
+
+</div>

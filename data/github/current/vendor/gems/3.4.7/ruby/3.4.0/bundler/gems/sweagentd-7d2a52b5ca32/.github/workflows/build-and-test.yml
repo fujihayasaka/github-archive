@@ -1,0 +1,181 @@
+name: "Build and test"
+
+on:
+  push:
+  workflow_dispatch:
+  merge_group:
+
+permissions:
+  id-token: write # for setup-goproxy
+  contents: read
+
+env:
+  HUSKY: 0
+
+jobs:
+  sweagentd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+      - uses: github/setup-goproxy@v1.1.0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ vars.GOVERSION }}
+          check-latest: true
+      - name: No changes to go.sum
+        run: |
+          go mod tidy
+          git diff --exit-code go.sum || exit_code=$?
+          if [ "${exit_code:-0}" -ne 0 ]; then
+            echo "Error: go.sum has changed, please run `go mod tidy` and commit the result"
+            exit 1
+          fi
+
+      - name: Build sweagentd
+        run: make build
+
+      - name: Execute sweagentd tests
+        run: |
+          go install github.com/mfridman/tparse@latest
+          make test
+        env:
+          GITHUB_ORG: "ghcpd"
+          GITHUB_TOKEN: ${{ secrets.COPILOT_DEVLOPER_AGENT_USER_PAT }}
+          GITHUB_BOT_LOGIN: "CloudColonel" # the assignee to the PR
+  sweagentd_with_integration_tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+      - uses: github/setup-goproxy@v1.1.0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ vars.GOVERSION }}
+          check-latest: true
+      - name: Build sweagentd
+        run: make build
+
+      - name: Execute sweagentd tests
+        run: |
+          go install github.com/mfridman/tparse@latest
+          RUN_INTEGRATION_TESTS=1 make test
+        env:
+          GITHUB_ORG: "ghcpd"
+          GITHUB_TOKEN: ${{ secrets.COPILOT_DEVLOPER_AGENT_USER_PAT }}
+          GITHUB_BOT_LOGIN: "CloudColonel" # the assignee to the PR
+
+  mcp-client:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # push gets disabled if not set
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: runtime/package-lock.json
+
+      - name: Build mcp-client (via npm)
+        working-directory: ./runtime
+        run: |
+          npm install
+          npm run build:mcp-client
+
+      - name: Execute mcp-client tests
+        working-directory: ./runtime
+        run: |
+          npm run test:mcp-client
+
+  firewall-container:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        variant: ["root", "non-root"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 #v3.10.0
+
+      - name: Run firewall tests in a container
+        working-directory: ./runtime
+        run: |
+          echo -e "\n** Running all tests as ${{ matrix.variant }} **"
+          script/firewall-test test-${{ matrix.variant }}
+        env:
+          EBPF_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.EBPF_DOWNLOAD_GITHUB_TOKEN }}"
+
+  firewall-local:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        variant: ["root", "non-root"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install requests
+
+      - name: Download binaries
+        working-directory: ./runtime
+        run: script/firewall-build
+        env:
+          EBPF_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.EBPF_DOWNLOAD_GITHUB_TOKEN }}"
+
+      - name: Run firewall tests locally
+        working-directory: ./runtime
+        run: |
+          echo -e "\n** Running all tests as ${{ matrix.variant }} user **"
+          if [ "${{ matrix.variant }}" = "root" ]; then
+            sudo PATH=$PATH script/firewall-test test-local
+          else
+            script/firewall-test test-local
+          fi
+
+  action_setup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        variant: ["cached", "download"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+      - name: Test action setup - ${{ matrix.variant }}
+        working-directory: ./runtime
+        run: |
+          set -e
+          ./action/test/test-setup.sh "${{ matrix.variant }}"

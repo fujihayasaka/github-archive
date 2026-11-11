@@ -1,0 +1,83 @@
+<%# erblint:counter DeprecatedComponentsCounter 1 %>
+<%= render layout: "settings/settings_focus" do %>
+  <%= render "integrations/settings/integration_header", view: view %>
+
+  <div class="container-lg p-responsive">
+    <%= render Primer::Alpha::Layout.new do |c| %>
+      <% c.with_sidebar do %>
+        <%= render "integrations/settings/integration_menu", view: view %>
+      <% end %>
+
+      <% c.with_main(width: :lg) do %>
+        <%= render Primer::Beta::Subhead.new do |component| %>
+          <% component.with_heading(tag: :h2) do %>App managers<% end %>
+        <% end %>
+
+        <p class="mb-3">These people can manage settings, permissions and webhooks for <%= view.integration.name %>.</p>
+
+        <%= render(Primer::Beta::BorderBox.new(mb: 3)) do |component| %>
+          <% view.this_app_managers.each do |manager| %>
+            <%= component.with_row(display: :flex, align_items: :center, justify_content: :flex_end, p: 0) do %>
+              <% if manager.is_a?(User) %>
+                <%= render(Businesses::BusinessMemberAvatarAndProfileLinkComponent.new(user: manager, business: view.business)) %>
+              <% elsif manager.is_a?(BusinessTeam) %>
+                <div class="py-3 css-truncate pl-3 flex-auto">
+                  <span class="color-fg-default" <%= test_selector("login-displayed-if-full-name-exists") %>><%= link_to "#{manager.name}", enterprise_team_path(manager.business.slug, manager.slug, only_path: true)%></span>
+                  <div class="f6 color-fg-muted" <%= test_selector("team-slug-member-count-#{manager.id}") %>>
+                    @<%= manager.combined_slug %> &bull; <%= pluralize manager.members_scope_count, 'member' %>
+                  </div>
+                </div>
+              <% end%>
+              <div class="text-right p-3 v-align-middle">
+                <%= form_tag  urls.settings_permissions_apps_destroy_enterprise_path(view.business, view.integration), method: :delete do %>
+                  <%= hidden_field_tag "manager_id", manager.id %>
+                  <%= hidden_field_tag "manager_type", manager.class.name %>
+                  <%= hidden_field_tag "user_login", manager.is_a?(User) ? manager.display_login : manager.name %>
+                  <%= render(Primer::ButtonComponent.new(scheme: :link, type: :submit, color: :danger, aria: {
+                    label: "Revoke permission to manage this App"
+                  })) { "Revoke" } %>
+                <% end %>
+              </div>
+            <% end %>
+          <% end %>
+
+          <% view.all_app_managers.each do |manager| %>
+            <%= component.with_row(display: :flex, align_items: :center, justify_content: :flex_end, p: 0) do %>
+              <% if manager.is_a?(User) %>
+                <%= render(Businesses::BusinessMemberAvatarAndProfileLinkComponent.new(user: manager, business: view.business)) %>
+              <% elsif manager.is_a?(BusinessTeam) %>
+                <div class="py-3 css-truncate pl-3 flex-auto">
+                  <span class="color-fg-default" <%= test_selector("login-displayed-if-full-name-exists") %>><%= link_to "#{manager.name}", enterprise_team_path(manager.business.slug, manager.slug, only_path: true)%></span>
+                  <div class="f6 color-fg-muted" <%= test_selector("team-slug-member-count-#{manager.id}") %>>
+                    @<%= manager.combined_slug %> &bull; <%= pluralize manager.members_scope_count, 'member' %>
+                  </div>
+                </div>
+              <% end %>
+              <%= render(Primer::Beta::Text.new(tag: :span, p: 3, color: :subtle)) do %>
+                Manages <strong>all</strong> Apps
+              <% end %>
+            <% end %>
+          <% end %>
+
+          <% user_lookup = User.where(id: view.business_owners).index_by(&:id) %>
+          <% view.business_owners.each do |id| %>
+            <% manager = user_lookup[id] %>
+            <%= component.with_row(display: :flex, align_items: :center, justify_content: :flex_end, p: 0) do %>
+              <%= render(Businesses::BusinessMemberAvatarAndProfileLinkComponent.new(user: manager, business: view.business)) %>
+              <%= render(Primer::Beta::Text.new(tag: :span, p: 3, color: :subtle)) { "Enterprise owner" } %>
+            <% end %>
+          <% end %>
+        <% end %>
+
+        <%= render "businesses/permissions/integrations/grant_permission", view: create_view_model(
+            Businesses::ManageIntegrationRolesView,
+            business: view.business,
+            integration: view.integration
+          )
+        %>
+      <% end %>
+    <% end %>
+  </div>
+<% end %>
+
+

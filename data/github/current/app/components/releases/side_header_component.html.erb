@@ -1,0 +1,76 @@
+<%# erblint:counter DeprecatedComponentsCounter 1 %>
+<div class="col-md-2 d-flex flex-md-column flex-row flex-wrap pr-md-6 mb-2 mb-md-0 flex-items-start pt-md-4">
+  <div class="mb-2 f4 mr-3 mr-md-0 col-12 pt-1 pt-sm-0">
+    <% if release.date_for_display %>
+      <relative-time class="no-wrap" prefix="" datetime="<%= release.date_for_display.iso8601 %>">
+        <%= release.date_for_display.to_fs(:short) %>
+      </relative-time>
+    <% end %>
+  </div>
+
+  <% if release.author %>
+    <div class="mb-md-2 mr-3 mr-md-0 pt-1 pt-sm-0">
+      <%= render GitHub::AvatarComponent.new(actor: release.author) %>
+      <%= profile_link(release.author, class: "color-fg-muted wb-break-all") %>
+    </div>
+  <% end %>
+
+  <% if release.immutable? %>
+    <div class="mb-md-2 mr-3 mr-md-0 pt-1 pt-sm-0 color-fg-muted">
+      <%= render(Primer::Beta::Octicon.new(icon: :lock, mr: 1, aria: { hidden: true })) %>
+      <span>
+        Immutable
+        <span class="sr-only">release. Only release title and notes can be modified.</span>
+      </span>
+    </div>
+  <% end %>
+
+  <% if release.tagged? %>
+    <div class="mb-md-2 mr-3 mr-md-0 d-flex pt-1 pt-sm-0" data-pjax="#repo-content-pjax-container" data-turbo-frame="repo-content-turbo-frame">
+      <%= render Primer::Beta::Link.new(href: tag_path, muted: true, test_selector: "tag-link") do %>
+        <%= render(Primer::Truncate.new(inline: true)) do %>
+          <%= primer_octicon :tag, "aria-label": "Tag" %>
+          <span class="ml-1 wb-break-all">
+            <%= display_tag_name %>
+          </span>
+        <% end %>
+      <% end %>
+      <%= render Releases::VerifiedIconComponent.new(release.annotated_tag) %>
+    </div>
+    <div style="position: relative; top: 1px;" class="mb-md-2 mr-3 mr-md-0 pt-1 pt-sm-0" data-pjax="#repo-content-pjax-container" data-turbo-frame="repo-content-turbo-frame">
+      <%= render Primer::Beta::Link.new(
+        href: release_commit_path,
+        muted: true,
+        mb: 2,
+        test_selector: "commit-link",
+        data: HovercardHelper.hovercard_data_attributes_for_commit(commit_url: release_commit_path)
+      ) do %>
+        <%= primer_octicon "git-commit", "aria-label": "Commit" %>
+        <%# Below must be on same line for styling to avoid extra space %>
+        <code class="f5 ml-1 wb-break-all"><%= release.tag.commit.abbreviated_oid %></code><% end %><%= render Releases::VerifiedIconComponent.new(release.tag.commit) %>
+    </div>
+    <div class="mb-md-2 mr-3 mr-md-0 pt-1 pt-sm-0">
+      <%= render Primer::Alpha::SelectPanel.new(
+        use_experimental_non_local_form: user_feature_enabled?(:primer_select_panel_use_experimental_non_local_form),
+        title: "Choose a tag to compare",
+        select_variant: :single,
+        fetch_strategy: :eventually_local,
+        src: refs_ref_list_path(
+          repository: current_repository.name,
+          tag_name: release.tag_name_or_target_commitish,
+          user_id: current_repository.owner_display_login
+        )
+      ) do |panel| %>
+        <% panel.with_show_button(size: :small) do |button| %>
+          <% button.with_trailing_visual_icon(icon: :"triangle-down") %>
+          Compare
+        <% end %>
+        <% panel.with_footer(show_divider: true) do %>
+          <div class="text-center width-full">
+            <%= link_to "View all tags", tags_path(current_repository.owner_display_login, current_repository) %>
+          </div>
+        <% end %>
+      <% end %>
+    </div>
+  <% end %>
+</div>

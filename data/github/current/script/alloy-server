@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# Check if port 9100 is not already in use
+if lsof -Pi :9100 -sTCP:LISTEN >/dev/null; then
+  echo "An instance of Alloy is already running" && sleep infinity
+  exit 0
+fi
+
+if [[ "$VITE" = true || "$VITE" = 1 ]]; then
+  npm run vite:alloy
+fi
+
+SKIP_ALLOY="${SKIP_ALLOY:-false}"
+
+if [ "$SKIP_ALLOY" = "true" ] || [ "$SKIP_ALLOY" = "1" ]; then
+  echo "alloy has been disabled"
+  sleep infinity
+else
+  SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+  source $SCRIPT_DIR/dx/lib/subproject-containers
+
+  SUBPROJECT_VERSION=$(subproject_version "alloy")
+  echo "alloy version $SUBPROJECT_VERSION"
+
+  start_subproject --name alloy \
+    -e NODE_ENV=production \
+    -e PORT=9100 \
+    -e HMAC_SECRETS=yay-alloy-dev \
+    -e ALLOWED_DOMAINS=github.githubassets.com,github.localhost \
+    "ghcr.io/github/shared-dev/alloy:$SUBPROJECT_VERSION"
+fi

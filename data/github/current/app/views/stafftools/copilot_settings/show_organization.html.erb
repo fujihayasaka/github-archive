@@ -1,0 +1,299 @@
+<%# erblint:counter DeprecatedComponentsCounter 2 %>
+<%
+  page_info(title: "#{ this_user } / copilot", selected_link: :stafftools_user_copilot)
+
+  organization_cancellation_date = this_user.next_metered_billing_cycle_starts_at.to_date - 1.day
+  cloud_trial                    = Billing::EnterpriseCloudTrial.new(this_user)
+  enabled_str = "Enabled"
+  disabled_str = "Disabled"
+  copilot_dotcom_enablement = copilot_organization.copilot_for_dotcom_enabled? ? enabled_str : disabled_str
+  dotcom_chat_enablement = copilot_organization.dotcom_chat_enabled? ? enabled_str : disabled_str
+  pr_summarizations_enablement = copilot_organization.pr_summarizations_enabled? ? enabled_str : disabled_str
+  bing_chat_enablement = copilot_organization.bing_github_chat_enabled? ? enabled_str : disabled_str
+  beta_features_enablement = copilot_organization.beta_features_github_chat_enabled?  ? enabled_str : disabled_str
+%>
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+  <% component.with_header do |h| %>
+    <% h.with_title(tag: :h2) do %>
+      Copilot Access
+    <% end %>
+  <% end %>
+
+  <% component.with_row do %>
+   <%= render(Primer::Beta::Flash.new) do %>
+    <% if copilot_organization.copilot_business.present? %>
+      Copilot Access for <strong>Enterprise Linked Organizations</strong> happens one of two ways:<br>
+      &nbsp;&nbsp;1. Enterprise admin enables Copilot for this organization<br>
+      &nbsp;&nbsp;2. Staff enables <%= Copilot.business_product_name %>/Enterprise Trial
+    <% else %>
+      Copilot Access for <strong>Standalone Organizations</strong> happens one of two ways:<br>
+      &nbsp;&nbsp;1. Organization admin enables Copilot<br>
+      &nbsp;&nbsp;2. Staff enables a <%= Copilot.business_product_name %> Trial
+    <% end %>
+   <% end %>
+  <% end %>
+
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Copilot Access",
+      copilot_organization.copilot_enablement_setting,
+      "Does this organization have the ability to use Copilot?",
+      label_scheme: :accent,
+    ) %>
+  <% end %>
+
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Enterprise Linked?",
+      copilot_organization.copilot_business.present?,
+      "Is this organization linked to an Enterprise?",
+    ) %>
+  <% end %>
+
+  <% if copilot_organization.copilot_business.present? %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "Linked Enterprise",
+        link_to(
+          copilot_organization.copilot_business.slug,
+          stafftools_copilot_path(copilot_organization.copilot_business),
+          target: "_blank",
+        ),
+        "The Enterprise in the feature flag that this organization is part of.",
+      ) %>
+    <% end %>
+
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "Linked Enterprise On GHEC Trial?",
+        copilot_organization.business.trial?,
+        copilot_organization.business.trial? ? "#{copilot_organization.business.trial_days_remaining} days remaining" : "",
+      ) %>
+    <% end %>
+
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "GHEC for Copilot Only?",
+        copilot_organization.business.seats_plan_basic?,
+        "These enterprises have no SDLC functionality and can only manage #{Copilot.business_product_name} seats",
+      ) %>
+    <% end %>
+
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "Copilot Enabled",
+        copilot_organization.copilot_enabled?,
+        "Did the Enterprise admin enable Copilot for this organization?",
+      ) %>
+    <% end %>
+
+  <% else %>
+
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "Organization On Business Plus (GHEC) Trial?",
+        cloud_trial.active?,
+        cloud_trial.description,
+      ) %>
+    <% end %>
+
+  <% end %>
+<% end %>
+
+<%= render Stafftools::Copilot::CachedBillableOrganizationComponent.new(copilot_organization) %>
+
+<% if copilot_organization.copilot_enabled? %>
+  <%= render(Stafftools::Copilot::PlanComponent.new(copilot_organization)) %>
+<% end %>
+
+<br>
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed)) do |component| %>
+  <% component.with_header do |h| %>
+    <% h.with_title(tag: :h2) do %>
+      Copilot Billing
+    <% end %>
+  <% end %>
+  <% if copilot_organization.shares_payment_method_with_blocked_user? %>
+    <% component.with_row do %>
+      <%= render(Primer::Beta::Flash.new(scheme: :danger, full_when_narrow: true, icon: :"alert-fill")) do %>
+      This organizations shares a payment method with a blocked account.
+      <a target="_blank" href="<%= lookup_stafftools_reused_card_fingerprints_path(card_fingerprint: copilot_organization.organization_object.payment_method.card_fingerprint) %>" <%= test_selector("lookup-card-fingerprint-link") %>>Lookup card fingerprint</a>
+      <% end %>
+    <% end %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Copilot Billing Type",
+      copilot_organization.copilot_billing_type,
+      "This is used in instrumentation",
+      label_scheme: :accent,
+    ) %>
+  <% end %>
+  <% component.with_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Copilot Metered Services Billable? (Billing Check)",
+      copilot_organization.billable_object.metered_services_billable?[:billable],
+      "Reason: <strong>#{copilot_organization.billable_object.metered_services_billable?[:reason]}</strong>".html_safe, # rubocop:disable Rails/OutputSafety
+    ) %>
+  <% end %>
+
+  <% if copilot_organization.can_emit_usage? %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "Emitting Usage?",
+        true,
+        "This organization is emitting usage to Meuse",
+      ) %>
+    <% end %>
+  <% else %>
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "Emitting Usage?",
+        false,
+        "This organization is not emitting usage to Meuse",
+      ) %>
+    <% end %>
+
+    <% component.with_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "In Free Feature Flag?",
+        copilot_organization.copilot_for_business_free?,
+        "Is this organization or linked enterprise in the free feature flag?",
+      ) %>
+    <% end %>
+  <% end %>
+<% end %>
+<br>
+<%= render Stafftools::Copilot::SettingsComponent.new(copilot_organization) do |component| %>
+  <% component.with_prepended_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      "Seat Management Setting",
+      copilot_organization.friendly_seat_management_setting,
+      "How this organization has configured Copilot access"
+    )  do |detail| %>
+      <% detail.with_body do %>
+        <%= render(Primer::Alpha::ActionMenu.new) do |menu| %>
+          <% menu.with_show_button { |button|
+            button.with_trailing_action_icon(icon: :"triangle-down")
+            copilot_organization.friendly_seat_management_setting
+            } %>
+            <% menu.with_item(
+              label: "Disable",
+              href: stafftools_user_copilot_update_seat_management_setting_path(copilot_organization),
+              form_arguments: {
+                method: :post,
+                name: "copilot_seat_management",
+                value: "disabled"
+              },
+              content_arguments: {
+                data: { confirm: "Are you sure you want to disable Copilot seat management for this organization?" }
+              }
+            ) %>
+            <% menu.with_item(
+              label: "Enable for all",
+              href: stafftools_user_copilot_update_seat_management_setting_path(copilot_organization),
+              form_arguments: {
+                method: :post,
+                name: "copilot_seat_management",
+                value: "enabled_for_all"
+              },
+              content_arguments: {
+                data: { confirm: "Are you sure you want to enable Copilot for all members in this organization?" }
+              }
+            ) %>
+            <% menu.with_item(
+              label: "Enable for selected",
+              href: stafftools_user_copilot_update_seat_management_setting_path(copilot_organization),
+              form_arguments: {
+                method: :post,
+                name: "copilot_seat_management",
+                value: "enabled_for_selected"
+              },
+              content_arguments: {
+                data: { confirm: "Are you sure you want to enable Copilot for selected members only? This will remove existing seat assignments." }
+              }
+            ) %>
+            <% menu.with_item(
+              label: "Enable for selected - Keep assignments",
+              href: stafftools_user_copilot_update_seat_management_setting_path(copilot_organization),
+              form_arguments: {
+                method: :post,
+                name: "copilot_seat_management",
+                value: "enabled_for_selected_keep_assignments"
+              },
+              content_arguments: {
+                data: { confirm: "Are you sure you want to enable Copilot for selected members while keeping existing assignments?" }
+              }
+            ) %>
+        <% end %>
+      <% end %>
+    <% end %>
+    <% component.with_prepended_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_MCP_REGISTRY_ACCESS,
+        copilot_organization.mcp_registry_access.titleize,
+        "What level of MCP registry access restriction that the enterprise has set",
+        label_scheme: copilot_organization.mcp_registry_access_is?("registry_only") ? :success : :danger
+      ) %>
+    <% end %>
+  <% end %>
+
+  <% component.with_prepended_row do %>
+    <%= render Stafftools::Copilot::DetailComponent.new(
+      Copilot::COPILOT_MCP_REGISTRY,
+      nil,
+      "Whether the organization has a #{Copilot::COPILOT_MCP_REGISTRY} set and what the url is",
+    ) do |component| %>
+      <% component.with_body do %>
+        <p class="note">
+          <%= copilot_organization.mcp_registry_url.present? ? copilot_organization.mcp_registry_url : "No MCP registry URL set" %>
+        </p>
+      <% end %>
+    <% end %>
+
+    <% component.with_prepended_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        Copilot::COPILOT_MCP_REGISTRY_ACCESS,
+        copilot_organization.mcp_registry_access.titleize,
+        "What level of MCP registry access restriction that the enterprise has set",
+        label_scheme: copilot_organization.mcp_registry_access_is?("registry_only") ? :success : :danger
+      ) %>
+    <% end %>
+  <% end %>
+
+  <% if current_user.feature_flag_enabled?(:copilot_overages, default: false) %>
+    <% component.with_prepended_row do %>
+      <%= render Stafftools::Copilot::DetailComponent.new(
+        "Additional Copilot premium requests",
+        copilot_organization.overages == "unconfigured" ? "Unconfigured (Blocked)" : copilot_organization.overages.capitalize,
+        "Whether this organization has enabled or disabled overages",
+        label_scheme: copilot_organization.overages_enabled? ? :success : :danger
+      ) %>
+    <% end %>
+  <% end %>
+<% end %>
+
+<%= render(Stafftools::Copilot::WaitlistsComponent.new(copilot_organization.organization_object)) %>
+
+<%= render Stafftools::Copilot::MetricsComponent.new(copilot_organization) %>
+
+<%= render Stafftools::Copilot::SettingsCacheComponent.new(copilot_organization) %>
+
+<%= render(Stafftools::Copilot::BusinessTrialComponent.new(
+  this_user,
+  business_trial,
+)) %>
+
+<%= render Stafftools::Copilot::EmailOptInOutComponent.new(
+  entity: this_user,
+  submit_path: stafftools_user_copilot_toggle_email_notifications_path(this_user.display_login),
+  notifications: params[:notifications]
+) %>
+
+<%= render Stafftools::Copilot::AuthAndCaptureComponent.new(entity: this_user) %>
+
+<%= render Stafftools::Copilot::BlockOrganizationComponent.new(organization: this_user) %>
+
+<%= render Stafftools::Copilot::SeatEmissionsComponent.new(copilot_seat_emissions) %>
+
+<%= render Stafftools::Copilot::SeatHistoryComponent.new(this_user) %>

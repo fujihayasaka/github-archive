@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: repo-visibility-changes
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "repo-visibility-changes"
+        heaven.githubapp.com/image-placeholder: "dependency-graph-api"
+        heaven.githubapp.com/deploy-requirement: "true"
+spec:
+    # Make sure that the number of replicas is <= to the partitions for the kafka topic: https://github.com/github/hydro-schemas/blob/master/topic-configuration/production/potomac/kafka-topics.yaml
+    replicas: 1
+    strategy:
+        type: RollingUpdate
+    selector:
+        matchLabels:
+            app: dependency-graph-api
+            role: repo-visibility-changes
+    template:
+        metadata:
+            labels:
+                app: dependency-graph-api
+                role: repo-visibility-changes
+        spec:
+            dnsPolicy: ClusterFirst
+            volumes:
+                - name: github-metadata
+                  hostPath:
+                    path: /etc/github/metadata.json
+            containers:
+                - name: repo-visibility-changes
+                  image: dependency-graph-api
+                  resources:
+                    requests:
+                        cpu: 200m
+                        memory: "1Gi"
+                    limits:
+                        cpu: 1000m
+                        memory: "4Gi"
+                  command: ["./script/etl/repo_visibility_changes"]
+                  readinessProbe:
+                    timeoutSeconds: 1
+                    tcpSocket:
+                        port: 8888
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                  volumeMounts:
+                    - mountPath: /etc/github/metadata.json
+                      name: github-metadata
+                      readOnly: true

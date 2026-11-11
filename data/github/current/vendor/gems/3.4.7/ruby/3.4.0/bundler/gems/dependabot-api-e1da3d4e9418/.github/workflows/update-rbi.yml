@@ -1,0 +1,74 @@
+name: Update sorbet types
+
+on:
+  pull_request:
+
+permissions:
+  pull-requests: write
+  contents: write
+  packages: read
+
+jobs:
+  fetch-dependabot-metadata:
+    runs-on: ubuntu-latest
+    # We only want to check the metadata on pull_request events from Dependabot itself,
+    # any subsequent pushes to the PR should just skip this step so we don't go into
+    # a loop on commits created by the `update-rbi-files` job
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    # Map the step output to a job output for subsequent jobs
+    outputs:
+      dependency-type: ${{ steps.dependabot-metadata.outputs.dependency-type }}
+      package-ecosystem: ${{ steps.dependabot-metadata.outputs.package-ecosystem }}
+    steps:
+      - name: Fetch dependabot metadata
+        id: dependabot-metadata
+        uses: dependabot/fetch-metadata@08eff52bf64351f401fb50d4972fa95b9f2c2d1b # v2.4.0
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+  update-rbi-files:
+    runs-on: self-hosted
+    needs: [fetch-dependabot-metadata]
+    # We only need to update rbi if the PR is updating ruby dependencies
+    if: needs.fetch-dependabot-metadata.outputs.package-ecosystem == 'bundler'
+    steps:
+      # Docker login is required by `script/bootstrap`
+      - uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: PAT
+          password: ${{secrets.GITHUB_TOKEN}}
+
+      - name: Generate token
+        id: generate_token
+        uses: actions/create-github-app-token@67018539274d69449ef7c02e8e71183d1719ab42 # v2.1.4
+        with:
+          app-id: ${{ secrets.DEPENDABOT_API_TOKEN_AUTOMATION_CLIENT_ID }}
+          private-key: ${{ secrets.DEPENDABOT_API_TOKEN_AUTOMATION_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v5
+        with:
+          # Avoids detached head state on Dependabot PRs
+          ref: ${{ github.event.pull_request.head.ref }}
+          # Check out using the generated token so any pushed changes will trigger checkruns
+          token: ${{ steps.generate_token.outputs.token }}
+
+      - name: Make sure the secret files are present for Docker
+        run: touch apt-auth-conf pkg-mirror-host
+
+      - name: Update rbi files
+        run: |
+          chmod -R a+w sorbet
+          script/bootstrap
+          script/app-env bundle exec tapioca gem
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check in any change to sorbet/rbi/
+        run: |
+          git add sorbet/rbi/
+          # Specifying the full email allows the avatar to show up: https://github.com/orgs/community/discussions/26560
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "[dependabot skip] Update sorbet/rbi with changes for update" || exit 0
+          git push

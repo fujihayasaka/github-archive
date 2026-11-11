@@ -1,0 +1,140 @@
+syntax = "proto3";
+
+package github.dependency_graph_platform.alerting.v1;
+
+option go_package = "github.com/github/dependency-graph-platform-proto/gen/go/alerting/v1";
+
+import "types/v1/manifest.proto";
+import "types/v1/dependency.proto";
+import "types/v1/job_status.proto";
+
+service AlertingAPI {
+    rpc AllRepositoriesWithDependencyVersion(AllRepositoriesWithDependencyVersionRequest) returns (AllRepositoriesWithDependencyVersionResponse);
+    rpc GetDependencyRelationships(GetDependencyRelationshipsRequest) returns (GetDependencyRelationshipsResponse);
+    rpc FetchVulnerableDependenciesForRepository(FetchVulnerableDependenciesForRepositoryRequest) returns (FetchVulnerableDependenciesForRepositoryResponse);
+}
+
+message AllRepositoriesWithDependencyVersionRequest {
+    // Required: the ecosystem to search for.
+    github.dependency_graph_platform.types.v1.Ecosystem package_ecosystem = 1;
+
+    // Required: the name of the dependency to search for.
+    string package_name = 2;
+
+    // Required: the raw requirements string to search for.
+    string requirements = 3;
+
+    // Optional: a limit and cursor to paginate the results. If not provided, the first page of results is
+    // returned.
+    Pagination pagination = 4;
+}
+
+message AllRepositoriesWithDependencyVersionResponse {
+    repeated RepositoryResult repository_results = 1;
+    Cursors next_cursor = 2;
+}
+
+message Cursors {
+    int64 dgp_declared_requirements_id = 1;
+    int64 repository_id = 2;
+    int64 dgp_dependency_id = 3;
+}
+
+message Pagination {
+    // Optional: the number of results to return. Default is determined by DGP, which is not guaranteed to
+    // return all results.
+    int32 limit = 1;
+
+    // Optional: the cursor to start returning results from. If not provided, the first page of results is
+    // returned. Clients should neither interpret nor modify this value.
+    Cursors cursor = 2;
+}
+
+message RepositoryResult {
+    uint64 repository_id = 1;
+    string requirements = 2;
+    uint64 dgp_dependency_id = 3;
+    github.dependency_graph_platform.types.v1.Scope scope = 4;
+    string manifest_name = 5;
+    string manifest_path = 6;
+    github.dependency_graph_platform.types.v1.Relationship relationship = 7;
+}
+
+message GetDependencyRelationshipsRequest {
+    // Unique identifier for the GitHub repository
+    uint64 repository_id = 1;
+
+    // Name of the package related to the alert
+    string package_name = 2;
+
+    // File path to the manifest file associated with the alert
+    string manifest_path = 3;
+
+    // Versions of the package that are affected by the alert
+    string requirements = 4;
+    
+    // Flag to include snapshots in the response
+    bool include_snapshots = 5;
+}
+
+message GetDependencyRelationshipsResponse {
+    // List of direct dependencies in which the requested dependency (related to alert) is found in the transitive path
+    repeated DirectDependencyResult dependencies = 1;
+}
+
+message DirectDependencyResult {
+    // Name of the direct dependency package
+    string package_name = 1;
+
+    // Version requirement of direct dependency
+    string requirement = 2;
+
+    // Relationship of the direct depedency is to the requested dependency
+    Relationship relationship = 3;
+}
+
+// Enum representing the relationship of a direct dependency to the requested dependency
+enum Relationship {
+    // Relationship is not known
+    UNKNOWN = 0;
+
+    // Direct dependency is a parent of the requested dependency (i.e., 1 level deep)
+    PARENT = 1;
+
+    // Direct dependency is an ancestor of the requested dependency (i.e., 2 or more levels deep)
+    ANCESTOR = 2;
+}
+
+message FetchVulnerableDependenciesForRepositoryRequest {
+    // Required: the github id of the repository
+    uint64 repository_id = 1;
+    // Required: the specific commit sha to fetch the dependencies for.
+    string commit_oid = 2;
+}
+
+message FetchVulnerableDependenciesForRepositoryResponse{
+    uint64 repository_id = 1;
+    string commit_oid = 2;
+    github.dependency_graph_platform.types.v1.JobStatus status = 3;
+    // This list will include all the manifests we have detected, including
+    // those that have no alertable_dependencies to report.
+    //
+    // A caller can compare values at different shas to determine which manifests
+    // have been added or removed.
+    repeated AlertableManifest manifests = 4;
+}
+
+message AlertableDependency {
+    string name = 1;
+    string requirements = 2;
+    github.dependency_graph_platform.types.v1.Relationship relationship = 3;
+    github.dependency_graph_platform.types.v1.Scope scope = 4;
+    repeated uint64 vulnerable_version_range_github_ids = 5;
+}
+
+message AlertableManifest {
+    string path = 1;
+    string filename = 2;
+    github.dependency_graph_platform.types.v1.Ecosystem ecosystem = 3;
+    repeated AlertableDependency alertable_dependencies = 4;
+}

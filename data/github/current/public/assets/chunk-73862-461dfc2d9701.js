@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([[73862],{5790:(u,i,e)=>{e.r(i),(0,e(22108).ox)()},50467:(u,i,e)=>{e.d(i,{_:()=>b});function b(u,i,e){return i in u?Object.defineProperty(u,i,{value:e,enumerable:!0,configurable:!0,writable:!0}):u[i]=e,u}}}]);
+//# sourceMappingURL=73862-4a1d9f204557.js.map

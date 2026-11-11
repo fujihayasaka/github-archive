@@ -1,0 +1,107 @@
+#!/bin/bash
+
+#/ Usage: script/notifyd-server <option>
+#/
+#/ Runs the notifyd api server.
+#/
+#/ Options:
+#/ --dev      Run the notifyd server in Development mode
+#/ --test     Run the notifyd server in Test mode (default) Detect if the current runtime is ENTERPRISE
+RAILS_ROOT_PATH=$([[ "$RAILS_ROOT" != "" ]] && echo "$RAILS_ROOT" || echo "$(pwd)")
+if [[ "$(cat ${RAILS_ROOT_PATH}/tmp/runtime/current 2>/dev/null)" == "enterprise" ]]
+then
+  export ENTERPRISE=1
+  echo "notifyd does not run on enterprise mode"
+fi
+
+SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+source $SCRIPT_DIR/dx/lib/subproject-containers
+
+start_notifyd () {
+    if ([ -z "$LOCAL_NOTIFYD" ] || [[ "$LOCAL_NOTIFYD" = false ]]) && [[ "$DX_EDGE" = true ]] && [[ "$DX_FEATURE_SUBPROJECT_CONTAINERS" = true ]]; then
+        SUBPROJECT_VERSION=$(subproject_version "notifyd")
+        echo "notifyd version $SUBPROJECT_VERSION"
+
+        MONOLITH_TWIRP_API_HMAC_KEY=386c7e393febb6f77dcc4c459a856e3f754a75e5aefbdb366e9570ae47a439bb
+        MONOLITH_TWIRP_API_URL=http://api.github.localhost/internal
+        NOTIFYD_CHECKER_TYPE=dummy
+        TWIRP_API_HMAC_KEYS=notifyd-dev-api-hmac-key
+        PRIMARY_DB_URL="root@tcp(localhost)/notifyd_development"
+        REPLICA_DB_URL="root@tcp(localhost)/notifyd_development"
+        TEST_DB_URL="root@tcp(localhost)/notifyd_test"
+        STATSD_ADDR=IGNORE
+        AQUEDUCT_APP=notifyd
+        AQUEDUCT_QUEUE=test
+        RETRIES_QUEUE=retries
+        FRENO_ADDR=localhost:8099
+        API_INTERNAL_TWIRP_HMAC_KEYS_FOR_NOTIFYD=386c7e393febb6f77dcc4c459a856e3f754a75e5aefbdb366e9570ae47a439bb
+        NOTIFYD_HMAC_KEY=notifyd-dev-api-hmac-key
+        NOTIFYD_API_PORT=8088
+        NOTIFYD_API_ADDR=":$NOTIFYD_API_PORT"
+        NOTIFYD_PRODUCTION_URL="http://localhost:$NOTIFYD_API_PORT"
+        PPROF_ADDR=:8089
+        CHATOPS_ADDR=:8090
+        NOTIFYD_API_TIMEOUT=10s
+
+        NAME="notifyd-${NOTIFYD_API_PORT}"
+
+        start_subproject --name=$NAME --entrypoint "/go/bin/entrypoint.sh" -e INITIAL_TIMEOUT=5s \
+        -e TIMEOUT=0s \
+        -e INFORMATIVE_ERRORS=true \
+        -e MONOLITH_TWIRP_API_HMAC_KEY="$MONOLITH_TWIRP_API_HMAC_KEY" \
+        -e MONOLITH_TWIRP_API_URL="$MONOLITH_TWIRP_API_URL" \
+        -e NOTIFYD_CHECKER_TYPE="$NOTIFYD_CHECKER_TYPE" \
+        -e TWIRP_API_HMAC_KEYS="$TWIRP_API_HMAC_KEYS" \
+        -e PRIMARY_DB_URL="$PRIMARY_DB_URL" \
+        -e REPLICA_DB_URL="$REPLICA_DB_URL" \
+        -e TEST_DB_URL="$TEST_DB_URL" \
+        -e STATSD_ADDR="$STATSD_ADDR" \
+        -e AQUEDUCT_APP="$AQUEDUCT_APP" \
+        -e AQUEDUCT_QUEUE="$AQUEDUCT_QUEUE" \
+        -e RETRIES_QUEUE="$RETRIES_QUEUE" \
+        -e FRENO_ADDR="$FRENO_ADDR" \
+        -e API_INTERNAL_TWIRP_HMAC_KEYS_FOR_NOTIFYD="$API_INTERNAL_TWIRP_HMAC_KEYS_FOR_NOTIFYD" \
+        -e NOTIFYD_PRODUCTION_URL="$NOTIFYD_PRODUCTION_URL" \
+        -e NOTIFYD_HMAC_KEY="$NOTIFYD_HMAC_KEY" \
+        -e NOTIFYD_API_ADDR="$NOTIFYD_API_ADDR" \
+        -e PPROF_ADDR="$PPROF_ADDR" \
+        -e CHATOPS_ADDR="$CHATOPS_ADDR" \
+        -e NOTIFYD_API_TIMEOUT="$NOTIFYD_API_TIMEOUT" \
+        "ghcr.io/github/shared-dev/notifyd:$SUBPROJECT_VERSION"
+    else
+        script/build-subproject notifyd || exit 1
+        NOTIFYD_BIN="vendor/notifyd/bin/api"
+        until [ -x $NOTIFYD_BIN ]; do
+            sleep 10
+        done
+
+        cd vendor/notifyd || exit 1
+
+        echo "Loading env variables"
+        export $(cat .env |grep -v "\#" | xargs)
+        echo "Loading additional env variables"
+        source ./dotcom-codespaces-development/.env
+        echo $NOTIFYD_API_ADDR
+
+        echo "Migrating notifyd cluster"
+        skeema_profile=development GO111MODULE=on go run -mod=vendor ./cmd/migrate
+
+        ./bin/api
+    fi
+}
+
+notifyd_dummy_start () {
+    # dummy start notifyd when notifyd is not enabled
+    echo "Notifyd dummy start"
+    while true
+    do
+    sleep 1
+    done
+}
+
+if [[ "${NOTIFYD_ENABLED}" == 1 && -z "${ENTERPRISE}" || ${RAILS_ENV} != "test" ]]; then
+   start_notifyd
+else
+   notifyd_dummy_start
+fi
+

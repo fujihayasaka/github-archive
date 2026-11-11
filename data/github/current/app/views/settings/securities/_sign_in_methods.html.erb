@@ -1,0 +1,372 @@
+<%# erblint:counter ButtonComponentMigrationCounter 1 %>
+<div <%= test_selector("sign-in-methods") %>>
+<%= render Primer::Beta::Subhead.new(spacious: true, hide_border: true) do |component| %>
+  <% component.with_heading(tag: :h2) do %>Sign in methods<% end %>
+<% end %>
+
+<%= render(Primer::Beta::BorderBox.new) do |component| %>
+  <% component.with_row do %>
+    <%# Email Authentication %>
+    <div class="d-flex flex-justify-between flex-items-center">
+      <div class="d-flex flex-items-center">
+        <%= render(Primer::Beta::Octicon.new(:mail, size: :medium, classes: "mr-3")) %>
+        <div>
+          <h3 class="h5 my-0">Email</h3>
+          <div class="note mt-1">
+            <% verified_emails_count = current_user.emails.verified.count %>
+            <span class="<%= 'color-fg-danger' if verified_emails_count == 0 %>">
+              <%= pluralize(verified_emails_count, "verified email") %> configured
+            </span>
+          </div>
+        </div>
+      </div>
+      <div>
+        <%= render(Primer::Beta::Button.new(
+          tag: :a,
+          href: settings_email_preferences_path,
+          size: :small
+        )) { "Manage" } %>
+      </div>
+    </div>
+  <% end %>
+
+  <%# Password Authentication %>
+  <% component.with_row do %>
+    <change-password>
+      <div class="d-flex flex-justify-between flex-items-start">
+        <div class="d-flex flex-items-center flex-auto pr-3">
+          <%= render(Primer::Beta::Octicon.new(:ellipsis, size: :medium, classes: "mr-3 flex-shrink-0")) %>
+          <div class="flex-auto">
+            <h3 class="h5 my-0">Password</h3>
+            <div class="note mt-1">
+              <% if current_user.is_passwordless_user? %>
+                Not configured
+              <% else %>
+                Configured
+              <% end %>
+            </div>
+          </div>
+        </div>
+        <div class="flex-shrink-0">
+          <% if current_user.is_passwordless_user? %>
+            <%= render(Primer::Beta::Button.new(
+              tag: :a,
+              href: password_reset_path,
+              size: :small
+            )) { "Set password" } %>
+          <% else %>
+            <%= render Primer::Beta::Button.new(
+              size: :small,
+              disabled: true,
+              data: {
+                action: "click:change-password#toggleChangePasswordSection",
+                target: "change-password.button"
+              }
+            ) do %>
+              <span data-target="change-password.showPasswordSectionButtonText">
+                Change password
+              </span>
+              <span data-target="change-password.hidePasswordSectionButtonText" hidden>
+                Hide
+              </span>
+            <% end %>
+          <% end %>
+        </div>
+      </div>
+
+      <%# Change Password Form (hidden by default) %>
+      <% if !current_user.is_passwordless_user? %>
+        <div data-target="change-password.changePasswordSection" hidden class="mt-3 ml-6">
+          <%= form_for current_user, url: change_password_path, method: :put, html: { id: "sign_in_methods_change_password", "aria-label": "Change password" } do |f| %>
+            <div class="form-group password-confirmation-form">
+              <div class="mb-1"><%= f.label :old_password %></div>
+              <%= password_field_tag 'user[old_password]', nil, id: "user_old_password_sign_in_methods", required: true, autocomplete: "current-password" %>
+            </div>
+            <password-strength
+              minimum-character-count="<%= PasswordStrengthHelper::MINIMUM_VALID_CHARACTERS %>"
+              passphrase-length="<%= User::PASSPHRASE_LENGTH %>"
+              invalid-message="Password is invalid."
+              error-class="color-fg-danger text-bold"
+              pass-class="color-fg-success"
+            >
+              <div class="form-group password-confirmation-form">
+                <div class="mb-1"><%= f.label :new_password %></div>
+                <%= auto_check_tag(:password) do %>
+                  <%= password_field_tag 'user[password]', nil, id: 'user_new_password_sign_in_methods', required: true, passwordrules: User::PASSWORD_RULES, autocomplete: "new-password", "aria-describedby": "password-req-note-sign-in-methods" %>
+                <% end %>
+              </div>
+              <div class="form-group password-confirmation-form">
+                <div class="mb-1"><%= f.label :confirm_new_password, "Confirm new password" %></div>
+                <%= password_field_tag 'user[password_confirmation]', nil, id: 'user_confirm_new_password_sign_in_methods', required: true, autocomplete: "new-password" %>
+              </div>
+              <p id="password-req-note-sign-in-methods" class="note"><%= password_strength_sentence %></p>
+            </password-strength>
+            <%= spamurai_form_signals %>
+            <p>
+              <%= render Primer::Beta::Button.new(mr: 2, type: :submit) do %>Update password<% end %>
+              <span><%= link_to "I forgot my password", password_reset_path %></span>
+            </p>
+          <% end %>
+        </div>
+      <% end %>
+    </change-password>
+  <% end %>
+
+  <%# Passkeys %>
+  <% if current_user.passkeys_enabled? %>
+    <%
+      passkeys = current_user.u2f_registrations.passkeys
+      passkeys_count = passkeys.count
+    %>
+
+    <% component.with_row do %>
+    <div>
+      <div class="d-flex flex-justify-between flex-items-start">
+        <%= render(Primer::Beta::Octicon.new(:"passkey-fill", size: :medium, classes: "mr-3 flex-shrink-0")) %>
+
+        <div class="flex-auto pr-3">
+          <h3 class="h5 my-0">Passkeys</h3>
+          <div class="note mt-1">
+            <% if passkeys_count > 0 %>
+              <details class="details-reset Details-element">
+                <summary class="btn-link color-fg-muted" style="cursor: pointer; list-style: none;">
+                  <div class="d-flex flex-items-center">
+                    <span class="mr-2"><%= pluralize(passkeys_count, "passkey") %> configured</span>
+                    <span class="Details-content--closed"><%= render(Primer::Beta::Octicon.new(:"chevron-down", size: :small)) %></span>
+                    <span class="Details-content--open"><%= render(Primer::Beta::Octicon.new(:"chevron-up", size: :small)) %></span>
+                  </div>
+                </summary>
+
+                <%# Passkey List (expandable inline) with scrolling for many passkeys %>
+                <div class="border-top pt-3 mt-3" style="max-height: calc(3.3 * 5.5rem); overflow-y: auto; padding-right: 8px;">
+                  <% passkeys.each_with_index do |passkey, index| %>
+                    <div class="js-passkey-registration <%= 'border-top pt-3' if index > 0 %>">
+                      <div class="Details js-details-container">
+                        <%# Hidden edit form %>
+                        <div class="Details-content--hidden">
+                          <div class="pb-2">
+                            <%= form_for passkey,
+                                url: u2f_edit_path(passkey),
+                                method: :put,
+                                html: {
+                                  id: "edit_nickname_#{passkey.id}",
+                                  class: "js-passkey-update",
+                                },
+                                data: { sudo_required: true } do |f| %>
+                              <div class="d-flex flex-column">
+                                <div class="mb-2">
+                                  <%= f.label :u2f_registration_nickname, "Nickname:", class: 'form-label' %>
+                                </div>
+                                <div class="d-flex flex-items-start gap-2" style="max-width: 100%;">
+                                  <%= f.text_field :nickname,
+                                    class: "js-quick-submit form-control",
+                                    style: "flex: 1; min-width: 0; max-width: 300px;",
+                                    autofocus: true,
+                                    autocomplete: "off",
+                                    maxlength: 100,
+                                    "aria-label": "Passkey nickname"
+                                  %>
+                                  <div class="d-flex flex-shrink-0 gap-1">
+                                    <%= render Primer::Beta::Button.new(
+                                      type: :submit,
+                                      "data-disable-with": "Save",
+                                      "aria-label": "Save changes to passkey nickname",
+                                      size: :small
+                                    ) do %>Save<% end %>
+                                    <%= render Primer::Beta::Button.new(
+                                      scheme: :invisible,
+                                      classes: "js-details-target",
+                                      "aria-expanded": "true",
+                                      "aria-label": "Cancel changes to passkey nickname",
+                                      size: :small
+                                    ) do %>Cancel<% end %>
+                                  </div>
+                                </div>
+                              </div>
+                            <% end %>
+                            <div class="js-passkey-edit-form-error mt-2 color-fg-danger" role="alert" hidden>An error occurred while renaming your passkey.</div>
+                          </div>
+                        </div>
+
+                        <%# Shown state with passkey details and buttons %>
+                        <div class="Details-content--shown">
+                          <div class="d-flex flex-justify-between flex-items-center pb-2">
+                            <div class="flex-auto min-width-0 pr-2">
+                              <div class="d-flex flex-items-center flex-wrap">
+                                <div class="text-bold mr-2 js-passkey-nickname"><%= passkey.nickname %></div>
+                                <% if passkey.linked_to_current_device?(current_device_id) %>
+                                  <%= render(Primer::Beta::Label.new(scheme: :secondary, ml: 2)) { "Seen from this browser" } %>
+                                <% end %>
+                                <% if passkey.backup_eligibility %>
+                                  <%= render(Primer::Beta::Label.new(
+                                    scheme: :accent,
+                                    ml: 2,
+                                    title: "This passkey is eligible for backup by its provider",
+                                    aria: {
+                                      label: "This passkey is eligible for backup by its provider"
+                                    },
+                                  )) { "Synced" } %>
+                                <% end %>
+                              </div>
+                              <div class="text-small color-fg-muted mt-1">
+                                Added on <%= passkey.created_at.strftime("%b %-d, %Y") %>
+                                | Last used
+                                <% if passkey.get_last_used_at > 1.hour.ago %>
+                                  less than an hour ago
+                                <% else %>
+                                  <%= time_ago_in_words(passkey.get_last_used_at) %> ago
+                                <% end %>
+                              </div>
+                            </div>
+                            <%# Edit/Delete buttons %>
+                            <div class="d-flex flex-items-center flex-shrink-0 gap-1">
+                              <%= render(Primer::Beta::IconButton.new(icon: :pencil, "aria-label": "Edit passkey nickname", "aria-expanded": false, classes: "js-details-target")) %>
+
+                              <%= form_tag u2f_destroy_path(passkey), method: :delete, class: "js-passkey-registration-delete", data: { sudo_required: true } do %>
+                                <%= render(Primer::Alpha::Dialog.new(
+                                  title: "Delete passkey?",
+                                  "aria-label": "Confirm delete of `#{passkey.nickname}` passkey",
+                                  id: "delete-passkey-#{passkey.id}",
+                                )) do |d| %>
+                                  <% d.with_show_button(
+                                    scheme: :danger,
+                                    p: 2,
+                                    title: "Delete `#{passkey.nickname}` passkey",
+                                    classes: "js-passkey-registration-delete-button",
+                                    "data-disable-with": "Deleting…",
+                                  ) do |sb| %>
+                                    <% sb.with_tooltip(text: "Delete `#{passkey.nickname}` passkey") %>
+                                    <%= render(Primer::Beta::Octicon.new(icon: :trash, size: :small)) %>
+                                  <% end %>
+                                  <% d.with_body do %>
+                                    <p id="passkey-delete-description" role="alert">
+                                      Are you sure you want to delete your `<%= passkey.nickname %>` passkey?
+                                    </p>
+                                    <p>
+                                      <% if passkey.backup_eligibility %>
+                                        By removing this passkey you will no longer be able to use it to sign-in to your account from any of the devices on which it has been synced.
+                                      <% else %>
+                                        You will no longer be able to use it to sign-in to your account.
+                                      <% end %>
+                                    </p>
+                                    <p>
+                                      Note: You may continue to see this passkey as an option during sign-in until you also delete it from your browser, device or associated account's password management settings.
+                                    </p>
+                                  <% end %>
+                                  <% d.with_footer do %>
+                                    <%= render(Primer::Beta::Button.new(
+                                      "data-close-dialog-id": "delete-passkey-#{passkey.id}",
+                                      "aria-label": "Cancel `#{passkey.nickname}` passkey delete"
+                                    )) { "Cancel" } %>
+                                    <%= render(Primer::Beta::Button.new(
+                                      type: :submit,
+                                      scheme: :danger,
+                                      "data-close-dialog-id": "delete-passkey-#{passkey.id}",
+                                      "aria-describedby": "passkey-delete-description",
+                                      "aria-label": "Confirm delete `#{passkey.nickname}` passkey"
+                                    )) { "Delete" } %>
+                                  <% end %>
+                                <% end %>
+                              <% end %>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  <% end %>
+                </div>
+              </details>
+            <% else %>
+              Passwordless sign-in with biometrics or security keys
+            <% end %>
+          </div>
+        </div>
+
+        <%# Add passkey button %>
+        <div class="d-flex flex-items-start flex-shrink-0">
+          <%= render(Primer::Beta::Button.new(
+            tag: :a,
+            href: trusted_device_registration_prompt_path(return_to: settings_security_path),
+            size: :small
+          )) { "Add passkey" } %>
+        </div>
+      </div>
+    </div>
+  <% end %>
+<% end %>
+
+  <%# Social Authentication (Google) %>
+  <% if user_feature_enabled?(:social_sisu) %>
+    <% google_connected_count = SocialIdentities.domain.social_provider_connection_count(current_user.id, :GOOGLE) %>
+    <% component.with_row do %>
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-flex flex-items-center">
+          <%= render(Providers::GoogleIconComponent.new(size: 16, classes: "mr-3")) %>
+          <div>
+            <h3 class="h5 my-0">Google</h3>
+            <div class="note mt-1">
+              <% if google_connected_count > 0 %>
+                <%= pluralize(google_connected_count, "account") %> connected
+              <% else %>
+                Sign in with your Google account
+              <% end %>
+            </div>
+          </div>
+        </div>
+        <div>
+          <% if google_connected_count > 0 %>
+            <%= render(Primer::Alpha::ActionMenu.new(test_selector: "google-sign-in-method-dropdown")) do |menu| %>
+              <% menu.with_show_button(icon: "kebab-horizontal", aria: { label: "Google sign in method dropdown" }) %>
+              <% menu.with_item(label: "Manage", href: settings_email_preferences_path) %>
+              <% menu.with_item(label: "Add account", href: login_url(add_account: 1, return_to: settings_security_url)) %>
+            <% end %>
+          <% else %>
+            <%= render(Primer::Beta::Button.new(
+              tag: :a,
+              href: login_url(add_account: 1, return_to: settings_security_url),
+              size: :small
+            )) { "Connect" } %>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+  <% end %>
+
+  <%# Social Authentication (Apple) %>
+  <% if user_feature_enabled?(:social_sisu) && user_feature_enabled?(:social_sisu_apple) %>
+    <% apple_connected_count = SocialIdentities.domain.social_provider_connection_count(current_user.id, :APPLE) %>
+    <% component.with_row do %>
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-flex flex-items-center">
+          <%= render(Providers::AppleIconComponent.new(size: 16, classes: "mr-3")) %>
+          <div>
+            <h4 class="h5 my-0">Apple</h4>
+            <div class="note mt-1">
+              <% if apple_connected_count > 0 %>
+                <%= pluralize(apple_connected_count, "account") %> connected
+              <% else %>
+                Sign in with your Apple account
+              <% end %>
+            </div>
+          </div>
+        </div>
+        <div>
+          <% if apple_connected_count > 0 %>
+            <%= render(Primer::Alpha::ActionMenu.new(test_selector: "apple-sign-in-method-dropdown")) do |menu| %>
+              <% menu.with_show_button(icon: "kebab-horizontal", aria: { label: "Apple sign in method dropdown" }) %>
+              <% menu.with_item(label: "Manage", href: settings_email_preferences_path) %>
+              <% menu.with_item(label: "Add account", href: login_url(add_account: 1, return_to: settings_security_url)) %>
+            <% end %>
+          <% else %>
+            <%= render(Primer::Beta::Button.new(
+              tag: :a,
+              href: login_url(add_account: 1, return_to: settings_security_url),
+              size: :small
+            )) { "Connect" } %>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+  <% end %>
+<% end %>
+</div>

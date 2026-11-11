@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: daily-import
+    annotations:
+        heaven.githubapp.com/image-placeholder: "advisory-db"
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "daily-import"
+spec:
+    schedule: "30 */3 * * *" # Every three hours (on the half hour since less frequent jobs tend to be scheduled at the top of the hour)
+    successfulJobsHistoryLimit: 8
+    failedJobsHistoryLimit: 8
+    jobTemplate:
+        spec:
+            activeDeadlineSeconds: 3600
+            template:
+                spec:
+                    restartPolicy: Never
+                    containers:
+                        - name: daily-import
+                          image: advisory-db
+                          command:
+                            - bin/rake
+                            - advisory_db:import:all
+                          envFrom:
+                            - configMapRef:
+                                name: rails
+                            - secretRef:
+                                name: vault-secrets
+                          env:
+                            - name: ADVISORY_DB_ROLE
+                              value: "cron"
+                            - name: DOGSTATSD_HOST
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: spec.nodeName
+    concurrencyPolicy: Forbid

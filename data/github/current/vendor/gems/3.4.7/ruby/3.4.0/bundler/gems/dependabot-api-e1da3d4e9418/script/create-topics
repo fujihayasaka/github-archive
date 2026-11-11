@@ -1,0 +1,54 @@
+#!/bin/bash
+appdir=$(cd $(dirname "$0")/.. && pwd)
+
+echo "==> Creating hydro topics..."
+if [[ -z "$HYDRO_KAFKA_BROKERS" ]]; then
+  echo "No HYDRO_KAFKA_BROKERS defined, nothing to do."
+  exit
+fi
+
+if [ -f /etc/app-env ]; then
+  exec bundle exec ruby $0 $@
+else
+  exec "$appdir/script/app-env" bundle exec ruby $0 $@
+fi
+
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+require_relative "../config/environment"
+if !Rails.env.development?
+ puts "Can only use this script in development environment"
+ exit 1
+end
+
+TOPIC_PREFIX = "cp1-iad.ingest.github.v1"
+
+CONSUMED_TOPIC_NAMES = %w{
+  ComputeUsage
+  IntegrationInstallationCreate
+  IntegrationInstallationDelete
+  IntegrationInstallationRepositoriesAdded
+  IntegrationInstallationRepositoriesRemoved
+  PullRequestClose
+  RepositoryVulnerabilityAlertResolveRequest
+  RepositoryVulnerabilityAlertCreate
+  RepositoryPush
+  RepositoryCommitStatusCreated
+  RepositoryDependencyUpdateCleanedUp
+  RepositoryDependencyUpdatesVulnerabilitiesDisabled
+  RepositoryDependencyUpdatesVulnerabilitiesEnabled
+  UpdateGraphEvent
+}
+
+kafka = Kafka.new(ENV["HYDRO_KAFKA_BROKERS"].to_s.split)
+
+CONSUMED_TOPIC_NAMES.each do |topic_name|
+  topic = [TOPIC_PREFIX, topic_name].join('.')
+
+  if kafka.topics.include?(topic)
+    puts "#{topic} already exists."
+  else
+    kafka.create_topic(topic)
+    puts "#{topic} created."
+  end
+end

@@ -1,0 +1,41 @@
+#!/bin/bash
+set -e
+set -u
+
+IMAGE=spokes-proto-generate-go
+
+if ! [ -z ${BP_GITHUB_TOKEN+x} ]; then
+	export GITHUB_TOKEN=$BP_GITHUB_TOKEN
+fi
+
+if [ -z "${GITHUB_TOKEN:-}" ]; then
+	echo "script/generate-go requires that the environment includes GITHUB_TOKEN or BP_GITHUB_TOKEN."
+	exit 1
+fi
+
+tar cf - \
+    config/tools/generate-go \
+    config/tools/shared |
+docker build --build-arg GITHUB_TOKEN -f config/tools/generate-go/Dockerfile -t ${IMAGE} -
+
+docker_args=""
+if [ "$(uname -s)" == "Linux" ]; then
+	# This ensures the output files are owned by the current user rather than root.
+	docker_args="--user $(id -u):$(id -g) --tmpfs /.cache/"
+fi
+
+export GOPROXY=https://goproxy.githubapp.com/mod,https://proxy.golang.org,direct
+export GOPRIVATE=
+export GONOPROXY=
+export GONOSUMDB="github.com/github/*"
+
+docker run --rm \
+	--net=none \
+	-e "GOPROXY=$GOPROXY" \
+	-e "GONOSUMDB=$GONOSUMDB" \
+	-v "$HOME/.netrc:/root/.netrc" \
+	-v $(pwd)/_template:/go/src/github.com/github/spokes-proto/_template:ro \
+	-v $(pwd)/proto:/go/src/github.com/github/spokes-proto/proto \
+	-v $(pwd)/gen:/go/src/github.com/github/spokes-proto/gen \
+	$docker_args \
+	${IMAGE}

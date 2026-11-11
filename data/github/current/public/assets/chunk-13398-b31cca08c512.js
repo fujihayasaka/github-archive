@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([[3201,6315,9389,13398,16902,28773,28970,31146,37415,38074,45338,48727,50531,57293,57431,58281,60229,64492,65404,73369,73560,73575,76413,76512,83846,85243,90920,91472],{49732:(u,i,b)=>{var h=b(7123),t=b(51416);(0,h.k)("create-branch-button",{Component:t.F})}}]);
+//# sourceMappingURL=lazy-react-partial-create-branch-button-31dbea714b03.js.map

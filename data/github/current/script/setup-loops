@@ -1,0 +1,78 @@
+#!/bin/bash
+set -e
+
+# This script sets up the github/loops repository for a github/github codespace.
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+ORANGE='\033[0;33m'
+NC='\033[0m' # No Color
+
+# Function to print help message
+help() {
+   echo "Sets up the github/loops repository for a github/github codespace."
+   echo
+   echo "Usage: setup-codespaces-loops [-b branch] [-d|h|w] "
+   echo "Options:"
+   echo "-d     Before starting, delete the existing loops directory in the codespace."
+   echo "-w     Add the loops repo as a workspace in VS Code."
+   echo "-b     Clone the loops repo on this branch."
+   echo "-h     Print this help message."
+   echo
+}
+
+BRANCH=main
+
+# Get the options
+while getopts ":hdwb:c" opt; do
+   case $opt in
+      h) # display help message
+         help
+         exit;;
+      d) # Delete the repository if it exists
+         DELETE_REPO=true;;
+      w) # Add the repository as a workspace in VS Code
+         ADD_TO_WORKSPACE=true;;
+      b) # If a branch was provided, re-set the variable
+         BRANCH=$OPTARG;;
+     :)
+      echo -e "${RED}Error: Option -$OPTARG requires an argument."
+      exit 1;;
+     \?) # Invalid option
+         echo -e "${RED}Error: Invalid option -$OPTARG"
+         exit 1;;
+   esac
+done
+
+# If the loops repo already exists and the delete argument hasn't been specified, echo a warning and exit.
+if [[ -d "/workspaces/loops" && -z "$DELETE_REPO" ]]; then
+  echo -e "${RED}The loops directory already exists in this codespace.${NC} \nYou can rerun the setup script with the -d argument to force the deletion of the existing repository."
+  exit 1
+fi
+
+if [ "$DELETE_REPO" = true ]; then
+  echo -e "\n${GREEN}➡️ Deleting the existing loops repo...\n${NC}"
+  rm -rf /workspaces/loops
+fi
+
+# Do a shallow clone of loops to the same dir as the github/github repo.
+# If a branch was supplied, use that branch for the clone.
+echo -e "\n${GREEN}➡️ Cloning loops repo...\n${NC}"
+git clone https://github.com/github/loops /workspaces/loops --branch $BRANCH
+
+echo -e "\n${GREEN}➡️ Setting up environment variables...\n${NC}"
+( cd /workspaces/loops ; script/setup )
+
+# Add the loops repo as a workspace in VS Code
+if [ "$ADD_TO_WORKSPACE" = true ]; then
+   echo -e "\n${GREEN}➡️ Adding loops to VS Code workspace...\n${NC}"
+   code --add /workspaces/loops
+fi
+
+script/setup-loops.rb "$@"
+
+echo -e ""
+echo -e "${GREEN}🎉🎉 FINISHED! The loops repo has been set up! 🎉🎉${NC}"
+echo -e ""
+echo -e "${GREEN}The loops server will be started when you run ${NC}make build && bin/loops${GREEN} in /workspaces/loops"
+echo -e ""

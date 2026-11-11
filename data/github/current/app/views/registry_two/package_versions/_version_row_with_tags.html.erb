@@ -1,0 +1,126 @@
+<%
+  limit ||= 10
+  tags = limit ?  package_version.metadata.tags.first(limit) : package_version.metadata.tags
+%>
+<% component.with_row do %>
+  <div class="d-flex" <%= test_selector("version-row-with-tags")%>>
+    <%# sha, label, published container %>
+    <div class="col-10 d-flex flex-auto flex-column" style="overflow: hidden;">
+      <%# versions/labels %>
+      <% if is_actions_package %>
+        <% if tags.empty? %>
+          <div class="d-inline-flex flex-wrap">
+            <%= link_to package_version.metadata.manifest.digest,
+                    package_two_path(version: package_version.id, user_type: user_type),
+                    class: "css-truncate css-truncate-target h4 color-fg-default mr-2",
+                    style: "max-width: 100%" %>
+          </div>
+        <% else %>
+          <div class="d-flex flex-items-center">
+            <% tags.reject { |tag| tag.name == PackageRegistry::PackageVersion::LATEST_TAG }.each do |tag| %>
+              <span <%= test_selector("tag-name")%>>
+                <%= link_to tag.name, package_two_path(version: package_version.id, tag: tag.name, user_type: user_type), class: "h4 color-fg-default Link--primary" %>
+              </span>
+            <% end %>
+            <% if is_latest %>
+              <%= render(Primer::Beta::Label.new(scheme: :secondary, mx: 2, test_selector: "latest-label", title: "Label: Latest", tag: :a, href: package_two_path(version: package_version.id, tag: tag.name, user_type: user_type))) { "Latest" } %>
+            <% end %>
+          </div>
+        <% end %>
+      <% else %>
+        <% if tags.empty? %>
+          <div class="d-inline-flex flex-wrap">
+            <%= link_to package_version.metadata.manifest.digest,
+                        package_two_path(version: package_version.id, user_type: user_type),
+                        class: "css-truncate css-truncate-target",
+                        style: "max-width: 100%" %>
+          </div>
+        <% else %>
+          <div class="d-inline-flex flex-wrap">
+            <% if package_version.metadata.tags.any? { |tag| tag.name == PackageRegistry::PackageVersion::LATEST_TAG } %>
+              <%= link_to "latest", package_two_path(version: package_version.id, tag: "latest", user_type: user_type), class: "Label Label--success mr-1 mb-2" %>
+            <% end %>
+            <% tags.reject { |tag| tag.name == PackageRegistry::PackageVersion::LATEST_TAG }.each do |tag| %>
+              <%= link_to tag.name, package_two_path(version: package_version.id, tag: tag.name, user_type: user_type), class: "Label mr-1 mb-2 text-normal" %>
+            <% end %>
+          </div>
+        <% end %>
+      <% end %>
+
+      <%# published %>
+      <div class="css-truncate css-truncate-target d-block" style="max-width: 540px;">
+        <small class="color-fg-muted">
+          <% if tags.empty? %>
+            Published <%= time_ago_in_words(Time.at(package_version.created_at)) %> ago
+          <% else %>
+            Published <%= time_ago_in_words(Time.at(package_version.created_at)) %> ago · Digest
+            <span class="Details js-details-container">
+              <span class="hidden-text-expander inline">
+                <button type="button" class="ellipsis-expander js-details-target" aria-expanded="false">&hellip;</button>
+              </span>
+              <div class="Details-content--hidden mt-2">
+                <code class="d-block color-bg-subtle border-0 rounded-2 f6 lh-default">
+                  <%= render Primer::Beta::ClipboardCopy.new(display: :block, position: :relative, px: 2, py: 1, border_radius: 2, classes: "CopyBlock tooltipped-no-delay", "aria-label": "Copy", "data-copy-feedback": "Copied!", "data-tooltip-direction": "e", role: "button", tabindex: "0", value: package_version.metadata.manifest.digest) do %><%# erblint:disable Primer::Accessibility::TooltippedMigration %>
+                    <span class="color-fg-muted"><%= package_version.metadata.manifest.digest %></span>
+                    <%= primer_octicon(:copy, color: :accent, right: 0, mr: 1, position: :absolute, classes: "js-clipboard-copy-icon", style: "top: 5px;") %>
+                    <%= primer_octicon(:check, color: :success, position: :absolute, display: :none, classes: "js-clipboard-check-icon", style: "top: 6px; right: 5px;") %>
+                  <% end %>
+                </code>
+              </div>
+            </span>
+          <% end %>
+        </small>
+      </div>
+    </div>
+
+    <%# download count %>
+    <div class="d-flex flex-items-center">
+      <span class="d-flex flex-items-center gap-1 color-fg-muted overflow-hidden f6 mr-3" style="white-space:nowrap;">
+        <%= primer_octicon(:download) %>
+        <%= number_with_delimiter(package_version.download_count, delimiter: ",") %>
+        <span class="sr-only">Version downloads</span>
+      </span>
+      <% if viewer_is_admin && !disable_deletion %>
+        <div class="pl-2" style="display: inline-block; vertical-align: bottom">
+          <%= render layout: "registry_two/package_versions/delete_version_dialog", locals: {
+            package:,
+            package_version:,
+            user_type:,
+            show_reclaimed_storage: false
+          } do %>
+            <%= render Primer::Alpha::IncludeFragment.new(my: 3, "aria-label": "Loading...") do %><%= render(Primer::Beta::Spinner.new(size: :large, mx: :auto, display: :block)) %><% end %>
+          <% end %>
+        </div>
+      <% elsif viewer_is_admin && disable_deletion && is_actions_package %>
+        <%= render(Primer::Beta::Button.new(
+          scheme: :default,
+          size: :small,
+          inactive: true,
+          "aria-label": "Delete version",
+          id: "delete-version-button-#{package_version.id}",
+          "data-show-dialog-id": "disabled-delete-version-dialog",
+          "data-test-selector": "disabled-delete-version-button",
+          ml: 2,
+        )) do |component| %>
+          <% component.with_tooltip(
+            type: :description,
+            text: "Cannot delete versions with over 5000 downloads"
+          ) %>
+          Delete
+        <% end %>
+        <%= render Primer::Alpha::Dialog.new(
+          title: "Cannot delete version",
+          size: :small,
+          id: "disabled-delete-version-dialog",
+          text_align: :left,
+        ) do |d| %>
+          <%# TODO update URL once docs for immutable actions are published. See https://github.com/github/package-registry-team/issues/8000 %>
+          <% d.with_body do %>
+            Versions with more than 5000 downloads cannot be deleted.
+            <%= link_to "Learn more about immutable actions", "#{GitHub.help_url}/actions", class: "Link--inTextBlock" %>.
+          <% end %>
+        <% end %>
+      <% end %>
+    </div>
+  </div>
+<% end %>

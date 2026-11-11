@@ -1,0 +1,68 @@
+#!/usr/bin/env safe-ruby
+# frozen_string_literal: true
+
+require_relative "#{Rails.root}/config/environment"
+require_relative "#{Rails.root}/script/seeds/objects"
+require_relative "#{Rails.root}/script/seeds/runner"
+
+unless Rails.env.development?
+  raise "This is a dev-only script"
+end
+
+class SetupModels
+  def call
+    puts("Starting Models Registry setup...")
+
+    enable_feature_flags
+    create_models
+
+    puts "Models Registry setup completed."
+  end
+
+  private
+
+  def enable_feature_flags
+    flags = [
+      # Allows model policy UI screens to be accessed
+      :copilot_for_business_free,
+      :copilot_model_registry_ui,
+      # Displays internal models on the policy UI screens
+      :copilot_registry_internal_models_testing,
+    ]
+    puts "Enabling feature flags"
+
+    flags.each do |flag|
+      puts "Enabling #{flag} feature..."
+      FeatureFlag.vexi_management.enable_feature_flag(flag)
+    end
+  end
+
+  def create_models
+    all_plans = %w(copilot_free copilot_pro copilot_pro_plus copilot_business copilot_enterprise)
+    puts "Creating models..."
+    create_model("model-free", "Model Free", description: "A copilot-free model", plans: %w(free))
+    create_model("model-pro", "Model Pro", description: "A copilot-pro model", plans: %w(pro))
+    create_model("model-pro-plus", "Model Pro Plus", description: "A copilot-pro-plus model", plans: %w(pro_plus))
+    create_model("model-business", "Model Business", description: "A copilot-business model", plans: %w(business))
+    create_model("model-enterprise", "Model Enterprise", description: "A copilot-enterprise model", plans: %w(enterprise))
+    create_model("model-preview", "Model Preview", description: "A preview model for all copilot plans", plans: all_plans, preview: true)
+    create_model("model-internal", "Model Internal", description: "An internal only model for testing.", plans: all_plans, internal: true, documentation_link: "https://docs.github.com/", documentation_link_text: "Learn more.")
+    create_model("model-internal-preview", "Model Internal Preview", description: "An internal only preview model for testing.", plans: all_plans, internal: true, preview: true)
+  end
+
+  def create_model(model_key, name, description:, plans:, preview: false, internal: false, feature_flag: "", documentation_link: nil, documentation_link_text: nil)
+    puts "Creating model: #{model_key} (#{name})"
+    Copilot::ModelsRegistryCache.find_or_create_by!(model_key: model_key) do |model|
+      model.name = name
+      model.description = description
+      model.plans = plans
+      model.preview = preview
+      model.internal = internal
+      model.feature_flag = feature_flag
+      model.documentation_link = documentation_link
+      model.documentation_link_text = documentation_link_text
+    end
+  end
+end
+
+SetupModels.new.call

@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package github.secretscanning.v1;
+
+option go_package = "github.com/github/secret-scanning-proto/gen/go/v1/api";
+option ruby_package = "GitHub::Proto::SecretScanning::Api::V1";
+
+import "api/v1/shared.proto";
+
+// OauthAccessAPI contains APIs used by secret scanning for oauth access tokens
+// keys found in scanned source code.
+service OauthAccessAPI {
+  // RevokeOauthAccess revokes oauth access for the tokens found in source code
+  // pushed to public repositories.
+  rpc RevokeOauthAccess(RevokeOauthAccessRequest) returns (RevokeOauthAccessResponse);
+
+  // VerifyOauthAccess verifies whether oauth access tokens are valid.
+  rpc VerifyOauthAccess(VerifyOauthAccessRequest) returns (VerifyOauthAccessResponse);
+}
+
+message RevokeOauthAccessRequest {
+  message OauthAccessCandidate {
+    // token is the raw oauth access token
+    string token = 1;
+
+    // url is the url of the blob that the token was found in
+    string url = 2;
+
+    // type is the type of OAuth token (such as user-to-server or server-to-server)
+    string type = 3;
+
+    // commit where the credential was found
+    string commit_oid = 4; 
+
+    // identifies where did we find the credential (content, commit, issue etc)
+    TokenSource token_source = 5; 
+  }
+
+  // candidates are the oauth tokens that should be revoked
+  repeated OauthAccessCandidate candidates = 2;
+
+  // Id of the repository, used for internal private revocation
+  int64 repository_id = 3;
+
+  // type of repository (gist or repos)
+  RepositoryType repository_type = 4;
+
+  bool is_one_click_revoke_request = 5;
+}
+
+message RevokeOauthAccessResponse {
+  // revoked_count is the number of oauth access tokens that were revoked
+  uint64 revoked_count = 1;
+
+  message OauthAccess {
+    // revoke_result identified what the result was when the oauth access at the given ordinal was attempted to be revoked
+    RevokeResult revoke_result = 1;
+  }
+
+  // results are the revocation results for each oauth access requested
+  repeated OauthAccess results = 2;
+}
+
+message VerifyOauthAccessRequest {
+  message OauthAccessCandidate {
+    // token is the raw oauth access token
+    string token = 1;
+
+    // Id of the repository, used for internal private revocation
+    int64 repository_id = 2;
+
+    // type is the type of OAuth token (such as user-to-server or server-to-server)
+    string type = 3;
+
+    // type of repository (gist or repos)
+    RepositoryType repository_type = 4;
+  }
+
+  // candidates are the oauth tokens that should be checked
+  repeated OauthAccessCandidate candidates = 1;
+}
+
+message VerifyOauthAccessResponse {
+  enum VerificationStatus {
+    UNKNOWN = 0;
+    ACTIVE = 1;
+    REVOKED = 2;
+    UNVERIFIABLE = 3;
+  }
+
+  message OauthAccess {
+    // is_verified is whether the oauth access at this index was legitimate
+    bool is_verified = 1;
+
+    // verification_status indicates in what state is an oauth access found
+    VerificationStatus verification_status = 2;
+  }
+
+  // results are the verification results for each oauth access requested
+  repeated OauthAccess results = 1;
+}

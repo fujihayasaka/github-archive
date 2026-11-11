@@ -1,0 +1,39 @@
+<%
+  # 'type' _should_ always be defined, but if it's not, we'll default to :app
+  # :app is the best fallback option to display here so that the user can view/click alternative options
+  type = defined?(type) && type == :sms ? :sms : :app
+%>
+
+<% page_info title: "Verify your two-factor configuration", class: "page-two-factor-auth session-authentication" %>
+
+<%= render Sessions::AuthenticationWrapperComponent.new(
+      id: "login",
+      body_classes: "sessions-two-factor-w-full px-3",
+    ) do |component| %>
+
+  <% component.with_header do %>
+    <%= render_react_partial name: "sessions-auth-header", props: { variant:  "github", avatarUrl: user ? image_path(user.primary_avatar_url(100)) : nil, userName: user&.name, title: "Two-factor settings", description: "Verify your recently configured two-factor authentication method." } %>
+  <% end %>
+
+  <% component.with_body do %>
+    <%= form_tag settings_two_factor_checkup_path, method: :put do %>
+      <% if type == :app %>
+        <%= render(partial: "sessions/totp/app_prompt", locals: {
+          user: user,
+          form_type: "checkup_app"
+        }) %>
+      <% elsif type == :sms %>
+        <%= render(partial: "sessions/totp/sms_prompt", locals: {
+          user: user,
+          form_type: "checkup_sms"
+        }) %>
+      <% end %>
+    <% end %>
+
+    <% if [:app, :sms].include?(type) %>
+      <div class="mt-2">
+        <%= render(Sessions::TwoFactorAlternativesComponent.new(user: user, prompt_type: "checkup_#{type}", list_label_id: "problems-options")) %>
+      </div>
+    <% end %>
+  <% end %>
+<% end %>

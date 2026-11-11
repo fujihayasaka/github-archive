@@ -1,0 +1,203 @@
+<%# erblint:counter DeprecatedComponentsCounter 6 %>
+<%# erblint:counter ButtonComponentMigrationCounter 2 %>
+<%# erblint:counter GoogleAnalyticsDeprecation 2 %>
+<%# view = Settings::OrgsView %>
+<% page_info :title => "Organizations" %>
+<% ref_loc = "organization_settings_list" %>
+
+<%= render layout: "settings/settings" do %>
+  <% if params[:cb_200_offer_notice].present? %>
+    <%= render(Primer::Beta::Flash.new(
+      scheme: :success,
+      icon: :check,
+      mb: 4,
+      test_selector: "cb_200_offer_notice"
+    )) do %>
+      We’re processing your credit now. It’ll be ready in 1–2 business days — we’ll let you know when you can put it to work.
+    <% end %>
+  <% end %>
+
+  <% if view.sso_orgs.present? &&  view.sso_orgs.any? %>
+    <% if FeatureFlag.vexi.enabled?(:global_sso_banner_dismiss_dialog, current_user, default: false)  %>
+      <%= render_react_partial name: "sso-orgs-settings-list", props: { ssoOrgs: view.sso_orgs } %>
+    <% else %>
+      <%= render Primer::Beta::Subhead.new(hide_border: true, mb: 1) do |component| %>
+        <% component.with_heading(tag: :h2, font_size: 3) do %>Single sign-on<% end %>
+      <% end %>
+
+      <div class="Box mb-6">
+        <% view.sso_orgs.each do |org| %>
+          <div class="Box-row d-flex flex-items-center">
+            <% if org[:primary_avatar_url] %>
+              <%= render(Primer::Beta::Avatar.new(
+                src: org[:primary_avatar_url],
+                size: 20,
+                alt: org[:login],
+                shape: :square,
+                mr: 2
+              )) %>
+            <% end %>
+
+            <div class="flex-1">
+              <strong>
+                <%= link_to org[:login], user_path(org[:login]), { "data-test-selector": "sso-org-link-#{org[:id]}" } %>
+              </strong>
+              <span class="color-fg-muted ml-1"><%= org[:profile_name] %></span>
+            </div>
+
+            <% if org[:needs_authentication] %>
+              <%= render Primer::Beta::Button.new(scheme: :default, size: :small, type: :button, tag: :a, href: org[:sso_url]) do %>
+                Sign in
+              <% end %>
+            <% else %>
+              <%= form_tag org[:sso_url_logout], :method => :delete do %>
+                <%= hidden_field_tag :return_to, "/settings/organizations" %>
+                <%= render Primer::Beta::Button.new(scheme: :danger, size: :small, type: :submit) do %>
+                  Sign out
+                <% end %>
+              <% end %>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
+
+    <div class="paginate-container" data-pjax data-html-cleaner-suppress-children>
+      <%= will_paginate(view.paginated_sso_orgs, param_name: :sso_orgs_page, role: "navigation", "aria-label": "SSO organizations pagination") %>
+    </div>
+  <% end %>
+
+  <%= render Primer::Beta::Subhead.new(hide_border: true, mb: 1) do |component| %>
+    <% component.with_heading(tag: :h2, font_size: 3) do %>Organizations<% end %>
+    <% component.with_actions do %>
+      <% if user_can_create_organizations? && !current_user.is_enterprise_managed? %>
+        <a
+          href="<%= new_organization_path %>"
+          data-ga-click="<%= ga_label_with_analytics_tracking_id("Orgs,click,text:New organization;") %>"
+          class="btn btn-sm"
+        >
+          New organization
+        </a>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if view.eligible_organization_count > 0 %>
+    <%= render(Primer::Box.new(
+      bg: :accent,
+      border_color: :accent,
+      border: true,
+      border_radius: 2,
+      display: :flex,
+      p: 3,
+      mb: 3,
+      align_self: :center,
+      test_selector: "org-settings-upgrade-banner"
+    )) do %>
+      <%= render(Primer::Beta::Octicon.new(:info, mr: 2, color: :accent, align_self: :center)) %>
+      <%= render(Primer::Beta::Text.new) do %>
+        You have (<%= view.eligible_organization_count %>) <%= "organization".pluralize(view.eligible_organization_count) %> eligible for a <%= render(Primer::Beta::Text.new(font_weight: :bold)) { "free upgrade" } %>.
+      <% end %>
+      <%= render(Primer::Box.new(flex: 1)) %>
+      <%= render(Primer::Beta::Link.new(
+        href: "#{GitHub.help_url}/admin/overview/about-enterprise-accounts",
+        data: analytics_click_attributes(
+          category: "entacct_migration",
+          action: "click_to_learn_more_about_enterprise_accounts",
+          label: "ref_loc:#{ref_loc};ref_cta:learn_more",
+        ))) { "Learn more" } %>
+    <% end %>
+  <% end %>
+
+  <% if view.memberships.any? || show_pending_invitations_indicator? %>
+    <% organizations_with_nudges.each do |membership| %>
+      <div class="Box mb-4" <%= test_selector("organization-with-nudges-box") %>>
+        <%= render partial: "settings/organizations/organization_list_item", locals: {
+          membership: membership,
+          view: view,
+          ref_loc: ref_loc,
+        } %>
+
+        <%= render(Settings::OrganizationListItemNudgeComponent.new(
+          organization: membership.organization,
+          user: current_user,
+        )) %>
+      </div>
+    <% end %>
+
+    <div class="Box" <%= test_selector("organizations-without-nudges-box") %>>
+      <%= render Settings::PendingInvitationsComponent.new(user: current_user) %>
+
+      <% organizations_without_nudges.each do |membership| %>
+          <%= render partial: "settings/organizations/organization_list_item", locals: {
+          membership: membership,
+          view: view,
+          ref_loc: ref_loc,
+        } %>
+      <% end %>
+
+    </div>
+    <div class="paginate-container" data-pjax data-html-cleaner-suppress-children>
+      <%= will_paginate(view.paginated_organizations, param_name: :all_orgs_page, role: "navigation", "aria-label": "All organizations pagination") %>
+    </div>
+  <% else %>
+    <%= render Primer::Beta::Blankslate.new do |c| %>
+      <% c.with_heading(tag: :h2) do %>
+        You are not a member of any organizations.
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if user_can_create_organizations? && !current_user.is_enterprise_managed? %>
+    <%= render Primer::Beta::Subhead.new(spacious: true) do |component| %>
+      <% component.with_heading(tag: :h2) do %>Transform account<% end %>
+    <% end %>
+
+    <% if current_user.has_a_plan_specific_coupon? %>
+      <p>You cannot transform this account into an organization, because you have an active coupon that is locked to a plan. Please <a class="Link--inTextBlock" href="<%= contact_path %>">contact support</a>.</p>
+      <p><%= render Primer::ButtonComponent.new(disabled: true) do %>Turn <%= current_user.display_login %> into an organization<% end %></p>
+    <% elsif current_user.actively_sponsoring? %>
+      <p>You cannot transform this account into an organization until all sponsorships are cancelled.</p>
+      <p><%= render Primer::ButtonComponent.new(disabled: true) do %>Turn <%= current_user.display_login %> into an organization<% end %></p>
+    <% elsif current_user.active_sponsors_account? %>
+      <p>You cannot transform this account into an organization because you have an active GitHub Sponsors account.</p>
+      <p><%= render Primer::ButtonComponent.new(disabled: true) do %>Turn <%= current_user.display_login %> into an organization<% end %></p>
+    <% elsif current_user.organizations.empty? %>
+      <%= render layout: "shared/details_dialog", locals: {button_text: "Turn #{current_user} into an organization", title: "Account Transformation Warning"} do %>
+        <%= render Primer::Beta::Flash.new(full: true, scheme: :warning) do %>
+          What you are about to do is an irreversible and destructive process. Please be aware:
+        <% end %>
+        <div class="Box-body overflow-auto">
+          <ul class="ml-4">
+            <% unless current_user.plan_supports?(:repos, visibility: :private, org: true) %>
+              <li>Any private repositories owned by <%= current_user.display_login %> will be disabled</li>
+            <% end %>
+
+            <li>You will no longer be able to sign in to <%= current_user.display_login %> (all administrative privileges will be bestowed upon the owners you choose)</li>
+            <li>Any user-specific information (OAuth tokens, SSH keys, Job Profile, etc) will be erased</li>
+            <li>You will no longer be able to create or modify gists owned by the converted personal account</li>
+            <li>Any commits and comments credited to <%= current_user.display_login %> will no longer be linked to this GitHub account</li>
+            <li>Any GitHub Apps installed on <%= current_user.display_login %> will be uninstalled</li>
+            <li>The total amount of collaborators across private repositories will be the total amount of seats for the organization</li>
+            <% fork_count = current_user.private_repositories.forks.size %>
+            <% unless fork_count.zero? %>
+              <li><%= pluralize(fork_count, "private fork") %> will be deleted</li>
+            <% end %>
+
+          </ul>
+          <p class="mt-3 mb-0">
+            If you are using <%= current_user.display_login %> as a personal account, you should
+            <a class="Link--inTextBlock" href="/join">create a new personal account</a>
+            before transforming <%= current_user.display_login %> into an organization.
+          </p>
+        </div>
+        <div class="Box-footer">
+          <a href="<%= new_organization_path(transform_user: 1) %>" class="btn btn-block">Turn <%= current_user.display_login %> into an organization</a>
+        </div>
+      <% end %>
+    <% else %>
+      <p>You cannot transform this account into an organization until you leave all organizations that you’re a member of.</p>
+      <p><%= render Primer::ButtonComponent.new(disabled: true) do %>Turn <%= current_user.display_login %> into an organization<% end %></p>
+    <% end %>
+  <% end %>
+<% end %>

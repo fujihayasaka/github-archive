@@ -1,0 +1,48 @@
+#!/bin/bash
+set -e
+
+# Test curl for ResolveConfigsByTargetWithOwners endpoint with HMAC authentication
+
+# Get the project directory
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# shellcheck disable=SC1091
+source "${PROJECT_DIR}/script/setup-env"
+
+# Check if HMAC key is set
+if [ -z "$APP_HMAC_KEY_PRIMARY" ]; then
+    echo "Error: APP_HMAC_KEY_PRIMARY is not set"
+    exit 1
+fi
+
+# Set default port
+PORT="${APP_PORT:-8080}"
+ENDPOINT="http://localhost:${PORT}/twirp/configs.Configs/ResolveConfigsByTargetWithOwners"
+
+# Request body with made-up IDs
+REQUEST_BODY='{
+  "target": {
+    "repo_id": 12345,
+    "owner_id": 67890,
+    "business_id": 111
+  }
+}'
+
+# Generate HMAC signature using Go
+# The go-auth/hmac package generates a timestamp-based signature
+HMAC_SIGNATURE=$(cd "$PROJECT_DIR" && go run "$PROJECT_DIR/script/generate_hmac.go")
+
+echo "Making request to: $ENDPOINT"
+echo "Request body: $REQUEST_BODY"
+echo ""
+
+# Make the curl request
+curl -X POST "$ENDPOINT" \
+  -H "Content-Type: application/json" \
+  -H "Request-HMAC: $HMAC_SIGNATURE" \
+  -d "$REQUEST_BODY" \
+  -w "\n\nHTTP Status: %{http_code}\n" \
+  -v
+
+echo ""
+echo "Request completed successfully!"

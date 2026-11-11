@@ -1,0 +1,39 @@
+#!/bin/bash
+#/ Usage: script/voltron-server
+#/
+#/ Runs the voltron server.
+
+# Don't run voltron when current runtime is enterprise for now
+RAILS_ROOT_PATH=$([[ "$RAILS_ROOT" != "" ]] && echo "$RAILS_ROOT" || pwd)
+if [[ "${USE_VOLTRON}" != "1" && ( \
+      "$(cat "${RAILS_ROOT_PATH}/tmp/runtime/current" 2>/dev/null)" == "enterprise" || \
+      -n "${FASTDEV}" || \
+      -n "${PRELOAD}" ) ]]; then
+  echo "Skipping voltron server because either current runtime is enterprise or either FASTDEV or PRELOAD are set"
+  export NO_VOLTRON=1
+fi
+
+if [[ $NO_VOLTRON == "1" ]]; then
+  echo "voltron has been disabled"
+  while true; do sleep 10000; done
+  exit 0
+fi
+
+export VOLTRON_USE_HTTP_ROUTES="1"
+export VOLTRON_RETRY_HTTP_ROUTES=9
+
+SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+# shellcheck source=dx/lib/subproject-containers
+source "$SCRIPT_DIR/dx/lib/subproject-containers"
+
+SUBPROJECT_VERSION=$(subproject_version "voltron")
+echo "voltron version $SUBPROJECT_VERSION"
+
+# Run the service.
+start_subproject --name voltron  \
+  --entrypoint "/app/bin/voltron" \
+  -e OTEL_SERVICE_NAME=voltron \
+  -e VOLTRON_USE_HTTP_ROUTES=1 \
+  -e VOLTRON_RETRY_HTTP_ROUTES=9 \
+  -e SERVER_ADDR=localhost:3007 \
+  "ghcr.io/github/shared-dev/voltron:$SUBPROJECT_VERSION"

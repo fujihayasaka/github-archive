@@ -1,0 +1,96 @@
+#!/usr/bin/env ruby
+# typed: false
+# frozen_string_literal: true
+
+require "bundler/setup"
+require "sorbet-runtime"
+require "optparse"
+require_relative "../lib/github/query_guard"
+
+options = {}
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: script/query-guard [--checker | --commenter]"
+
+  opts.on("--checker", "Run QueryChecker") do
+    options[:mode] = :checker
+  end
+
+  opts.on("--commenter", "Run PullRequestCommenter") do
+    options[:mode] = :commenter
+  end
+
+  opts.on("-h", "--help", "Show help") do
+    puts opts
+    exit 0
+  end
+end
+
+begin
+  parser.parse!(ARGV)
+rescue OptionParser::InvalidOption => e
+  warn e.message
+  warn parser
+  exit 1
+end
+
+unless options[:mode]
+  warn "Must specify one of --checker or --commenter"
+  warn parser
+  exit 1
+end
+
+auth = GitHub::QueryGuard::Azure::Auth.new(
+  tenant_id: ENV["SPN_GITHUB_PANORAMA_TENANT_ID"],
+  client_id: ENV["SPN_GITHUB_PANORAMA_CLIENT_ID"],
+  client_secret: ENV["SPN_GITHUB_PANORAMA"]
+)
+
+github_client = GitHub::QueryGuard::GitHubClient.new(
+  ENV.fetch("GITHUB_TOKEN"),
+  ENV.fetch("GITHUB_INFERENCE_TOKEN")
+)
+
+kusto_client = GitHub::QueryGuard::Azure::Kusto.new(
+  auth,
+  "https://query-silo-ci.eastus.kusto.windows.net"
+)
+
+event_hub_client = GitHub::QueryGuard::Azure::EventHub.new(
+  auth,
+  "query-harvester-ci",
+  "ci-ingest"
+)
+
+case options[:mode]
+when :commenter
+  should_comment = ENV.fetch("QUERY_GUARD_SHOULD_COMMENT_V2").downcase == "true"
+
+  commenter = GitHub::QueryGuard::PullRequestCommenter.new(
+    ENV.fetch("GITHUB_REPOSITORY"),
+    ENV["PR_NUMBER"],
+    ENV.fetch("BRANCH_NAME"),
+    ENV.fetch("HEAD_SHA"),
+    ENV.fetch("GITHUB_EVENT_NAME"),
+    ENV.fetch("ORIGINAL_ACTIONS_RUN_ID"),
+    ENV.fetch("RERUN_ACTIONS_RUN_ID"),
+    should_comment,
+    github_client,
+    kusto_client,
+    event_hub_client,
+  )
+
+  commenter.run
+when :checker
+  checker = GitHub::QueryGuard::QueryChecker.new(
+    ENV.fetch("GITHUB_REPOSITORY"),
+    ENV["PR_NUMBER"],
+    ENV.fetch("BRANCH_NAME"),
+    ENV.fetch("GITHUB_EVENT_NAME"),
+    ENV.fetch("ORIGINAL_ACTIONS_RUN_ID"),
+    github_client,
+    kusto_client,
+    event_hub_client
+  )
+
+  checker.run
+end

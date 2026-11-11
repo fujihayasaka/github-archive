@@ -1,0 +1,187 @@
+name: Nightly Evals
+
+env:
+  HUSKY: 0
+
+on:
+  workflow_dispatch:
+    inputs:
+      eval_model:
+        description: "Model to evaluate"
+        required: false
+        type: string
+        default: ""
+      test_pattern:
+        description: "Test pattern to run (e.g. ./test/evals/specific*.test.ts)"
+        required: false
+        type: string
+        default: ./test/evals/*.test.ts
+  schedule:
+    # Once daily at 12 PM UTC
+    - cron: "0 12 * * *"
+jobs:
+  evals:
+    env:
+      EVAL_MODEL_NAME: ${{ matrix.model }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        run_number: [1, 2, 3]
+        model: ${{ fromJson(github.event.inputs.eval_model != '' && format('["{0}"]', github.event.inputs.eval_model) || '["claude-sonnet-4","claude-sonnet-4.5"]') }}
+    permissions:
+      issues: read # required for MCP test which fetches issues
+      contents: read # push gets disabled if not set
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: runtime/package-lock.json
+      - uses: astral-sh/setup-uv@6b9c6063abd6010835644d4c2e1bef4cf5cd0fca #v6.0.1
+
+      - name: Build runtime (via npm)
+        working-directory: ./runtime
+        run: npm install && npm run build
+        env:
+          AUTOFIND_DOWNLOAD_GITHUB_TOKEN: ${{ secrets.AUTOFIND_DOWNLOAD_GITHUB_TOKEN }}
+      - name: Execute runtime tests
+        working-directory: ./runtime
+        run: |
+          # Set test pattern to default if not provided
+          git config --global user.name "$COPILOT_AGENT_COMMIT_LOGIN"
+          git config --global user.email "$COPILOT_AGENT_COMMIT_EMAIL"
+          set -o pipefail # Ensure the pipeline fails if any command fails
+          # Run tests; filter results to only the test output matching the test pattern
+          npm run test ${{ github.event.inputs.test_pattern || './test/evals/*.test.ts' }} | grep -E "($(echo '${{ github.event.inputs.test_pattern || './test/evals/*.test.ts' }}' | sed 's|\./||g' | sed 's|\*|.*|g' | sed 's|\.ts||g'))"
+        env:
+          NIGHTLY_TEST_CI: true
+          TEST_CI: true
+          EVAL_MODEL: ${{ env.EVAL_MODEL_NAME }}
+          EVAL_TEST_GITHUB_TOKEN: "${{ secrets.PROBE_TEST_GITHUB_TOKEN }}"
+          EVAL_TEST_GITHUB_TOKEN_GITHUB: "${{ secrets.EVAL_TEST_GITHUB_TOKEN_GITHUB }}"
+          EVAL_TEST_VISION: "${{ secrets.EVAL_TEST_VISION }}"
+          EVAL_LOG_ROOT: ${{runner.temp}}/sweagent-evals-run${{ matrix.run_number }}
+          COPILOT_AGENT_RUNNER_TYPE: STANDALONE
+          COPILOT_AGENT_COMMIT_LOGIN: "CloudColonel"
+          COPILOT_AGENT_COMMIT_EMAIL: "175728472+Copilot@users.noreply.github.com"
+          CAPI_HMAC_KEY: ${{ secrets.CAPI_HMAC_KEY }}
+          GITHUB_COPILOT_INTEGRATION_ID: ${{ vars.CAPI_INTEGRATION_ID }}
+          GITHUB_MCP_ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate eval summary
+        working-directory: ./runtime
+        run: node script/evals-summary.js ${{runner.temp}}/sweagent-evals-run${{ matrix.run_number }}
+        if: always()
+      - name: Upload eval logs artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-results-run${{ matrix.run_number }}-${{ env.EVAL_MODEL_NAME != '' && env.EVAL_MODEL_NAME || 'default' }}
+          path: ${{runner.temp}}/sweagent-evals-run${{ matrix.run_number }}
+
+  generate-results-summary:
+    name: Generate Results Summary
+    runs-on: ubuntu-latest
+    needs: evals
+    if: success() || failure() # Run if completed, but skip if canceled
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        model: ${{ fromJson(github.event.inputs.eval_model != '' && format('["{0}"]', github.event.inputs.eval_model) || '["claude-sonnet-4","claude-sonnet-4.5"]') }}
+    env:
+      EVAL_MODEL_NAME: ${{ matrix.model }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: runtime/script/log-visualizer/package.json
+
+      - name: Install log-visualizer dependencies
+        working-directory: ./runtime/script/log-visualizer
+        run: npm install
+
+      - name: Build log-visualizer
+        working-directory: ./runtime/script/log-visualizer
+        run: npm run build
+
+      - name: Download all artifacts for this model
+        uses: actions/download-artifact@v4
+        with:
+          pattern: eval-results-run*-${{ env.EVAL_MODEL_NAME }}
+          path: ./downloaded-artifacts
+
+      - name: Combine TLDR files
+        run: |
+          TLDR_OUTPUT="combined-tldr-${{ env.EVAL_MODEL_NAME }}.txt"
+          echo "# Combined Evaluation TLDR for Model: ${{ env.EVAL_MODEL_NAME }}" > "$TLDR_OUTPUT"
+          echo "# Generated at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "$TLDR_OUTPUT"
+          echo "" >> "$TLDR_OUTPUT"
+
+          # Find all eval-tldr.txt files in downloaded artifacts
+          for run_dir in ./downloaded-artifacts/eval-results-run*-${{ env.EVAL_MODEL_NAME }}; do
+              if [ -d "$run_dir" ]; then
+                  RUN_NAME=$(basename "$run_dir")
+                  TLDR_FILE="$run_dir/eval-tldr.txt"
+                  
+                  if [ -f "$TLDR_FILE" ]; then
+                      echo "==================================================================" >> "$TLDR_OUTPUT"
+                      echo "Run: $RUN_NAME" >> "$TLDR_OUTPUT"
+                      echo "==================================================================" >> "$TLDR_OUTPUT"
+                      cat "$TLDR_FILE" >> "$TLDR_OUTPUT"
+                      echo "" >> "$TLDR_OUTPUT"
+                      echo "" >> "$TLDR_OUTPUT"
+                  fi
+              fi
+          done
+
+          echo "Combined TLDR file created at: $TLDR_OUTPUT"
+
+      - name: Generate results summary report
+        working-directory: ./runtime/script/log-visualizer
+        run: npm start report.html ${{ env.EVAL_MODEL_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload results summary report
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-eval-results-summary-${{ env.EVAL_MODEL_NAME != '' && env.EVAL_MODEL_NAME || 'default' }}
+          path: ./runtime/script/log-visualizer/report.html
+
+      - name: Add report link to run summary
+        run: |
+          TLDR_OUTPUT="combined-tldr-${{ env.EVAL_MODEL_NAME }}.txt"
+
+          echo "## 📊 Nightly Eval Results Summary (Model: ${{ env.EVAL_MODEL_NAME != '' && env.EVAL_MODEL_NAME || 'default' }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Add combined TLDR content to step summary
+          if [ -f "$TLDR_OUTPUT" ]; then
+              echo "### 📝 Combined TLDR Summary" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              cat "$TLDR_OUTPUT" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "The detailed HTML report has been generated and is available for download." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Download Links" >> $GITHUB_STEP_SUMMARY
+          echo "- Scroll to the bottom of the page and look for the 'nightly-eval-results-summary-${{ env.EVAL_MODEL_NAME != '' && env.EVAL_MODEL_NAME || 'default' }}' artifact." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "_The report contains trend analysis, test status tables, and detailed check results from the last 10 nightly evaluation runs for model: ${{ env.EVAL_MODEL_NAME != '' && env.EVAL_MODEL_NAME || 'default' }}._" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,320 @@
+<% page_info title: "Manage #{space.name} · Copilot Spaces · Stafftools", selected_link: :copilot_spaces %>
+
+<%= render Primer::Beta::Subhead.new do |subhead| %>
+  <% subhead.with_heading(tag: :h2, display: :flex, align_items: :center) do %>
+    <span>
+      <%= link_to "Copilot Spaces", stafftools_user_copilot_spaces_path(user), class: "Link--primary" %> /
+      <%= link_to user.display_login, stafftools_user_copilot_spaces_path(user), class: "Link--primary" %> /
+      <%= space.name %>
+    </span>
+  <% end %>
+<% end %>
+
+ <%# Space Details %>
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed, mb: 3)) do |border_box| %>
+  <% border_box.with_header do |h| %>
+    <% h.with_title(tag: :h2) do %>
+      Space Details
+    <% end %>
+  <% end %>
+
+  <% border_box.with_row do %>
+    <dl class="d-flex flex-wrap">
+      <div class="col-6">
+        <dt class="text-bold">Name:</dt>
+        <dd class="mb-3"><%= space.name %></dd>
+      </div>
+      <div class="col-6">
+        <dt class="text-bold">Owner:</dt>
+        <dd class="mb-3"><%= space.owner.display_login %></dd>
+      </div>
+      <div class="col-6">
+        <dt class="text-bold">Created:</dt>
+        <dd class="mb-3"><%= time_ago_in_words_js(space.created_at) %></dd>
+      </div>
+      <div class="col-6">
+        <dt class="text-bold">Updated:</dt>
+        <dd class="mb-3"><%= time_ago_in_words_js(space.updated_at) %></dd>
+      </div>
+      <div class="col-6">
+        <dt class="text-bold">Resources:</dt>
+        <dd class="mb-3"><%= space.resources.count %></dd>
+      </div>
+      <div class="col-6">
+        <dt class="text-bold">Creator:</dt>
+        <dd class="mb-3">
+          <% if space.creator %>
+            <%= link_to space.creator.display_login, stafftools_user_path(space.creator), class: "text-bold Link--primary" %>
+          <% else %>
+            <span class="color-fg-muted">Unknown</span>
+          <% end %>
+        </dd>
+      </div>
+      <% if space.description.present? %>
+        <div class="col-12">
+          <dt class="text-bold">Description:</dt>
+          <dd class="mb-3"><%= space.description %></dd>
+        </div>
+      <% end %>
+    </dl>
+  <% end %>
+<% end %>
+
+<%# Resources %>
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed, mb: 3)) do |border_box| %>
+  <% border_box.with_header do |h| %>
+    <% h.with_title(tag: :h2) do %>
+      Resources (<%= space.resources.count %>)
+    <% end %>
+  <% end %>
+
+  <% if space.resources.any? %>
+    <% space.resources.order(:created_at).each do |resource| %>
+      <% border_box.with_row do %>
+        <div class="d-flex flex-justify-between flex-items-center">
+          <div class="d-flex flex-items-start gap-3 flex-auto">
+            <%# Resource Type Icon %>
+            <div class="mt-1">
+              <%= primer_octicon(resource_type_icon_name(resource.resource_type), size: :small) %>
+            </div>
+
+            <%# Resource Details %>
+            <div class="flex-auto">
+              <div class="d-flex flex-items-center gap-2 mb-1">
+                <span class="text-bold">
+                  <%= render_resource_title(resource) %>
+                </span>
+                <%= render Primer::Beta::Label.new(
+                  scheme: :default
+                ).with_content(resource.resource_type.humanize) %>
+              </div>
+
+              <div class="text-small color-fg-muted">
+                <%= render_resource_details(resource) %>
+              </div>
+
+              <div class="text-small color-fg-muted mt-1">
+                Added <%= time_ago_in_words_js(resource.created_at) %>
+              </div>
+            </div>
+          </div>
+
+          <%# Quick Actions %>
+          <div class="d-flex flex-items-center gap-2">
+            <% if resource_viewable?(resource) %>
+              <%= render Primer::Beta::Button.new(
+                tag: :a,
+                href: resource_url(resource),
+                target: "_blank",
+                size: :small,
+                scheme: :default,
+                "aria-label": "View resource"
+              ) do %>
+                <%= primer_octicon("link-external", size: :small) %>
+              <% end %>
+            <% end %>
+
+            <%= form_with url: stafftools_user_resource_copilot_spaces_path(user, space, resource), method: :delete, local: true, class: "d-inline" do |form| %>
+              <%= render Primer::Beta::Button.new(
+                type: :submit,
+                size: :small,
+                scheme: :danger,
+                "aria-label": "Remove resource",
+                "data-confirm": "Are you sure you want to remove this resource from the space?"
+              ) do %>
+                <%= primer_octicon("trash", size: :small) %>
+              <% end %>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+    <% end %>
+  <% else %>
+    <% border_box.with_row do %>
+      <div class="text-center py-4">
+        <p class="color-fg-muted">No resources have been added to this space.</p>
+      </div>
+    <% end %>
+  <% end %>
+<% end %>
+
+<%# Visibility Management %>
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed, mb: 3)) do |border_box| %>
+  <% border_box.with_header do |h| %>
+    <% h.with_title(tag: :h2) do %>
+      Visibility Settings
+    <% end %>
+  <% end %>
+
+  <% border_box.with_row do %>
+    <div class="mb-3">
+      <p class="text-small color-fg-muted mb-2">
+        Current status:
+        <%= render Primer::Beta::Label.new(
+          scheme: space_visibility_scheme(space),
+        ).with_content(space_visibility_text(space, is_org_context: is_org_context)) %>
+        <% unless space.base_role == "none" %>
+          <%= render Primer::Beta::Label.new(
+            scheme: :default,
+          ).with_content(format_base_role_label(space.base_role)) %>
+        <% end %>
+        <% if space.collaborators_count > 0 %>
+          <%= render Primer::Beta::Label.new(
+            scheme: :success,
+          ).with_content("Shared with #{pluralize(space.collaborators_count, 'collaborator')}") %>
+        <% end %>
+      </p>
+    </div>
+
+    <%= form_with model: space, url: stafftools_user_copilot_space_path(user, space), method: :patch, local: true, class: "d-flex flex-items-end gap-3" do |form| %>
+      <div class="form-group mb-0" style="min-width: 200px;">
+        <%= form.label :base_role, "Base Role:", class: "form-label" %>
+        <%= form.select :base_role,
+          options_for_select(copilot_space_visibility_options, space.base_role),
+          { prompt: false },
+          {
+            class: "form-select",
+            required: true,
+            "aria-label": "Select space's base role"
+          } %>
+      </div>
+      <%= render Primer::Beta::Button.new(type: :submit, scheme: :primary) do %>
+        Update Visibility
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>
+
+<%# Collaborators %>
+<%= render(Primer::Beta::BorderBox.new(padding: :condensed, mb: 3)) do |border_box| %>
+  <% border_box.with_header do |h| %>
+    <% h.with_title(tag: :h2) do %>
+      Collaborators (<%= collaborators.size %>)
+    <% end %>
+  <% end %>
+
+  <%# Add New Collaborator Form %>
+  <% border_box.with_row do %>
+    <div class="mb-3">
+      <h3 class="f4 mb-2">Add Collaborator</h3>
+      <%= form_with url: stafftools_user_add_collaborator_copilot_spaces_path(user, space), method: :post, local: true, class: "d-flex flex-items-end gap-2" do |form| %>
+        <div class="form-group mb-0" style="min-width: 200px;">
+          <%= form.label :user_login, "Username:", class: "form-label" %>
+          <%= form.text_field :user_login,
+              placeholder: "Enter username",
+              class: "form-control",
+              required: true %>
+        </div>
+        <div class="form-group mb-0" style="min-width: 150px;">
+          <%= form.label :role_name, "Role:", class: "form-label" %>
+          <%= form.select :role_name,
+              options_for_select(copilot_space_collaborator_role_options),
+              { prompt: "Select role" },
+              { class: "form-select", required: true, "aria-label": "Select new collaborator's role" } %>
+        </div>
+        <%= render Primer::Beta::Button.new(type: :submit, scheme: :primary) do %>
+          Add Collaborator
+        <% end %>
+      <% end %>
+    </div>
+  <% end %>
+
+  <%# Existing Collaborators List %>
+  <% if collaborators.any? %>
+    <% collaborators.each do |user_role| %>
+      <% border_box.with_row do %>
+        <div class="d-flex flex-justify-between flex-items-center">
+          <div class="d-flex flex-items-center gap-2">
+            <% if user_role.actor.is_a?(Organization) %>
+              <%= primer_octicon(:organization, size: :small) %>
+            <% elsif user_role.actor.is_a?(Team) %>
+              <%= primer_octicon(:people, size: :small) %>
+            <% else %>
+              <%= primer_octicon(:person, size: :small) %>
+            <% end %>
+            <%= link_to (user_role.actor.is_a?(Team) ? user_role.actor.combined_slug : user_role.actor.display_login), (user_role.actor.is_a?(Team) ? gh_stafftools_team_path(user_role.actor) : stafftools_user_path(user_role.actor)), class: "text-bold Link--primary" %>
+            <%= render Primer::Beta::Label.new(
+              scheme: :default,
+            ).with_content(format_collaborator_role_label(user_role.role.name)) %>
+          </div>
+          <div class="text-small color-fg-muted">
+            Added <%= time_ago_in_words_js(user_role.created_at) %>
+          </div>
+          <div class="d-flex flex-items-center gap-2">
+            <%# Role Update Form %>
+            <%= form_with url: stafftools_user_update_collaborator_copilot_spaces_path(user, space, user_role.id), method: :patch, local: true, class: "d-inline d-flex flex-items-center gap-1" do |form| %>
+              <%= form.select :role_name,
+                options_for_select(copilot_space_collaborator_role_options, user_role.role.name),
+                { prompt: false },
+                {
+                  class: "form-select form-select-sm d-inline-block",
+                  style: "width: auto; margin-right: 4px;",
+                  "aria-label": "Change #{user_role.actor.is_a?(Team) ? user_role.actor.combined_slug : user_role.actor.display_login}'s role"
+                } %>
+              <%= render Primer::Beta::Button.new(
+                type: :submit,
+                size: :small,
+                scheme: :default
+              ) do %>
+                Update
+              <% end %>
+            <% end %>
+
+            <%# Remove Collaborator Form %>
+            <%= form_with url: stafftools_user_remove_collaborator_copilot_spaces_path(user, space, user_role.id), method: :delete, local: true, class: "d-inline ml-1" do |form| %>
+              <%= render Primer::Beta::Button.new(
+                type: :submit,
+                size: :small,
+                scheme: :danger,
+                "data-confirm": "Are you sure you want to remove #{h(user_role.actor.is_a?(Team) ? user_role.actor.combined_slug : user_role.actor.display_login)} from this space?",
+                "aria-label": "Remove collaborator"
+              ) do %>
+                <%= primer_octicon("trash", size: :small) %>
+              <% end %>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+    <% end %>
+  <% else %>
+    <% border_box.with_row do %>
+      <div class="text-center py-4">
+        <p class="color-fg-muted">No collaborators have been added to this space.</p>
+      </div>
+    <% end %>
+  <% end %>
+<% end %>
+
+<%# Actions %>
+<div class="d-flex gap-2">
+  <%= form_with url: stafftools_user_copilot_space_path(user, space), method: :delete, local: true, class: "d-inline" do |form| %>
+    <%= render Primer::Beta::Button.new(
+      type: :submit,
+      scheme: :danger,
+      "data-confirm": "Are you sure you want to delete the space '#{h(space.name)}'? This action cannot be undone and will remove all resources and collaborators from this space.",
+      "aria-label": "Delete space"
+    ) do %>
+      <%= primer_octicon("trash", size: :small) %>
+      Delete Space
+    <% end %>
+  <% end %>
+
+  <%= render Primer::Beta::Button.new(
+    tag: :a,
+    href: copilot_spaces_show_by_number_path(space.owner.display_login, space.number),
+    target: "_blank",
+    scheme: :default
+  ) do %>
+    <%= primer_octicon("link-external", size: :small) %>
+    View Space
+  <% end %>
+
+  <%= render Primer::Beta::Button.new(
+    tag: :a,
+    href: stafftools_user_copilot_spaces_path(user),
+    scheme: :secondary
+  ) do %>
+    Back to Spaces List
+  <% end %>
+
+</div>

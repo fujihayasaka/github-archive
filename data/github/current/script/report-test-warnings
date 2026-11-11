@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+
+set -e
+
+find_and_report_warnings() {
+  local title="$1"
+  local tmp_suffix="$2"
+  local pattern="$3"
+  local count=0
+
+  echo "" >> "$REPORT_FILE"
+  echo "## $title" >> "$REPORT_FILE"
+
+  find "$TEMP_DIR" -type f -name "test_stderr.txt" | while read -r file; do
+    grep -n "$pattern" "$file" | while read -r line; do
+      # Extract the message after the line number and any initial spaces/colons.
+      #   574:Test is missing assertions: `test__actor_tenant_returns_tenant_info_when_in_Proxima_mode_L153` /workspace/github/packages/management_tools/test/models/repository/feature_flags_dependency_test.rb:153
+      #   6055: stubbing non-existent method: #<AnActor:0x262950>.feature_enabled?
+      echo "$line" | sed -E 's/^[0-9]+:([^:]+:)?//' >> "$REPORT_FILE.$tmp_suffix.tmp"
+    done
+  done
+
+  if [ -f "$REPORT_FILE.$tmp_suffix.tmp" ]; then
+    sort -u "$REPORT_FILE.$tmp_suffix.tmp" > "$REPORT_FILE.$tmp_suffix.sorted.tmp"
+    count=$(wc -l < "$REPORT_FILE.$tmp_suffix.sorted.tmp")
+    cat "$REPORT_FILE.$tmp_suffix.sorted.tmp" >> "$REPORT_FILE"
+    rm "$REPORT_FILE.$tmp_suffix.tmp" "$REPORT_FILE.$tmp_suffix.sorted.tmp"
+
+    echo "" >> "$REPORT_FILE"
+    echo "Total: $count $title." >> "$REPORT_FILE"
+  fi
+
+  echo "$count"
+}
+
+if [ -z "$1" ]; then
+  echo "Error: Please provide a GitHub Actions run ID"
+  echo "Usage: script/report-test-warnings RUN_ID EXISTING_TEMP_DIR"
+  exit 1
+fi
+
+RUN_ID=$1
+REPORT_FILE="test_warnings_report_$RUN_ID.txt"
+
+if [ -z "$2" ]; then
+  TEMP_DIR=$(mktemp -d)
+  echo "Creating temporary directory at $TEMP_DIR."
+  echo "Downloading artifacts from run $RUN_ID."
+
+  gh run download -R github/github "$RUN_ID" -D "$TEMP_DIR" -p "github*" -p "enterprise*"
+  if [ $? -ne 0 ]; then
+    echo "Error: Failed to download artifacts"
+    rm -rf "$TEMP_DIR"
+    exit 1
+  fi
+  echo "Deleting everything that isn't a txt file, and thus empty directories..."
+  find "$TEMP_DIR" -type f ! -name "*.txt" -exec rm -f {} \;
+  echo "Temporary directory created at $TEMP_DIR. Artifacts downloaded."
+else
+  echo "Using pre-existing temporary directory and assuming it contains artifacts."
+  TEMP_DIR=$2
+fi
+
+{
+  echo "# Test Warnings (Run ID: $RUN_ID)"
+  echo "Generated on $(date)"
+  echo "--------------------------------------------"
+} > "$REPORT_FILE"
+
+MISSING_ASSERTIONS_COUNT=$(find_and_report_warnings "Tests Missing Assertions" "missing_assertions" "missing assertions")
+STUBBING_NON_EXISTENT_METHOD_COUNT=$(find_and_report_warnings "Non-existent Method Stubs" "nonexistent_method" "stubbing non-existent method")
+
+echo "" >> "$REPORT_FILE"
+echo "## Summary" >> "$REPORT_FILE"
+echo "* Missing Assertions: ${MISSING_ASSERTIONS_COUNT:-0}" >> "$REPORT_FILE"
+echo "* Non-existent Method Stubs: ${STUBBING_NON_EXISTENT_METHOD_COUNT:-0}" >> "$REPORT_FILE"
+TOTAL_WARNINGS=$((${MISSING_ASSERTIONS_COUNT:-0} + ${STUBBING_NON_EXISTENT_METHOD_COUNT:-0}))
+echo "* Total Warnings: $TOTAL_WARNINGS" >> "$REPORT_FILE"
+
+echo "Report generated in $REPORT_FILE."

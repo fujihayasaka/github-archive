@@ -1,0 +1,2 @@
+"use strict";(globalThis.webpackChunk_github_ui_github_ui=globalThis.webpackChunk_github_ui_github_ui||[]).push([[98817],{88774:(e,b,i)=>{i(95911),i(59264),i(78903),(0,i(39595).Se)({"active-global-banners":()=>i.e(39389).then(i.bind(i,39389)),"global-banner":()=>i.e(42241).then(i.bind(i,42241)),"locale-selector":()=>i.e(39344).then(i.bind(i,16963))})}},e=>{e.O(0,[913,6488,43784,66292,75320],()=>e(e.s=88774)),e.O()}]);
+//# sourceMappingURL=marketing-essentials-51459440dfe7.js.map

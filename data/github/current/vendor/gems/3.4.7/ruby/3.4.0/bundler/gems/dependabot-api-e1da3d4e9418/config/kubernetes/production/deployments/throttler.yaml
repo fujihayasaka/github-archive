@@ -1,0 +1,71 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    annotations:
+        heaven.githubapp.com/image-placeholder: dependabot-api
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: throttler
+        moda.github.net/vpa-updater-enabled: "true"
+    name: throttler
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app: dependabot-api
+            role: throttler
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt_sloppy
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: dependabot
+            labels:
+                app: dependabot-api
+                role: throttler
+        spec:
+            containers:
+                - command:
+                    - bundle
+                    - exec
+                    - rake
+                    - throttler:server
+                  env:
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  image: dependabot-api
+                  name: throttler
+                  readinessProbe:
+                    exec:
+                        command:
+                            - stat
+                            - /tmp/throttler_started
+                    initialDelaySeconds: 10
+                    periodSeconds: 5
+                  resources:
+                    limits:
+                        cpu: 1000m
+                        memory: 2Gi
+                    requests:
+                        cpu: 200m
+                        memory: 500Mi
+                  volumeMounts:
+                    - mountPath: /etc/github/metadata.json
+                      name: github-metadata
+                      readOnly: true
+            dnsPolicy: ClusterFirst
+            securityContext:
+                runAsGroup: 1000
+                runAsUser: 1000
+            volumes:
+                - hostPath:
+                    path: /etc/github/metadata.json
+                  name: github-metadata

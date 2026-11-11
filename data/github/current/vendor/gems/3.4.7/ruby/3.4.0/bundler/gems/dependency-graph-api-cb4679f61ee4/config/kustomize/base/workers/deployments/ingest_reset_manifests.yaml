@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: ingest-reset-manifests
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "ingest-reset-manifests"
+        heaven.githubapp.com/image-placeholder: "dependency-graph-api"
+        heaven.githubapp.com/deploy-requirement: "true"
+        moda.github.net/vpa-updater-enabled: "true"
+spec:
+    replicas: 2
+    strategy:
+        type: RollingUpdate
+    selector:
+        matchLabels:
+            app: dependency-graph-api
+            role: ingest-reset-manifests
+    template:
+        metadata:
+            labels:
+                app: dependency-graph-api
+                role: ingest-reset-manifests
+        spec:
+            dnsPolicy: ClusterFirst
+            volumes:
+                - name: github-metadata
+                  hostPath:
+                    path: /etc/github/metadata.json
+            containers:
+                - name: ingest-reset-manifests
+                  image: dependency-graph-api
+                  resources:
+                    requests:
+                        cpu: 150m
+                        memory: "350Mi"
+                    limits:
+                        cpu: 3000m
+                        memory: "4Gi"
+                  command: ["./script/etl/ingest_reset_manifests"]
+                  readinessProbe:
+                    timeoutSeconds: 1
+                    tcpSocket:
+                        port: 8888
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                  volumeMounts:
+                    - mountPath: /etc/github/metadata.json
+                      name: github-metadata
+                      readOnly: true

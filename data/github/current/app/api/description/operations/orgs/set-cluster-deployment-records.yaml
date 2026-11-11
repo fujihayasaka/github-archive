@@ -1,0 +1,167 @@
+---
+summary: 'Set cluster deployment records'
+description: |-
+    Set deployment records for a given cluster.
+tags:
+  - orgs
+operationId: orgs/set-cluster-deployment-records
+
+externalDocs:
+  description: API method documentation
+  url: '${externalDocsUrl}/rest/orgs/artifact-metadata#set-cluster-deployment-records'
+
+x-github-internal:
+  path: /orgs/{org}/artifacts/metadata/deployment-record/cluster/{cluster}
+  http-method: post
+  published: true
+  owner: '@github/package-security'
+
+x-github-releases:
+  - api.github.com
+  - ghec
+
+parameters:
+  - $ref: '../../components/parameters/org.yaml'
+  - name: cluster
+    in: path
+    description: The cluster name.
+    required: true
+    schema:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: '^[a-zA-Z0-9._-]+$'
+
+requestBody:
+  required: true
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          logical_environment:
+            type: string
+            description: The stage of the deployment.
+          physical_environment:
+            type: string
+            description: The physical region of the deployment.
+          deployments:
+            type: array
+            description: The list of deployments to record.
+            items:
+              type: object
+              maxLength: 100
+              properties:
+                name:
+                  type: string
+                  description: |
+                    The name of the artifact. Note that if multiple deployments have identical 'digest' parameter values,
+                    the name parameter must also be identical across all entries.
+                  minLength: 1
+                  maxLength: 255
+                digest:
+                  type: string
+                  description: |
+                    The hex encoded digest of the artifact. Note that if multiple deployments have identical 'digest' parameter values,
+                    the name and version parameters must also be identical across all entries.
+                  minLength: 71
+                  maxLength: 71
+                  pattern: '^sha256:[a-f0-9]{64}$'
+                version:
+                  type: string
+                  description: |
+                    The artifact version. Note that if multiple deployments have identical 'digest' parameter values,
+                    the version parameter must also be identical across all entries.
+                  minLength: 1
+                  maxLength: 100
+                  x-multi-segment: true
+                  example: 1.2.3
+                status:
+                  type: string
+                  description: The deployment status of the artifact.
+                  enum:
+                    - deployed
+                    - decommissioned
+                deployment_name:
+                  type: string
+                  description: |
+                    The unique identifier for the deployment represented by the new record. To accommodate differing
+                    containers and namespaces within a record set, the following format is recommended:
+                    {namespaceName}-{deploymentName}-{containerName}
+                  minLength: 1
+                  maxLength: 128
+                github_repository:
+                  type: string
+                  description: |-
+                    The name of the GitHub repository associated with the artifact. This should be used
+                    when there are no provenance attestations available for the artifact. The repository
+                    must belong to the organization specified in the path parameter.
+
+                    If a provenance attestation is available for the artifact, the API will use
+                    the repository information from the attestation instead of this parameter.
+                  minLength: 1
+                  maxLength: 100
+                  pattern: '^[A-Za-z0-9.\-_]+$'
+                  example: my-github-repo
+                tags:
+                  type: object
+                  description: Key-value pairs to tag the deployment record.
+                  additionalProperties:
+                    type: string
+                runtime_risks:
+                  type: array
+                  description: A list of runtime risks associated with the deployment.
+                  maxItems: 4
+                  uniqueItems: true
+                  items:
+                    type: string
+                    enum:
+                      - critical-resource
+                      - internet-exposed
+                      - lateral-movement
+                      - sensitive-data
+              required:
+                - name
+                - deployment_name
+                - digest
+        required:
+          - logical_environment
+          - deployments
+      examples:
+        default:
+          value:
+            logical_environment: prod
+            physical_environment: pacific-east
+            deployments:
+              - name: awesome-image
+                digest: sha256:1bb1e949e55dcefc6353e7b36c8897d2a107d8e8dca49d4e3c0ea8493fc0bc72
+                version: 2.1.0
+                status: deployed
+                deployment_name: deployment-pod
+                tags:
+                  runtime-risk: sensitive-data
+
+responses:
+  '200':
+    description: Artifact deployment record stored successfully.
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            total_count:
+              description: The number of deployment records created
+              type: integer
+            deployment_records:
+              type: array
+              items:
+                $ref: '../../components/schemas/artifact-deployment-record.yaml'
+        examples:
+          default:
+            $ref: '../../components/examples/artifact-deployment-record-list.yaml'
+
+x-github:
+  githubCloudOnly: false
+  enabledForGitHubApps: true
+  category: orgs
+  subcategory: artifact-metadata

@@ -1,0 +1,279 @@
+#!/bin/bash
+#
+# SWE Agent Memory Management Script
+#
+# This script provides a unified interface for managing SWE Agent memories.
+# It supports local development, staging, and production environments.
+# For production and staging, it can automatically use GitHub CLI authentication.
+#
+# Usage:
+#   script/memory-api [--production|--staging] <command> <repo_owner>/<repo_name> [args...]
+#
+# Commands:
+#   create <repo> <json_payload> - Create a new memory
+#   search <repo> <json_payload> - Search memories
+#   recent <repo> [limit]        - Get recent memories (default limit: 10)
+#
+# Options:
+#   --production                 - Use production environment
+#   --staging                    - Use staging environment
+#   --local                      - Use local development environment (default)
+#
+# Environment Variables:
+#   USER_TOKEN                   - Token for production/staging API (auto-detected from gh CLI if not set)
+#   MONALISA_PAT                 - Token for local development (Codespace)
+#   MEMORY_API_BASE_URL          - Override API base URL
+#
+# Examples:
+#   script/memory-api create github/private-server '{"subject":"user preferences","fact":"user prefers TypeScript","category":"preference"}'
+#   script/memory-api search github/private-server '{"question":"what does the user prefer?"}'
+#   script/memory-api recent github/private-server 5
+#   script/memory-api --staging create github/private-server '{"subject":"bug fix","fact":"fixed authentication issue","category":"technical"}'
+#   script/memory-api --production search github/private-server '{"question":"what bugs were fixed?"}'
+
+set -e
+
+# Function to show help
+show_help() {
+    cat << 'EOF'
+SWE Agent Memory Management Script
+
+Usage:
+  script/memory-api [--production|--staging] <command> <repo_owner>/<repo_name> [args...]
+
+Commands:
+  create <repo> <json_payload> - Create a new memory
+  search <repo> <json_payload> - Search memories
+  recent <repo> [limit]        - Get recent memories (default limit: 10)
+
+Options:
+  --production                 - Use production environment
+  --staging                    - Use staging environment
+  --local                      - Use local development environment (default)
+  --help, -h                   - Show this help message
+
+Environment Variables:
+  USER_TOKEN                   - Token for production/staging API (auto-detected from gh CLI if not set)
+  MONALISA_PAT                 - Token for local development (Codespace, default)
+  MEMORY_API_BASE_URL          - Override API base URL
+
+Examples:
+  script/memory-api create github/private-server '{"subject":"user preferences","fact":"user prefers TypeScript","category":"preference"}'
+  script/memory-api search github/private-server '{"question":"what does the user prefer?"}'
+  script/memory-api recent github/private-server 5
+  script/memory-api --staging create github/private-server '{"subject":"bug fix","fact":"fixed authentication issue","category":"technical"}'
+  script/memory-api --production search github/private-server '{"question":"what bugs were fixed?"}'
+EOF
+}
+
+# Configuration
+SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
+cd "$SCRIPT_DIR"
+
+# Default API base URLs
+PRODUCTION_API_BASE_URL="https://api.githubcopilot.com/agents/swe"
+STAGING_API_BASE_URL="https://api.githubcopilot.com/agents/swe-staging"
+LOCAL_API_BASE_URL="http://localhost:2208"
+
+# Parse command line options
+LOCAL_MODE=true
+STAGING_MODE=false
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --production)
+            LOCAL_MODE=false
+            STAGING_MODE=false
+            shift
+            ;;
+        --staging)
+            LOCAL_MODE=false
+            STAGING_MODE=true
+            shift
+            ;;
+        --local)
+            LOCAL_MODE=true
+            STAGING_MODE=false
+            shift
+            ;;
+        --help|-h)
+            show_help
+            exit 0
+            ;;
+        -*)
+            echo "Unknown option: $1" >&2
+            show_help
+            exit 1
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# Function to set up environment based on mode
+setup_environment() {
+    if [ "$LOCAL_MODE" = true ]; then
+        # Local development mode
+        export USER_TOKEN="${MONALISA_PAT}"
+        export MEMORY_API_BASE_URL="${MEMORY_API_BASE_URL:-$LOCAL_API_BASE_URL}"
+        
+        if [ -z "${MONALISA_PAT}" ]; then
+            echo "Error: MONALISA_PAT environment variable is required for local mode." >&2
+            echo "If you are not in a Codespace, please set this variable before running the script." >&2
+            exit 1
+        fi
+    elif [ "$STAGING_MODE" = true ]; then
+        # Staging mode
+        export MEMORY_API_BASE_URL="${MEMORY_API_BASE_URL:-$STAGING_API_BASE_URL}"
+        
+        if [ -z "${USER_TOKEN}" ]; then
+            # Try to get token from GitHub CLI
+            if command -v gh >/dev/null 2>&1; then
+                echo "USER_TOKEN not found, attempting to get token from GitHub CLI..." >&2
+                export USER_TOKEN=$(gh auth token 2>/dev/null)
+                if [ -z "${USER_TOKEN}" ]; then
+                    echo "Error: Could not get token from GitHub CLI. Please run 'gh auth login' or set USER_TOKEN environment variable." >&2
+                    exit 1
+                fi
+            else
+                echo "Error: USER_TOKEN environment variable is required for staging mode." >&2
+                echo "Please set this variable with an appropriately scoped token or install GitHub CLI." >&2
+                exit 1
+            fi
+        fi
+    else
+        # Production mode
+        export MEMORY_API_BASE_URL="${MEMORY_API_BASE_URL:-$PRODUCTION_API_BASE_URL}"
+        
+        if [ -z "${USER_TOKEN}" ]; then
+            # Try to get token from GitHub CLI
+            if command -v gh >/dev/null 2>&1; then
+                echo "USER_TOKEN not found, attempting to get token from GitHub CLI..." >&2
+                export USER_TOKEN=$(gh auth token 2>/dev/null)
+                if [ -z "${USER_TOKEN}" ]; then
+                    echo "Error: Could not get token from GitHub CLI. Please run 'gh auth login' or set USER_TOKEN environment variable." >&2
+                    exit 1
+                fi
+            else
+                echo "Error: USER_TOKEN environment variable is required for production mode." >&2
+                echo "Please set this variable with an appropriately scoped token or install GitHub CLI." >&2
+                exit 1
+            fi
+        fi
+    fi
+}
+
+# Function to create a new memory
+cmd_create() {
+    if [ "$#" -ne 2 ]; then
+        echo "Usage: script/memory-api [--production|--staging] create <repo_owner>/<repo_name> <json_payload>" >&2
+        exit 1
+    fi
+    
+    local repo="$1"
+    local json_payload="$2"
+    
+    if [ "$LOCAL_MODE" = true ]; then
+        curl -i  -L \
+            -H "Authorization: Bearer ${USER_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            --request "PUT" \
+            --data "$json_payload" \
+            "$MEMORY_API_BASE_URL/internal/memory/v0/$repo"
+    else
+        curl -i  -L \
+            -H "Copilot-Integration-Id: copilot-developer-dev" \
+            -H "Authorization: Bearer ${USER_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            --request "PUT" \
+            --data "$json_payload" \
+            "$MEMORY_API_BASE_URL/internal/memory/v0/$repo"
+    fi
+}
+
+# Function to search memories
+cmd_search() {
+    if [ "$#" -ne 2 ]; then
+        echo "Usage: script/memory-api [--production|--staging] search <repo_owner>/<repo_name> <json_payload>" >&2
+        exit 1
+    fi
+    
+    local repo="$1"
+    local json_payload="$2"
+    
+    if [ "$LOCAL_MODE" = true ]; then
+        curl -i  -L \
+            -H "Authorization: Bearer ${USER_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            --request "POST" \
+            --data "$json_payload" \
+            "$MEMORY_API_BASE_URL/internal/memory/v0/$repo/search"
+    else
+        curl -i  -L \
+            -H "Copilot-Integration-Id: copilot-developer-dev" \
+            -H "Authorization: Bearer ${USER_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            --request "POST" \
+            --data "$json_payload" \
+            "$MEMORY_API_BASE_URL/internal/memory/v0/$repo/search"
+    fi
+}
+
+# Function to get recent memories
+cmd_recent() {
+    if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+        echo "Usage: script/memory-api [--production|--staging] recent <repo_owner>/<repo_name> [limit]" >&2
+        exit 1
+    fi
+    
+    local repo="$1"
+    local limit="${2:-10}"  # Default to 10 if not specified
+    
+    if [ "$LOCAL_MODE" = true ]; then
+        curl -i  -L \
+            -H "Authorization: Bearer ${USER_TOKEN}" \
+            -H "Accept: application/json" \
+            --request "GET" \
+            "$MEMORY_API_BASE_URL/internal/memory/v0/$repo/recent?limit=$limit"
+    else
+        curl -i  -L \
+            -H "Copilot-Integration-Id: copilot-developer-dev" \
+            -H "Authorization: Bearer ${USER_TOKEN}" \
+            -H "Accept: application/json" \
+            --request "GET" \
+            "$MEMORY_API_BASE_URL/internal/memory/v0/$repo/recent?limit=$limit"
+    fi
+}
+
+# Main command dispatch
+if [ "$#" -lt 1 ]; then
+    echo "Error: Insufficient arguments" >&2
+    show_help
+    exit 1
+fi
+
+setup_environment
+
+command="$1"
+shift
+
+case "$command" in
+    create)
+        cmd_create "$@"
+        ;;
+    search)
+        cmd_search "$@"
+        ;;
+    recent)
+        cmd_recent "$@"
+        ;;
+    *)
+        echo "Error: Unknown command '$command'" >&2
+        show_help
+        exit 1
+        ;;
+esac

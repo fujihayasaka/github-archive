@@ -1,0 +1,41 @@
+#!/bin/bash
+
+set -eo pipefail
+
+cd "$(dirname "$0")/.."
+
+DOCKERFILE=Dockerfile.enterprise
+DOCKERTAG=dependabot-api
+PREFIX=ghcr.io/github/dependabot-api
+export DOCKER_BUILDKIT=1
+
+if [[ -z $GITHUB_SHA ]]; then
+  echo "GITHUB_SHA is required."
+  exit 1
+fi
+
+docker build -f $DOCKERFILE \
+  -t "$PREFIX/$DOCKERTAG:$GITHUB_SHA" \
+  --build-arg GITHUB_SHA="${GITHUB_SHA}" \
+  --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+  .
+
+if [[ "${1:-""}" = "--build-only" ]]; then
+  echo "completed build"
+  exit
+fi
+
+if [[ -n "$CI" ]]; then
+  push_url="$PREFIX/$DOCKERTAG:$GITHUB_SHA"
+  digest=$(docker push "$push_url" | tail -1 | cut -f 3 -d " ")
+
+  printf "\n\n"
+  echo "dependabot-api=$push_url@$digest"
+
+  echo "### Enterprise Build Info" >> "$GITHUB_STEP_SUMMARY"
+  echo ":rocket: The image has been published! :rocket:" >> "$GITHUB_STEP_SUMMARY"
+  echo "To use the new image in \`bp-dev\` issue the following in \`~/enterprise2\`:" >> "$GITHUB_STEP_SUMMARY"
+  echo "\`\`\`plaintext" >> "$GITHUB_STEP_SUMMARY"
+  echo "./script/update-service.rb dependabot-api $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+  echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+fi
