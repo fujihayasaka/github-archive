@@ -23,11 +23,12 @@ module Secrets::AppsHelper
   end
 
   def self.multi_integrations_enabled_for_user?(user)
-    GitHub.dependabot_enabled? || user&.codespaces_feature_enabled?
+    GitHub.dependabot_enabled? || user&.codespaces_feature_enabled? || GitHub.elm_exporter_enabled?
   end
 
   def self.display_name_for(app_name)
     return "Private registries" if app_name == PRIVATE_REGISTRY_APP_NAME
+    return "ELM exporter" if app_name == ELM_EXPORTER_APP_NAME
     app_name.capitalize
   end
 
@@ -90,7 +91,7 @@ module Secrets::AppsHelper
       },
       ELM_EXPORTER_APP_NAME => {
         app: Apps::Privileged.integration(:elm_exporter_secrets),
-        enabled: false, # We do not want to show this in the generic secrets settings page
+        enabled: GitHub.elm_exporter_enabled?,
         key_name: Platform::EncryptionKeys::ELM_EXPORTER_SECRETS,
       },
     }

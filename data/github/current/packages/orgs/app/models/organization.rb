@@ -1972,6 +1972,8 @@ class Organization < User
   #                                  the org but NOT admins.
   # actor_ids - A list of user ids to filter the possible visible users on.
   #
+  # Note: this includes suspended users on GHES to avoid breaking existing undocumented behavior of the API endpoints.
+  #
   # Returns an ActiveRecord::Relation
   def visible_users_for(viewer, type: :all, actor_ids: nil, limit: MEGA_ORG_MEMBER_THRESHOLD, include_indirect_abilities: true)
     scope = case type
@@ -1991,12 +1993,10 @@ class Organization < User
       scope = scope.publicly_belongs_to(id)
     end
 
-    # On GHES, filter out all suspended users (regardless of suspension source).
-    scope = scope.not_suspended if GitHub.enterprise?
-
     scope
   end
 
+  # Note: this includes suspended users on GHES to avoid breaking existing undocumented behavior of the API endpoints.
   def visible_user_ids_for(viewer, type: :all, actor_ids: nil, limit: MEGA_ORG_MEMBER_THRESHOLD, include_indirect_abilities: true)
     user_ids = case type
     when :all, :direct_member
@@ -2016,17 +2016,6 @@ class Organization < User
     end
 
     return user_ids if user_ids.empty?
-
-    # On GHES, filter out suspended users.
-    if GitHub.enterprise?
-      suspended_ids = Set.new
-
-      GitHub::BatchedScope.batched(values: user_ids) do |values|
-        suspended_ids.merge(User.where(id: values).suspended.pluck(:id))
-      end
-
-      user_ids = user_ids.reject { |id| suspended_ids.include?(id) }
-    end
 
     if limit_to_public_members?(viewer, include_indirect_abilities: include_indirect_abilities)
       # Anonymous users, non-org-members, and users using oauth apps blocked by

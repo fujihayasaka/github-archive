@@ -33,9 +33,9 @@ class Release::ReleaseNotesConfigHelper
   # handles any errors from YAML.safe_load and raises a Releases::Error instead
   def load_config_from_file
     yaml_string = @release_config_file&.data
-    yaml_string && YAML.safe_load(yaml_string)
+    yaml_string && Release::YamlParsing::SafeYamlParser.safe_load(yaml_string)
   # errors possible from invalid yaml passed to YAML.safe_load
-  rescue Psych::BadAlias, Psych::DisallowedClass, Psych::SyntaxError => e
+  rescue Release::YamlParsing::SafeYamlParser::UserError => e
     raise Releases::Error, "Could not parse #{@release_config_file&.path}: #{e.message}"
   end
 

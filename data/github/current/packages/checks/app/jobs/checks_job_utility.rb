@@ -15,6 +15,10 @@ module ChecksJobUtility
   DEFAULT_MAX_ARCHIVE_THRESHOLD_IN_DAYS = 400.days.freeze
   DEFAULT_ARCHIVE_RETENTION_PERIOD_IN_DAYS = 10.days.freeze
 
+  # Maximum number of concurrent delete jobs. Used by:
+  # - CheckSuitesDeleteArchivedOrchestrationJob
+  MAX_DELETE_CONCURRENCY = 150
+
   # The amount of days that we have to wait before archiving resources
   def archive_threshold_days
     return GitHub.checks_retention_archive_threshold.days if GitHub.checks_retention_archive_threshold && GitHub.enterprise?

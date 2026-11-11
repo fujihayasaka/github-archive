@@ -2886,6 +2886,9 @@ GitHub::Application.routes.draw do
     put    "/organizations/:organization_id/settings/secrets/:app_name/:name",                  to: "orgs/secrets_settings#update_secret",                    as: :settings_org_secrets_update_secret
   end
 
+  get    "/organizations/:organization_id/settings/elm-exporter/secrets",                       to: "orgs/elm_exporter_secrets#index",                        as: :settings_org_elm_exporter_secrets
+  put    "/organizations/:organization_id/settings/elm-exporter/secrets/:name",                 to: "orgs/elm_exporter_secrets#update",                       as: :update_settings_org_elm_exporter_secret
+
   resources :pages_protected_domains,
     only: [:new, :create, :show, :update, :destroy],
     path: "/organizations/:organization_id/settings/pages_verified_domains",

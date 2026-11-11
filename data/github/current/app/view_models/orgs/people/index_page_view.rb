@@ -163,7 +163,11 @@ class Orgs::People::IndexPageView < Orgs::OverviewView
   def found_members
     @found_members ||= begin
       users = Organization::People::Filter.new(query: people_query).call
-      Organization::People::Search.new(query: people_query, users: users).call
+      members = Organization::People::Search.new(query: people_query, users: users).call
+      # Hide suspended users at the UI-level only on GHES. Suspended users are still
+      # returned by the API but this is undocumented.
+      members = members.not_suspended if GitHub.enterprise?
+      members
     end
   end
 end

@@ -28,6 +28,7 @@ module Settings
       org = @entity.is_a?(::Organization) ? @entity : nil
       enabled_app_names = Secrets::AppsHelper.enabled_app_names(@user, org:)
       enabled_app_names.delete(Secrets::AppsHelper::PRIVATE_REGISTRY_APP_NAME) if !org
+      enabled_app_names.delete(Secrets::AppsHelper::ELM_EXPORTER_APP_NAME) if !org
       return enabled_app_names if @is_admin
       [ACTIONS_APP_NAME] if (@fgps[:actions_secrets] || @fgps[:actions_variables]) && enabled_app_names.include?(ACTIONS_APP_NAME)
     end
@@ -45,6 +46,8 @@ module Settings
         if app_name == Secrets::AppsHelper::ACTIONS_APP_NAME && @fgps[:actions_variables] && !@fgps[:actions_secrets] && !@is_admin
           # Variables only, not admin
           organization_variables_path(@entity, app_name: app_name)
+        elsif app_name == Secrets::AppsHelper::ELM_EXPORTER_APP_NAME
+          settings_org_elm_exporter_secrets_path(@entity)
         else
           settings_org_secrets_path(@entity, app_name: app_name)
         end

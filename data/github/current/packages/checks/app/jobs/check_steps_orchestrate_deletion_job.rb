@@ -23,6 +23,9 @@ class CheckStepsOrchestrateDeletionJob < ApplicationJob
     # We'll be switching to hot/cold for steps
     return if GitHub.multi_tenant_enterprise?
 
+    # Allow GHES admins to disable this job entirely via ghe-config
+    return if GitHub.enterprise? && GitHub.checks_steps_deletion_disabled?
+
     # regardless if checks retention is enabled or not, we still want to run this on GHES because the maxmimum retention period for logs on all environments is 400 days and it cannot be incrased
 
     lock! do
@@ -42,6 +45,11 @@ class CheckStepsOrchestrateDeletionJob < ApplicationJob
   end
 
   def records_per_batch
+    if GitHub.enterprise?
+      value = GitHub.checks_steps_deletion_records_per_batch.to_i
+      return value if value.positive?
+    end
+
     45000
   end
 
@@ -49,7 +57,13 @@ class CheckStepsOrchestrateDeletionJob < ApplicationJob
   # This number should match the total max_concurrent_jobs value in check_steps_delete_job.rb
   def parallel_count
     if GitHub.enterprise?
-      return 3 if weekend_deletion_window?
+      if weekend_deletion_window?
+        value = GitHub.checks_steps_deletion_parallel_count_weekend.to_i
+        return value.positive? ? value : 3
+      else
+        value = GitHub.checks_steps_deletion_parallel_count_weekday.to_i
+        return value.positive? ? value : 1
+      end
     else
       return 20 if weekend_deletion_window?
       return 5 if ramp_up_retention_time?

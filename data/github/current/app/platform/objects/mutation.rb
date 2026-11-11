@@ -186,6 +186,7 @@ module Platform
       field :remove_labels_from_labelable, mutation: Mutations::RemoveLabelsFromLabelable
       field :replace_labels_for_labelable, mutation: Mutations::ReplaceLabelsForLabelable
       field :set_labels_for_labelable, mutation: Mutations::SetLabelsForLabelable
+      field :update_labels_for_labelable, mutation: Mutations::UpdateLabelsForLabelable
       field :close_issue, mutation: Mutations::CloseIssue
       field :reopen_issue, mutation: Mutations::ReopenIssue
       field :transfer_issue, mutation: Mutations::TransferIssue

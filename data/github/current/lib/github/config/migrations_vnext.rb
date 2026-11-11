@@ -20,6 +20,59 @@ module GitHub
         GitHub.environment["MVND_HMAC_KEY"]
       end
 
+      def mvnd_base_url
+        [mvnd_host, "twirp"].join("/")
+      end
+
+      # Twirp client for elm-exporter's MigrationManagerAPI.
+      # GHES-only substrate for the customer-facing ELM API. Like #mvnd_client but:
+      # reads ELM_EXPORTER_HMAC_KEYS, signs via the gem's HMACMiddleware, and the base
+      # URL has NO "/twirp" segment (see #elm_exporter_base_url).
+      # Callers MUST gate on #elm_exporter_enabled? — ELM_EXPORTER_HOST is not yet wired
+      # into the monolith env, so without it this can't reach a server.
+      def elm_exporter_client
+        @elm_exporter_client ||= begin
+          connection = GitHub::FaradayClient.internal("elm_exporter", elm_exporter_base_url) do |conn|
+            conn.use Mvnd::ElmExporter::HMACMiddleware, elm_exporter_hmac_key
+
+            conn.options[:open_timeout] = 1
+            conn.options[:timeout] = 5
+          end
+          Mvnd::ElmExporter::Client.new(connection)
+        end
+      end
+
+      def elm_exporter_host
+        GitHub.environment.fetch("ELM_EXPORTER_HOST", @elm_exporter_host)
+      end
+      attr_writer :elm_exporter_host
+
+      # ELM_EXPORTER_HMAC_KEYS may hold a comma-separated list during key rotation; the
+      # elm-exporter server (hmac.Validator) accepts any key in the list, and all ELM
+      # daemons sign with the FIRST (primary) key — see eventlistener/command.go, which
+      # does cmdutil.ParseHMACKeys(...)[0]. That parser splits on ",", trims whitespace,
+      # and drops empties. The gem's HMACMiddleware signs verbatim and does not split,
+      # so we mirror ParseHMACKeys here and select the first key.
+      def elm_exporter_hmac_key
+        GitHub.environment["ELM_EXPORTER_HMAC_KEYS"].to_s.split(",").map(&:strip).reject(&:empty?).first
+      end
+
+      # No "/twirp" suffix — unlike #mvnd_base_url. The generated elm_exporter client
+      # posts to the bare "<package>.<Service>/<Rpc>" path.
+      def elm_exporter_base_url
+        elm_exporter_host
+      end
+
+      # Whether the customer-facing ELM API can serve traffic here: GHES single-tenant
+      # only, and only once ELM_EXPORTER_HOST is wired in.
+      def elm_exporter_enabled?
+        return @elm_exporter_enabled if defined?(@elm_exporter_enabled)
+
+        GitHub.single_tenant_enterprise? &&
+          (Rails.env.development? || elm_exporter_host.present?)
+      end
+      attr_writer :elm_exporter_enabled
+
       # Determine if ELM internal webhooks are enabled
       # - Disabled for dotcom
       # - Disabled for enterprise by default, except if explicitly enabled via ghe-config apply. Checks for ENTERPRISE_ELM_INTERNAL_WEBHOOKS_ENABLED variable.

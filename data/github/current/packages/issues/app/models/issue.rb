@@ -1076,6 +1076,67 @@ class Issue < ApplicationRecord::Domain::IssuesPullRequests
     self
   end
 
+  # Internal: Update labels on an issue by specifying labels to add and remove.
+  # This is a diff-based approach that avoids the race condition present in
+  # replace_labels, where concurrent updates can cause label loss.
+  #
+  # labels_to_add:    Array of Label objects to add (idempotent - won't duplicate)
+  # labels_to_remove: Array of Label objects to remove (idempotent - ignores missing)
+  #
+  # Returns true if successful, false if validation fails.
+  #
+  # Example:
+  #   issue.update_labels(labels_to_add: [priority_label], labels_to_remove: [bug_label])
+  #
+  def update_labels(labels_to_add: [], labels_to_remove: [])
+    update_successful = T.let(true, T::Boolean)
+    changed_labels = T.let([], T::Array[Label])
+
+    # Sort labels by ID to avoid deadlocks during concurrent transaction execution,
+    # matching the pattern used by replace_labels.
+    sorted_labels_to_add = Array(labels_to_add).sort_by(&:id)
+    sorted_labels_to_remove = Array(labels_to_remove).sort_by(&:id)
+
+    Issue.transaction do
+      # Remove labels first (order matters for events)
+      labels_to_actually_remove = self.labels.where(id: sorted_labels_to_remove.map(&:id)).order(:id)
+      if labels_to_actually_remove.any?
+        labels_to_actually_remove.each { |label| trigger_unlabel_event(label) }
+        self.labels.delete(labels_to_actually_remove)
+        changed_labels.concat(labels_to_actually_remove.to_a)
+      end
+
+      # Add new labels (skip duplicates)
+      # Preload existing label IDs to avoid N+1 queries
+      existing_label_ids = self.labels.pluck(:id).to_set
+      sorted_labels_to_add.uniq(&:id).each do |label|
+        next if existing_label_ids.include?(label.id)
+
+        begin
+          self.labels << label
+          existing_label_ids.add(label.id)
+          trigger_label_event(label)
+          changed_labels << label
+        rescue ActiveRecord::RecordNotUnique
+          # Already exists, skip (concurrent insert from another transaction)
+        end
+      end
+
+      self.touch if changed_labels.any?
+
+      unless self.valid?
+        update_successful = false
+        raise ActiveRecord::Rollback
+      end
+    end
+
+    return false unless update_successful
+
+    notify_socket_subscribers if changed_labels.any?
+    update_repo_community_profile(changed_labels: changed_labels) if changed_labels.any?
+    true
+  end
+
   # Public: Replace all labels on an issue, updates the search index
   # and updated_at timestamp
   #

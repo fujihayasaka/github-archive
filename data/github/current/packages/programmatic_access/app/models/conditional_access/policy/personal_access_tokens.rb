@@ -113,15 +113,7 @@ module ConditionalAccess
       end
 
       def pat_restricted_organizations_experiment(org_id, targets)
-        science "cap.personal_access_tokens.restricted_organization_ids_v_three" do |experiment|
-          experiment.use do
-            pat_restricted_organization_ids.include?(org_id)
-          end
-
-          experiment.try do
-            pat_restricted_organization_ids_candidate(targets).include?(org_id)
-          end
-        end
+        pat_restricted_organization_ids_candidate(targets).include?(org_id)
       end
 
       # Internal: Find all of the actors associated Organizations that are

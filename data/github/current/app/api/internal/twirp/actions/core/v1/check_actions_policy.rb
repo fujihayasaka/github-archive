@@ -201,8 +201,9 @@ module Api::Internal::Twirp::Actions
         def block_non_sha_pinned_actions!
           return unless allowed_actions.any?
 
+          # Local-to-repo actions are not considered for sha pinning
           non_sha_pinned = allowed_actions.select do |action|
-            !action.pinned_to_sha?
+            !action.local_to_repo? && !action.pinned_to_sha?
           end
 
           @disallowed_actions = disallowed_actions + non_sha_pinned

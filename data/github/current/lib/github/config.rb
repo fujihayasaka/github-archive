@@ -527,6 +527,49 @@ module GitHub
     end
     attr_writer :checks_retention_delete_threshold
 
+    # Whether check steps deletion is disabled on GHES.
+    # Defaults to false (not disabled). Set ENTERPRISE_CHECKS_STEPS_DELETION_DISABLED=1 to disable.
+    def checks_steps_deletion_disabled?
+      return @checks_steps_deletion_disabled.to_i.positive? if defined?(@checks_steps_deletion_disabled)
+      false
+    end
+    attr_writer :checks_steps_deletion_disabled
+
+    # The number of records to process per batch during check steps deletion.
+    # Populated by ENTERPRISE_CHECKS_STEPS_DELETION_RECORDS_PER_BATCH.
+    def checks_steps_deletion_records_per_batch
+      @checks_steps_deletion_records_per_batch if defined?(@checks_steps_deletion_records_per_batch)
+    end
+    attr_writer :checks_steps_deletion_records_per_batch
+
+    # The parallel count for check steps deletion during the weekend.
+    # Populated by ENTERPRISE_CHECKS_STEPS_DELETION_PARALLEL_COUNT_WEEKEND.
+    def checks_steps_deletion_parallel_count_weekend
+      @checks_steps_deletion_parallel_count_weekend if defined?(@checks_steps_deletion_parallel_count_weekend)
+    end
+    attr_writer :checks_steps_deletion_parallel_count_weekend
+
+    # The parallel count for check steps deletion during the weekday.
+    # Populated by ENTERPRISE_CHECKS_STEPS_DELETION_PARALLEL_COUNT_WEEKDAY.
+    def checks_steps_deletion_parallel_count_weekday
+      @checks_steps_deletion_parallel_count_weekday if defined?(@checks_steps_deletion_parallel_count_weekday)
+    end
+    attr_writer :checks_steps_deletion_parallel_count_weekday
+
+    # The parallel count for check suites deletion during the weekday (peak and off-peak).
+    # Populated by ENTERPRISE_CHECKS_SUITES_DELETION_PARALLEL_COUNT_WEEKDAY.
+    def checks_suites_deletion_parallel_count_weekday
+      @checks_suites_deletion_parallel_count_weekday if defined?(@checks_suites_deletion_parallel_count_weekday)
+    end
+    attr_writer :checks_suites_deletion_parallel_count_weekday
+
+    # The parallel count for check suites deletion during the weekend.
+    # Populated by ENTERPRISE_CHECKS_SUITES_DELETION_PARALLEL_COUNT_WEEKEND.
+    def checks_suites_deletion_parallel_count_weekend
+      @checks_suites_deletion_parallel_count_weekend if defined?(@checks_suites_deletion_parallel_count_weekend)
+    end
+    attr_writer :checks_suites_deletion_parallel_count_weekend
+
     # Whether GitHub Stacks is enabled.
     # - Always enabled for dotcom.
     # - Disabled for Enterprise by default.

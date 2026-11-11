@@ -3,7 +3,9 @@
 
 class Api::Enterprise::Migrations < Api::Enterprise::App
   # Pre-compute ELM resource mapping at class load time for Sorbet compatibility
-  # Auto-discovers all ELM export resources from MonolithTwirp::Elm::{Module}::{Version} namespaces
+  # Auto-discovers all ELM export resources from MonolithTwirp::Elm::{Module}::{Version} namespaces.
+  # ExportCommitStatusCheck is then pinned to V1: the import path consumes the V1 message schema,
+  # while V2 is an export-only type with an incompatible schema that must not overwrite it.
   ELM_RESOURCE_MAPPING = MonolithTwirp::Elm.constants
     .flat_map do |module_name|
       # Get each module constant (e.g., Actions, Organizations, etc.)
@@ -25,6 +27,7 @@ class Api::Enterprise::Migrations < Api::Enterprise::App
       end.flatten(1) # Flatten the nested arrays from versions
     end
     .to_h # Convert array of [name, class] pairs to hash
+    .merge("ExportCommitStatusCheck" => MonolithTwirp::Elm::Actions::V1::ExportCommitStatusCheck)
     .freeze
 
   post "/enterprise/migration/create", operation_id: "enterprise-admin/migration-create", read_from_replicas: true do

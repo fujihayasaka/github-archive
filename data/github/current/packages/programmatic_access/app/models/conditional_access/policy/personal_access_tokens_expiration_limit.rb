@@ -151,21 +151,7 @@ module ConditionalAccess
       end
 
       def org_expiration_science_experiment(org_id, targets)
-        usable_result = T.let(false, T.untyped)
-        science "cap.personal_access_tokens_expiration_limit.org_expiration_science_experiment_v_three" do |experiment|
-          experiment.context(
-            org_id: org_id,
-            targets_count: targets.size,
-          )
-          experiment.use do
-            usable_result = pat_expiration_limit_unsatisfied_org_ids.include?(org_id)
-          end
-          experiment.try do
-            pat_expiration_limit_unsatisfied_org_ids_candidate(targets).include?(org_id)
-          end
-        end
-
-        usable_result
+        pat_expiration_limit_unsatisfied_org_ids_candidate(targets).include?(org_id)
       end
 
       # Internal: Find all of the actor's associated Orgs that enforce

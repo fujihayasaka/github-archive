@@ -8,7 +8,7 @@ module Api::Internal::Twirp::Registrymetadata
     module V1
       # Handler for the MonolithTwirp::Registrymetadata::Core::V1::OrgAPIService
       class OrgAPIHandler < Api::Internal::Twirp::Handler
-        allow_access_for :client, allowed_clients: %w(packageregistry package_registry).freeze
+        allow_access_for :client, allowed_clients: %w(packageregistry package_registry elm migrations_vnext).freeze
         handles_service MonolithTwirp::Registrymetadata::Core::V1::OrgAPIService
 
         # Public: Implementation of the GetOrgId Twirp RPC.
