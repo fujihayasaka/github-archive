@@ -1478,7 +1478,7 @@ class BlobController < GitContentController
       violations = check_for_rule_violations(hook_error, "File could not be created")
 
       increment_quick_pull_error_stats
-      return render(json: { data: { error: hook_error.present? ? hook_error : flash.now[:error], error_details: { ruleViolations: violations } }, code: 422 }, status: :unprocessable_entity) if react_repos_view_enabled?
+      return render_web_commit_error(hook_error, violations) if react_repos_view_enabled?
       return new
     end
 
@@ -1591,7 +1591,7 @@ class BlobController < GitContentController
       @contents = contents
       @allow_contents_unchanged = true
 
-      return render(json: { data: { error: hook_error.present? ? hook_error : flash.now[:error], error_details: { ruleViolations: violations } }, code: 422 }, status: :unprocessable_entity) if react_repos_view_enabled?
+      return render_web_commit_error(hook_error, violations) if react_repos_view_enabled?
       return edit
     end
 
@@ -1641,7 +1641,7 @@ class BlobController < GitContentController
       violations = check_for_rule_violations(hook_error, "File could not be deleted")
 
       increment_quick_pull_error_stats
-      return render(json: { data: { error: hook_error.present? ? hook_error : flash.now[:error], error_details: { ruleViolations: violations } }, code: 422 }, status: :unprocessable_entity) if react_repos_view_enabled?
+      return render_web_commit_error(hook_error, violations) if react_repos_view_enabled?
       return delete
     end
 
@@ -2179,6 +2179,24 @@ class BlobController < GitContentController
 
       true
     end
+  end
+
+  # Internal: Renders the JSON error response for a web commit that failed a pre-receive hook or repository rule.
+  #
+  # When there are no rule violations, `ruleViolations` is omitted (nil via .presence) so the UI uses the `error` message to display the error.
+  # When there are rule violations, `ruleViolations` is included and the UI uses that to display the violations.
+  sig { params(hook_error: T.nilable(String), violations: T::Array[String]).returns(T.untyped) }
+  def render_web_commit_error(hook_error, violations)
+    render(
+      json: {
+        data: {
+          error: hook_error.present? ? hook_error : flash.now[:error],
+          error_details: { ruleViolations: violations.presence }, # .presence returns nil if empty, which is what we want here
+        },
+        code: 422,
+      },
+      status: :unprocessable_entity,
+    )
   end
 
   # Internal: Record and handle success for a blob action

@@ -196,7 +196,8 @@ module GitHub
         from: from,
         ip: request.ip,
         user_agent: request.env["HTTP_USER_AGENT"],
-        request_id: Rack::RequestId.get(request.env)
+        request_id: Rack::RequestId.get(request.env),
+        repo: params["repo"],
       )
       result = attempt.try_enterprise_password_auth
 

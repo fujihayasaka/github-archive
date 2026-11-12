@@ -428,6 +428,12 @@ class GitHub::Authentication::Attempt
     if password_result.success?
       clear_attempted_user_memoizations
       @attempted_user = password_result.user
+      if from?(:git)
+        GitHub.logger.info("Deprecated password authentication detected", {
+          "gh.auth.login" => password_result.user.display_login,
+          "gh.repo.path" => metadata[:repo],
+        })
+      end
       return password_result
     end
 

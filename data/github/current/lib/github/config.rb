@@ -494,6 +494,17 @@ module GitHub
     end
     attr_writer :checks_retention_enabled
 
+    # Whether the Statuses retention jobs are enabled.
+    # - Always enabled for dotcom.
+    # - On Enterprise, defaults to checks_retention_enabled? so behavior is
+    #   unchanged unless ENTERPRISE_STATUSES_RETENTION_ENABLED is set. This lets
+    #   statuses retention be controlled independently of check_suites retention.
+    def statuses_retention_enabled?
+      return @statuses_retention_enabled if defined?(@statuses_retention_enabled)
+      checks_retention_enabled?
+    end
+    attr_writer :statuses_retention_enabled
+
     # The threshold checks will be retained for before being archived
     # Populated by ENTERPRISE_CHECKS_RETENTION_ARCHIVE_THRESHOLD.
     def checks_retention_archive_threshold
