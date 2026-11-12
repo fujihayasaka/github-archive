@@ -260,6 +260,7 @@ class Integrations::ShowView < ViewModel # rubocop:todo ViewComponent/NoMoreView
   end
 
   def self.show_copilot_tab?(integration)
+    return false if GitHub.enterprise?
     !integration.copilot_extensions_hide_copilot_settings_tab?
   end
 

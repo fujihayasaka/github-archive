@@ -448,6 +448,7 @@ module IntegrationsControllerMethods
   end
 
   def copilot
+    return render_404 if GitHub.enterprise?
     # Return 404 if the copilot tab should be hidden
     return render_404 if current_integration.copilot_extensions_hide_copilot_settings_tab?
 
@@ -460,6 +461,7 @@ module IntegrationsControllerMethods
   end
 
   def update_copilot
+    return render_404 if GitHub.enterprise?
     if FeatureFlag.vexi.enabled?(:copilot_extensions_deprecation_marketplace, current_context, default: false)
       flash[:error] = "Copilot extensions are being deprecated and cannot be configured at this time."
       return redirect_to gh_settings_app_path(current_integration)

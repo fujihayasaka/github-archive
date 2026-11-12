@@ -4,6 +4,8 @@
 class AdvisoriesController < ApplicationController
   include AdvisoryDB::CvssScore
 
+  before_action :dotcom_required, only: [:get_package_url]
+
   depends_on_clusters ApplicationRecord::Mysql1,
     ApplicationRecord::Notify,
     ApplicationRecord::Collab,
@@ -37,6 +39,14 @@ class AdvisoriesController < ApplicationController
 
   def get_package_url # rubocop:todo GitHub/UseRestfulActions
     ecosystem, package_name = params[:ecosystem], params[:package_name]&.strip
+
+    # Reject package names that look like absolute or protocol-relative URIs to prevent SSRF via URI.join
+    if package_name.present? && package_name.match?(%r{\A([a-z][a-z0-9+\-.]*:)?//}i)
+      return respond_to do |format|
+        format.json { render json: { error: "invalid_package_name" }, status: :bad_request }
+      end
+    end
+
     advisory_package_url = AdvisoryPackageUrl.new(ecosystem, package_name)
 
     respond_to do |format|
