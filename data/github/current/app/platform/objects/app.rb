@@ -185,7 +185,17 @@ module Platform
         if ProximaAppSynchronization.synchronized_third_party?(@object)
           promise = Promise.resolve(::DotcomAppOwnerMetadata.find_by(local_app: @object))
         else
-          promise = @object.async_owner
+          # Fall back to the ghost user when a User/Org-owned app's owning account
+          # was hard-deleted (owner_type "User" but the row is gone). `owner` is a
+          # non-null field, so returning nil would surface an InvalidNull error;
+          # the ghost user keeps it resolvable and mirrors the REST serialization.
+          # Scoped to owner_type "User" so a missing Business owner isn't
+          # mislabelled as a ghost User (its :ea id resolves without the owner).
+          # The global id degrades independently (implements_node above): that
+          # needs the real owner's id, which is gone.
+          promise = @object.async_owner.then do |integration_owner|
+            integration_owner || (::User.ghost if @object.user_or_organization_owned?)
+          end
         end
 
         errors = []

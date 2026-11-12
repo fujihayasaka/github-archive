@@ -20,5 +20,18 @@ module SecretScanning::AccessControl
 
       current_user.id == assigned_user.id
     end
+
+    # Checks if a user is eligible to be assigned to an alert in this repository.
+    #
+    # This is the single source of truth for assignee eligibility and must match
+    # the scope used to build the assignee picker, otherwise the two can drift and
+    # a caller can assign an alert to a user the picker would never have offered.
+    sig { params(user: T.nilable(User)).returns(T::Boolean) }
+    def assignable?(user)
+      return false if user.nil?
+      return false if user.suspended?
+
+      @repository.writable_by?(user)
+    end
   end
 end

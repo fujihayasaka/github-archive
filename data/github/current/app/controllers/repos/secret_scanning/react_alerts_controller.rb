@@ -583,6 +583,9 @@ class Repos::SecretScanning::ReactAlertsController < AbstractRepositoryControlle
     return render json: { error: "Only single assignee assignment is currently supported" }, status: 422 if assignee_ids.length > 1
 
     assignee_error = alerts_service.set_alert_assignee(current_repository, number, assignee_ids, current_user)
+    if assignee_error.is_a?(SP::Errors::InvalidAssignee)
+      return render json: { error: assignee_error.message }, status: 422
+    end
     return render json: { error: "Unable to assign alert" }, status: :internal_server_error if assignee_error
 
     render json: nil, status: :ok

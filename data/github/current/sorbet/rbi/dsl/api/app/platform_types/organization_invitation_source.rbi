@@ -7,6 +7,9 @@
 
 module Api::App::PlatformTypes::OrganizationInvitationSource
   sig { returns(T::Boolean) }
+  def enterprise_organization_creation?; end
+
+  sig { returns(T::Boolean) }
   def member?; end
 
   sig { returns(T::Boolean) }
@@ -15,6 +18,7 @@ module Api::App::PlatformTypes::OrganizationInvitationSource
   sig { returns(T::Boolean) }
   def unknown?; end
 
+  ENTERPRISE_ORGANIZATION_CREATION = T.let("ENTERPRISE_ORGANIZATION_CREATION", String)
   MEMBER = T.let("MEMBER", String)
   SCIM = T.let("SCIM", String)
   UNKNOWN = T.let("UNKNOWN", String)
