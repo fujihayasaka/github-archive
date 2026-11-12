@@ -99,7 +99,7 @@ class PatchDiffController < ApplicationController
     return true if current_repository.public?
     parsed_token = User.verify_signed_auth_token token: params[:token],
                                                  scope: pull_request_authorization_token_scope_key
-    parsed_token.valid?
+    parsed_token.valid? && current_repository.readable_by?(parsed_token.user)
   end
 
   def find_pull_request

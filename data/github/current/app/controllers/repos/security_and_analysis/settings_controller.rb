@@ -183,7 +183,12 @@ class Repos::SecurityAndAnalysis::SettingsController < AbstractRepositoryControl
     # It is an availability risk to leave a transaction open while you query an external service over HTTP.
     # If it fails part way then users will just have to try applying the configuration again and we should ensure
     # that operation is idempotent.
-    security_params = params.except(:advanced_security_enabled)
+    #
+    # Only allow known form keys through to SettingsForm. This prevents
+    # injection of privileged internal signals (enablement_action,
+    # is_repo_creation, etc.) that could bypass enforced security
+    # configurations. See settings_form.rb for the allowlist definition.
+    security_params = params.slice(*SecurityProduct::SettingsForm::ALLOWED_FORM_KEYS)
     service_toggle_response = SecurityProduct::ServiceManager.new(current_repository).toggle_services_with_form_inputs(
       T.must(current_user),
       params: security_params,

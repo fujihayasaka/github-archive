@@ -257,6 +257,8 @@ module React
 
     sig { returns(T::Boolean) }
     def define_ssr_enabled
+      return false if GitHub.single_tenant_enterprise?
+      return false if Alloy::BaseRenderer.request_url.blank?
       return false if @app_actor.feature_flag_enabled?(:disable_react_ssr, default: false)
       return false if feature_enabled?(:disable_react_ssr, default: false)
 

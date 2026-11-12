@@ -29,9 +29,7 @@ class Stafftools::ReportsController < StafftoolsController
     only: [:index], optional: true
 
   def authentication_methods # rubocop:todo GitHub/UseRestfulActions
-    login_from_signed_auth_token("StafftoolsReports") ||
-    login_from_authorization_header_auth ||
-    super
+    login_from_authorization_header_auth || super
   end
 
   # Gets the port the request is coming in on. This is so we
@@ -55,54 +53,50 @@ class Stafftools::ReportsController < StafftoolsController
 
   def active_users # rubocop:todo GitHub/UseRestfulActions
     if csv?
-      send_report_data(:active_users, active_users_stafftools_reports_url(report_options({})))
+      send_report_data(:active_users, active_users_stafftools_reports_url)
     else
-      cache_report(:active_users, active_users_stafftools_reports_url(report_options))
+      cache_report(:active_users, active_users_stafftools_reports_url(format: "csv"))
     end
   end
 
   def all_users # rubocop:todo GitHub/UseRestfulActions
     if csv?
-      send_report_data(:all_users, all_users_stafftools_reports_url(report_options({})))
+      send_report_data(:all_users, all_users_stafftools_reports_url)
     else
-      cache_report(:all_users, all_users_stafftools_reports_url(report_options))
+      cache_report(:all_users, all_users_stafftools_reports_url(format: "csv"))
     end
   end
 
   def dormant_users # rubocop:todo GitHub/UseRestfulActions
     if csv?
-      send_report_data(:dormant_users, dormant_users_stafftools_reports_url(report_options({})))
+      send_report_data(:dormant_users, dormant_users_stafftools_reports_url)
     else
-      cache_report(:dormant_users, dormant_users_stafftools_reports_url(report_options))
+      cache_report(:dormant_users, dormant_users_stafftools_reports_url(format: "csv"))
     end
   end
 
   def suspended_users # rubocop:todo GitHub/UseRestfulActions
     if csv?
-      send_report_data(:suspended_users, suspended_users_stafftools_reports_url(report_options({})))
+      send_report_data(:suspended_users, suspended_users_stafftools_reports_url)
     else
-      cache_report(:suspended_users, suspended_users_stafftools_reports_url(report_options))
+      cache_report(:suspended_users, suspended_users_stafftools_reports_url(format: "csv"))
     end
   end
 
   def all_organizations # rubocop:todo GitHub/UseRestfulActions
     if csv?
-      send_report_data(:all_organizations, all_organizations_stafftools_reports_url(report_options({})))
+      send_report_data(:all_organizations, all_organizations_stafftools_reports_url)
     else
-      cache_report(:all_organizations, all_organizations_stafftools_reports_url(report_options))
+      cache_report(:all_organizations, all_organizations_stafftools_reports_url(format: "csv"))
     end
   end
 
   def all_repositories # rubocop:todo GitHub/UseRestfulActions
     if csv?
-      send_report_data(:all_repositories, all_repositories_stafftools_reports_url(report_options({})))
+      send_report_data(:all_repositories, all_repositories_stafftools_reports_url)
     else
-      cache_report(:all_repositories, all_repositories_stafftools_reports_url(report_options))
+      cache_report(:all_repositories, all_repositories_stafftools_reports_url(format: "csv"))
     end
-  end
-
-  def token_request_format? # rubocop:todo GitHub/UseRestfulActions
-    true
   end
 
   private
@@ -146,18 +140,8 @@ class Stafftools::ReportsController < StafftoolsController
     end
   end
 
-  def report_options(options = { format: "csv" })
-    if GitHub.private_mode_enabled? && logged_in?
-      options[:token] = current_user.signed_auth_token(
-        scope: "StafftoolsReports",
-        expires: 50.years.from_now,
-      )
-    end
-    options
-  end
-
   def conditional_sudo_filter
-    return if authorization_header_authed? || signed_token_authed?
+    return if authorization_header_authed?
     sudo_filter
   end
 

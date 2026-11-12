@@ -75,10 +75,16 @@ module SecretScanning
           repos_in_archived_state: T.nilable(T::Boolean),
           start_date: T.nilable(Date),
           end_date: T.nilable(Date),
-          token_filters: T.nilable(PushProtectionTokenFilters)
+          token_filters: T.nilable(PushProtectionTokenFilters),
         ).returns([T.nilable(SecretScanning::Models::PushProtectionMetrics), T.any(T::Boolean, StandardError, Twirp::Error)])
       end
-      def self.get_push_protection_metrics(scope, actor, repo_ids: [], exclude_repo_ids: [], repo_owners: nil, repos_in_archived_state: nil, start_date: nil, end_date: nil, token_filters: nil)
+      def self.get_push_protection_metrics(
+        scope, actor,
+        repo_ids: [], exclude_repo_ids: [],
+        repo_owners: nil, repos_in_archived_state: nil,
+        start_date: nil, end_date: nil,
+        token_filters: nil
+      )
         request = {
           owner_id: scope.id,
           owner_scope: self.to_proto_owner_scope(scope),
@@ -218,31 +224,47 @@ module SecretScanning
           T::Array[SecretScanning::Models::BypassRequestStatusCountMetric],
         ])
       end
-      def self.get_delegated_bypass_metrics(scope, actor, repo_ids: [], exclude_repo_ids: [], repo_owners: nil, repos_in_archived_state: nil, start_date: nil, end_date: nil, token_filters: nil, bypass_request_ids: [])
+      def self.get_delegated_bypass_metrics(
+        scope, actor,
+        repo_ids: nil, exclude_repo_ids: [],
+        # NOTE: I think based on the controller's filter/request_hash code, this is nil for org scope, not nil for business scope?
+        repo_owners: nil,
+        repos_in_archived_state: nil,
+        start_date: nil, end_date: nil, token_filters: nil,
+        bypass_request_ids: []
+      )
         if scope.is_a?(Business)
           owner_ids = []
-          scope.organizations.in_batches { |org| owner_ids.concat(org.pluck(:id)) }
-          if SecurityProduct::Permissions::BusinessAuthz.new(scope, actor: actor).can_view_user_owned_repository_alerts?
-            ::SecurityOverviewAnalytics::Repository.where(business_id: scope.id, owner_type: "USER").in_batches { |config| owner_ids.concat(config.pluck(:owner_id)) }
+          # Use owner ids from repo_owners filter if exists. Otherwise get all owners in the business.
+          if repo_owners
+            if repo_owners.owner_type != RepoOwnerType::User
+              org_ids = repo_owners.org_ids
+              owner_ids.concat(org_ids) if org_ids
+            end
+            if repo_owners.owner_type != RepoOwnerType::Organization
+              if SecurityProduct::Permissions::BusinessAuthz.new(scope, actor: actor).can_view_user_owned_repository_alerts?
+                user_ids = repo_owners.user_ids
+                owner_ids.concat(user_ids) if user_ids
+              end
+            end
+          else
+            scope.organizations.in_batches { |org| owner_ids.concat(org.pluck(:id)) }
+            if SecurityProduct::Permissions::BusinessAuthz.new(scope, actor: actor).can_view_user_owned_repository_alerts?
+              ::SecurityOverviewAnalytics::Repository.where(business_id: scope.id, owner_type: "USER").in_batches { |config| owner_ids.concat(config.pluck(:owner_id)) }
+            end
           end
         else
           owner_ids = [scope.id]
         end
 
-        include_repo_ids = repo_ids || []
-        exclude_repo_ids = exclude_repo_ids || []
+        exclude_repo_ids ||= []
         if repo_owners
-          owner_repo_ids = []
           if repo_owners.owner_type != RepoOwnerType::User
-            owner_repo_ids.concat(::SecurityOverviewAnalytics::Repository.where(business_id: scope.id, owner_type: "ORGANIZATION", owner_id: repo_owners.org_ids).pluck(:repository_id)) if repo_owners.org_ids
             exclude_repo_ids.concat(::SecurityOverviewAnalytics::Repository.where(business_id: scope.id, owner_type: "ORGANIZATION", owner_id: repo_owners.exclude_org_ids).pluck(:repository_id)) if repo_owners.exclude_org_ids
           end
-
           if repo_owners.owner_type != RepoOwnerType::Organization
-            owner_repo_ids.concat(::SecurityOverviewAnalytics::Repository.where(business_id: scope.id, owner_type: "USER", owner_id: repo_owners.user_ids).pluck(:repository_id)) if repo_owners.user_ids
             exclude_repo_ids.concat(::SecurityOverviewAnalytics::Repository.where(business_id: scope.id, owner_type: "USER", owner_id: repo_owners.exclude_user_ids).pluck(:repository_id)) if repo_owners.exclude_user_ids
           end
-          include_repo_ids += owner_repo_ids
         end
 
         total_response_time = 0
@@ -253,39 +275,39 @@ module SecretScanning
         pending_count = 0
         bypass_requests_count = 0
 
-        page_size = 10_000
-
         do_not_ignore_expired_exemptions = SecretScanning::Features::FeatureFlagHelper.feature_flag_enabled_in_hierarchy?(
           scope,
           SecretScanning::Features::FeatureFlagHelper::FeatureFlags::DO_NOT_FILTER_EXPIRED_EXEMPTION_REQUESTS
         )
 
-        Repositories.domain.repo_ids_by_owners(
+        queried_repo_ids = Repositories.domain.repo_ids_by_owners(
           owner_ids: owner_ids,
-          include_repo_ids: include_repo_ids.present? || repo_owners ? include_repo_ids : nil,
+          # Protect against repo_ids possibly being an empty array, which causes an empty in clause (so 0 results)
+          include_repo_ids: repo_ids&.empty? ? nil : repo_ids,
           exclude_repo_ids: exclude_repo_ids,
           exclude_archived: !repos_in_archived_state.nil? && !repos_in_archived_state,
           archived_only: repos_in_archived_state.present?,
-        ) do |repo_ids_page|
-          repo_ids_page.each_slice(page_size) do |repo_ids_slice|
-            exemption_request_ids = Rules.domain.exemption_request_ids_by_repo_ids(
-              repo_ids: repo_ids_slice.to_a,
-              request_type: SecretScanning::Constants::EXEMPTION_REQUEST_TYPE,
-              start_date: start_date,
-              end_date: end_date,
-              ids: token_filters ? bypass_request_ids : nil,
-              filter_expired: !do_not_ignore_expired_exemptions
-            )
-            metrics = Rules.domain.exemption_metrics(exemption_request_ids: exemption_request_ids)
+        )
+        # Default max in-clause size results in too many queries, and the individual queries are fast enough.
+        # So we can try a bigger batch size
+        queried_repo_ids&.each_slice(GH::Domain::Base::MAX_REPOSITORY_ID_IN_CLAUSE_SIZE * 5) do |repo_ids_slice|
+          exemption_request_ids = Rules.domain.exemption_request_ids_by_repo_ids(
+            repo_ids: repo_ids_slice,
+            request_type: SecretScanning::Constants::EXEMPTION_REQUEST_TYPE,
+            start_date: start_date,
+            end_date: end_date,
+            ids: token_filters ? bypass_request_ids : nil,
+            filter_expired: !do_not_ignore_expired_exemptions
+          )
+          metrics = Rules.domain.exemption_metrics(exemption_request_ids: exemption_request_ids)
 
-            bypass_requests_count += metrics.request_count
-            approved_count += metrics.approved_count
-            rejected_count += metrics.rejected_count
-            cancelled_count += metrics.cancelled_count
-            pending_count += metrics.pending_count
-            response_count += metrics.response_count
-            total_response_time += metrics.total_response_time
-          end
+          bypass_requests_count += metrics.request_count
+          approved_count += metrics.approved_count
+          rejected_count += metrics.rejected_count
+          cancelled_count += metrics.cancelled_count
+          pending_count += metrics.pending_count
+          response_count += metrics.response_count
+          total_response_time += metrics.total_response_time
         end
 
         mean_response_time = Integer(response_count > 0 ? total_response_time / response_count : 0)

@@ -48,13 +48,20 @@ module User::AdvancedSecurityDependency
     return { repos: [], total_repos_count: 0 } unless self.organization? && self.advanced_security_purchased?
 
     total_repos = self.repositories.count
-    response = GitHub::Turboghas.client.get_repositories(Turboghas::Proto::GetRepositoriesRequest.new(
-      owner_id: self.id,
-      cursor: Turboghas::Proto::Cursor.new(offset: [0, page].max * page_size),
-      limit: page_size,
-      features: sku.features
-    ))
-    raise StandardError.new(response.error) if response.error.present?
+    begin
+      response = GitHub::Turboghas.client.get_repositories(Turboghas::Proto::GetRepositoriesRequest.new(
+        owner_id: self.id,
+        cursor: Turboghas::Proto::Cursor.new(offset: [0, page].max * page_size),
+        limit: page_size,
+        features: sku.features
+      ))
+      raise AdvancedSecurityLicense::TurboghasError.new(response.error.to_s) if response.error.present?
+    rescue AdvancedSecurityLicense::TurboghasError
+      raise
+    rescue StandardError => e
+      raise AdvancedSecurityLicense::TurboghasError, e.message
+    end
+
     {
       repos: response.data.repositories.map do |repo|
         {

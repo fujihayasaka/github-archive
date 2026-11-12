@@ -285,6 +285,7 @@ class RemoveUsersOrganizationOrchestration < OrganizationOrchestration
   end
 
   step :revoke_org_member_copilot_space_access do
+    return if GitHub.enterprise?
     organizations.each do |org|
       users.each do |user|
         CopilotSpaces::RevokeOrgMemberCopilotSpaceAccessJob.perform_later(org, user)

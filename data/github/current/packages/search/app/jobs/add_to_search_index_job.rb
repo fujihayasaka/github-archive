@@ -234,27 +234,22 @@ class AddToSearchIndexJob < ApplicationJob
 
   def custom_deduped_restraint(document_type, document_id, &block)
     document_key = "#{self.class.name}-#{document_type}-#{document_id}"
-    if ignore_duplicated_locked_reindex_requests?(document_type)
-      unflushed_count = incr_duplicated_locked_reindex_attempts_count(document_key)
-      if unflushed_count == RUNNING_JOBS_PER_KEY
-        block.call
-      elsif unflushed_count == RUNNING_JOBS_PER_KEY + 1
-        # Causes a retry for the document
-        raise GitHub::Restraint::UnableToLock
-      else
-        # Silently ignore the request since there is already an unflushed job in the queue
-        GitHub.logger.info({
-          "gh.job.name" => self.class.name,
-          "gh.elasticsearch.document.id" => document_id,
-          "gh.elasticsearch.document.type" => document_type,
-          "gh.elasticsearch.action" => "index",
-          "gh.elasticsearch.document.locked_reindex_attempts" => unflushed_count,
-          "message" => "Ignoring duplicate reindex request for #{document_key}",
-        })
-      end
+    unflushed_count = incr_duplicated_locked_reindex_attempts_count(document_key)
+    if unflushed_count == RUNNING_JOBS_PER_KEY
+      block.call
+    elsif unflushed_count == RUNNING_JOBS_PER_KEY + 1
+      # Causes a retry for the document
+      raise GitHub::Restraint::UnableToLock
     else
-      # Use default GitHub::Restraint logic if dedupe feature is disabled
-      restraint.lock!(document_key, RUNNING_JOBS_PER_KEY, JOB_LOCK_TTL) { block.call }
+      # Silently ignore the request since there is already an unflushed job in the queue
+      GitHub.logger.info({
+        "gh.job.name" => self.class.name,
+        "gh.elasticsearch.document.id" => document_id,
+        "gh.elasticsearch.document.type" => document_type,
+        "gh.elasticsearch.action" => "index",
+        "gh.elasticsearch.document.locked_reindex_attempts" => unflushed_count,
+        "message" => "Ignoring duplicate reindex request for #{document_key}",
+      })
     end
   end
 
@@ -398,13 +393,5 @@ class AddToSearchIndexJob < ApplicationJob
     LUA
 
     redis.eval(script, keys: [key], argv: [JOB_LOCK_TTL.to_i])
-  end
-
-  def ignore_duplicated_locked_reindex_requests?(document_type)
-    FeatureFlag.vexi.enabled?(
-      :ignore_duplicated_locked_reindex_requests,
-      document_type,  # allows us to control behavior to only hit certain document types
-      default: false
-    )
   end
 end
