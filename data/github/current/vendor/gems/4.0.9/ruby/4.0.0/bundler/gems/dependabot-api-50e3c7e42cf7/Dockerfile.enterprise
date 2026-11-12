@@ -1,0 +1,60 @@
+###############################################################
+# STAGE 1 - BUILD
+###############################################################
+# From https://github.com/github/gh-base-image/pkgs/container/gh-base-image%2Fruby-builder
+FROM ghcr.io/github/gh-base-image/ruby-builder:v3.3-focal-20251117150931 AS build
+ARG GITHUB_SHA=latest
+ENV BUNDLE_GEMFILE="/opt/dependabot/Gemfile" \
+    BUNDLE_PATH="/opt/dependabot/vendor/bundle" \
+    BUNDLE_PATH__SYSTEM=false \
+    BUNDLE_WITHOUT="development:test" \
+    DEBIAN_FRONTEND=noninteractive \
+    ENTERPRISE=1 \
+    GITHUB_SHA=${GITHUB_SHA} \
+    HOME="/opt/dependabot" \
+    LANG=C.UTF-8 \
+    RAILS_ENV=production
+WORKDIR /opt/dependabot
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends \
+      # WARNING: Any changes to this list need to also get reflected in `dpkg.manifest`
+      default-mysql-client \
+      git \
+      libicu-dev \
+      liblzma-dev \
+      libsodium23 && \
+    echo 'gem: --no-document' >> /etc/gemrc
+COPY . .
+# Obfuscate Ruby source code because it's being sent to customers as part of GHES
+RUN find app lib gen -iname '*.rb' -print0 | xargs -0 "ruby" "/bin/tools/ruby-concealer.rb" 2>&1 | awk '!/already concealed/'
+RUN bundle install --local --jobs=$(nproc) && rake -f lib/tasks/enterprise.rake enterprise:tarball
+
+FROM ghcr.io/github/gh-base-image/go-builder-focal:20251120-151711-g12be639d2@sha256:f6a8752369f6535bb046614254f6f77f546aff6975590e792d7df8cce6352492 AS gobuild
+RUN GOBIN=/usr/local/bin go install github.com/ddollar/forego@v0.16.1
+
+################################################################
+## STAGE 2 - RUN. Use base image for main app
+################################################################
+# From https://github.com/github/gh-base-image/pkgs/container/gh-base-image%2Fruby-base
+FROM ghcr.io/github/gh-base-image/ruby-base:v3.3-focal-20251117150943
+ARG GITHUB_SHA=latest
+ENV BUNDLE_DEPLOYMENT=true \
+    BUNDLE_GEMFILE="/opt/dependabot/Gemfile" \
+    BUNDLE_PATH="/opt/dependabot/vendor/bundle" \
+    BUNDLE_PATH__SYSTEM=false \
+    BUNDLE_WITHOUT="development:test" \
+    DEBIAN_FRONTEND=noninteractive \
+    GITHUB_SHA=${GITHUB_SHA} \
+    HOME="/opt/dependabot" \
+    LANG=C.UTF-8 \
+    RAILS_ENV=production
+LABEL org.opencontainers.image.source=https://github.com/github/dependabot-api
+COPY --from=build /opt/dependabot/pkg/*.tar.gz /opt/
+COPY --from=gobuild /usr/local/bin/forego /usr/local/bin/foreman
+COPY script/bootstrap-ghes /usr/local/bin/bootstrap.sh
+COPY dpkg.manifest /etc/dependabot/dpkg.manifest
+RUN sh /usr/local/bin/bootstrap.sh
+WORKDIR /opt/dependabot
+USER dependabot
+COPY /script/entrypoint.sh /entrypoint.sh
+ENTRYPOINT ["/usr/bin/dumb-init", "--", "/entrypoint.sh"]

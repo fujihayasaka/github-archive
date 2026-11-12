@@ -1,0 +1,132 @@
+#!/bin/bash
+
+# script/lint Runs golangci-lint on the current repository.
+
+set -e
+
+# Get configuration from environment variables (set by workflow) or fallback to parsing workflow file
+cmdVersion="${LINT_VERSION:-$(sed -n 's/^[[:space:]]*LINT_VERSION:[[:space:]]*\(.*\)$/\1/p' .github/workflows/lint.yml)}"
+goerrorslint_pkgs="${GOERRORSLINT_PKGS:-$(sed -n 's/^[[:space:]]*GOERRORSLINT_PKGS:[[:space:]]*\(.*\)$/\1/p' .github/workflows/lint.yml)}"
+
+lint_skip_file=".github/lint_skip.txt"
+lint_skip=""
+
+load_lint_skip() {
+  if [ -n "$LINT_SKIP" ]; then
+    lint_skip="$LINT_SKIP"
+    return
+  fi
+
+  if [ -f "$lint_skip_file" ]; then
+    # Collapse non-empty lines into a space-separated list
+    lint_skip=$(sed '/^[[:space:]]*$/d' "$lint_skip_file" | tr '\n' ' ')
+    lint_skip=$(echo "$lint_skip" | tr -s ' ' | sed 's/^ //;s/ $//')
+  fi
+}
+
+load_lint_skip
+
+# Get all child folders of the cmd/ and internal/ directories in the format of:
+# e.g. cmd/child1/... cmd/child2/... internal/child1/... internal/child2/...
+# we'll then remove all items in that list that also appear in the lint_skip
+# variable to enable an opt-out mechanism for linting directories.
+# lint_skip is expected to be a space-separated list of paths in the same format:
+# e.g. lint_skip="cmd/http/... internal/experimental/..."
+all_dirs=$(find cmd internal -mindepth 1 -maxdepth 1 -type d ! -path "*/.*" -exec bash -c 'echo -n "{}"/...\ ' \;)
+if [ -n "$lint_skip" ]; then
+  for skip in $lint_skip; do
+    all_dirs="${all_dirs//$skip/}"
+  done
+  all_dirs=$(echo "$all_dirs" | tr -s ' ' | sed 's/^ //;s/ $//')
+fi
+
+# Now set lint_args to the resulting list of directories
+lint_args="${all_dirs}"
+
+glob="./..."
+# if args are provided, use them as the glob pattern
+if [ $# -gt 0 ]; then
+  glob="$*"
+  # when using command line args as glob, clear lint_args to avoid duplication
+  lint_args=""
+elif [ -n "$lint_args" ]; then
+  glob="$lint_args"
+  # when using lint_args as glob, clear it to avoid duplication
+  lint_args=""
+fi
+
+
+check_golangci_version() {
+    # Use provided version or default to latest stable
+    local defaultCmdVersion="v2.7.2"  # Set a reasonable default
+    if [ -z "$cmdVersion" ]; then
+      cmdVersion="$defaultCmdVersion"
+    fi
+
+    INFO "Checking for existing golangci-lint version: $cmdVersion"
+    # newer versions of golangci-lint have a --version flag, but older versions don't
+    if command -v golangci-lint >/dev/null 2>&1 && (golangci-lint --version | grep "$cmdVersion" &> /dev/null || golangci-lint | grep "$cmdVersion" &> /dev/null); then
+      INFO "found golangci-lint version $cmdVersion"
+      return
+    fi
+
+    INFO "No golangci-lint found with version $cmdVersion, Installing.."
+    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(go env GOPATH)/bin "${cmdVersion}"
+}
+
+FATAL() {
+    echo -e "${FATAL}$1${NC}"
+    exit 1
+}
+
+INFO() {
+       echo -e "${INFO}$1${NC}"
+}
+
+check_golangci_version
+
+gobin_path="${GOBIN:-$(go env GOPATH)/bin}"
+
+golangci_cmd=("${gobin_path}/golangci-lint" "run")
+
+if [ -n "$linter_config_file" ]; then
+  INFO "Running golangci-lint with config file: ${linter_config_file} and lint args: ${glob}"
+  golangci_cmd+=("--config" "$linter_config_file")
+else
+  INFO "Running golangci-lint with default config and lint args: ${glob}"
+fi
+
+# Add the glob pattern
+golangci_cmd+=($glob)
+
+# Execute the command
+"${golangci_cmd[@]}"
+
+INFO "Attempting to build and run custom linters"
+
+# Create a custom version of golangci lint with our custom linters
+# Linter takes about 10 seconds to build, but we can skip this when our custom linter wouldn't change anyway, so we sha the various dependencies
+customgclsha=$({ find ${PWD}/pkg/goerrorslint -type f -exec sha256sum {} + && sha256sum ./.custom-gcl.yml && ${gobin_path}/golangci-lint --version; } | sort | sha256sum | awk '{print $1}')
+if [ ! -f ${PWD}/bin/custom-gcl ] || [ ! -f ${PWD}/bin/customgcl.sum ] || [ "$(cat ${PWD}/bin/customgcl.sum)" != "$customgclsha" ]
+then
+	INFO "Creating custom gcl with plugins"
+	if ! ${gobin_path}/golangci-lint custom
+	then
+		WARN "unable to build custom linter, exiting"
+		exit 0
+	fi
+
+	printf '%s' "$customgclsha" > ${PWD}/bin/customgcl.sum
+else
+	INFO "custom gcl already exists"
+fi
+
+golangci_cmd=("./bin/custom-gcl" "run" "--config=./.golangci-custom.yml")
+
+INFO "Running custom linter with lint args: ${glob}"
+
+# Add the glob pattern
+golangci_cmd+=($glob)
+
+# Execute the command
+"${golangci_cmd[@]}"

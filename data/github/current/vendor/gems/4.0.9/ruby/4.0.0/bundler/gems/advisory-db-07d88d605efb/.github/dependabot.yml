@@ -1,0 +1,166 @@
+---
+version: 2
+registries:
+  ghcr:
+    type: docker-registry
+    url: ghcr.io
+    username: PAT
+    password: ${{secrets.CONTAINER_BUILDER_TOKEN}}
+updates:
+- package-ecosystem: bundler
+  vendor: true
+  directory: "/"
+  schedule:
+    interval: weekly
+  groups:
+    # updating rails is a big deal and we should make sure we do it only intentionally
+    bundler-rails:
+      patterns:
+      - "rails"
+    # we think these are all unlikely to cause a regression and can be updated just by merging with passing tests
+    bundler-low-regression:
+      patterns:
+      - "mysql2"
+      - "google-protobuf"
+      - "zstd-ruby"
+      - "dartsass-rails"
+      - "inline_svg"
+      - "jsbundling-rails"
+      - "octicons*"
+      - "turbolinks"
+      - "view_component"
+      - "will_paginate"
+      - "aasm"
+      - "after_commit_everywhere"
+      - "paper_trail"
+      - "dogstatsd-ruby"
+      - "rails_semantic_logger"
+      - "git"
+      - "jwt"
+      - "octokit"
+      - "cvss-suite"
+      - "diffy"
+      - "json_schema"
+      - "matrix"
+      - "naught"
+      - "semantic"
+      - "slack_progress_bar"
+      - "slack-ruby-client"
+      - "tomlrb"
+      - "diff-lcs"
+      - "charlock_holmes"
+      - "sprockets-rails"
+      exclude-patterns:
+      # json_schemer has an incompatible major update
+      - "json_schemer"
+    # updating github dependencies can be a little risky and sometimes requires manual change, should be tested
+    bundler-github:
+      patterns:
+      - "failbot"
+      - "github-semantic_conventions"
+      - "github-telemetry"
+      - "hydro-client"
+      - "feature-flags-client"
+      exclude-patterns:
+      # manually vendored
+      - "chatops-controller"
+      - "monolith-twirp-features-core"
+      # local
+      - "advisory_db_toolkit"
+    # updating primer almost always requires a smoke test and manual updates to make sure asset bundles etc. are updated.
+    bundler-github-primer:
+      patterns:
+      - "primer*"
+    # we don't anticipate problems with these updates but they are fundamental to both web and async serving behavior
+    bundler-infra:
+      patterns:
+      - "resque*"
+      - "puma"
+    # Add any dev or test dependency here, they can be batch merged with passing tests
+    bundler-dev:
+      patterns:
+      - "capybara"
+      - "database_cleaner"
+      - "dotenv-rails"
+      - "erb_lint"
+      - "factory_bot_rails"
+      - "faker"
+      - "json_dumper"
+      - "mechanize"
+      - "minitest*"
+      - "mocha"
+      - "pry-byebug"
+      - "pry-rails"
+      - "rails-controller-testing"
+      - "rollup"
+      - "rubocop"
+      - "rubocop-performance"
+      - "rubocop-rails"
+      - "selenium-webdriver"
+      - "solargraph"
+      - "timecop"
+      - "vcr"
+      - "webmock"
+      - "listen"
+      - "web-console"
+  open-pull-requests-limit: 10
+- package-ecosystem: npm
+  directory: "/"
+  schedule:
+    interval: weekly
+  groups:
+    # we think these are all unlikely to cause a regression and can be updated just by merging with passing tests
+    npm-low-regression:
+      patterns:
+      - "@babel/*"
+      - "babel*"
+      - "*eslint*"
+      - "*-loader"
+      - "stylelint*"
+      - "*typescript"
+      - "*webpack*"
+      - "sass*"
+      - "mini-css-extract-plugin"
+      - "postcss"
+      - "selector-observer"
+      - "turbolinks"
+      - "delegated-events"
+    # these require basic smoke testing of the UI. All of these are internal references and have been seen to break things in the past.
+    # we're still ok updating these regularly as long as a smoke test works, they are almost always easy to either revert or fix forward.
+    npm-manual-verification:
+      patterns:
+      - "@primer/*"
+      - "@github/*"
+      - "github*"
+    # only upgrade these intentionally. Rails upgrades can be a little risky by their nature.
+    npm-intentional:
+      patterns:
+      - "@rails/*"
+  # Starting with ESLint 9, users must migrate to a new configuration file format.  We are not ready to do that yet.
+  # Once https://github.com/github/team-advisory-database/issues/5127 is completed, we can remove the ignore for `eslint`.
+  ignore:
+    - dependency-name: "eslint"
+      update-types: ["version-update:semver-major"]
+  open-pull-requests-limit: 10
+- package-ecosystem: github-actions
+  directory: "/"
+  schedule:
+    interval: weekly
+  ignore:
+    - dependency-name: "github/internal-actions"
+  groups:
+    all-github-actions:
+      patterns:
+      - "*"
+  open-pull-requests-limit: 10
+# https://thehub.github.com/epd/engineering/dev-practicals/containers/container-development/adopt-base-images-for-service/
+- package-ecosystem: "docker"
+  directory: "/"
+  schedule:
+    interval: weekly
+  registries:
+    - ghcr
+  groups:
+    all-docker-images:
+      patterns:
+      - "*"

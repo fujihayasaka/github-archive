@@ -489,6 +489,10 @@ class OauthAuthorization < ApplicationRecord::Domain::Integrations
   end
 
   def clear_mobile_auth_keys
+    # User#gh_mobile_auth_enabled? disables mobile authentication on GHES; see
+    # https://github.com/github/github/blob/8c8452c4bb623da5419a470281f879b2140be5bf/packages/authentication/app/models/user/two_factor_authentication_dependency.rb#L180 .
+    # The cleanup queue is also disabled in config/background_job_queues/authnd.yml.
+    return if GitHub.single_tenant_enterprise?
     return unless user && accesses.any?
     DestroyMobileAuthDeviceKeysJob.perform_later(user, id, application, accesses.pluck(:id))
   end

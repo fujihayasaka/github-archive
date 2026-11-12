@@ -1,0 +1,40 @@
+# This template provides a generic setup for Go-based projects with optional Node.js, Docker, and caching support.
+name: "Copilot Setup Steps"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest-xl
+    permissions:
+      contents: read
+      id-token: write # for OIDC/goproxy
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: OIDC Setup for goproxy
+        uses: github/setup-goproxy@v1.1.0
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      # Optionally cache Go build cache
+      - name: Get Go cache path
+        id: get-cache-paths
+        run: echo "go-build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Go build cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.get-cache-paths.outputs.go-build }}
+          key: ${{ runner.os }}-go-build-${{ hashFiles('**/go.sum') }}
+
+      - name: Download Go dependencies
+        run: go mod download
+
+      - name: Install Go Linter
+        uses: github/go-linter/install-only@main

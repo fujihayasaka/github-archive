@@ -1,0 +1,531 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+run-name: '<< .RunName >>'
+
+permissions:
+  deployments: write  # Required temporarily because we are technically "deploying" to Copilot
+
+on: dynamic
+
+jobs:
+  << .JobName >>:
+    runs-on: << index .Customization "runs-on" >>
+    timeout-minutes: << index .Customization "timeout-minutes" >>
+    << index .Customization "permissions" >>
+    << index .Customization "snapshot" >>
+    << index .Customization "container" >>
+    << index .Customization "services" >>
+    environment: copilot
+    env:
+      SHOULD_CONTINUE: 'true'  # This variable is used to short-circuit steps if prerequisites fail
+      << if or (contains .Secrets "HTTP_PROXY") (contains .Variables "HTTP_PROXY") >>
+      HTTP_PROXY: '${{ secrets.HTTP_PROXY || vars.HTTP_PROXY }}'
+      << end >>
+      << if or (contains .Secrets "HTTPS_PROXY") (contains .Variables "HTTPS_PROXY") >>
+      HTTPS_PROXY: '${{ secrets.HTTPS_PROXY || vars.HTTPS_PROXY }}'
+      << end >>
+      << if or (contains .Secrets "NO_PROXY") (contains .Variables "NO_PROXY") >>
+      NO_PROXY: '${{ secrets.NO_PROXY || vars.NO_PROXY }}'
+      << end >>
+      << if or (contains .Secrets "NODE_EXTRA_CA_CERTS") (contains .Variables "NODE_EXTRA_CA_CERTS") >>
+      NODE_EXTRA_CA_CERTS: '${{ secrets.NODE_EXTRA_CA_CERTS || vars.NODE_EXTRA_CA_CERTS }}'
+      << end >>
+      << if or (contains .Secrets "SSL_CERT_FILE") (contains .Variables "SSL_CERT_FILE") >>
+      SSL_CERT_FILE: '${{ secrets.SSL_CERT_FILE || vars.SSL_CERT_FILE }}'
+      << end >>
+    steps:
+      - name: Validate runner OS
+        shell: bash
+        run: |
+          << if .WindowsOSRunnerEnabled >>
+          if [[ "${{ runner.os }}" != "Linux" && "${{ runner.os }}" != "Windows" ]]; then
+            echo "SHOULD_CONTINUE=false" >> $GITHUB_ENV
+            echo "${{ runner.os }} is not currently supported. Only Linux and Windows are supported."
+            exit 1
+          fi
+          << else >>
+          if [[ "${{ runner.os }}" != "Linux" ]]; then
+            echo "SHOULD_CONTINUE=false" >> $GITHUB_ENV
+            echo "${{ runner.os }} is not currently supported. Only Linux is supported."
+            exit 1
+          fi
+          << end >>
+
+      << if ne .IsDevelopmentEnvironment true >>
+      # Firewall must be disabled if:
+      # - OS is Windows (firewall not supported on Windows), OR
+      # - Runner is self-hosted (can't guarantee firewall support on self-hosted runners)
+      - name: Validate firewall settings (Linux)
+        if: ${{ runner.environment == 'self-hosted' && runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          if [ "$COPILOT_AGENT_FIREWALL_ENABLED" == "true" ]; then
+            echo "SHOULD_CONTINUE=false" >> $GITHUB_ENV
+            echo "You have configured Copilot coding agent to use self-hosted GitHub Actions runners in copilot-setup-steps.yml, but the agent firewall is enabled. You must disable the agent firewall in the repository's settings to use self-hosted runners. For more information, see https://gh.io/cca-self-hosted-disable-firewall."
+            exit 1
+          fi
+        env:
+          COPILOT_AGENT_FIREWALL_ENABLED: "${{ vars.COPILOT_AGENT_FIREWALL_ENABLED || << .AgentFirewallEnabledDefault >> }}"
+
+      - name: Validate firewall settings (Windows)
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
+        run: |
+          if ($env:COPILOT_AGENT_FIREWALL_ENABLED -eq "true") {
+            "SHOULD_CONTINUE=false" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "The agent firewall is enabled, but firewall is not supported on Windows runners. You must disable the agent firewall in the repository's settings to use Windows runners. For more information, see https://gh.io/cca-disable-firewall."
+            exit 1
+          }
+        env:
+          COPILOT_AGENT_FIREWALL_ENABLED: "${{ vars.COPILOT_AGENT_FIREWALL_ENABLED || << .AgentFirewallEnabledDefault >> }}"
+      << end >>
+
+      - name: Start downloading Playwright MCP server in the background (Linux)
+        if: ${{ env.SHOULD_CONTINUE == 'true' && << .MCPEnabled >> && runner.os == 'Linux' }}
+        shell: bash # Bash is required for the disown command, used to run installation in the background
+        run: |
+          if ! command -v npm &> /dev/null; then
+            echo "Warning: npm is not available on this runner. Skipping Playwright MCP pre-download. The MCP server may be installed later if needed."
+            exit 0
+          fi
+          echo "Starting background installation of @playwright/mcp..."
+          npm install -g @playwright/mcp@${{ env.PLAYWRIGHT_VERSION }} > /tmp/npm_install.log 2>&1 & disown
+          echo "Started installing @playwright/mcp@${{ env.PLAYWRIGHT_VERSION }} in the background"
+        env:
+          PLAYWRIGHT_VERSION: "<< .PlaywrightVersion >>"
+
+      - name: Start downloading Playwright MCP server in the background (Windows)
+        if: ${{ env.SHOULD_CONTINUE == 'true' && << .MCPEnabled >> && runner.os == 'Windows' }}
+        shell: pwsh
+        run: |
+          if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+            Write-Host "Warning: npm is not available on this runner. Skipping Playwright MCP pre-download. The MCP server may be installed later if needed."
+            exit 0
+          }
+          Write-Host "Starting background installation of @playwright/mcp..."
+          $job = Start-Job -ScriptBlock {
+            param($version)
+            npm install -g "@playwright/mcp@$version" 2>&1 | Out-File -FilePath "$env:TEMP\npm_install.log"
+          } -ArgumentList $env:PLAYWRIGHT_VERSION
+          Write-Host "Started installing @playwright/mcp@$($env:PLAYWRIGHT_VERSION) in the background (Job ID: $($job.Id))"
+        env:
+          PLAYWRIGHT_VERSION: "<< .PlaywrightVersion >>"
+
+      # Download the runtime code and related binaries, but we don't want to be that specific in the name
+      - name: Prepare Copilot (Linux)
+        if: ${{ env.SHOULD_CONTINUE == 'true' && runner.os == 'Linux' }}
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -o pipefail
+          echo "Preparing Copilot..." && \
+          echo "Runtime version: $COPILOT_AGENT_RUNTIME_VERSION" && \
+          echo "COPILOT_AGENT_START_TIME_SEC=$(date +%s)" >> $GITHUB_ENV
+          echo "COPILOT_AGENT_TIMEOUT_MIN=<< index .Customization "timeout-minutes" >>" >> $GITHUB_ENV
+          mkdir -p "runtime-logs" "cca-mcp-debug-logs" && \
+          MAX_RETRIES=3 && RETRY_COUNT=0 && \
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do \
+            if [ -n "$GITHUB_COPILOT_ACTION_OVERRIDE_DOWNLOAD_URL" ]; then \
+              curl -f -D "runtime-logs/download.log" -H "Authorization: Bearer $GITHUB_COPILOT_API_TOKEN" $GITHUB_COPILOT_ACTION_OVERRIDE_DOWNLOAD_URL 2>> "runtime-logs/download.log" | tar -zxv >> "runtime-logs/download.log" 2>&1; \
+            else \
+              curl -f -D "runtime-logs/download.log" $GITHUB_COPILOT_ACTION_DOWNLOAD_URL 2>> "runtime-logs/download.log" | tar -zxv >> "runtime-logs/download.log" 2>&1; \
+            fi; \
+            if [ $? -eq 0 ]; then break; fi; \
+            RETRY_COUNT=$((RETRY_COUNT + 1)); \
+            sleep 1; \
+          done && \
+          echo "Finished downloading and extracting runtime" && \
+          if [ ! -d "copilot-developer-action-main" ]; then mv copilot-developer-action-* copilot-developer-action-main >> "runtime-logs/download.log" 2>&1; fi && \
+          ./copilot-developer-action-main/script/setup.sh "${{ runner.temp }}/ghcca-node" && \
+          echo "Copilot prepared successfully." 2>&1 | tee -a "runtime-logs/download.log"
+        env:
+          GITHUB_COPILOT_ACTION_DOWNLOAD_URL: ${{ secrets.GITHUB_COPILOT_ACTION_DOWNLOAD_URL }}
+          COPILOT_AGENT_SOURCE_ENVIRONMENT: "<< .Environment >>"
+          GITHUB_COPILOT_ACTION_OVERRIDE_DOWNLOAD_URL: "<< .ActionDownloadURL >>"
+          GITHUB_COPILOT_API_TOKEN: "${{ secrets.GITHUB_COPILOT_API_TOKEN }}"
+          COPILOT_AGENT_RUNTIME_VERSION: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).COPILOT_AGENT_RUNTIME_VERSION }}"
+
+      - name: Prepare Copilot (Windows)
+        if: ${{ env.SHOULD_CONTINUE == 'true' && runner.os == 'Windows' }}
+        working-directory: ${{ runner.temp }}
+        shell: pwsh
+        run: |
+          Write-Host "Preparing Copilot..."
+          Write-Host "Runtime version: $env:COPILOT_AGENT_RUNTIME_VERSION"
+          
+          # Verify tar is available (built-in on Windows 10 1803+ and Server 2019+)
+          if (-not (Get-Command tar -ErrorAction SilentlyContinue)) {
+            throw "The 'tar' command is not available on this runner. Please either install the tar tool or use GitHub-hosted runners."
+          }
+          
+          $timestamp = [int][double]::Parse((Get-Date -UFormat %s))
+          "COPILOT_AGENT_START_TIME_SEC=$timestamp" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "COPILOT_AGENT_TIMEOUT_MIN=<< index .Customization "timeout-minutes" >>" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          New-Item -ItemType Directory -Force -Path "runtime-logs", "cca-mcp-debug-logs" | Out-Null
+          
+          $maxRetries = 3
+          $retryCount = 0
+          $success = $false
+          
+          while ($retryCount -lt $maxRetries) {
+            try {
+              if ($env:GITHUB_COPILOT_ACTION_OVERRIDE_DOWNLOAD_URL) {
+                $headers = @{ "Authorization" = "Bearer $env:GITHUB_COPILOT_API_TOKEN" }
+                Invoke-WebRequest -Uri $env:GITHUB_COPILOT_ACTION_OVERRIDE_DOWNLOAD_URL -OutFile "action.tar.gz" -Headers $headers -ErrorAction Stop
+              } else {
+                Invoke-WebRequest -Uri $env:GITHUB_COPILOT_ACTION_DOWNLOAD_URL -OutFile "action.tar.gz" -ErrorAction Stop
+              }
+              $success = $true
+              break
+            } catch {
+              $retryCount++
+              Start-Sleep -Seconds 1
+            }
+          }
+          
+          if (-not $success) {
+            throw "Failed to download action after $maxRetries retries"
+          }
+          
+          # Extract tar.gz using tar (built-in on Windows 10 1803+ and Server 2019+)
+          tar -zxf action.tar.gz *>> "runtime-logs\download.log"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to extract action.tar.gz with exit code $LASTEXITCODE"
+          }
+          
+          # Rename directory if needed
+          $dirs = Get-ChildItem -Directory -Filter "copilot-developer-action-*"
+          if ($dirs -and -not (Test-Path "copilot-developer-action-main")) {
+            Rename-Item -Path $dirs[0].FullName -NewName "copilot-developer-action-main"
+          }
+          
+          # Run setup script (PowerShell version expected in the runtime package)
+          if (Test-Path "copilot-developer-action-main\script\setup.ps1") {
+            & "copilot-developer-action-main\script\setup.ps1" "${{ runner.temp }}\ghcca-node"
+            if ($LASTEXITCODE -ne 0) { throw "Setup script failed with exit code $LASTEXITCODE" }
+          } else {
+            throw "setup.ps1 not found. The runtime package may be corrupted or incompatible with Windows runners."
+          }
+          
+          Write-Host "Copilot prepared successfully."
+        env:
+          GITHUB_COPILOT_ACTION_DOWNLOAD_URL: ${{ secrets.GITHUB_COPILOT_ACTION_DOWNLOAD_URL }}
+          COPILOT_AGENT_SOURCE_ENVIRONMENT: "<< .Environment >>"
+          GITHUB_COPILOT_ACTION_OVERRIDE_DOWNLOAD_URL: "<< .ActionDownloadURL >>"
+          GITHUB_COPILOT_API_TOKEN: "${{ secrets.GITHUB_COPILOT_API_TOKEN }}"
+          COPILOT_AGENT_RUNTIME_VERSION: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).COPILOT_AGENT_RUNTIME_VERSION }}"
+
+      # Run steps here - this should already have all references to MCP or GitHub secrets / vars removed through by replacing them w/''
+      << index .Customization "steps" >>
+
+      << if eq .MCPEnabled true >>
+      - name: Start MCP Servers (Linux)
+        if: ${{ env.SHOULD_CONTINUE == 'true' && (success() || !cancelled()) && runner.os == 'Linux' }}
+        working-directory: ${{ runner.temp }}
+        run: |
+          echo "Starting MCP servers..." && \
+          export HOME="$(realpath ~)"
+          export RUNNER_PATH="${{ runner.temp }}"
+
+          "$RUNNER_PATH/copilot-developer-action-main/script/start-mcp-servers.sh"
+
+          echo "Ending MCP step"
+        env:
+          BLACKBIRD_MODE: "<< .BlackbirdMode >>"
+          COPILOT_API_URL: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).COPILOT_API_URL }}"
+          GITHUB_PERSONAL_ACCESS_TOKEN: "${{ secrets.COPILOT_MCP_GITHUB_PERSONAL_ACCESS_TOKEN || secrets.<< .GitHubMCPTokenSecretName >> }}"
+          GITHUB_COPILOT_API_TOKEN: "${{ secrets.GITHUB_COPILOT_API_TOKEN }}"
+          GITHUB_COPILOT_3P_MCP_ENABLED: << .MCP3PEnabled >>
+          COPILOT_AGENT_MCP_SERVER_TEMP: "${{ runner.temp }}/mcp-server"
+          GITHUB_COPILOT_MCP_JSON_FROM_INPUT: "${{ github.event.inputs.GITHUB_COPILOT_MCP_JSON }}"
+          GITHUB_COPILOT_REMOTE_MCP_ENABLED: << .McpRemoteEnabled >>
+          GITHUB_COPILOT_INTERACTION_ID: "${{ github.event.inputs.GITHUB_COPILOT_INTERACTION_ID }}"
+          COPILOT_FEATURE_FLAGS: "<< .FeatureFlags >>"
+          COPILOT_EXPERIMENTS: "<< .Experiments >>"
+          COPILOT_EXPERIMENT_ASSIGNMENT_CONTEXT: "<< .ExperimentAssignmentContext >>"
+          GITHUB_COPILOT_INTEGRATION_ID: "${{ secrets.GITHUB_COPILOT_INTEGRATION_ID }}"
+          COPILOT_USE_SESSIONS: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).COPILOT_USE_SESSIONS }}"
+          COPILOT_USE_ASYNC_SESSIONS: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).COPILOT_USE_ASYNC_SESSIONS }}"
+          COPILOT_AGENT_SESSION_ID: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).COPILOT_AGENT_SESSION_ID }}"
+          # Path that MCP servers can place debug logs that are then uploaded as an artifact at the end of the run
+          COPILOT_AGENT_MCP_DEBUG_LOGS_PATH: "${{ runner.temp }}/cca-mcp-debug-logs"
+          # Required for telemetry
+          COPILOT_AGENT_CALLBACK_URL: "<< .AgentCallbackURL >>"
+          COPILOT_AGENT_JOB_ID: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).COPILOT_AGENT_JOB_ID }}"
+          COPILOT_JOB_NONCE: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).COPILOT_JOB_NONCE }}"
+          GITHUB_REPOSITORY_ID: "${{ github.repository_id }}"
+          GITHUB_REPOSITORY_OWNER_ID: "${{ github.repository_owner_id }}"
+        <<- range .MCPSecrets>>
+          <<.>>: ${{ secrets.<<.>> }}
+        <<- end>>
+        <<- range .MCPVariables>>
+          <<.>>: ${{ vars.<<.>> }}
+        <<- end>>
+
+      - name: Start MCP Servers (Windows)
+        if: ${{ env.SHOULD_CONTINUE == 'true' && (success() || !cancelled()) && runner.os == 'Windows' }}
+        working-directory: ${{ runner.temp }}
+        shell: pwsh
+        run: |
+          Write-Host "Starting MCP servers..."
+          $env:HOME = (Resolve-Path ~).Path
+          $env:RUNNER_PATH = "${{ runner.temp }}"
+
+          if (Test-Path "$env:RUNNER_PATH\copilot-developer-action-main\script\start-mcp-servers.ps1") {
+            & "$env:RUNNER_PATH\copilot-developer-action-main\script\start-mcp-servers.ps1"
+            if ($LASTEXITCODE -ne 0) { throw "MCP servers startup script failed with exit code $LASTEXITCODE" }
+          } else {
+            throw "start-mcp-servers.ps1 not found. The runtime package may be corrupted or incompatible with Windows runners."
+          }
+
+          Write-Host "Ending MCP step"
+        env:
+          BLACKBIRD_MODE: "<< .BlackbirdMode >>"
+          COPILOT_API_URL: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).COPILOT_API_URL }}"
+          GITHUB_PERSONAL_ACCESS_TOKEN: "${{ secrets.COPILOT_MCP_GITHUB_PERSONAL_ACCESS_TOKEN || secrets.<< .GitHubMCPTokenSecretName >> }}"
+          GITHUB_COPILOT_API_TOKEN: "${{ secrets.GITHUB_COPILOT_API_TOKEN }}"
+          GITHUB_COPILOT_3P_MCP_ENABLED: << .MCP3PEnabled >>
+          COPILOT_AGENT_MCP_SERVER_TEMP: "${{ runner.temp }}/mcp-server"
+          GITHUB_COPILOT_MCP_JSON_FROM_INPUT: "${{ github.event.inputs.GITHUB_COPILOT_MCP_JSON }}"
+          GITHUB_COPILOT_REMOTE_MCP_ENABLED: << .McpRemoteEnabled >>
+          GITHUB_COPILOT_INTERACTION_ID: "${{ github.event.inputs.GITHUB_COPILOT_INTERACTION_ID }}"
+          COPILOT_FEATURE_FLAGS: "<< .FeatureFlags >>"
+          COPILOT_EXPERIMENTS: "<< .Experiments >>"
+          COPILOT_EXPERIMENT_ASSIGNMENT_CONTEXT: "<< .ExperimentAssignmentContext >>"
+          GITHUB_COPILOT_INTEGRATION_ID: "${{ secrets.GITHUB_COPILOT_INTEGRATION_ID }}"
+          COPILOT_USE_SESSIONS: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).COPILOT_USE_SESSIONS }}"
+          COPILOT_USE_ASYNC_SESSIONS: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).COPILOT_USE_ASYNC_SESSIONS }}"
+          COPILOT_AGENT_SESSION_ID: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).COPILOT_AGENT_SESSION_ID }}"
+          # Path that MCP servers can place debug logs that are then uploaded as an artifact at the end of the run
+          COPILOT_AGENT_MCP_DEBUG_LOGS_PATH: "${{ runner.temp }}/cca-mcp-debug-logs"
+          # Required for telemetry
+          COPILOT_AGENT_CALLBACK_URL: "<< .AgentCallbackURL >>"
+          COPILOT_AGENT_JOB_ID: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).COPILOT_AGENT_JOB_ID }}"
+          COPILOT_JOB_NONCE: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).COPILOT_JOB_NONCE }}"
+          GITHUB_REPOSITORY_ID: "${{ github.repository_id }}"
+          GITHUB_REPOSITORY_OWNER_ID: "${{ github.repository_owner_id }}"
+        <<- range .MCPSecrets>>
+          <<.>>: ${{ secrets.<<.>> }}
+        <<- end>>
+        <<- range .MCPVariables>>
+          <<.>>: ${{ vars.<<.>> }}
+        <<- end>>
+      << end >>
+      
+      << if .RuntimeSetup >>
+      - name: Setup Agent (Linux)
+        if: ${{ env.SHOULD_CONTINUE == 'true' && (success() || !cancelled()) && runner.os == 'Linux' }}
+        working-directory: ${{ runner.temp }}
+        run: |
+          echo "Setting up the agent..."
+          npm config get prefix
+          << .RuntimeSetup >>
+
+      - name: Setup Agent (Windows)
+        if: ${{ env.SHOULD_CONTINUE == 'true' && (success() || !cancelled()) && runner.os == 'Windows' }}
+        working-directory: ${{ runner.temp }}
+        shell: pwsh
+        run: |
+          Write-Host "Setting up the agent..."
+          npm config get prefix
+          << .RuntimeSetup >>
+      << end >>
+
+      - name: Processing Request (Linux)
+        if: ${{ env.SHOULD_CONTINUE == 'true' && (success() || !cancelled()) && runner.os == 'Linux' }}
+        run:  |
+          << if .ClearTempGitCredentials >>
+          set -euo pipefail
+          echo "RUNNER_TEMP=$RUNNER_TEMP"
+          find "$RUNNER_TEMP" -maxdepth 1 -type f -name 'git-credentials-*.config' -print -delete
+          << end >>
+
+          echo "Processing requests..." && \
+          "${{ runner.temp }}/copilot-developer-action-main/ebpf/launch.sh" \
+            "${{ runner.temp }}/ghcca-node/node/bin/node --enable-source-maps ${{ runner.temp }}/copilot-developer-action-main/<< .RuntimeEntryPoint >>" \
+            "${{ runner.temp }}/runtime-logs" \
+            "false"
+        env:
+
+          # These are values that GitHub itself injects and should always be in the form GITHUB_*. Nothing else can use the GITHUB_ prefix
+          GITHUB_TOKEN: "${{ secrets.GITHUB_COPILOT_GIT_TOKEN }}"
+          # TODO: Remove conditional once ff rolled out
+          << if eq .GitHubMCPTokenSecretName "GITHUB_COPILOT_GITHUB_TOKEN" >>
+          GITHUB_COPILOT_GITHUB_TOKEN: "${{ secrets.GITHUB_COPILOT_GITHUB_TOKEN }}"
+          << end >>
+          GITHUB_COPILOT_API_TOKEN: "${{ secrets.GITHUB_COPILOT_API_TOKEN }}"
+          GITHUB_COPILOT_INTEGRATION_ID: "${{ secrets.GITHUB_COPILOT_INTEGRATION_ID }}"
+          # These are user configurable settings that should be something that can be set at the org or repo level.
+          # They should generally be COPILOT_* or COPILOT_AGENT_* (for Padawan) specific items, but don't end in _OVERRIDE.
+          COPILOT_AGENT_FIREWALL_ENABLED: "${{ vars.COPILOT_AGENT_FIREWALL_ENABLED || << .AgentFirewallEnabledDefault >> }}"
+          COPILOT_AGENT_FIREWALL_RULESET_ALLOW_LIST: "${{ vars.COPILOT_AGENT_FIREWALL_RULE_SET_ALLOW_LIST || '<< .AgentFirewallRuleSetAllowListDefault >>' }}"
+          COPILOT_AGENT_FIREWALL_ENABLE_RULESET_ALLOW_LIST: "${{ vars.COPILOT_AGENT_FIREWALL_ALLOW_LIST == '' && 'true' || 'false' }}"
+          COPILOT_AGENT_FIREWALL_ALLOW_LIST: "<< .AgentFirewallRequiredAllowList >>,${{ vars.COPILOT_AGENT_FIREWALL_ALLOW_LIST }},${{ github.server_url }},${{ vars.COPILOT_AGENT_FIREWALL_ALLOW_LIST_ADDITIONS }}"
+          COPILOT_AGENT_SOURCE_ENVIRONMENT: "<< .Environment >>"
+          GITHUB_UPLOADS_URL: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).GITHUB_UPLOADS_URL }}"
+          GITHUB_DOWNLOADS_URL: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).GITHUB_DOWNLOADS_URL }}"
+          SECRET_SCANNING_URL: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).SECRET_SCANNING_URL }}"
+          COPILOT_AGENT_RUNTIME_VERSION: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).COPILOT_AGENT_RUNTIME_VERSION }}"
+          COPILOT_AGENT_DEBUG: "${{ (vars.COPILOT_AGENT_DEBUG == 'true' || ( vars.COPILOT_AGENT_DEBUG != 'true' && vars.COPILOT_AGENT_DEBUG != 'false' && '<< .AgentDebug >>' == 'true' )) && true || false }}"
+          # Only injected if cfg.IsDevelopment() is true. Secrets/vars should generally be in the form of COPILOT_*_OVERRIDE to distinguish them.
+          << if .IsDevelopmentEnvironment >>
+          COPILOT_INTEGRATION_ID_OVERRIDE: "${{ secrets.COPILOT_INTEGRATION_ID_OVERRIDE }}"
+          CAPI_HMAC_KEY_OVERRIDE: "${{ secrets.CAPI_HMAC_KEY_OVERRIDE }}"
+          << end >>
+          # This variable controls whether the runtime runs in "MCP mode" or not. Basically whether it looks for `mcp-config.json` to register MCP tools
+          COPILOT_MCP_ENABLED: << .MCPEnabled >>
+          COPILOT_AGENT_MCP_SERVER_TEMP: "${{ runner.temp }}/mcp-server"
+          # This variable determines how and whether blackbird is used by the agent.
+          BLACKBIRD_MODE: "<< .BlackbirdMode >>"
+          COPILOT_AGENT_INJECTED_SECRET_NAMES: "<< .InjectedSecretNames >>"
+          # variables that control online evaluation. The trajectory file is needed for this feature to work.
+          CPD_SAVE_TRAJECTORY_OUTPUT: ${{ runner.temp }}/copilot-developer-action-main/dist/trajectory.md
+          COPILOT_AGENT_ONLINE_EVALUATION_DISABLED: "<< .AgentOnlineEvaluationDisabled >>"
+          COPILOT_FEATURE_FLAGS: "<< .FeatureFlags >>"
+          COPILOT_EXPERIMENTS: "<< .Experiments >>"
+          COPILOT_EXPERIMENT_ASSIGNMENT_CONTEXT: "<< .ExperimentAssignmentContext >>"
+          << if .CopilotTraceParent >>
+          COPILOT_TRACE_PARENT: "<< .CopilotTraceParent >>"
+          << end >>
+          # This final section is secrets and variables that can only be set in an Actions "copilot" environment and are passed through. Be
+          # sure to add values above this section to workflowDirectlyReferencedVarNames list in actions.go to so they are not injected twice.
+        <<- range .Secrets>>
+          <<.>>: ${{ secrets.<<.>> }}
+        <<- end>>
+        <<- range .Variables>>
+          <<.>>: ${{ vars.<<.>> }}
+        <<- end>>
+
+      - name: Processing Request (Windows)
+        if: ${{ env.SHOULD_CONTINUE == 'true' && (success() || !cancelled()) && runner.os == 'Windows' }}
+        shell: pwsh
+        run:  |
+          << if .ClearTempGitCredentials >>
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          Write-Host "RUNNER_TEMP=$env:RUNNER_TEMP"
+          Get-ChildItem -LiteralPath $env:RUNNER_TEMP -File -Filter 'git-credentials-*.config' |
+            ForEach-Object {
+              Write-Host $_.FullName
+              Remove-Item -LiteralPath $_.FullName -Force
+            }
+          << end >>
+
+          Write-Host "Processing requests..."
+          # Note: eBPF is not available on Windows, running node directly
+          $nodePath = "${{ runner.temp }}\ghcca-node\node\bin\node.exe"
+          if (-not (Test-Path $nodePath)) {
+            $nodePath = "${{ runner.temp }}\ghcca-node\node\node.exe"
+            if (-not (Test-Path $nodePath)) {
+              throw "Node.js executable not found in expected locations: ${{ runner.temp }}\ghcca-node\node\bin\node.exe or ${{ runner.temp }}\ghcca-node\node\node.exe"
+            }
+          }
+          & $nodePath --enable-source-maps "${{ runner.temp }}\copilot-developer-action-main\<< .RuntimeEntryPoint >>"
+        env:
+
+          # These are values that GitHub itself injects and should always be in the form GITHUB_*. Nothing else can use the GITHUB_ prefix
+          GITHUB_TOKEN: "${{ secrets.GITHUB_COPILOT_GIT_TOKEN }}"
+          # TODO: Remove conditional once ff rolled out
+          << if eq .GitHubMCPTokenSecretName "GITHUB_COPILOT_GITHUB_TOKEN" >>
+          GITHUB_COPILOT_GITHUB_TOKEN: "${{ secrets.GITHUB_COPILOT_GITHUB_TOKEN }}"
+          << end >>
+          GITHUB_COPILOT_API_TOKEN: "${{ secrets.GITHUB_COPILOT_API_TOKEN }}"
+          GITHUB_COPILOT_INTEGRATION_ID: "${{ secrets.GITHUB_COPILOT_INTEGRATION_ID }}"
+          # Required for remote MCP (HTTP-based) GitHub API calls on Windows
+          GITHUB_PERSONAL_ACCESS_TOKEN: "${{ secrets.COPILOT_MCP_GITHUB_PERSONAL_ACCESS_TOKEN || secrets.<< .GitHubMCPTokenSecretName >> }}"
+          # These are user configurable settings that should be something that can be set at the org or repo level.
+          # They should generally be COPILOT_* or COPILOT_AGENT_* (for Padawan) specific items, but don't end in _OVERRIDE.
+          COPILOT_AGENT_FIREWALL_ENABLED: "${{ vars.COPILOT_AGENT_FIREWALL_ENABLED || << .AgentFirewallEnabledDefault >> }}"
+          COPILOT_AGENT_FIREWALL_RULESET_ALLOW_LIST: "${{ vars.COPILOT_AGENT_FIREWALL_RULE_SET_ALLOW_LIST || '<< .AgentFirewallRuleSetAllowListDefault >>' }}"
+          COPILOT_AGENT_FIREWALL_ENABLE_RULESET_ALLOW_LIST: "${{ vars.COPILOT_AGENT_FIREWALL_ALLOW_LIST == '' && 'true' || 'false' }}"
+          COPILOT_AGENT_FIREWALL_ALLOW_LIST: "<< .AgentFirewallRequiredAllowList >>,${{ vars.COPILOT_AGENT_FIREWALL_ALLOW_LIST }},${{ github.server_url }},${{ vars.COPILOT_AGENT_FIREWALL_ALLOW_LIST_ADDITIONS }}"
+          COPILOT_AGENT_SOURCE_ENVIRONMENT: "<< .Environment >>"
+          GITHUB_UPLOADS_URL: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).GITHUB_UPLOADS_URL }}"
+          GITHUB_DOWNLOADS_URL: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).GITHUB_DOWNLOADS_URL }}"
+          COPILOT_AGENT_RUNTIME_VERSION: "${{ fromJSON(github.event.inputs.COPILOT_AGENT_INPUTS).COPILOT_AGENT_RUNTIME_VERSION }}"
+          COPILOT_AGENT_DEBUG: "${{ (vars.COPILOT_AGENT_DEBUG == 'true' || ( vars.COPILOT_AGENT_DEBUG != 'true' && vars.COPILOT_AGENT_DEBUG != 'false' && '<< .AgentDebug >>' == 'true' )) && true || false }}"
+          # Only injected if cfg.IsDevelopment() is true. Secrets/vars should generally be in the form of COPILOT_*_OVERRIDE to distinguish them.
+          << if .IsDevelopmentEnvironment >>
+          COPILOT_INTEGRATION_ID_OVERRIDE: "${{ secrets.COPILOT_INTEGRATION_ID_OVERRIDE }}"
+          CAPI_HMAC_KEY_OVERRIDE: "${{ secrets.CAPI_HMAC_KEY_OVERRIDE }}"
+          << end >>
+          # This variable controls whether the runtime runs in "MCP mode" or not. Basically whether it looks for `mcp-config.json` to register MCP tools
+          COPILOT_MCP_ENABLED: << .MCPEnabled >>
+          COPILOT_AGENT_MCP_SERVER_TEMP: "${{ runner.temp }}/mcp-server"
+          # This variable controls whether the runtime uses remote MCP (HTTP-based) instead of local binary.
+          # Required for Windows since the local github-mcp-server binary is not available for Windows.
+          GITHUB_COPILOT_REMOTE_MCP_ENABLED: << .McpRemoteEnabled >>
+          # This variable determines how and whether blackbird is used by the agent.
+          BLACKBIRD_MODE: "<< .BlackbirdMode >>"
+          COPILOT_AGENT_INJECTED_SECRET_NAMES: "<< .InjectedSecretNames >>"
+          # variables that control online evaluation. The trajectory file is needed for this feature to work.
+          CPD_SAVE_TRAJECTORY_OUTPUT: ${{ runner.temp }}/copilot-developer-action-main/dist/trajectory.md
+          COPILOT_AGENT_ONLINE_EVALUATION_DISABLED: "<< .AgentOnlineEvaluationDisabled >>"
+          COPILOT_FEATURE_FLAGS: "<< .FeatureFlags >>"
+          COPILOT_EXPERIMENTS: "<< .Experiments >>"
+          COPILOT_EXPERIMENT_ASSIGNMENT_CONTEXT: "<< .ExperimentAssignmentContext >>"
+          << if .CopilotTraceParent >>
+          COPILOT_TRACE_PARENT: "<< .CopilotTraceParent >>"
+          << end >>
+          # This final section is secrets and variables that can only be set in an Actions "copilot" environment and are passed through. Be
+          # sure to add values above this section to workflowDirectlyReferencedVarNames list in actions.go to so they are not injected twice.
+        <<- range .Secrets>>
+          <<.>>: ${{ secrets.<<.>> }}
+        <<- end>>
+        <<- range .Variables>>
+          <<.>>: ${{ vars.<<.>> }}
+        <<- end>>
+
+      # This step ensures that tokens are cleaned up even if the runtime bombs and logs situations where a job is in a non-terminal state
+      - name: Clean Up (Linux)
+        if: always() && runner.os == 'Linux'
+        run: |
+          echo "Cleaning up..." && \
+          mkdir -p "${{ runner.temp }}/runtime-logs" && \
+          curl -L -H "Content-Type: application/json" -H "Accept: application/json" --data '{"oid":'$GITHUB_REPOSITORY_OWNER_ID',"rid":'$GITHUB_REPOSITORY_ID',"wid":'$GITHUB_RUN_ID'}' \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_COPILOT_API_TOKEN }}" -H "X-GitHub-Copilot-Cleanup-List: ${{ secrets.GITHUB_COPILOT_API_TOKEN }},${{ secrets.GITHUB_COPILOT_GIT_TOKEN }},${{ secrets.GITHUB_COPILOT_GITHUB_TOKEN }}" \
+            "<< .AgentCallbackURL >>/cleanup" > "${{ runner.temp }}/runtime-logs/clean.log" 2>&1
+
+      - name: Clean Up (Windows)
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Host "Cleaning up..."
+          New-Item -ItemType Directory -Force -Path "${{ runner.temp }}\runtime-logs" | Out-Null
+          
+          $body = @{
+            oid = $env:GITHUB_REPOSITORY_OWNER_ID
+            rid = $env:GITHUB_REPOSITORY_ID
+            wid = $env:GITHUB_RUN_ID
+          } | ConvertTo-Json
+          
+          $headers = @{
+            "Content-Type" = "application/json"
+            "Accept" = "application/json"
+            "Authorization" = "Bearer ${{ secrets.GITHUB_COPILOT_API_TOKEN }}"
+            "X-GitHub-Copilot-Cleanup-List" = "${{ secrets.GITHUB_COPILOT_API_TOKEN }},${{ secrets.GITHUB_COPILOT_GIT_TOKEN }},${{ secrets.GITHUB_COPILOT_GITHUB_TOKEN }}"
+          }
+          
+          try {
+            Invoke-RestMethod -Uri "<< .AgentCallbackURL >>/cleanup" -Method Post -Body $body -Headers $headers -ContentType "application/json" -ErrorAction Stop | Out-File -FilePath "${{ runner.temp }}\runtime-logs\clean.log"
+          } catch {
+            $_ | Out-File -FilePath "${{ runner.temp }}\runtime-logs\clean.log"
+          }
+
+      - name: "[Optional] Archive Details"
+        if: ${{ always() && ((vars.COPILOT_AGENT_DEBUG == 'true' || (vars.COPILOT_AGENT_DEBUG != 'true' && vars.COPILOT_AGENT_DEBUG != 'false' && '<< .AgentDebug >>' == 'true')) && true || false) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: |
+            ${{ runner.temp }}/cca-mcp-debug-logs/*
+            ${{ runner.temp }}/mcp-server/mcp-stdout.log
+            ${{ runner.temp }}/mcp-server/mcp-stderr.log
+            ${{ runner.temp }}/runtime-logs/blocked.jsonl
+            ${{ runner.temp }}/runtime-logs/blocked.md
+            ${{ runner.temp }}/runtime-logs/fw.jsonl
+            ${{ runner.temp }}/runtime-logs/ipv6.log
+            ${{ runner.temp }}/runtime-logs/download.log
+            ${{ runner.temp }}/runtime-logs/mkcert.log
+            ${{ runner.temp }}/runtime-logs/clean.log
+            << if .IsDevelopmentEnvironment >>
+            ${{ runner.temp }}/runtime-logs/params.log
+            << end >>

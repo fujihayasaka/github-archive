@@ -134,6 +134,11 @@ module GitAuth
     end
 
     def hash_algo
+      # SHA-256 repositories can only be created behind feature flags, which
+      # can't be enabled on GHES. Asking spokes would cost an RPC plus a git
+      # process on the fileserver for every git request, so don't.
+      return GitHub::HashAlgorithm::SHA1 if GitHub.enterprise?
+
       if wiki?
         repository.unsullied_wiki.hash_algo
       else

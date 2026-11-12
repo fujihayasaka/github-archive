@@ -1,0 +1,71 @@
+name: Post-process Initiative Issues
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  inject-headers:
+    if: contains(github.event.issue.body, '### Key Insights')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inject section headers
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          ORIGINAL_BODY: ${{ toJSON(github.event.issue.body) }}
+        run: |
+          python3 - <<'PY'
+          import os, json, re, sys
+          from urllib import request
+          
+          body_json = os.environ.get('ORIGINAL_BODY','')
+          if not body_json:
+              print('No body found, skipping.')
+              sys.exit(0)
+          body = json.loads(body_json)
+          
+          rules = [
+              ('### Key Insights', '## 📊 Understand the problem space'),
+              ('### Strategic Opportunity', '## 🎯 Identify the levers to achieve your goal'),
+              ('### Key Releases & Milestones', '## ✅ Execute on those levers perfectly'),
+              ('### 🧑‍🤝‍🧑 Canonical People', '## 👀 Canonical Info'),
+          ]
+          
+          new_body = body
+          for anchor, header in rules:
+              if header in new_body:
+                  continue  # already injected
+              pattern = re.compile(rf"(^\s*{re.escape(anchor)}\s*$)", re.MULTILINE)
+              if pattern.search(new_body):
+                  new_body = pattern.sub(f"{header}\n\n{anchor}", new_body, count=1)
+          
+          if new_body == body:
+              print('No changes needed.')
+              sys.exit(0)
+          
+          repo = os.environ['REPO']
+          issue_number = os.environ['ISSUE_NUMBER']
+          token = os.environ['GH_TOKEN']
+          
+          api_url = f'https://api.github.com/repos/{repo}/issues/{issue_number}'
+          data = json.dumps({'body': new_body}).encode('utf-8')
+          req = request.Request(api_url, data=data, method='PATCH', headers={
+              'Authorization': f'token {token}',
+              'Accept': 'application/vnd.github+json',
+              'Content-Type': 'application/json',
+              'User-Agent': 'GitHub-Actions-Initiative-Postprocess'
+          })
+          
+          try:
+              with request.urlopen(req) as resp:
+                  print('Issue body updated with section headers. Status:', resp.status)
+          except Exception as e:
+              print('Failed to update issue body:', e)
+              sys.exit(1)
+          PY

@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+package github.dependency_snapshots_api.entities;
+
+import "buf/validate/validate.proto";
+import "entities/manifest.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/github/dependency-snapshots-api/pkg/proto/entities;entities";
+
+// Fields are inspired by
+// https://github.com/github/github/blob/master/app/api/description/components/schemas/snapshot.yaml
+
+message Snapshot {
+  // The version of the repository snapshot submission.
+  uint64 version = 1 [(buf.validate.field).required = true];
+
+  // The job submitting the snapshot.
+  message Job {
+    // The external ID of the job.
+    string id = 1 [(buf.validate.field).required = true];
+
+    // Correlator provides a key that is used to group snapshots submitted over time.
+    string correlator = 2 [(buf.validate.field).required = true];
+
+    // The url for the job.
+    string html_url = 3;
+  }
+  Job job = 2 [(buf.validate.field).required = true];
+
+  // The commit sha associated with this dependency snapshot.
+  string sha = 3 [(buf.validate.field) = {
+    required: true
+    string: {
+      min_len: 40
+      max_len: 40
+    }
+  }];
+
+  // The repository branch that triggered this snapshot.
+  string ref = 4 [(buf.validate.field) = {
+    required: true
+    string: {pattern: "^refs/"}
+  }];
+
+  // A description of the detector used.
+  message Detector {
+    // The name of the detector used.
+    string name = 1 [(buf.validate.field).required = true];
+
+    // The version of the detector used.
+    string version = 2 [(buf.validate.field).required = true];
+
+    // The url of the detector used.
+    string url = 3 [(buf.validate.field).required = true];
+  }
+  Detector detector = 5 [(buf.validate.field).required = true];
+
+  // A collection of package manifests, which are a collection of related dependencies
+  // declared in a file or representing a logical group of dependencies.
+  // Key is a user-defined key to represent an item in manifests.
+  map<string, Manifest> manifests = 6;
+
+  // The time at which the snapshot was scanned.
+  google.protobuf.Timestamp scanned = 7 [(buf.validate.field).required = true];
+
+  // User-defined metadata to store domain-specific information.
+  map<string, string> metadata = 8 [(buf.validate.field).map = {max_pairs: 8}];
+}

@@ -1,0 +1,42 @@
+name: "go-linter"
+
+env:
+  HUSKY: 0
+
+on:
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+      - uses: github/setup-goproxy@v1.1.0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Check Go formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "FAIL! The following files are not formatted with gofmt:"
+            echo "$unformatted"
+            echo ""
+            echo "Please run 'make format' or 'gofmt -w .' to format the code."
+            exit 1
+          fi
+      - name: Run Go Linter
+        run: script/lint
+        env:
+          # Configuration parameters for script/lint
+          LINT_VERSION: v2.7.2
+          # opt packages out of linting by adding them to .github/lint_skip.txt

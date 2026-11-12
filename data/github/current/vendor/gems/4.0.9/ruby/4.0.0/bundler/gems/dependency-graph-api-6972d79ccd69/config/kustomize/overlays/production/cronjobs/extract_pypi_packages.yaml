@@ -1,0 +1,47 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: extract-pypi-packages
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "extract-pypi-packages"
+        heaven.githubapp.com/image-placeholder: "dependency-graph-api"
+spec:
+    schedule: "0 * * * *" # Every hour on the hour
+    concurrencyPolicy: Forbid # Do not allow concurrent runs of this job
+    successfulJobsHistoryLimit: 2
+    failedJobsHistoryLimit: 2
+    jobTemplate:
+        spec:
+            template:
+                spec:
+                    dnsPolicy: ClusterFirst
+                    volumes:
+                        - name: github-metadata
+                          hostPath:
+                            path: /etc/github/metadata.json
+                    restartPolicy: Never
+                    containers:
+                        - name: extract-pypi-packages
+                          image: dependency-graph-api
+                          workingDir: "/src/app/package_manager_adapters"
+                          resources:
+                            requests:
+                                memory: "1Gi"
+                            limits:
+                                memory: "4Gi"
+                          command: ["/usr/bin/tools/istio-job-wrapper"]
+                          args: ["script/start_kube", "pypi"]
+                          envFrom:
+                            - configMapRef:
+                                name: environment
+                            - secretRef:
+                                name: vault-secrets
+                          env:
+                            - name: DOGSTATSD_HOST
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: spec.nodeName
+                          volumeMounts:
+                            - mountPath: /etc/github/metadata.json
+                              name: github-metadata
+                              readOnly: true

@@ -1,0 +1,42 @@
+name: "Notify Datadog"
+description: "Send a service check to Datadog for integration test results"
+inputs:
+  datadog_api_key:
+    description: "The Datadog API key"
+    required: true
+  job_status:
+    description: "The job status (pass job.status from the workflow)"
+    required: true
+  test_type:
+    description: "The test type tag for reporting"
+    required: true
+  test_name:
+    description: "Human-readable name of the test for the message"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Notify success
+      if: ${{ inputs.job_status == 'success' }}
+      uses: masci/datadog@227ec5d143d39b030dc197bff0eb48c4d5a99f8e
+      with:
+        api-key: ${{ inputs.datadog_api_key }}
+        service-checks: |
+          - check: "sweagentd.integration_test"
+            host_name: "sweagentd"
+            status: 0
+            message: "${{ inputs.test_name }} Completed Successfully"
+            tags:
+              - "test_type:${{ inputs.test_type }}"
+    - name: Notify failure
+      if: ${{ inputs.job_status != 'success' }}
+      uses: masci/datadog@227ec5d143d39b030dc197bff0eb48c4d5a99f8e
+      with:
+        api-key: ${{ inputs.datadog_api_key }}
+        service-checks: |
+          - check: "sweagentd.integration_test"
+            host_name: "sweagentd"
+            status: 2
+            message: "${{ inputs.test_name }} Failed"
+            tags:
+              - "test_type:${{ inputs.test_type }}"

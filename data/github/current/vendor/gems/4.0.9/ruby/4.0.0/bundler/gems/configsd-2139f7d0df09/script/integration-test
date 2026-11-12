@@ -1,0 +1,37 @@
+#!/bin/bash
+set -e
+
+# Determine the script's directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}/.."
+
+export RUNTIME_ENV="test"
+
+# Source environment setup
+# shellcheck disable=SC1091  # setup-env is sourced at runtime, not available during static analysis
+source "${SCRIPT_DIR}/setup-env"
+
+echo ""
+echo "---Setting up test database---"
+# Drop and recreate the test database to ensure clean state
+mysql -u root -h 127.0.0.1 -e "DROP DATABASE IF EXISTS configurations_test"
+mysql -u root -h 127.0.0.1 -e "CREATE DATABASE configurations_test"
+# Load the database schema
+mysql -u root -h 127.0.0.1 configurations_test < "${REPO_ROOT}/db/configurations-structure.sql"
+echo "✅ Test database configured"
+
+echo ""
+echo "---Starting server---"
+make run ARGS="-b"
+
+echo ""
+echo "---Waiting for server to be ready---"
+./script/wait-for-server
+
+echo ""
+echo "---Testing server---"
+go clean -testcache && go test -v -tags=integration -p 1 ./integration-test/...
+
+echo ""
+echo "---Stopping server---"
+make stop

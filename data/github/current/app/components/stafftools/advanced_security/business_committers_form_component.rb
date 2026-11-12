@@ -12,9 +12,13 @@ class Stafftools::AdvancedSecurity::BusinessCommittersFormComponent < Applicatio
       @additional_committers = nil
       @additional_committers_csv = nil
       @error = nil
-      summary = @this_business.advanced_security_license_for_sku(sku:).entity_summary
-      @maximum_committers = summary.maximum_committers
-      @active_committers = summary.active_committers
+      begin
+        summary = @this_business.advanced_security_license_for_sku(sku:).entity_summary
+        @maximum_committers = summary.maximum_committers
+        @active_committers = summary.active_committers
+      rescue AdvancedSecurityLicense::TurboghasError, Faraday::Error => e
+        Failbot.report!(e, catalog_service: "github/licensing")
+      end
       @sku = sku
 
       # GET - entities are nil

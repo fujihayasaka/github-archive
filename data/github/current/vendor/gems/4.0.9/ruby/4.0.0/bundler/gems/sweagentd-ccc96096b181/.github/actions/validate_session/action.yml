@@ -1,0 +1,34 @@
+name: "Validate session"
+description: "Validate that the session has the expected premium_requests value"
+inputs:
+  token:
+    description: "The GitHub token to use for API calls"
+    required: true
+  session_id:
+    description: "The id of the session for this CCA run"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Validate session premium_requests
+      shell: bash
+      run: |
+        echo "Validating session: ${{ inputs.session_id }}"
+
+        if ! response=$(curl -s --fail-with-body https://api.githubcopilot.com/agents/sessions/${{ inputs.session_id }} -H "Authorization: Bearer ${{ inputs.token }}" -H "Copilot-Integration-Id: playground-dev"); then
+          echo "Failed to fetch session"
+          exit 1
+        fi
+
+        if ! premium_requests=$(echo "$response" | jq -r '.premium_requests'); then
+          echo "Failed to parse premium_requests from response"
+          exit 1
+        fi
+
+        if [ "$premium_requests" = "1" ]; then
+          echo "premium_requests validation passed (value: $premium_requests)"
+          exit 0
+        else
+          echo "premium_requests validation failed (expected: 1, got: $premium_requests)"
+          exit 1
+        fi

@@ -1,0 +1,42 @@
+name: Publish Ruby Gem
+
+run-name: Publish Ruby Gem - ${{ github.sha }}
+
+on: workflow_dispatch
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Validate default branch
+      run: |
+        if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+          echo "This workflow should only be run on the main branch."
+          exit 1
+        fi
+      env:
+        GITHUB_REF: ${{ github.ref }}
+
+    - uses: actions/checkout@v6
+    - name: Set up Ruby
+      uses: ruby/setup-ruby@4fc31e1c823882afd7ef55985266a526c589de90 # v1.282.0
+      with:
+        ruby-version: "4.0.1"
+        bundler-cache: true
+
+    - name: Publish to GPR
+      run: |
+        mkdir -p $HOME/.gem
+        touch $HOME/.gem/credentials
+        chmod 0600 $HOME/.gem/credentials
+        printf -- "---\n:github: ${GEM_HOST_API_KEY}\n" > $HOME/.gem/credentials
+        gem build *.gemspec
+        gem push --key github --host https://rubygems.pkg.github.com/${OWNER} *.gem
+      env:
+        GEM_HOST_API_KEY: "Bearer ${{ secrets.GITHUB_TOKEN }}"
+        OWNER: ${{ github.repository_owner }}

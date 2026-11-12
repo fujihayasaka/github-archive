@@ -1,0 +1,260 @@
+syntax = "proto3";
+
+package github.spokes.repositories.v1;
+
+option go_package = "github.com/github/spokes-proto/gen/go/v1/repositories";
+option ruby_package = "GitHub::Spokes::Proto::Repositories::V1";
+
+import "spokes-api/extensions/v1/field_options.proto";
+
+import "spokes-api/types/v1/hash_algorithm.proto";
+import "spokes-api/types/v1/object_id.proto";
+import "spokes-api/types/v1/path.proto";
+import "spokes-api/types/v1/ref_format.proto";
+import "spokes-api/types/v1/repository.proto";
+import "spokes-api/types/v1/request_context.proto";
+import "spokes-api/types/v1/reference.proto";
+import "spokes-api/types/v1/sockstat.proto";
+import "spokes-api/types/v1/token.proto";
+import "spokes-api/types/v1/update_references_priority.proto";
+import "spokes-api/types/v2/attribution.proto";
+
+import "spokes-api/repositories/v1/replica_item.proto";
+
+// RepositoriesAPI contains APIs for repository related operations.
+service RepositoriesAPI {
+    // ListAvailableReplicas returns a list of all the available replicas for a
+    // repository.
+    rpc ListAvailableReplicas(ListAvailableReplicasRequest) returns (ListAvailableReplicasResponse);
+
+    // UpdateInfoNWO creates or updates the info/nwo file that lives in a repository.
+    rpc UpdateInfoNWO(UpdateInfoNWORequest) returns (UpdateInfoNWOResponse);
+
+    // RecomputeChecksums does a 3pc transaction to recompute the checksums, but does not change hard state.
+    rpc RecomputeChecksums(RecomputeChecksumsRequest) returns (RecomputeChecksumsResponse);
+
+    // CreateFork creates a fork repository on-disk and in the Spokes DB, including
+    // cloning the appropriate contents of the parent into the fork.
+    rpc CreateFork(CreateForkRequest) returns (CreateForkResponse);
+
+    // GetRepositoryMetadata provides a list of repository metadata, including
+    // the hash algorithm and ref format.
+    // Note: For repository and network metadata, use v2.GetRepositoryMetadata
+    rpc GetRepositoryMetadata(GetRepositoryMetadataRequest) returns (GetRepositoryMetadataResponse);
+
+    // CreateRepository creates a repository on-disk and in the Spokes DB.
+    rpc CreateRepository(CreateRepositoryRequest) returns (CreateRepositoryResponse);
+}
+
+message ListAvailableReplicasRequest {
+    // repository is the repository used to retrieve replicas.
+    github.spokes.types.v1.Repository repository = 1;
+}
+
+message ListAvailableReplicasResponse {
+    // replicas are the available replicas for the repository, sorted by most to least recommended.
+    repeated ReplicaItem replicas = 1;
+}
+
+message UpdateInfoNWORequest {
+    // repository is the repository used to update the info/nwo file.
+    github.spokes.types.v1.Repository repository = 1;
+
+    // nwo is the repository "name with owner" to write to the info/nwo file.
+    string nwo = 2; // required
+
+    github.spokes.types.v1.RequestContext request_context = 3;
+
+     // priority is the priority for this update.
+     github.spokes.types.v1.UpdateReferencesPriority priority = 4; // required
+
+     // sockstat is the sockstat data to be used for this update.
+     github.spokes.types.v1.Sockstat sockstat = 5;
+}
+
+message UpdateInfoNWOResponse {
+       enum ErrorReason {
+        ERROR_REASON_INVALID = 0;
+        ERROR_REASON_FAILED_TO_LOCK = 1;
+        ERROR_REASON_THREEPC = 2;
+        ERROR_REASON_TOO_BUSY = 3;
+        ERROR_REASON_TIMEOUT = 4;
+        ERROR_REASON_DATABASE = 5;
+    }
+    // error_reason is a machine-readable 3PC error code.
+    ErrorReason error_reason = 1;
+    // error_message is a human-readable error message.
+    string error_message = 2;
+    // checksum provides the Spokes checksum after the operation completed
+    string checksum = 3;
+
+    // committed_at provides a time value, formatted as a unixtime stamp, for
+    // when the 3pc transaction that updates the info/nwo file has been committed.
+    uint64 committed_at = 4;
+}
+
+message RecomputeChecksumsRequest {
+    // repository is the repository for which the checksum will be recomputed. (required)
+    github.spokes.types.v1.Repository repository = 1;
+
+    // request_context determines the quality of service we ask for from gitmon
+    github.spokes.types.v1.RequestContext request_context = 2;
+
+    // priority is the priority for the checksum recomputation. (required)
+    github.spokes.types.v1.UpdateReferencesPriority priority = 3;
+
+    // sockstat is the sockstat data to be used for this checksum recomputation.
+    github.spokes.types.v1.Sockstat sockstat = 4;
+
+    enum ChecksumStrategy {
+        CHECKSUM_STRATEGY_INVALID = 0;
+        CHECKSUM_STRATEGY_REUSE_CHECKSUMS = 1;
+        CHECKSUM_STRATEGY_FORGET_CHECKSUMS = 2;
+    }
+
+    // checksum_strategy chooses whether we recompute the checksums from scratch. (required)
+    ChecksumStrategy checksum_strategy = 5;
+}
+
+message RecomputeChecksumsResponse {
+    enum ErrorReason {
+        ERROR_REASON_INVALID = 0;
+        ERROR_REASON_FAILED_TO_LOCK = 1;
+        ERROR_REASON_THREEPC = 2;
+        ERROR_REASON_TOO_BUSY = 3;
+        ERROR_REASON_TIMEOUT = 4;
+        ERROR_REASON_DATABASE = 5;
+    }
+
+    // error_reason is a machine-readable 3PC error code.
+    ErrorReason error_reason = 1;
+
+    // error_message is a human-readable error message.
+    string error_message = 2;
+
+    // checksum provides the Spokes checksum after the operation completed
+    string checksum = 3;
+
+    // committed_at provides a time value, formatted as a unixtime stamp, for
+    // when the recomputation happened.
+    uint64 committed_at = 4;
+}
+
+
+message CreateForkRequest {
+    // parent is the parent repository from which the fork should be created.
+    ParentRepository parent = 1;
+
+    message Fork {
+        // id is the ID of the fork to create from parent.
+        uint64 id = 1;
+        // nwo is the repository "name with owner" to write to the info/nwo file.
+        string nwo = 2; // required
+    }
+
+    Fork fork = 2;
+
+    github.spokes.types.v1.RequestContext request_context = 3;
+
+    enum BranchMode {
+        BRANCH_MODE_INVALID = 0;
+        // create the fork with all branches of the parent.
+        BRANCH_MODE_ALL_BRANCHES = 1;
+        // create the fork with only the default branch of the parent.
+        BRANCH_MODE_DEFAULT_BRANCH = 2;
+    }
+    BranchMode branch_mode = 4;
+
+    // token is an opaque token to poll for the status of an in progress fork operation.
+    github.spokes.types.v1.Token token = 5;
+
+    // wait_milliseconds is the amount of time gitrpcd should wait
+    // before telling the caller the operation is still running.
+    uint32 wait_milliseconds = 6;
+}
+
+message CreateForkResponse {
+    enum Status {
+        STATUS_INVALID = 0;
+        STATUS_COMPLETE = 1;
+        STATUS_FAILED = 2;
+        STATUS_INPROGRESS = 3;
+    }
+
+    // status is the machine-readable status of the fork operation.
+    Status status = 1;
+
+    // message includes details, if available, related to the status
+    // of the operation.
+    string message = 2;
+
+    // token is an opaque token to poll for the status of an in progress fork operation.
+    github.spokes.types.v1.Token token = 3;
+}
+
+message ParentRepository {
+    github.spokes.types.v1.Repository repository = 1;
+}
+
+message GetRepositoryMetadataRequest {
+    // repository is the repository used to update the info/nwo file.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.RequestContext request_context = 2;
+}
+
+message GetRepositoryMetadataResponse {
+    // hash_algorithm is the main hash algorithm in use for this repository.
+    github.spokes.types.v1.HashAlgorithm hash_algorithm = 1;
+
+    // ref_format is the ref format in use for this repository.
+    github.spokes.types.v1.RefFormat ref_format = 2;
+}
+
+message CreateRepositoryRequest {
+    // repository is the repository to be created.
+    github.spokes.types.v1.Repository repository = 1;
+
+    github.spokes.types.v1.RequestContext request_context = 2;
+
+    // nwo is the name with owner of the repository.
+    string nwo = 3;
+
+    message InitialCommit {
+        // author is the author of the object.
+        github.spokes.types.v2.Attribution author = 1;
+
+        // committer is the committer of the object.
+        github.spokes.types.v2.Attribution committer = 2;
+
+        // message is the commit's message.
+        bytes message = 3;
+
+        message File {
+            // path is the path of the file in the repository.
+            // at present, only root-level files can be provided.
+            github.spokes.types.v1.Path path = 1;
+            // content is the content of the file to be created.
+            bytes content = 2;
+        }
+        // files is a list of files to include in the commit.
+        repeated File files = 4 [(github.spokes.extensions.v1.limit) = 10000];
+    }
+
+    // initial_commit contains data for optionally creating an initial commit in the repository.
+    InitialCommit initial_commit = 4;
+    
+    // default_branch is the reference to use for the default branch.
+    github.spokes.types.v1.Reference default_branch = 5;
+
+    // hash_algorithm is the main hash algorithm in use for this repository.
+    github.spokes.types.v1.HashAlgorithm hash_algorithm = 6;
+
+    // ref_format is the ref format in use for this repository.
+    github.spokes.types.v1.RefFormat ref_format = 7;
+}
+
+message CreateRepositoryResponse {
+    // head_oid is the object ID of the commit at the head of the default branch.
+    github.spokes.types.v1.ObjectID head_oid = 1;
+}

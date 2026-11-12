@@ -1,0 +1,94 @@
+#!/bin/bash
+appdir=$(cd $(dirname "$0")/.. && pwd)
+
+if [ -f /etc/app-env ]; then
+  exec bundle exec ruby $0 $@
+else
+  exec "$appdir/script/app-env" bundle exec ruby $0 $@
+fi
+
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+require_relative "../config/environment"
+
+if !Rails.env.development?
+  puts "This script is only available in development environments"
+  exit 1
+end
+
+# Invoke the RepositoryVulnerabilityAlertCreate hydro handler, which should trigger a dependabot-updater run
+# and create a pull request.
+# Requires: `docker compose up web worker update-job-runner`
+#
+# Defaults to mocking https://nvd.nist.gov/vuln/detail/CVE-2018-16487 (lodash <4.17.11)
+
+options = {
+  manifest_path: 'package.json',
+  ghsa_id: 'GHSA-cccc-ffff-gggg',
+  vulnerable_package: {
+    name: 'lodash',
+    ecosystem: 'npm',
+  },
+  vulnerable_version: '< 4.17.11',
+}
+
+OptionParser.new do |opts|
+  opts.banner = "Usage: script/trigger-security-update --nwo monalisa/foo"
+
+  opts.on('-r', '--nwo REPO_NWO', 'Repository name with owner') { |v| options[:repo_nwo] = v }
+
+  opts.on('-e', '--ecosystem PACKAGE_ECOSYSTEM', 'The package ecosystem to use') { |v| options[:vulnerable_package][:ecosystem] = v }
+  opts.on('-t', '--manifest_path MANIFEST_PATH', 'The manifest path to update') { |v| options[:manifest_path] = v }
+  opts.on('-p', '--package_name PACKAGE_NAME', 'The package name to update') { |v| options[:vulnerable_package][:name] = v }
+  opts.on('-g', '--ghsa_id GHSA_ID', 'GHSA ID to mock') { |v| options[:ghsa_id] = v }
+  opts.on('-v', '--package_version PACKAGE_VERSION', 'The package version range to update past') { |v| options[:vulnerable_version] = v }
+end.parse!
+
+# Query repo information from API:
+github_login, repo_name = options[:repo_nwo].split("/")
+account = Account.find_by(github_login: github_login)
+client = GitHubHelpers::ClientWithRetries.new(account: account)
+repo = client.repo(options[:repo_nwo])
+
+# Convert from API (octokit.rb) to hydro model:
+user = HydroHandlers::GitHub::User.new(
+  {
+    login: repo.owner.login,
+    id: repo.owner.id,
+    type: repo.owner.type == 'Organization' ? :ORGANIZATION : :USER,
+  },
+  installation_id: account.current_installation_id,
+)
+repository = HydroHandlers::GitHub::Repository.new(
+  {
+    name: repo.name,
+    id: repo.id,
+    global_relay_id: repo.node_id,
+    parent_id: repo.parent_id,
+    visibility: repo.visibility,
+    primary_language_name: repo.language,
+    default_branch: repo.default_branch,
+  },
+  owner: user,
+)
+
+# Mock an advisory:
+advisory = HydroHandlers::GitHub::SecurityVulnerability.new(
+  ghsa_id: options[:ghsa_id],
+  package: options[:vulnerable_package],
+  vulnerable_version_range: options[:vulnerable_version],
+)
+dependency_update = HydroHandlers::GitHub::DependencyUpdate.new(
+  repository_dependency_update_id: (UpdateJob.maximum(:github_request_id) || 0) + 1,
+  manifest_path: options[:manifest_path],
+  trigger: :MANUAL,
+  triggered_at: Time.now.utc,
+  dry_run: false,
+)
+
+HydroHandlers::RepositoryVulnerabilityAlertCreate.new(
+  advisory: advisory,
+  dependency_update: dependency_update,
+  user: user,
+  repository: repository).run
+puts "New vulnerability alert pipeline triggered"

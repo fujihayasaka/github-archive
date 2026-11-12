@@ -1,0 +1,45 @@
+#!/bin/sh
+
+# Usage: script/test [options] [spec_files...]
+#
+# Run RSpec tests for the application. Without arguments, runs all specs.
+#
+# Options:
+#   --staged     Run tests for staged files only
+#   --[option]   Any option starting with '--' is passed to RSpec
+#
+# Examples:
+#   script/test                           # Run all specs
+#   script/test spec/models/user_spec.rb  # Run specific spec file
+#   script/test --staged                  # Run only staged spec files
+#   script/test --format doc             # Use RSpec documentation format
+
+staged_files=""
+if [ ! -f /etc/app-env ]; then
+  # Check if the script is not being run in a container environment
+  # The git repo is not available in the container
+  new_args=""
+  for arg in "$@"; do
+    if [ "$arg" = "--staged" ]; then
+      # Add staged spec files to string
+      staged=$(git diff --cached --name-only | grep "_spec\.rb$" || true)
+      staged_files="$staged"
+    else
+      # Add other arguments to new_args
+      new_args="$new_args $arg"
+    fi
+  done
+  # Update arguments
+  set -- $new_args $staged_files
+fi
+
+appdir=$(cd $(dirname "$0")/.. && pwd)
+[ -f /etc/app-env ] || exec "$(pwd)/script/app-env" $0 $@
+
+export BUNDLE_IGNORE_CONFIG=1
+
+if [ ${ENTERPRISE:-} ] ; then
+  export SCHEMA="$appdir/db/enterprise_structure.sql"
+fi
+
+RAILS_ENV=test bundle exec rspec $@

@@ -31,9 +31,8 @@ module EnablementAdvancedSecurityLicenseDependency
         payload.merge!(unbundled_licence_info(org))
         payload.delete(:bundled) # remove fallback info
       end
-
-    rescue AdvancedSecurityLicense::TurboghasError => e
-      Failbot.report(e, catalog_service: "github/licensing")
+    rescue AdvancedSecurityLicense::TurboghasError, Faraday::Error => e
+      Failbot.report!(e, catalog_service: "github/licensing")
       payload[:failedToFetchLicenses] = true
     end
 

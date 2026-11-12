@@ -1,0 +1,42 @@
+#!/bin/bash
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}/.."
+
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/setup-env"
+
+make build
+
+# Stop in case already running
+make stop
+
+# Check if background mode is requested
+if [ "${1:-}" = "--background" ] || [ "${1:-}" = "-b" ]; then
+    echo "Starting server in background mode..."
+    "$BIN_DIR/server" &> "$BIN_DIR/server.log" &
+    APP_PID=$!
+
+    echo "Waiting for server to start..."
+    ./script/wait-for-server
+
+    if ! kill -0 $APP_PID 2>/dev/null; then
+        echo "Error: Failed to start server. Check logs at $BIN_DIR/server.log for details."
+        exit 1
+    fi
+
+    echo "✅ server is running with PID $APP_PID"
+    echo
+    echo "  🔹 stop      : make stop"
+    echo "  🔹 ping      : make ping"
+    echo "  🔹 watch log : make watch"
+    echo
+else
+    echo "Starting server in foreground mode..."
+    echo "Use --background or -b to run in background"
+    echo "  make run ARGS=\"-b\" or make run ARGS=\"--background\""
+    echo "Logs are at: $BIN_DIR/server.log"
+    echo
+    "$BIN_DIR/server" 2>&1 | tee "$BIN_DIR/server.log"
+fi

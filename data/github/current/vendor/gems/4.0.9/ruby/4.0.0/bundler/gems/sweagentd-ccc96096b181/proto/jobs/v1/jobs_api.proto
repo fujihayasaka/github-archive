@@ -1,0 +1,272 @@
+syntax = "proto3";
+
+package sweagentd.jobs.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "jobs/v1";
+option ruby_package = "Sweagentd::JobsAPI::V1";
+
+// JobsAPI service is used for all `service -> sweagentd` communication about Jobs.
+service JobsAPI {
+    // ListJobsForPullRequest returns the list of jobs associated with a given pull request.
+    rpc ListJobsForPullRequest(ListJobsForPullRequestRequest) returns (ListJobsForPullRequestResponse);
+    // CreateJob creates a new job for the given repository and owner.
+    rpc CreateJob(CreateJobRequest) returns (CreateJobResponse);
+    // CreateJobForAssignment creates a new job for an existing assignment.
+    rpc CreateJobForAssignment(CreateJobForAssignmentRequest) returns (CreateJobForAssignmentResponse);
+    // CreateJobForIssue creates a new job for a specific issue.
+    rpc CreateJobForIssue(CreateJobForIssueRequest) returns (CreateJobForIssueResponse);
+    // GetJobBySessionID retrieves a job by its associated session ID.
+    rpc GetJobBySessionID(GetJobBySessionIDRequest) returns (GetJobBySessionIDResponse);
+    // CreateCommand creates a new command for the given job.
+    rpc CreateCommand(CreateCommandRequest) returns (CreateCommandResponse);
+    // CreateAssignment creates a new empty assignment for the given repository.
+    rpc CreateAssignment(CreateAssignmentRequest) returns (CreateAssignmentResponse);
+}
+
+message ListJobsForPullRequestRequest {
+    int64 repo_id = 1;
+    int64 owner_id = 2;
+    int64 pull_request_id = 3;
+}
+
+message ListJobsForPullRequestResponse {
+    repeated Job jobs = 1;
+}
+
+message CreateJobRequest {
+    uint64 actor_id = 1;
+    uint64 repo_id = 2;
+    uint64 owner_id = 3;
+    string problem_statement = 4;
+    string custom_agent = 5;
+    CustomAgentAttributes custom_agent_attributes = 6;
+    int64 agent_id = 7;
+    string event_url = 8;
+    repeated string event_identifiers = 9;
+    string event_content = 10;
+    Features features = 11;
+    string model = 12;
+}
+
+message CreateJobForAssignmentRequest {
+    uint64 actor_id = 1;
+    uint64 repo_id = 2;
+    uint64 owner_id = 3;
+    string problem_statement = 4;
+    uint64 agent_id = 5;
+    string event_url = 6;
+    repeated string event_identifiers = 7;
+    string event_content = 8;
+    string assignment_id = 9;
+    string custom_agent = 10;
+    CustomAgentAttributes custom_agent_attributes = 11;
+    Features features = 12;
+    // The AI model to use for this job. If empty, defaults to the previous job's model or "auto".
+    string model = 13;
+    // The event type for this job. If empty, defaults to "api_call_received".
+    string event_type = 14;
+}
+
+message CreateJobForIssueRequest {
+    uint64 actor_id = 1;
+    uint64 repo_id = 2;
+    uint64 owner_id = 3;
+    string additional_instructions = 4;
+    string base_branch_name = 5;
+    string custom_agent = 6;
+    CustomAgentAttributes custom_agent_attributes = 7;
+    int64 issue_id = 8;
+    string event_content = 9;
+    int64 agent_id = 10;
+}
+
+message CustomAgentAttributes {
+    string display_name = 1;
+    string description = 2;
+    string prompt = 3;
+    repeated string tools = 4;
+    map<string, string> permissions = 5;
+    // mcp_servers is a map of server names to their configurations.
+    // This field is only available through the internal Twirp API, not the public Jobs API.
+    map<string, MCPServer> mcp_servers = 6;
+}
+
+// MCPServer represents the configuration for an individual MCP server.
+// The type field determines which fields are relevant:
+// - For remote servers (type: "http" or "sse"): use url and headers
+// - For local servers (type: "local" or "stdio"): use command, args, and env
+message MCPServer {
+    // tools is a list of tools to include from this server. Use ["*"] to include all tools.
+    repeated string tools = 1;
+    // type indicates the server type: "http", "sse", "local", or "stdio".
+    string type = 2;
+
+    // Remote server fields (used when type is "http" or "sse")
+    // url is the URL of the remote server.
+    string url = 3;
+    // headers are HTTP headers to include in requests to remote servers.
+    map<string, string> headers = 4;
+
+    // Local server fields (used when type is "local" or "stdio")
+    // command is the command to run for the server.
+    string command = 5;
+    // args are the arguments to pass to the command.
+    repeated string args = 6;
+    // env are environment variables to set for the server process.
+    map<string, string> env = 7;
+}
+
+// Features describes the features of the environment that must be
+// created for the agent to run the job.
+message Features {
+    // Branch contains details about the branch provided to the agent to use
+    // during execution of the job.
+    BranchFeature branch = 1;
+
+    // PullRequest contains details about the pull request provided to the agent
+    // to use during execution of the job.
+    PullRequestFeature pull_request = 2;
+}
+
+// BranchFeature describes the branch that will be created for the job.
+message BranchFeature {
+    // Name is the name of the branch created for the job.
+    string name = 1;
+
+    // BaseRef is the base ref that the branch is created from.
+    string base_ref = 2;
+}
+
+// PullRequestFeature describes the pull request that will be created for the job.
+message PullRequestFeature {
+    // BaseRef is the base branch that the pull request targets.
+    string base_ref = 4;
+
+    // HeadRef is the branch that will be used for the PR (but still targeting
+    // the BaseRef).
+    // If not specified, but the branch feature is specified, the branch feature's
+    // resulting branch will be used.
+    // If neither is specified, a new branch will be created from the BaseRef.
+    string head_ref = 5;
+}
+
+message CreateJobResponse {
+    string job_id = 1;
+    string session_id = 2;
+    int64 pull_request_id = 3;
+    int64 pull_request_number = 4;
+}
+
+message CreateJobForAssignmentResponse {
+    string job_id = 1;
+    string session_id = 2;
+}
+
+message CreateJobForIssueResponse {
+    string job_id = 1;
+    string session_id = 2;
+    int64 pull_request_id = 3;
+    int64 pull_request_number = 4;
+}
+
+message Job {
+    string id = 1;
+    int64 repo_id = 2;
+    int64 owner_id = 3;
+    string repo_node_id = 4;
+    string owner_node_id = 5;
+    string assignment_id = 6;
+    int64 pull_request_id = 7;
+    string compute_id = 8;
+    string session_id = 9;
+    EventType event_type = 10;
+    string event_url = 11;
+    repeated string event_identifiers = 12;
+    JobStatus status = 13;
+    google.protobuf.Timestamp created_at = 14;
+    google.protobuf.Timestamp launched_at = 15;
+    google.protobuf.Timestamp queued_at = 16;
+    google.protobuf.Timestamp completed_at = 17;
+    google.protobuf.Timestamp updated_at = 18;
+    string model = 19;
+    string branch_name = 20;
+    string base_commit = 21;
+    int64 actor_id = 22;
+    string event_content = 23;
+}
+
+enum JobStatus {
+    JOB_STATUS_INVALID = 0;
+    JOB_STATUS_PENDING = 1;
+    JOB_STATUS_QUEUED = 2;
+    JOB_STATUS_RUNNING = 3;
+    JOB_STATUS_COMPLETED = 4;
+    JOB_STATUS_FAILED = 5;
+    JOB_STATUS_CANCELLED = 6;
+    JOB_STATUS_TIMED_OUT = 7;
+}
+
+enum EventType {
+    EVENT_TYPE_INVALID = 0;
+    EVENT_TYPE_ISSUE_ASSIGNMENT = 1;
+    EVENT_TYPE_PULL_REQUEST_COMMENT = 2;
+    EVENT_TYPE_PULL_REQUEST_REVIEW = 3;
+    EVENT_TYPE_CODE_SCANNING_ALERTS_ASSIGNMENT = 4;
+    EVENT_TYPE_API_CALL_RECEIVED = 5;
+}
+
+message GetJobBySessionIDRequest {
+    string session_id = 1;
+    int64 repo_id = 2;
+    int64 owner_id = 3;
+}
+
+message GetJobBySessionIDResponse {
+    Job job = 1;
+}
+
+message CreateCommandRequest {
+    // The ID of the job to which we should attach this command to
+    string job_id = 1;
+    // The owner ID of the repository where the job belongs
+    int64 owner_id = 2;
+    // The repository ID where the job belongs
+    int64 repo_id = 3;
+    // An external ID to correlate this command with an external system (e.g. Sessions API)
+    string external_id = 4;
+    // The ID of the actor (user or bot) creating this command
+    int64 actor_id = 5;
+    // The content of the command (e.g. "change approach", "more tests", etc.)
+    string content = 6;
+    // The timestamp when the command was created in the external system (e.g. Sessions API)
+    int64 timestamp = 7;
+}
+
+message CreateCommandResponse {
+    // The ID of the newly created command
+    string id = 1;
+    // An external ID to correlate this command with an external system (e.g. Sessions API)
+    string external_id = 2;
+    // The ID of the job to which this command was attached
+    string job_id = 3;
+}
+
+message CreateAssignmentRequest {
+    // The owner ID of the repository where the assignment belongs
+    int64 owner_id = 1;
+    // The repository ID where the assignment belongs
+    int64 repo_id = 2;
+}
+
+message CreateAssignmentResponse {
+    // The ID of the newly created assignment
+    string id = 1;
+    // The timestamp when the assignment was created (Unix timestamp in seconds)
+    int64 created_at = 2;
+    // The owner ID of the repository
+    int64 owner_id = 3;
+    // The repository ID
+    int64 repo_id = 4;
+}

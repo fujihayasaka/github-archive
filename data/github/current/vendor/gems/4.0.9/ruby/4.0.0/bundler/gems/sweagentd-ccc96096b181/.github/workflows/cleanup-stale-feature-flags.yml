@@ -1,0 +1,59 @@
+name: "Cleanup Stale Feature Flags"
+
+env:
+  HUSKY: 0
+
+on:
+  schedule:
+    # Run every Monday at 10:00 AM UTC
+    - cron: "0 10 * * 1"
+  workflow_dispatch: # Allow manual triggering
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  cleanup-stale-feature-flags:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch full history for accurate age calculation
+          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          submodules: "recursive"
+
+      - name: Analyze feature flag ages
+        id: analyze-flags
+        run: |
+          # Run the script and capture output
+          ANALYSIS_OUTPUT=$(./script/get-feature-flag-ages)
+          echo "$ANALYSIS_OUTPUT"
+
+          # Save output to file for use in the prompt
+          # Use a delimiter to handle multi-line output
+          echo "FEATURE_FLAG_ANALYSIS<<EOF" >> $GITHUB_OUTPUT
+          echo "$ANALYSIS_OUTPUT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Delegate task to Copilot Coding Agent
+        uses: github/delegate-task-to-copilot-coding-agent@main
+        with:
+          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          custom-agent: stale-feature-flags
+          prompt: |
+            Identify and remove stale feature flags from the codebase that are older than 3 months.
+
+            The following is a pre-computed analysis of all feature flags and their ages based on Git history.
+            Use this information to identify which flags are stale (>3 months old) and should be removed.
+
+            ```
+            ${{ steps.analyze-flags.outputs.FEATURE_FLAG_ANALYSIS }}
+            ```
+
+            For each stale flag:
+            1. Create a separate commit that removes it completely
+            2. Include the flag introduction date and age in the commit message
+
+            Generate a summary report in the PR description with DevPortal links for all removed flags.

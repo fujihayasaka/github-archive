@@ -1,0 +1,13 @@
+# frozen_string_literal: true
+
+require 'apollo-federation/version'
+require 'apollo-federation/schema'
+require 'apollo-federation/object'
+require 'apollo-federation/interface'
+require 'apollo-federation/union'
+require 'apollo-federation/enum'
+require 'apollo-federation/enum_value'
+require 'apollo-federation/field'
+require 'apollo-federation/scalar'
+require 'apollo-federation/input_object'
+require 'apollo-federation/argument'

@@ -1,0 +1,42 @@
+#!/usr/bin/env bin/rails runner
+
+# Usage: script/restore [gzipped db dump]
+# Restore the local db from a db dump
+
+config = ActiveRecord::Base.connection_config
+file   = ARGV[0]
+
+# puts the prompt, reads the input, and returns it
+def ask(prompt)
+  puts prompt
+  gets.strip
+end
+
+def usage
+  puts "Usage: script/restore [gzipped_db_dump.gz]"
+end
+
+puts "Are you sure you wish to proceed? This will drop all data in #{config[:database]}"
+answer = ask "Continue? [Y/n]:"
+
+unless answer.downcase.starts_with?("y")
+  puts "Didn't get 'yes'. Exiting."
+  exit
+end
+
+unless file && File.exists?(file)
+  puts "Couldn't file dumpfile '#{file}'"
+  usage
+  exit
+end
+
+puts "Unzipping..."
+`gunzip #{file}`
+
+puts "Dropping db..."
+`bin/rake db:drop db:create db:schema:load`
+
+puts "Restoring db. This could take a while..."
+username = config.fetch(:user, `whoami`.strip)
+database = config.fetch(:database)
+system("mysql --user #{username} #{database} < #{file.sub(/\.gz/, '')}")
