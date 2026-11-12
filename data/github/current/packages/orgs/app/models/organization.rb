@@ -1696,6 +1696,58 @@ class Organization < User
     removable_users
   end
 
+  # Public: Filter out users who still have direct team membership in this org.
+  #
+  # Pre-SCIM manual teams may lack OrganizationMembershipEntry records, causing
+  # prevent_removal_of_scim_managed_user(s)? to incorrectly mark those users as
+  # removable. This method checks actual Ability-based team memberships as a
+  # safety net.
+  #
+  # Ability lives on a separate database cluster from teams, so we cannot use a
+  # cross-database subquery. Instead we materialize the org's team IDs and pass
+  # them as a subject_id filter to scope the Ability query to this org only.
+  # Both user IDs and team IDs are batched to keep IN-clause sizes bounded.
+  #
+  # The query uses all leading columns of the Ability composite index
+  # (actor_id, actor_type, subject_type, subject_id, priority) for efficient
+  # lookups, and only returns distinct actor_ids to minimize result set size.
+  #
+  # See https://github.com/github/authentication/issues/6872
+  #     https://github.com/github/external-identities/issues/5922
+  #
+  # users - Array of User objects that are candidates for org removal
+  #
+  # Returns Array of User objects that do NOT have any remaining team membership
+  TEAM_MEMBERSHIP_CHECK_BATCH_SIZE = 500
+
+  sig { params(users: T::Array[User]).returns(T::Array[User]) }
+  def filter_users_with_remaining_team_membership(users)
+    return users if users.empty?
+    return users unless FeatureFlag.vexi.enabled?(:check_team_membership_before_org_removal, business, default: false)
+
+    org_team_ids = teams.pluck(:id)
+    return users if org_team_ids.empty?
+
+    user_ids_still_in_teams = Set.new
+
+    users.each_slice(TEAM_MEMBERSHIP_CHECK_BATCH_SIZE) do |user_batch|
+      user_batch_ids = user_batch.map(&:id)
+      org_team_ids.each_slice(TEAM_MEMBERSHIP_CHECK_BATCH_SIZE) do |team_batch|
+        Ability.where(
+          actor_type: "User",
+          actor_id: user_batch_ids,
+          subject_type: "Team",
+          subject_id: team_batch,
+          priority: Ability.priorities[:direct],
+        ).distinct.pluck(:actor_id).each do |actor_id|
+          user_ids_still_in_teams.add(actor_id)
+        end
+      end
+    end
+
+    users.reject { |user| user_ids_still_in_teams.include?(user.id) }
+  end
+
   # Public: Removes organization membership entry for the given user if the user is a member of the organization
   #
   # user - the user who is being removed from the organization
@@ -1929,6 +1981,8 @@ class Organization < User
   #                                  the org but NOT admins.
   # actor_ids - A list of user ids to filter the possible visible users on.
   #
+  # Note: this includes suspended users on GHES to avoid breaking existing undocumented behavior of the API endpoints.
+  #
   # Returns an ActiveRecord::Relation
   def visible_users_for(viewer, type: :all, actor_ids: nil, limit: MEGA_ORG_MEMBER_THRESHOLD, include_indirect_abilities: true)
     scope = case type
@@ -1948,12 +2002,10 @@ class Organization < User
       scope = scope.publicly_belongs_to(id)
     end
 
-    # On GHES, filter out all suspended users (regardless of suspension source).
-    scope = scope.not_suspended if GitHub.enterprise?
-
     scope
   end
 
+  # Note: this includes suspended users on GHES to avoid breaking existing undocumented behavior of the API endpoints.
   def visible_user_ids_for(viewer, type: :all, actor_ids: nil, limit: MEGA_ORG_MEMBER_THRESHOLD, include_indirect_abilities: true)
     user_ids = case type
     when :all, :direct_member
@@ -1973,17 +2025,6 @@ class Organization < User
     end
 
     return user_ids if user_ids.empty?
-
-    # On GHES, filter out suspended users.
-    if GitHub.enterprise?
-      suspended_ids = Set.new
-
-      GitHub::BatchedScope.batched(values: user_ids) do |values|
-        suspended_ids.merge(User.where(id: values).suspended.pluck(:id))
-      end
-
-      user_ids = user_ids.reject { |id| suspended_ids.include?(id) }
-    end
 
     if limit_to_public_members?(viewer, include_indirect_abilities: include_indirect_abilities)
       # Anonymous users, non-org-members, and users using oauth apps blocked by

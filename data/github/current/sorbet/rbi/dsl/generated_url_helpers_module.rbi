@@ -14128,6 +14128,9 @@ module GeneratedUrlHelpersModule
   def settings_org_edit_global_dependabot_rule_url(*args); end
 
   sig { params(args: T.untyped).returns(String) }
+  def settings_org_elm_exporter_secrets_url(*args); end
+
+  sig { params(args: T.untyped).returns(String) }
   def settings_org_fgp_metadata_url(*args); end
 
   sig { params(args: T.untyped).returns(String) }
@@ -19841,6 +19844,9 @@ module GeneratedUrlHelpersModule
 
   sig { params(args: T.untyped).returns(String) }
   def update_settings_network_configurations_url(*args); end
+
+  sig { params(args: T.untyped).returns(String) }
+  def update_settings_org_elm_exporter_secret_url(*args); end
 
   sig { params(args: T.untyped).returns(String) }
   def update_settings_org_installation_url(*args); end

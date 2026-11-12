@@ -1,8 +1,13 @@
 #!/bin/bash
 
-# This script fetches the earliest matching git SHA from the main branch of the github/github-ui repo
-# and writes it to config/github-ui-version. It is resilient to errors and will try multiple strategies
-# for determining the base SHA/date and the UI SHA.
+# This script fetches the matching git SHA from the github/github-ui repo and writes it to
+# config/github-ui-version. It is resilient to errors and will try multiple strategies for
+# determining the base SHA/date and the UI SHA.
+#
+# For most branches it tracks github-ui's main branch, picking the earliest commit newer than the
+# base commit's date. Enterprise release lines are special: when running on an
+# `enterprise-X.Y-release` (or `enterprise-X.Y-backport-*`) branch, it pins to the tip of the
+# matching `enterprise-X.Y-release` branch in github-ui instead of main.
 # Once we have the UI SHA, it downloads the ui-manifest.json file from the CDN or Blob storage and places it in public/assets.
 
 set -euo pipefail
@@ -12,6 +17,7 @@ source script/ci/common_functions.sh
 BASE_SHA=""
 BASE_DATE=""
 BASE_METHOD=""
+UI_BRANCH=""
 
 # --- Utility Functions ---
 
@@ -113,6 +119,24 @@ detect_base() {
 
 # --- UI SHA Strategies ---
 
+# Map the current github/github branch to the github-ui branch we should track.
+# Enterprise release/backport branches (enterprise-X.Y-release, enterprise-X.Y-backport-*) map to
+# the matching enterprise-X.Y-release branch in github-ui. Prints the branch name and returns 0 when
+# on an enterprise branch, otherwise returns 1.
+detect_enterprise_ui_branch() {
+  # Check the PR base/head refs first (set in CI for pull requests), then the pushed ref, then the
+  # local branch name.
+  local candidate
+  for candidate in "${GITHUB_BASE_REF:-}" "${GITHUB_HEAD_REF:-}" "${GITHUB_REF:-}" "$(git branch --show-current 2>/dev/null || true)"; do
+    candidate="${candidate#refs/heads/}"
+    if [[ "$candidate" =~ ^enterprise-([0-9]+\.[0-9]+) ]]; then
+      echo "enterprise-${BASH_REMATCH[1]}-release"
+      return 0
+    fi
+  done
+  return 1
+}
+
 detect_github_ui_sha_since_base_date() {
   # Try to find the earliest commit on main newer than the base date
   local sha=$(git log refs/remotes/origin/main --first-parent --since="$BASE_DATE" --reverse --format="%H" | head -n 1 || true)
@@ -129,6 +153,17 @@ detect_github_ui_sha_latest() {
   local sha=$(git rev-parse origin/main 2>/dev/null) || return 1
   GITHUB_UI_SHA="$sha"
   UI_SHA_METHOD="latest"
+  return 0
+}
+
+detect_github_ui_sha_tip() {
+  # Use the tip of the given branch (used for enterprise release lines)
+  local branch="$1"
+  local sha
+  sha=$(git rev-parse "refs/remotes/origin/$branch" 2>/dev/null) || return 1
+  if [ -z "$sha" ]; then return 1; fi
+  GITHUB_UI_SHA="$sha"
+  UI_SHA_METHOD="enterprise_release_tip"
   return 0
 }
 
@@ -149,22 +184,42 @@ detect_github_ui_sha() {
   git remote add origin "$giturl"
   git config extensions.partialClone origin
 
-  # Try to fetch commit history since base date, fallback to latest if needed
-  if ! git fetch --shallow-since="$BASE_DATE" --filter=tree:0 --no-tags --quiet origin main 2>/dev/null; then
-    if ! git fetch --depth=1 --filter=tree:0 --no-tags --quiet origin main 2>/dev/null; then
-      log "ERROR: Failed to fetch from github-ui repository"
+  # The branch in github-ui we track. Defaults to main; enterprise branches set this to the
+  # matching enterprise-X.Y-release branch.
+  local ui_branch="${UI_BRANCH:-main}"
+  local result=1
+
+  if [ "$ui_branch" != "main" ]; then
+    # Enterprise: pin to the tip of the matching enterprise-X.Y-release branch in github-ui.
+    if ! git fetch --depth=1 --filter=tree:0 --no-tags --quiet origin "$ui_branch" 2>/dev/null; then
+      log "ERROR: Failed to fetch branch $ui_branch from github-ui repository"
       popd > /dev/null
       return 1
     fi
-  fi
 
-  local result=1
-  if detect_github_ui_sha_since_base_date; then
-    result=0
-  elif detect_github_ui_sha_latest; then
-    result=0
+    if detect_github_ui_sha_tip "$ui_branch"; then
+      result=0
+    else
+      log "ERROR: Could not determine tip of github-ui branch $ui_branch."
+    fi
   else
-    log "ERROR: Could not determine GITHUB_UI_SHA from github-ui repository."
+    # Default: track main, picking a commit contemporaneous with the base commit's date.
+    # Try to fetch commit history since base date, fallback to latest if needed
+    if ! git fetch --shallow-since="$BASE_DATE" --filter=tree:0 --no-tags --quiet origin main 2>/dev/null; then
+      if ! git fetch --depth=1 --filter=tree:0 --no-tags --quiet origin main 2>/dev/null; then
+        log "ERROR: Failed to fetch from github-ui repository"
+        popd > /dev/null
+        return 1
+      fi
+    fi
+
+    if detect_github_ui_sha_since_base_date; then
+      result=0
+    elif detect_github_ui_sha_latest; then
+      result=0
+    else
+      log "ERROR: Could not determine GITHUB_UI_SHA from github-ui repository."
+    fi
   fi
 
   popd > /dev/null
@@ -185,7 +240,23 @@ fi
 if [ -n "${GITHUB_UI_SHA:-}" ]; then
   log "Using GITHUB_UI_SHA from environment: $GITHUB_UI_SHA"
   UI_SHA_METHOD="env"
+elif UI_BRANCH=$(detect_enterprise_ui_branch); then
+  # Enterprise release/backport branches track the matching enterprise-X.Y-release branch in
+  # github-ui rather than main.
+  BASE_METHOD="enterprise_branch"
+  log "Detected enterprise branch; pinning github-ui to branch: $UI_BRANCH"
+
+  # Resolve the UI SHA from the enterprise branch. Fall back to main if it can't be resolved
+  # (e.g. github-ui has not cut the release branch yet).
+  if ! detect_github_ui_sha; then
+    log "WARNING: Could not resolve $UI_BRANCH from github-ui; falling back to main."
+    UI_BRANCH="main"
+    detect_base
+    detect_github_ui_sha
+  fi
 else
+  UI_BRANCH="main"
+
   # Get the BASE_SHA and BASE_DATE
   detect_base
 

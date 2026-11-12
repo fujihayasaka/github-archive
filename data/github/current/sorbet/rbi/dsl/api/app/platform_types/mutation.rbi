@@ -2575,6 +2575,12 @@ class Api::App::PlatformTypes::Mutation < GraphQL::Client::Schema::ObjectClass
   sig { returns(T::Boolean) }
   def update_label_by_name?; end
 
+  sig { returns(T.nilable(Api::App::PlatformTypes::UpdateLabelsForLabelablePayload)) }
+  def update_labels_for_labelable; end
+
+  sig { returns(T::Boolean) }
+  def update_labels_for_labelable?; end
+
   sig { returns(T.nilable(Api::App::PlatformTypes::UpdateMarketplaceListingPlanPayload)) }
   def update_marketplace_listing_plan; end
 

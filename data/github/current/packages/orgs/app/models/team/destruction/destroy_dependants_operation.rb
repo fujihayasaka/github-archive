@@ -326,6 +326,16 @@ module Team::Destruction
 
       users = User.batched_scope(:id, values: derived_org_members_ids).to_a
 
+      # Guard: exclude users who still belong to other org teams.
+      # Pre-SCIM manual teams may lack OrganizationMembershipEntry records,
+      # causing prevent_removal_of_scim_managed_user? to incorrectly mark
+      # those users as removable. The destroyed team's abilities have already
+      # been cleared by clear_abilities, so only abilities for remaining teams
+      # will appear.
+      # See https://github.com/github/authentication/issues/6872
+      #     https://github.com/github/external-identities/issues/5922
+      users = org.filter_users_with_remaining_team_membership(users)
+
       # if the user only has derived organization membership via a team (that was just removed above)
       # remove the user from the organization
       users.each do |user|

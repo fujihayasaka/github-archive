@@ -113,22 +113,7 @@ module ConditionalAccess
       end
 
       def legacy_pat_restricted_organizations_experiment(org_id, targets)
-        # This policy is evaluated first¹, we can check percentage enablement here
-        # and ensure that the following policy evaluation is consistent.
-        #
-        # This will allow us to enable experiment for 100% of actors in dotcom so that memoization is consistent
-        #
-        # ¹: packages/app_security/app/models/conditional_access/api/public/filter.rb#L25
-
-        science "cap.legacy_personal_access_tokens.restricted_organization_ids_v_three" do |experiment|
-          experiment.use do
-            legacy_pat_restricted_organization_ids.include?(org_id)
-          end
-
-          experiment.try do
-            legacy_pat_restricted_organization_ids_candidate(targets).include?(org_id)
-          end
-        end
+        legacy_pat_restricted_organization_ids_candidate(targets).include?(org_id)
       end
 
       # Internal: Find all of the actors associated Organizations that are

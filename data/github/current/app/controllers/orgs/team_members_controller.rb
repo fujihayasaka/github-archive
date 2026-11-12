@@ -92,7 +92,7 @@ class Orgs::TeamMembersController < Orgs::Controller
       query: parsed_query.query,
       max_members_limit: Organization::MEGA_ORG_MEMBER_THRESHOLD,
       with_business_teams: supports_business_teams?
-    ).scope.includes(:profile).paginate(page: params[:page], per_page: MEMBER_PAGE_SIZE)
+    ).scope
 
     immediate_member_scope = Team::Membership::ScopeBuilder.new(
       team_id: this_team.id,
@@ -108,6 +108,17 @@ class Orgs::TeamMembersController < Orgs::Controller
       membership: :child_team,
       max_members_limit: Organization::MEGA_ORG_MEMBER_THRESHOLD
     ).scope
+
+    # Hide suspended users from the team members page on GHES, mirroring the
+    # People page. Suspended users are still returned by the API and GraphQL;
+    # that is undocumented but long-standing behaviour we intentionally preserve.
+    if GitHub.enterprise?
+      members = members.not_suspended
+      immediate_member_scope = immediate_member_scope.not_suspended
+      child_member_scope = child_member_scope.not_suspended
+    end
+
+    members = members.includes(:profile).paginate(page: params[:page], per_page: MEMBER_PAGE_SIZE)
 
     options = {
       organization: this_organization,

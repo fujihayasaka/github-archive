@@ -113,6 +113,12 @@ fixnums = %w[
   saml_default_session_expiration
   checks_retention_archive_threshold
   checks_retention_delete_threshold
+  checks_steps_deletion_disabled
+  checks_steps_deletion_records_per_batch
+  checks_steps_deletion_parallel_count_weekend
+  checks_steps_deletion_parallel_count_weekday
+  checks_suites_deletion_parallel_count_weekend
+  checks_suites_deletion_parallel_count_weekday
   max_orgs_per_et_org_reconciliation_runner
   max_concurrent_et_org_reconciliation_runners
   max_concurrent_background_instrumentation_jobs

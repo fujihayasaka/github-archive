@@ -18,6 +18,7 @@ module Apps
           audit_log_secrets_app_name: "elm_exporter_secrets",
           secrets_event_subject: "integration",
           proxima_sync_delegate: :DefaultDelegate,
+          authzd_integration_name: "elm_exporter_secrets",
         },
         can_auto_install: {},
         custom_instrumentation_events: {},

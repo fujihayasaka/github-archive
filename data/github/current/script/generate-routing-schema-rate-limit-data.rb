@@ -268,6 +268,15 @@ module RateLimitGenerator
       "/enterprise/contractors",
       "/enterprise/contractors/{user_id}",
     ],
+    "Api::Enterprise::LiveMigrations" => [
+      "/enterprise/live-migrations",
+      "/enterprise/live-migrations/{migration_id}",
+      "/enterprise/live-migrations/{migration_id}/cancel",
+      "/enterprise/live-migrations/{migration_id}/cutover",
+      "/enterprise/live-migrations/{migration_id}/pause",
+      "/enterprise/live-migrations/{migration_id}/resume",
+      "/enterprise/live-migrations/{migration_id}/start",
+    ],
     "Api::Enterprise::Settings" => [
       "/enterprise/github/action_mailer",
       "/enterprise/github/environment",

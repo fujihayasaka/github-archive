@@ -9,6 +9,7 @@ class SecurityConfiguration::SecurityProductAvailabilityOnUpdateValidator < Acti
       next if is_installed
 
       if config.attribute_changed?(feature)
+        next if config.attribute_was(feature).nil? && config[feature] == "disabled" # allow nil→disabled normalization
         next if config.ghas_is_being_disabled? && config[feature] == "disabled" # allow disabling if GHAS is being disabled
         config.errors.add feature, "enablement for uninstalled #{feature} can not be changed"
       end

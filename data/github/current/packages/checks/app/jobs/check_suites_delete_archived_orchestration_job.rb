@@ -40,13 +40,18 @@ class CheckSuitesDeleteArchivedOrchestrationJob < ApplicationJob
   # Every 25 parallel jobs are ~1M CS deletions per hour
   def parallel_count
     if GitHub.enterprise?
-      return 5 if weekend_deletion_window?
-      2
+      return validated_enterprise_config(GitHub.checks_suites_deletion_parallel_count_weekend, 5) if weekend_deletion_window?
+      validated_enterprise_config(GitHub.checks_suites_deletion_parallel_count_weekday, 2)
     else
       return 25 if peak_traffic_time?
       return 40 if weekend_deletion_window?
       30
     end
+  end
+
+  def validated_enterprise_config(config_value, default)
+    value = [config_value.to_i, MAX_DELETE_CONCURRENCY].min
+    value.positive? ? value : default
   end
 
   def lock!

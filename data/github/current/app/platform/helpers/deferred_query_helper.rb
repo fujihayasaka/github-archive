@@ -59,43 +59,55 @@ module Platform
         return {} if initial_data.nil?
 
         if gql_query_object.context[:defer].present?
-          tags = get_tags(gql_query_object.context)
-          deferred_fragments = []
-          streamed_connections = Hash.new
+          begin
+            tags = get_tags(gql_query_object.context)
+            deferred_fragments = []
+            streamed_connections = Hash.new
 
-          tracer_attributes = {
-            "gh.graphql.query_hash" => gql_query_object.context[:query_tracker].query_hash,
-            "gh.graphql.variables_hash" => gql_query_object.context[:query_tracker].variables_hash,
-          }
-          tracer_attributes["gh.graphql.query_name"] = gql_query_object.context[:query_name] if gql_query_object.context[:query_name].present?
+            tracer_attributes = {
+              "gh.graphql.query_hash" => gql_query_object.context[:query_tracker].query_hash,
+              "gh.graphql.variables_hash" => gql_query_object.context[:query_tracker].variables_hash,
+            }
+            tracer_attributes["gh.graphql.query_name"] = gql_query_object.context[:query_name] if gql_query_object.context[:query_name].present?
 
-          GitHub.tracer.in_span("platform.defer.execute", attributes: tracer_attributes, kind: :internal) do
-            GitHub.dogstats.distribution_time("platform.defer.run", tags: tags) do
-              chunk_index = 0
-              gql_query_object.context[:defer].each do |deferred|
-                # the first (main) chunk is already in the query result
-                if chunk_index > 0
-                  if deferred.label.present? && deferred.label.size > 0
-                    # the label for stream connections is in the format of `<FRAGMENT_NAME>$stream$<STREAM_KEY>`
-                    # it will also contain a chunk with the label `<FRAGMENT_NAME>$defer$<STREAM_KEY>$pageInfo`
-                    stream_label = deferred.label.match(/\A(.*?)\$(?:stream|defer)\$([^$]+)/)
+            GitHub.tracer.in_span("platform.defer.execute", attributes: tracer_attributes, kind: :internal) do
+              GitHub.dogstats.distribution_time("platform.defer.run", tags: tags) do
+                chunk_index = 0
+                gql_query_object.context[:defer].each do |deferred|
+                  # the first (main) chunk is already in the query result
+                  if chunk_index > 0
+                    if deferred.label.present? && deferred.label.size > 0
+                      # the label for stream connections is in the format of `<FRAGMENT_NAME>$stream$<STREAM_KEY>`
+                      # it will also contain a chunk with the label `<FRAGMENT_NAME>$defer$<STREAM_KEY>$pageInfo`
+                      stream_label = deferred.label.match(/\A(.*?)\$(?:stream|defer)\$([^$]+)/)
+                    end
+                    # a deferred chunk belongs either to a deferred fragment or to a stream connection
+                    if stream_label
+                      # chunks belonging to a stream connection are grouped by the stream key
+                      streamed_connections[stream_label[1]] ||= []
+                      streamed_connections[stream_label[1]] << deferred
+                    else
+                      # we assume a one-to-one relationship between deferred fragments and deferred chunks
+                      deferred_fragments << deferred
+                    end
                   end
-                  # a deferred chunk belongs either to a deferred fragment or to a stream connection
-                  if stream_label
-                    # chunks belonging to a stream connection are grouped by the stream key
-                    streamed_connections[stream_label[1]] ||= []
-                    streamed_connections[stream_label[1]] << deferred
-                  else
-                    # we assume a one-to-one relationship between deferred fragments and deferred chunks
-                    deferred_fragments << deferred
-                  end
+                  chunk_index += 1
                 end
-                chunk_index += 1
-              end
 
-              execute_deferral_for_deferred_fragments(gql_query_object, initial_data, deferred_fragments)
-              execute_deferral_for_streamed_connections(gql_query_object, initial_data, streamed_connections)
+                execute_deferral_for_deferred_fragments(gql_query_object, initial_data, deferred_fragments)
+                execute_deferral_for_streamed_connections(gql_query_object, initial_data, streamed_connections)
+              end
             end
+          ensure
+            # Resolving deferred fragments / streamed connections re-enters the GraphQL
+            # interpreter runtime (via `deferred.to_h`), which repopulates the fiber-local
+            # `Fiber[:__graphql_runtime_info]` hash with this query's runtime state.
+            # graphql-ruby only clears that entry inside `Interpreter.run_all`'s ensure
+            # block, which already ran during the initial (non-deferred) execution pass.
+            # Without clearing it again here, every deferred query is retained for the life
+            # of the process, leaking its entire execution graph (AST, QueryTracker, resolved
+            # records, perf-tracer timings). See github/monolith-systems#928.
+            clear_interpreter_runtime_state(gql_query_object)
           end
         end
 
@@ -178,6 +190,25 @@ module Platform
 
         deferred_tracker.set_streamed_chunks_count(chunks.size) if execution_type == "streamed_chunks"
         gql_query_object.context[:query_tracker].add_deferred_fragment_tracker(deferred_tracker)
+      end
+
+      private
+
+      # Removes this query's runtime state from graphql-ruby's fiber-local
+      # `Fiber[:__graphql_runtime_info]` hash after deferred execution completes.
+      #
+      # Deferred fragments and streamed connections are resolved by re-entering the
+      # interpreter runtime, which lazily recreates `Fiber[:__graphql_runtime_info][query]`.
+      # graphql-ruby only clears that hash inside `Interpreter.run_all`'s ensure block
+      # (the initial, non-deferred pass), so without this cleanup the query — and the
+      # entire object graph it references — is retained for the life of the process.
+      #
+      # This mirrors what the gem itself does, calling the same public
+      # `Runtime#delete_all_interpreter_context` used in `Interpreter.run_all`.
+      sig { params(gql_query_object: GraphQL::Query).void }
+      def clear_interpreter_runtime_state(gql_query_object)
+        runtime = gql_query_object.context.namespace(:interpreter_runtime)[:runtime]
+        runtime&.delete_all_interpreter_context
       end
     end
   end

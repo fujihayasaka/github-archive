@@ -14128,6 +14128,9 @@ module GeneratedPathHelpersModule
   def settings_org_edit_global_dependabot_rule_path(*args); end
 
   sig { params(args: T.untyped).returns(String) }
+  def settings_org_elm_exporter_secrets_path(*args); end
+
+  sig { params(args: T.untyped).returns(String) }
   def settings_org_fgp_metadata_path(*args); end
 
   sig { params(args: T.untyped).returns(String) }
@@ -19841,6 +19844,9 @@ module GeneratedPathHelpersModule
 
   sig { params(args: T.untyped).returns(String) }
   def update_settings_network_configurations_path(*args); end
+
+  sig { params(args: T.untyped).returns(String) }
+  def update_settings_org_elm_exporter_secret_path(*args); end
 
   sig { params(args: T.untyped).returns(String) }
   def update_settings_org_installation_path(*args); end
