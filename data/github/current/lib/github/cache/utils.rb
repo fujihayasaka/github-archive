@@ -18,6 +18,7 @@ module GitHub
       # key     - The cache key to get/set.
       # options - Hash of options.
       #           :ttl       => Integer time-to-live value.
+      #           :expires_in => Alias for :ttl (accepts an ActiveSupport::Duration).
       #           :force     => Force the value to be recached.
       #           :raw       => Do not marshal cache value.
       #           :stats_key => Record timing and hit/miss stats under this key.
@@ -40,7 +41,7 @@ module GitHub
 
         if write_cache && block_given?
           cache_value = yield
-          set(key, cache_value, (options[:ttl] || 0), options[:raw])
+          set(key, cache_value, ttl_from(options), options[:raw])
         end
 
         if stats_key
@@ -71,6 +72,7 @@ module GitHub
       # key     - The cache key to get/set.
       # options - Hash of options.
       #           :ttl       => Integer time-to-live value.
+      #           :expires_in => Alias for :ttl (accepts an ActiveSupport::Duration).
       #           :force     => Force the value to be recached.
       #           :raw       => Do not marshal cache value.
       #           :stats_key => Record timing and hit/miss stats under this key.
@@ -98,7 +100,7 @@ module GitHub
           else
             safe_value = Promise.resolve(true).then { block.call } # catch exceptions
             safe_value.then do |new_value|
-              async_set(key, new_value, (options[:ttl] || 0), options[:raw]).then { new_value }
+              async_set(key, new_value, ttl_from(options), options[:raw]).then { new_value }
             end
           end
 
@@ -161,6 +163,16 @@ module GitHub
         value = value.to_s if raw
         key = key.to_s.tr(" ", "_")
         send(method, key, value, ttl, raw)
+      end
+
+      private
+
+      # Resolve the time-to-live (in seconds) from an options hash, accepting
+      # either :ttl or :expires_in (an alias, mirroring the Rails-compatible
+      # `write` method above). Returns an Integer; 0 means "no expiry".
+      def ttl_from(options)
+        ttl = options[:ttl] || options[:expires_in] || 0
+        ttl.to_i
       end
     end
   end

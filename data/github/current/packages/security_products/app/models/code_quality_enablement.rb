@@ -287,6 +287,7 @@ class CodeQualityEnablement < SecurityProduct::Service
   sig { override.returns(T::Boolean) }
   def enabled?
     return false if repository.deleted?
+    return false unless CodeQuality.available?(repository)
     managed_analyses_helper.enabled?
   rescue CodeScanning::AutoCodeqlError => error
     if GitHub::AppEnvironment.development?

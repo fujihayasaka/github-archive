@@ -12,6 +12,17 @@ class RepositoryNetwork
     extend T::Helpers
 
     requires_ancestor { RepositoryNetwork }
+
+    # The maximum value storable in the `disk_usage` column, which is a 4-byte
+    # signed integer (values are in KB, so this is ~2 TB). Networks larger than
+    # this are clamped to this value so that maintenance and status updates can
+    # still be persisted rather than raising ActiveModel::RangeError.
+    #
+    # The column type is defined as `int` on the `repository_networks` table:
+    # see db/repositories-structure.sql (CREATE TABLE `repository_networks`).
+    # See also RepositoryNetwork::Storage#calculate_disk_usage.
+    MAX_DISK_USAGE = 2_147_483_647
+
     # The network's storage URL as a "<host>:<path>" string. The <path> is to the
     # "network.git" directory.
     #
@@ -84,7 +95,15 @@ class RepositoryNetwork
     #
     # Returns the amount of physical disk used by the entire network in KBs.
     def calculate_disk_usage
-      self.disk_usage = rpc.nw_usage
+      usage = rpc.nw_usage
+      if usage && usage > MAX_DISK_USAGE
+        GitHub.logger.warn("network disk_usage exceeds storable range; clamping",
+          "gh.network.id" => id,
+          "gh.network.disk_usage_kb" => usage,
+          "gh.network.disk_usage_clamped_kb" => MAX_DISK_USAGE)
+        usage = MAX_DISK_USAGE
+      end
+      self.disk_usage = usage
     end
 
     # Like calculate_disk_usage but also save the record.

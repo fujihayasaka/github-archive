@@ -45,9 +45,11 @@ class RebuildAuditLogsJob < ApplicationJob
 
     if primary_cluster
       primary_template = Elastomer.router.primary_template(Elastomer::Indexes::AuditLog, cluster)
-      primary_template.remove_primary
-      template.add_primary
-      primary_template.destroy
+      ActiveRecord::Base.connected_to(role: :writing) do
+        primary_template.remove_primary
+        template.add_primary
+        primary_template.destroy
+      end
     end
     self
   end
@@ -86,7 +88,9 @@ class RebuildAuditLogsJob < ApplicationJob
       cluster:     cluster,
       is_writable: true,
       is_primary:  false
-    template.save!
+    ActiveRecord::Base.connected_to(role: :writing) do
+      template.save!
+    end
     template
   end
 

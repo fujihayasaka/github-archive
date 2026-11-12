@@ -1724,6 +1724,9 @@ module GitHub::Routers
       when %r{^admin/pre-receive-hooks}
         ::Api::Admin::PreReceiveHooks
 
+      when %r{^admin/repos/.+/.+/elm-migration-state}
+        ::Api::Admin::ElmMigrationState
+
       when %r{^admin/hooks}
         ::Api::Admin::Webhooks
 

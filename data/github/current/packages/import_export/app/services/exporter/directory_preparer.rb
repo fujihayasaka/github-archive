@@ -226,7 +226,7 @@ module Exporter
     # gz compression rate is 75%-95% but assuming majority of files consuming
     # large amounts of storage are images and other binary files so we set
     # threshold conservatively to 50% compression rate.
-    # This means we allow uncompressed directory to grow 2x of the MAX_EXPORT_ARCHIVE_SIZE
+    # This means we allow uncompressed directory to grow 2x of the configured max export archive size
     # before we raise an error.
     sig { params(total_batch_size: Integer).void }
     def check_export_size!(total_batch_size)
@@ -238,13 +238,17 @@ module Exporter
       end
     end
 
-    sig { returns(Integer) }
+    sig { returns(T.any(Integer, Float)) }
     def max_export_size
-      owner = @migration.owner
-      if owner&.feature_flag_enabled_or_raise?(:octoshift_ll__allow_max_80gb_archive_size) # rubocop:disable GitHub/FeatureManagement/NoVexiActorFeatureFlagEnabledOrRaiseUsage
-        MAX_EXPORT_ARCHIVE_SIZE_NEW
+      if GitHub.enterprise?
+        GitHub.migrations_max_export_archive_size_gb.gigabytes
       else
-        MAX_EXPORT_ARCHIVE_SIZE
+        owner = @migration.owner
+        if owner&.feature_flag_enabled_or_raise?(:octoshift_ll__allow_max_80gb_archive_size) # rubocop:disable GitHub/FeatureManagement/NoVexiActorFeatureFlagEnabledOrRaiseUsage
+          MAX_EXPORT_ARCHIVE_SIZE_NEW
+        else
+          MAX_EXPORT_ARCHIVE_SIZE
+        end
       end
     end
   end

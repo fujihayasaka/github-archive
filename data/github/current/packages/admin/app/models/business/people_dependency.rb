@@ -8,6 +8,10 @@ module Business::PeopleDependency
   include BusinessesHelper
   include Scientist
 
+  # Only ProgrammaticAccessBot logins use a reliable suffix ([api]).
+  # Generic Bot display_login can be custom, so suffix matching won't catch them.
+  PAB_LOGIN_SUFFIX = T.let("[api]".freeze, String)
+
   ROLE_TYPE = {
     "member" => :member_without_admin,
     "owner" => :admin,
@@ -385,6 +389,15 @@ module Business::PeopleDependency
         end
         # Filter all excluded users
         scope = scope.and(BusinessUserAccount.where.not(user_id: exclude_ids).or(BusinessUserAccount.where(user_id: nil)))
+        # On GHES, all users (including ProgrammaticAccessBot) auto-get BUA records
+        # via create_single_business_user_account, causing them to appear in the
+        # enterprise People page. Filter them out by login suffix. This is only
+        # needed on GHES; on dotcom, PABs never get BUA records.
+        if GitHub.enterprise?
+          scope = scope.and(
+            BusinessUserAccount.where.not(BusinessUserAccount.arel_table[:login].matches("%#{PAB_LOGIN_SUFFIX}"))
+          )
+        end
         scope = scope.distinct
         # Sort order
         order = "#{scope.table_name}.#{order_by_field} #{order_by_direction}"
@@ -425,7 +438,8 @@ module Business::PeopleDependency
       else
         business_org_abilities.pluck(:actor_id)
       end
-      Set.new(owner_ids + abilities + enterprise_installation_user_ids).to_a - [User.ghost.id]
+      exclude_ids = [User.ghost.id]
+      Set.new(owner_ids + abilities + enterprise_installation_user_ids).to_a - exclude_ids
     end
   end
 

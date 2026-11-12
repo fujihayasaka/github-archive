@@ -30,6 +30,8 @@ class Api::IntegrationInstallations < Api::App
     repositories = Repositories::Public.load_repositories(repository_ids)
     Repository.prefill_associations(repositories)
 
+    Configurable.preload_configuration(repositories)
+
     include_custom_properties = current_integration.feature_flag_enabled?(:integration_installation_api_with_custom_properties, default: false)
 
     deliver :integration_installation_repositories_hash,
@@ -104,6 +106,8 @@ class Api::IntegrationInstallations < Api::App
       end
 
     Repository.prefill_associations(repositories)
+
+    Configurable.preload_configuration(repositories)
 
     include_custom_properties = installation.integration.feature_flag_enabled?(:integration_installation_api_with_custom_properties, default: false)
 

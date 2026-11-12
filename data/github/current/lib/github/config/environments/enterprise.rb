@@ -121,6 +121,7 @@ fixnums = %w[
   max_orgs_per_et_org_reconciliation_runner
   max_concurrent_et_org_reconciliation_runners
   max_concurrent_background_instrumentation_jobs
+  migrations_max_export_archive_size_gb
 ]
 
 # some attributes are treated as arrays
