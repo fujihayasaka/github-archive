@@ -51,7 +51,7 @@ module PullRequests::PageData::MergeBox
 
       sig { override.returns(T::Boolean) }
       def available?
-        repository.ssh_enabled?
+        ActiveModel::Type::Boolean.new.cast(repository.ssh_enabled?)
       end
 
       sig { override.returns(Symbol) }

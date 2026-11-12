@@ -4,6 +4,12 @@
 module GitHub::HTML
   # HTML::Pipeline filter for processing contents with GitHub::Markup
   class WikiMarkupFilter < ::HTML::Pipeline::TextFilter
+    ORG_RUBY_RENDERING_FEATURE_FLAG = :org_ruby_rendering
+
+    def self.org_ruby_rendering_enabled?
+      FeatureFlag.vexi.enabled?(ORG_RUBY_RENDERING_FEATURE_FLAG, default: false)
+    end
+
     def call
       markup_sym = case context[:format]
       when :markdown
@@ -13,6 +19,8 @@ module GitHub::HTML
       when :rdoc
         ::GitHub::Markups::MARKUP_RDOC
       when :org
+        return ERB::Util.force_escape(@text) unless self.class.org_ruby_rendering_enabled?
+
         ::GitHub::Markups::MARKUP_ORG
       when :creole
         ::GitHub::Markups::MARKUP_CREOLE

@@ -7,6 +7,9 @@ module GitHub::Goomba
   # blob as the input - either as a gitrpc blob Hash or a TreeEntry (or
   # compatible) object.
   class MarkupFilter < InputFilter
+    def self.feature_flags
+      [GitHub::HTML::WikiMarkupFilter::ORG_RUBY_RENDERING_FEATURE_FLAG]
+    end
 
     def self.cache_key(context)
       GitHub::HTML::MarkupFilter.cache_key(context)

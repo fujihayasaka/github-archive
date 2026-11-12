@@ -187,7 +187,9 @@ class Api::RepositorySecretScanning < Api::App
 
       if assignment_error.present?
         # Handle specific error types that might indicate user-correctable issues
-        if assignment_error.is_a?(SecretScanning::Errors::ServiceInvalidArgument)
+        if assignment_error.is_a?(SecretScanning::Errors::InvalidAssignee)
+          deliver_error!(422, message: "user '#{assignee_param}' cannot be assigned to alerts in this repository")
+        elsif assignment_error.is_a?(SecretScanning::Errors::ServiceInvalidArgument)
           deliver_error!(400, message: "Invalid Argument Error: #{assignment_error.message}")
         elsif assignment_error.message.include?("404")
           deliver_error!(404, message: "Resource not found for alert id #{alert_number}")

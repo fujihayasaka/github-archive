@@ -473,6 +473,7 @@ scheduler.schedule "PageUpdatesJob", interval: 1.minute, condition: -> { PageUpd
 
 # GitHub Apps
 scheduler.schedule "CleanupOrphanedBotsJob", interval: 7.days
+scheduler.schedule "CleanupOrphanedIntegrationsJob", interval: 7.days
 
 # Billing
 scheduler.schedule "Billing::DailyCustomerWithoutPaymentInformationDunningCheckJob", interval: 1.hour

@@ -160,6 +160,7 @@ class DestroyUserCallbacks
   end
 
   def delete_social_identities(user)
+    return if GitHub.single_or_multi_tenant_enterprise?
     DeleteSocialIdentityJob.perform_later(user.id, nil)
   end
 

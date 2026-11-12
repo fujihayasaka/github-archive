@@ -744,6 +744,7 @@ scheduler.schedule "Copilot::FreeUserUpgradeJob", interval: 1.day, condition: ->
 
 # GitHub Apps
 scheduler.schedule "CleanupOrphanedBotsJob", interval: 7.days
+scheduler.schedule "CleanupOrphanedIntegrationsJob", interval: 7.days
 
 # Advisory Database
 scheduler.schedule "EPSSIngestionJob", interval: 1.day, condition: -> { !GitHub.enterprise? }

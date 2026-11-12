@@ -190,6 +190,9 @@ module Business::LicenseDependency
   def has_sufficient_licenses_for?(user: nil, email: nil, pending_cycle: false)
     return false if user.nil? && email.nil?
 
+    # Granting access to a persisted GHES account cannot increase appliance seat usage.
+    return true if GitHub.single_business_environment? && email.nil? && user&.persisted?
+
     available_invitable_licenses(pending_cycle:) > 0 ||
       additional_licenses_consumed_by(user_ids: [user&.id].compact, emails: [email].compact).zero?
   end
@@ -202,6 +205,9 @@ module Business::LicenseDependency
     user_ids.compact!
 
     return false if user_ids.empty? && emails.empty?
+
+    # Granting access by user ID cannot increase appliance seat usage on GHES.
+    return true if GitHub.single_business_environment? && emails.empty?
 
     additional_licenses_consumed_by(user_ids: user_ids, emails: emails) <= available_invitable_licenses(pending_cycle:)
   end
