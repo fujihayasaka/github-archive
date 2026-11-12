@@ -502,7 +502,10 @@ module Platform
 
         # rebuild contributions once for all emails added instead of for each
         # one independently
-        user.rebuild_contributions(context: "reconcile_enterprise_server_emails")
+        user.rebuild_contributions(
+          context: "reconcile_enterprise_server_emails",
+          only_repos_with_contributions: true,
+        )
         email_error
       end
 

@@ -38,6 +38,7 @@ module GitHub
   class Turboghas
     SERVICE_NAME = "turboghas"
     FAILBOT_APP_NAME = "github-turboghas-client"
+    GHES_SUMMARY_TIMEOUT = 8
 
     # SKU represents a billing SKU and a collection of advanced security features
     # the billing sku is where we send the number of active committers (pro-rated over the month)
@@ -150,12 +151,28 @@ module GitHub
     end
 
     sig { returns(::Turboghas::Proto::AdvancedSecurityAPIClient) }
+    def self.summary_client
+      @summary_client ||= if GitHub.enterprise?
+        new_client(connection: connection(timeout: GHES_SUMMARY_TIMEOUT, retry_on_timeout: false))
+      else
+        client
+      end
+    end
+
+    sig { returns(::Turboghas::Proto::AdvancedSecurityAPIClient) }
     def self.async_client
       @async_client ||= new_client(connection: connection(async: true))
     end
 
-    sig { params(async: T::Boolean, timeout: Integer, open_timeout: Integer).returns(Faraday::Connection) }
-    def self.connection(async: false, timeout: 5, open_timeout: 1)
+    sig { params(async: T::Boolean, timeout: Integer, open_timeout: Integer, retry_on_timeout: T::Boolean).returns(Faraday::Connection) }
+    def self.connection(async: false, timeout: 5, open_timeout: 1, retry_on_timeout: true)
+      retry_exceptions = [
+        Faraday::ConnectionFailed,
+        Faraday::RetriableResponse,
+        Faraday::ServerError,
+      ]
+      retry_exceptions.insert(2, Faraday::TimeoutError) if retry_on_timeout
+
       (async ? ConcurrentFaraday : GitHub::FaradayClient::Internal).new(url: GitHub.turboghas_url) do |conn|
         conn.use GitHub::FaradayMiddleware::Staffbar, url: GitHub.turboghas_url
         conn.use GitHub::FaradayMiddleware::HMACAuth, hmac_key: GitHub.turboghas_hmac_key
@@ -175,8 +192,11 @@ module GitHub
           backoff_factor:      1.2,
           retry_statuses: [429, 502, 503, 504],
           # In Twirp, everything is a POST
-          methods:     [:post],
-          exceptions:  [Faraday::ConnectionFailed, Faraday::RetriableResponse, Faraday::TimeoutError, Faraday::ServerError],
+          methods:     retry_on_timeout ? [:post] : [],
+          exceptions:  retry_exceptions,
+          retry_if:    proc { |env, exception|
+            !retry_on_timeout && env[:method] == :post && !exception.is_a?(Faraday::TimeoutError)
+          },
           retry_block: retry_block(timeout: timeout)
 
         conn.use GitHub::FaradayMiddleware::Resilient, name: "turboghas:AdvancedSecurityAPI", options: {

@@ -43,6 +43,22 @@ module SecurityProduct
     # or the enterprise bulk (enable all / disable all) enablement page
     VALID_ACTIONS = %w(security_configuration_enablement enterprise_bulk_enablement security_coverage_page_enablement)
 
+    # Keys that are safe to pass through from HTTP form submissions.
+    # Only these keys are allowed when the controller builds security_params;
+    # everything else (including privileged internal signals like
+    # enablement_action, is_repo_creation, etc.) is dropped automatically.
+    # Internal callers (background jobs) bypass the controller and pass params
+    # directly to toggle_services_with_form_inputs, so they are unaffected.
+    ALLOWED_FORM_KEYS = (
+      FORM_INPUTS_MAPPING.keys + %i(
+        auto_codeql_query_suite
+        auto_codeql_runner_label
+        auto_codeql_runner_type
+        dependabot_alerts_global_rule_enabled
+        dependency_graph_autosubmit_action_use_labeled_runners
+      )
+    ).freeze
+
     attr_reader :params, :repository
     def initialize(params, repository:)
       @params = params

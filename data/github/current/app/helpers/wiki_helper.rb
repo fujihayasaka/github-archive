@@ -12,6 +12,9 @@ module WikiHelper
         wiki_prefix_on_relative_links?,
         ("secure-user-assets" if FeatureFlag.vexi.enabled_or_raise?(:secure_user_assets, current_repository.owner)), # rubocop:disable GitHub/FeatureManagement/NoVexiEnabledOrRaiseUsage
       ].join(":")
+      if GitHub::Goomba::CodeRenderingServiceFilter.skip_quote_rewrite?(entity: page.wiki)
+        cache_key += ":skip-quote-rewrite"
+      end
 
       cached = GitHub.cache.get(cache_key)
       return rewrite_cached_user_assets(cached, current_user) if cached

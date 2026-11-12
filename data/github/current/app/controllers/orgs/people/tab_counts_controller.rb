@@ -18,7 +18,9 @@ class Orgs::People::TabCountsController < Orgs::Controller
     results = {}
 
     if params[:member].present?
-      results[".unstyled-orgs-member-count"] = this_organization.visible_user_ids_for(current_user, limit: nil).size
+      member_ids = this_organization.visible_user_ids_for(current_user, limit: nil)
+      member_ids -= suspended_member_ids(member_ids)
+      results[".unstyled-orgs-member-count"] = member_ids.size
     end
 
     if this_organization.adminable_by?(current_user)
@@ -55,5 +57,20 @@ class Orgs::People::TabCountsController < Orgs::Controller
     end
 
     render json: { selectors: results }
+  end
+
+  private
+
+  def suspended_member_ids(member_ids)
+    return User.where(id: member_ids).suspended.pluck(:id) if GitHub.enterprise?
+
+    business = this_organization.business
+    return [] unless business
+    return [] unless business.enterprise_managed_user_enabled?
+
+    business.user_accounts
+      .batched_scope(:user_id, values: member_ids) { |scope| scope.roles([:suspended]) }
+      .pluck(:user_id)
+      .compact
   end
 end

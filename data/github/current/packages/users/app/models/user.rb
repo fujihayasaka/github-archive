@@ -274,8 +274,8 @@ class User < ApplicationRecord::Domain::Users
   before_update  :regenerate_token_secret, if: :will_save_change_to_password?
   before_update  :clear_spam_flag_if_allowlisted
   after_commit   :instrument_creation, on: :create
-  after_commit   :sync_site_admin_and_global_business_admin, on: :create
-  after_update   :sync_site_admin_and_global_business_admin
+  after_commit   :sync_site_admin_and_global_business_admin, on: :create, if: :site_admin?
+  after_update   :sync_site_admin_and_global_business_admin, if: :saved_change_to_gh_role?
   after_save     :update_business_user_account_login, if: :saved_change_to_login?
   attr_accessor :provisioning_an_emu_user
 
@@ -3424,7 +3424,6 @@ class User < ApplicationRecord::Domain::Users
   def sync_site_admin_and_global_business_admin
     return unless GitHub.single_business_environment? && GitHub.global_business
     return unless user?
-    return unless saved_change_to_attribute? :gh_role
 
     if self.reload.site_admin?
       GitHub.global_business.add_owner(self, actor: nil)

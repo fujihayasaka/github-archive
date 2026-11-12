@@ -520,22 +520,30 @@ class Api::Enterprise::LiveMigrations < Api::App
   # the only messages a customer sees for an upstream failure. Keyed by the
   # `code` string (TWIRP_CODE_STRING's values) so collapsed codes share wording.
   GENERIC_MESSAGE = {
-    "invalid_argument"    => "The request was invalid.",
-    "unauthenticated"     => "Authentication is required.",
-    "permission_denied"   => "You do not have permission to perform this action.",
-    "not_found"           => "The requested migration resource was not found.",
-    "conflict"            => "The request conflicts with the current state of the migration.",
-    "failed_precondition" => "The migration is not in a valid state for this action.",
-    "rate_limited"        => "Rate limit exceeded. Please retry later.",
-    "timeout"             => "The migration service did not respond in time. Please retry.",
-    "not_implemented"     => "This operation is not yet implemented.",
-    "unavailable"         => "The migration service is temporarily unavailable. Please retry later.",
-    "internal_error"      => "The migration service encountered an internal error.",
+    "invalid_argument"     => "The request was invalid.",
+    "unauthenticated"      => "Authentication is required.",
+    "permission_denied"    => "You do not have permission to perform this action.",
+    "not_found"            => "The requested migration resource was not found.",
+    "conflict"             => "The request conflicts with the current state of the migration.",
+    "failed_precondition"  => "The migration is not in a valid state for this action.",
+    "rate_limited"         => "Rate limit exceeded. Please retry later.",
+    "timeout"              => "The migration service did not respond in time. Please retry.",
+    "not_implemented"      => "This operation is not yet implemented.",
+    "unavailable"          => "The migration service is temporarily unavailable. Please retry later.",
+    "unconfigured_secrets" => "The migration service is missing source or target credentials. Ask an organization administrator to configure the required secrets before retrying.",
+    "internal_error"       => "The migration service encountered an internal error.",
   }.freeze
   private_constant :GENERIC_MESSAGE
 
   ERROR_DOC_PATH = "/rest/enterprise-admin/live-migrations"
   private_constant :ERROR_DOC_PATH
+
+  # Signature of an unconfigured-secrets failure hidden inside a generic
+  # `unavailable` twirp error: the exporter's kredz credential fetch reports the
+  # PAT is missing (see github/migrations-vnext#6140). Matching is intentionally
+  # narrow so unrelated `unavailable` errors keep their generic wording.
+  UNCONFIGURED_SECRETS_PATTERN = /kredz fetch.*credential not found/mi
+  private_constant :UNCONFIGURED_SECRETS_PATTERN
 
   # ==========================================================================
   # Request parsing (github/migrations-vnext#4717)
@@ -607,6 +615,13 @@ class Api::Enterprise::LiveMigrations < Api::App
   # `error` responds to #code (Symbol) and #msg (String). `context_message` is our
   # hand-authored, safe lead; error.msg is intentionally never surfaced (see below).
   def translate_live_migration_twirp_error(error, context_message:)
+    # Missing org credentials surface as a generic `unavailable` from the exporter;
+    # reclassify into an actionable `unconfigured_secrets` error (github/migrations-vnext#6140).
+    if unconfigured_secrets_error?(error)
+      generic = GENERIC_MESSAGE.fetch("unconfigured_secrets")
+      return [422, "unconfigured_secrets", "#{context_message}: #{generic}"]
+    end
+
     status = Twirp::ERROR_CODES_TO_HTTP_STATUS[error.code] || 500
     # failed_precondition is twirp's 412 by default; here it always denotes an
     # application-state conflict, so map it to 409.
@@ -616,6 +631,14 @@ class Api::Enterprise::LiveMigrations < Api::App
     generic = GENERIC_MESSAGE.fetch(code, "The migration request could not be completed.")
 
     [status, code, "#{context_message}: #{generic}"]
+  end
+
+  # The exporter collapses missing-credential failures into a generic `unavailable`
+  # twirp error; the only distinguishing signal is the message text. Detect that
+  # narrow shape so we can reclassify it as `unconfigured_secrets`. We inspect
+  # error.msg purely to classify — it is still never forwarded to the customer.
+  def unconfigured_secrets_error?(error)
+    error.code == :unavailable && error.msg.to_s.match?(UNCONFIGURED_SECRETS_PATTERN)
   end
 
   # Logs the raw upstream error (correlated by request id) and renders the envelope

@@ -56,7 +56,14 @@ module SecurityCenter
           GitHub.dogstats.increment("security_center.fanout_throttler.throttle", tags: job.all_stats_tags + [
             *job_queue_over_limit.map { |q| "job_queue_over_limit:#{q}" }
           ])
-          job.class.perform_later(*job.arguments)
+          # Delay the source job to let fanout queues drain. Source and fanout
+          # jobs can share a queue (e.g. OrganizationSecurityConfigurationJob and
+          # ApplySecurityConfigurationToRepositoryJob both use
+          # `security_configurations`), so an immediate re-enqueue puts the source
+          # job straight back onto the queue it is waiting on. The source job then
+          # consumes the worker slots the fanout jobs need to drain, the depth
+          # never falls below the limit, and the queue livelocks.
+          job.class.set(wait: 5.minutes).perform_later(*job.arguments)
         else
           block.call
         end

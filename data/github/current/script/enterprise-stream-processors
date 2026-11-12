@@ -115,6 +115,21 @@ class ProcessorState
     end
   end
 
+  def set_topic_checker_client(topic_checker_client)
+    @mutex.synchronize do
+      @topic_checker_client = topic_checker_client
+    end
+  end
+
+  def close_topic_checker_client(topic_checker_client)
+    @mutex.synchronize do
+      if topic_checker_client != nil && @topic_checker_client.equal?(topic_checker_client)
+        @topic_checker_client.close
+        @topic_checker_client = nil
+      end
+    end
+  end
+
   def increment_start_attempt
     @mutex.synchronize do
       @start_attempt += 1
@@ -141,6 +156,13 @@ class ProcessorState
 
   def close
     @mutex.synchronize do
+      if @topic_checker_client != nil
+        @topic_checker_client.close
+        # No consumer exists while the topic checker is active, so stop the worker if client close cannot interrupt metadata I/O.
+        @thread.kill if @thread != nil
+        @topic_checker_client = nil
+      end
+
       if @consumer != nil
         start = Time.now
         # Blocks until the underlying ruby-kafka fetcher thread stops
@@ -160,6 +182,8 @@ class ThreadedProcessorRunner
   SUCCESS = "success"
   TIMEOUT = "timeout"
   INTERRUPTED = "interrupted"
+  DEFAULT_TOPIC_CHECKER_TIMEOUT_SEC = 30
+  MAX_TOPIC_CHECKER_TIMEOUT_SEC = 300
 
   attr_accessor :start_attempt
 
@@ -179,7 +203,11 @@ class ThreadedProcessorRunner
       processor = processor_type.new
     end
     @topic_checker_client_factory = topic_checker_client_factory ||= proc do
-      Kafka.new(seed_brokers: GitHub.environment.fetch("HYDRO_KAFKA_BROKERS", GitHub::Config::HydroConfig::DEVELOPMENT_BROKER).split(","))
+      Kafka.new(
+        seed_brokers: GitHub.environment.fetch("HYDRO_KAFKA_BROKERS", GitHub::Config::HydroConfig::DEVELOPMENT_BROKER).split(","),
+        connect_timeout: topic_checker_timeout_sec("ENTERPRISE_TOPIC_CHECKER_CONNECT_TIMEOUT_SEC"),
+        socket_timeout: topic_checker_timeout_sec("ENTERPRISE_TOPIC_CHECKER_SOCKET_TIMEOUT_SEC")
+      )
     end
     @consumer_factory = consumer_factory ||= proc do |_, processor_options|
       GitHub.hydro_consumer(processor_options)
@@ -197,7 +225,7 @@ class ThreadedProcessorRunner
         thread_name = "#{processor_type.name.demodulize}_#{i}"
 
         should_restart = !@do_not_restart.fetch(processor_type, false)
-        # Track the processor state to perform graceful shutdown on consumers in response to uncaught errors or SIGTERM
+        # Track the processor state to perform graceful shutdown on Kafka clients in response to uncaught errors or SIGTERM
         @processors.put(thread_name, ProcessorState.new(thread_name, should_restart: should_restart))
 
         GitHub.logger.info "Starting thread for processor=#{thread_name}"
@@ -216,9 +244,13 @@ class ThreadedProcessorRunner
                 GitHub.logger.info "[#{thread_name}] starting topic check"
                 begin
                   topic_checker_client = @topic_checker_client_factory.call
+                  this_processor.set_topic_checker_client(topic_checker_client)
                   subscribe_to = Array(processor.options[:subscribe_to])
                   GitHub.logger.with_named_tags("messaging.destination" => subscribe_to) do
-                    while running? && subscribe_to.flat_map { |pattern| topic_checker_client.topics.grep(pattern) }.empty?
+                    while running?
+                      topics = topic_checker_client.topics
+                      break if subscribe_to.any? { |pattern| topics.grep(pattern).any? }
+
                       sleep 1.second
                     end
                   end
@@ -229,7 +261,7 @@ class ThreadedProcessorRunner
                   GitHub.logger.error("processor=#{processor_type.name} topic checker encountered an error, restarting it", e)
                   next
                 ensure
-                  topic_checker_client.close
+                  this_processor.close_topic_checker_client(topic_checker_client)
                 end
 
                 consumer = @consumer_factory.call(processor_type, processor.options)
@@ -315,7 +347,7 @@ class ThreadedProcessorRunner
 
     @processors.each_state do |state|
       GitHub.logger.info "closing state for #{state.name}"
-      # This closes the consumer, which will cause ruby-kafka's underlying fetcher and consumers to stop.
+      # This closes an active topic checker and the consumer, which will cause ruby-kafka's underlying work to stop.
       # After the ruby-kafka consumer closes, calls to Hydro::Processor#process_with_consumer to no longer block,
       # which then unblocks the Hydro::Executor#wait_for_threads and Hydro::Executor##run_processor_loop, allowing
       # Hydro::Executor#run to unblock and return.
@@ -331,6 +363,17 @@ class ThreadedProcessorRunner
     @mutex.synchronize do
       @processors.get(thread_name)
     end
+  end
+
+  private
+
+  def topic_checker_timeout_sec(environment_variable)
+    timeout = Integer(GitHub.environment.fetch(environment_variable, DEFAULT_TOPIC_CHECKER_TIMEOUT_SEC).to_s, 10)
+    return timeout if timeout.between?(1, MAX_TOPIC_CHECKER_TIMEOUT_SEC)
+
+    DEFAULT_TOPIC_CHECKER_TIMEOUT_SEC
+  rescue ArgumentError, TypeError
+    DEFAULT_TOPIC_CHECKER_TIMEOUT_SEC
   end
 end
 

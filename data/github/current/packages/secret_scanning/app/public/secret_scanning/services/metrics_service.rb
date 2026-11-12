@@ -275,72 +275,39 @@ module SecretScanning
         pending_count = 0
         bypass_requests_count = 0
 
-        page_size = 10_000
-
         do_not_ignore_expired_exemptions = SecretScanning::Features::FeatureFlagHelper.feature_flag_enabled_in_hierarchy?(
           scope,
           SecretScanning::Features::FeatureFlagHelper::FeatureFlags::DO_NOT_FILTER_EXPIRED_EXEMPTION_REQUESTS
         )
 
-        if ::FeatureFlag.vexi.enabled?(:secret_scanning_gm_slow_query_fix, scope, default: false)
-          queried_repo_ids = Repositories.domain.repo_ids_by_owners(
-            owner_ids: owner_ids,
-            # Protect against repo_ids possibly being an empty array, which causes an empty in clause (so 0 results)
-            include_repo_ids: repo_ids&.empty? ? nil : repo_ids,
-            exclude_repo_ids: exclude_repo_ids,
-            exclude_archived: !repos_in_archived_state.nil? && !repos_in_archived_state,
-            archived_only: repos_in_archived_state.present?,
+        queried_repo_ids = Repositories.domain.repo_ids_by_owners(
+          owner_ids: owner_ids,
+          # Protect against repo_ids possibly being an empty array, which causes an empty in clause (so 0 results)
+          include_repo_ids: repo_ids&.empty? ? nil : repo_ids,
+          exclude_repo_ids: exclude_repo_ids,
+          exclude_archived: !repos_in_archived_state.nil? && !repos_in_archived_state,
+          archived_only: repos_in_archived_state.present?,
+        )
+        # Default max in-clause size results in too many queries, and the individual queries are fast enough.
+        # So we can try a bigger batch size
+        queried_repo_ids&.each_slice(GH::Domain::Base::MAX_REPOSITORY_ID_IN_CLAUSE_SIZE * 5) do |repo_ids_slice|
+          exemption_request_ids = Rules.domain.exemption_request_ids_by_repo_ids(
+            repo_ids: repo_ids_slice,
+            request_type: SecretScanning::Constants::EXEMPTION_REQUEST_TYPE,
+            start_date: start_date,
+            end_date: end_date,
+            ids: token_filters ? bypass_request_ids : nil,
+            filter_expired: !do_not_ignore_expired_exemptions
           )
-          # Default max in-clause size results in too many queries, and the individual queries are fast enough.
-          # So we can try a bigger batch size
-          queried_repo_ids&.each_slice(GH::Domain::Base::MAX_REPOSITORY_ID_IN_CLAUSE_SIZE * 5) do |repo_ids_slice|
-            exemption_request_ids = Rules.domain.exemption_request_ids_by_repo_ids(
-              repo_ids: repo_ids_slice,
-              request_type: SecretScanning::Constants::EXEMPTION_REQUEST_TYPE,
-              start_date: start_date,
-              end_date: end_date,
-              ids: token_filters ? bypass_request_ids : nil,
-              filter_expired: !do_not_ignore_expired_exemptions
-            )
-            metrics = Rules.domain.exemption_metrics(exemption_request_ids: exemption_request_ids)
+          metrics = Rules.domain.exemption_metrics(exemption_request_ids: exemption_request_ids)
 
-            bypass_requests_count += metrics.request_count
-            approved_count += metrics.approved_count
-            rejected_count += metrics.rejected_count
-            cancelled_count += metrics.cancelled_count
-            pending_count += metrics.pending_count
-            response_count += metrics.response_count
-            total_response_time += metrics.total_response_time
-          end
-        else
-          Repositories.domain.repo_ids_by_owners(
-            owner_ids: owner_ids,
-            # Protect against repo_ids possibly being an empty array, which causes an empty in clause (so 0 results)
-            include_repo_ids: repo_ids&.empty? ? nil : repo_ids,
-            exclude_repo_ids: exclude_repo_ids,
-            exclude_archived: !repos_in_archived_state.nil? && !repos_in_archived_state,
-            archived_only: repos_in_archived_state.present?,
-          ) do |repo_ids_page|
-            repo_ids_page.each_slice(page_size) do |repo_ids_slice|
-              exemption_request_ids = Rules.domain.exemption_request_ids_by_repo_ids(
-                repo_ids: repo_ids_slice,
-                request_type: SecretScanning::Constants::EXEMPTION_REQUEST_TYPE,
-                start_date: start_date,
-                end_date: end_date,
-                ids: token_filters ? bypass_request_ids : nil,
-                filter_expired: !do_not_ignore_expired_exemptions
-              )
-              metrics = Rules.domain.exemption_metrics(exemption_request_ids: exemption_request_ids)
-
-              bypass_requests_count += metrics.request_count
-              approved_count += metrics.approved_count
-              rejected_count += metrics.rejected_count
-              cancelled_count += metrics.cancelled_count
-              pending_count += metrics.pending_count
-              response_count += metrics.response_count
-              total_response_time += metrics.total_response_time
-            end
-          end
+          bypass_requests_count += metrics.request_count
+          approved_count += metrics.approved_count
+          rejected_count += metrics.rejected_count
+          cancelled_count += metrics.cancelled_count
+          pending_count += metrics.pending_count
+          response_count += metrics.response_count
+          total_response_time += metrics.total_response_time
         end
 
         mean_response_time = Integer(response_count > 0 ? total_response_time / response_count : 0)

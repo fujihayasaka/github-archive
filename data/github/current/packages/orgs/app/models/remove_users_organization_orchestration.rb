@@ -333,6 +333,7 @@ class RemoveUsersOrganizationOrchestration < OrganizationOrchestration
   end
 
   step :revoke_org_member_copilot_space_access do
+    return if GitHub.enterprise?
     return if data[:users_retain_business_team_indirect_access]
     organizations.each do |org|
       users.each do |user|
