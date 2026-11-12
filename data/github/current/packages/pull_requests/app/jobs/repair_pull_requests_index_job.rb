@@ -3,11 +3,11 @@
 
 # The purpose of this job is to reconcile the state of PullRequest records
 # between the database and the search index. We do this by iterating over
-# PullRequest records in batches of 500. The `updated_at` timestamp of the
+# PullRequest records in batches of 100. The `updated_at` timestamp of the
 # each PR is compared between the database and the search index. The
 # search index is then updated for any PRs where the timestamps disagree.
 #
-# Each repair job will process 500 pull requests. When it has reconciled
+# Each repair job will process 100 pull requests. When it has reconciled
 # all those pull requests it wil enqueue another job. Thes process will
 # continue until all pull requests have been processed.
 #
@@ -21,7 +21,7 @@ class RepairPullRequestsIndexJob < Elastomer::RepairJob
 
   reconcile "pull_request",
     fields: %w[updated_at],
-    limit: 500,
+    limit: 100,
     reject: :spammy?,
     accept: [:base_user, :head_user],
     include: [

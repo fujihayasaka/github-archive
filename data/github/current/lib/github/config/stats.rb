@@ -99,7 +99,13 @@ module GitHub
               # This can only be used if collectd is disabled in the GHES appliance
               # The Datadog agent doesn't run on GHES which is why we don't connect to the socket
               require "github/dogstats/allowlist"
-              GitHub::Dogstats::Allowlist.new(GitHub.stats_allowlist, host, port, tags: dogtags)
+              GitHub::Dogstats::Allowlist.new(
+                GitHub.stats_allowlist,
+                host,
+                port,
+                allowlist_cache_size: GitHub.stats_allowlist_cache_size || 0,
+                tags: dogtags,
+              )
             else
               GitHub::Dogstats.new(host, port, tags: dogtags)
             end

@@ -17,7 +17,7 @@ module ConditionalAccess::AuthzdActor
         attrs["credential.type"] = "IntegrationToken"
         attrs["application.id"] = a.id
         attrs["application.owner.id"] = a.owner_id
-        attrs["application.owner.type"] = a.owner_type == "User" ? a.async_owner.sync.type : a.owner_type
+        attrs["application.owner.type"] = a.user_or_organization_owned? ? a.async_owner.sync.type : a.owner_type
       when OauthApplication
         attrs["actor.id"] = a.id
         attrs["actor.type"] = a.class.name
@@ -33,7 +33,7 @@ module ConditionalAccess::AuthzdActor
         if integration = a.integration
           attrs["application.id"] = integration.id
           attrs["application.owner.id"] = integration.owner_id
-          if integration.owner_type == "User"
+          if integration.user_or_organization_owned?
             attrs["application.owner.type"] = integration.owner&.type
           else
             attrs["application.owner.type"] = integration.owner_type

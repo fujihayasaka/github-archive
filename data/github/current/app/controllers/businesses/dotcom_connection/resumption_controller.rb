@@ -9,7 +9,7 @@ class Businesses::DotcomConnection::ResumptionController < Businesses::BusinessC
 
   def create
     if token = dotcom_connection.temp_authentication_token
-      redirect_to dotcom_enterprise_installation_url(token, current_state)
+      redirect_to dotcom_enterprise_installation_url(token, current_state || generate_random_state)
     else
       redirect_error
     end

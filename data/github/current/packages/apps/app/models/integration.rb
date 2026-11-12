@@ -155,6 +155,8 @@ class Integration < ApplicationRecord::Domain::Integrations
     class_name: "IntegrationInstallation"
   destroy_dependents_in_background :installations
 
+  scope :first_party, -> { where(owner_type: "User", owner_id: GitHub.trusted_apps_owner_id) }
+
   # Public: Hook used to deliver events to an integration. This one Hook
   # receives events for all of the integration's installations.
   has_one :hook,
@@ -786,14 +788,21 @@ class Integration < ApplicationRecord::Domain::Integrations
   #
   # Returns a Boolean
   def user_owned?
-    owner_type == "User" && owner.type == "User"
+    user_or_organization_owned? && owner&.type == "User"
   end
 
   # Public: Is this integration owned by a organization?
   #
   # Returns a Boolean
   def organization_owned?
-    owner_type == "User" && owner.type == "Organization"
+    user_or_organization_owned? && owner&.type == "Organization"
+  end
+
+  # Public: Is this integration owned by a user or an organization, as opposed to an enterprise?
+  #
+  # Returns a Boolean
+  def user_or_organization_owned?
+    owner_type == "User"
   end
 
   # Public: Is this integration owned by an enterprise?
@@ -1093,7 +1102,7 @@ class Integration < ApplicationRecord::Domain::Integrations
       payload[:app]                   = self
       payload[:name]                  = name
       payload[:slug]                  = slug
-      payload[owner.event_prefix]     = owner
+      payload[owner.event_prefix]     = owner if owner
     end
   end
 

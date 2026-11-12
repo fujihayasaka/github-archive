@@ -382,3 +382,4 @@ scheduler.schedule "DpagesMaintenanceSchedulerJob", interval: GitHub.dpages_main
 
 # GitHub Apps
 scheduler.schedule "CleanupOrphanedBotsJob", interval: 7.days
+scheduler.schedule "CleanupOrphanedIntegrationsJob", interval: 7.days

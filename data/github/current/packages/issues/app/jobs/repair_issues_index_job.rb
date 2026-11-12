@@ -6,7 +6,7 @@ class RepairIssuesIndexJob < Elastomer::RepairJob
 
   reconcile "issue",
     fields: %w[updated_at],
-    limit: 750,
+    limit: 100,
     accept: :parent_repo_is_searchable?,
     reject: :spammy?,
     include: [:repository, { assignments: :assignee }, :labels],
