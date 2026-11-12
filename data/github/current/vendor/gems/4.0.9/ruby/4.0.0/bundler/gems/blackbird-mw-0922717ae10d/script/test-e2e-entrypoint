@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+#
+# Entrypoint for running the end-to-end tests for blackbird-mw
+# Call this script if you want to run the e2e tests.
+#
+# This script should only be run directly within Actions. If you want to run
+# this locally, start the e2e tests from the blackbird repo.
+#
+# The purpose of this script is to set up the environment to be used. All the
+# test orchestration will be performed inside a docker container, and this
+# script starts that container up and then calls another script to do further
+# work.
+#
+# The following environment variables must be set:
+# - BLACKBIRD_BUILD_IMAGE - a docker image to use to build the code
+# - BLACKBIRD_LOGDIR - a directory where logs for this test run will be stored
+#                      it should already be created and have permissions 777
+#
+# In addition, there are environment variables that must be set in the
+# blackbird-env file. The following are required, but there are more that are
+# useful to configure how the tests run.
+# - BLACKBIRD_BUILD_IMAGE - a docker image to use to build the code
+# - BLACKBIRD_BINARIES_IMAGE - a docker image that contains the blackbird repo's binaries
+# - BLACKBIRD_CLIB_IMAGE - a docker image that contains the blackbird repo's clibs
+# - BLACKBIRD_LOGDIR - a directory where logs for this test run will be stored
+#                      it should already be created and have permissions 777
+
+set -euo pipefail
+
+function start_orchestration_container() {
+  container_id=$(docker run \
+    --network host \
+    --env-file "$HOME/blackbird-env" \
+    --env "BLACKBIRD_LOGDIR=/home/builder/logs" \
+    --env "AZURE_BLACKBIRD_EMBEDDING_CANADACENTRAL_KEY=${AZURE_BLACKBIRD_EMBEDDING_CANADACENTRAL_KEY:-}" \
+    --env "METIS_VLLM_CANADACENTRAL_KEY=${METIS_VLLM_CANADACENTRAL_KEY:-}" \
+    --env "WAIT=${WAIT:-false}" \
+    --env "USER=builder" \
+    --volume "/var/run/docker.sock:/var/run/docker.sock" \
+    --volume ".:$(pwd)" \
+    --volume "$(pwd)/lib" \
+    --volume "$BLACKBIRD_LOGDIR:/home/builder/logs" \
+    --volume "$HOME/.netrc:/home/builder/.netrc" \
+    --volume "$HOME/.blackbird-e2e-user:/home/builder/.blackbird-e2e-user" \
+    --volume "$HOME/.blackbird-e2e-token:/home/builder/.blackbird-e2e-token" \
+    -d -it "$BLACKBIRD_BUILD_IMAGE" /bin/bash) || {
+    echo "Failed to run $BLACKBIRD_BUILD_IMAGE container"
+    return 1
+  }
+  docker exec "$container_id" sudo chmod 666 /var/run/docker.sock
+  docker exec "$container_id" sudo chown builder:builder "$(pwd)/lib"
+  docker exec "$container_id" git config --global --add safe.directory "$(pwd)"
+  echo "$container_id"
+  return 0
+}
+
+function shutdown() {
+  for container_id in "$@"; do
+    docker stop "$container_id"
+    docker rm "$container_id"
+  done
+
+  if [[ -f "$BLACKBIRD_LOGDIR/test_result" ]]; then
+    echo ""
+    cat "$BLACKBIRD_LOGDIR/test_result"
+  fi
+}
+
+function main() {
+  if [[ ! -v BLACKBIRD_BUILD_IMAGE ]]; then
+    echo "BLACKBIRD_BUILD_IMAGE must be set"
+    exit 1
+  fi
+  if [[ ! -v BLACKBIRD_LOGDIR ]]; then
+    echo "BLACKBIRD_LOGDIR must be set"
+    exit 1
+  fi
+
+  # This must be done outside of the docker image because it relies on
+  # modifying some files in a bind mount that the docker container may not have
+  # write permission to.
+  git submodule update --init
+
+  container_id=$(start_orchestration_container)
+  trap "shutdown $container_id 2>/dev/null" EXIT
+
+  # At this point, the orchestration container is running and everything else
+  # will happen inside that or in containers that it starts.
+  docker exec -i -w "$(pwd)" "$container_id" script/test-e2e
+}
+
+main

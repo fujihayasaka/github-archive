@@ -1,0 +1,164 @@
+name: Post-process Initiative Issues
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  inject-headers:
+    if: contains(github.event.issue.body, '### 📰 Overview')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inject section headers
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          ORIGINAL_BODY: ${{ toJSON(github.event.issue.body) }}
+        run: |
+          python3 - <<'PY'
+          import os, json, re, sys
+          from urllib import request
+          
+          body_json = os.environ.get('ORIGINAL_BODY','')
+          if not body_json:
+              print('No body found, skipping.')
+              sys.exit(0)
+          body = json.loads(body_json)
+          
+          rules = [
+              ('### The Problem & Opportunity', '## 📊 Understand the problem space'),
+              ('### Strategic Opportunity & Success Metrics', '## 🎯 Identify the levers to achieve your goal'),
+              ('### Key Milestones', '## ✅ Execute on those levers perfectly'),
+              ('### 🔗 Canonical People, Links & Communications', '## 👀 Canonical Info'),
+          ]
+          
+          new_body = body
+          for anchor, header in rules:
+              if header in new_body:
+                  continue  # already injected
+              pattern = re.compile(rf"(^\s*{re.escape(anchor)}\s*$)", re.MULTILINE)
+              if pattern.search(new_body):
+                  new_body = pattern.sub(f"{header}\n\n{anchor}", new_body, count=1)
+          
+          if new_body == body:
+              print('No changes needed.')
+              sys.exit(0)
+          
+          repo = os.environ['REPO']
+          issue_number = os.environ['ISSUE_NUMBER']
+          token = os.environ['GH_TOKEN']
+          
+          api_url = f'https://api.github.com/repos/{repo}/issues/{issue_number}'
+          data = json.dumps({'body': new_body}).encode('utf-8')
+          req = request.Request(api_url, data=data, method='PATCH', headers={
+              'Authorization': f'token {token}',
+              'Accept': 'application/vnd.github+json',
+              'Content-Type': 'application/json',
+              'User-Agent': 'GitHub-Actions-Initiative-Postprocess'
+          })
+          
+          try:
+              with request.urlopen(req) as resp:
+                  print('Issue body updated with section headers. Status:', resp.status)
+          except Exception as e:
+              print('Failed to update issue body:', e)
+              sys.exit(1)
+          PY
+
+      - name: Inject release rollup island
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import os, json, sys
+          from urllib import request, parse
+
+          issue_number = os.environ['ISSUE_NUMBER']
+          issue_url = os.environ['ISSUE_URL']
+          repo = os.environ['REPO']
+          token = os.environ['GH_TOKEN']
+
+          # Fetch current body (may have been updated by the previous step)
+          api_url = f'https://api.github.com/repos/{repo}/issues/{issue_number}'
+          req = request.Request(api_url, headers={
+              'Authorization': f'token {token}',
+              'Accept': 'application/vnd.github+json',
+              'User-Agent': 'GitHub-Actions-Initiative-Postprocess'
+          })
+          with request.urlopen(req) as resp:
+              body = json.loads(resp.read())['body'] or ''
+
+          # Skip if island already present
+          if '<!-- gh-aw-island-start:initiative-release-sync -->' in body:
+              print('Release rollup island already present, skipping.')
+              sys.exit(0)
+
+          copilot_prompt = parse.quote(
+              f'Create a release tracking issue in github/releases for this initiative and make it a sub-issue of the initiative: {issue_url}',
+              safe=''
+          )
+          copilot_url = f'https://github.com/copilot?prompt={copilot_prompt}'
+
+          island = (
+              '\n\n'
+              '<!-- gh-aw-island-start:initiative-release-sync -->\n'
+              '### 📋 Release Rollup\n\n'
+              '> _This table automatically syncs every 2 hours with release tracking issues added as sub-issues to this initiative. Do not edit manually. [Learn more](https://github.com/github/product/blob/main/Initiatives/initiative-briefs-playbook.md#release-roll-up)._ \n\n'
+              '| Release | Phase | Target Date ↓ | Confidence |\n'
+              '|---|---|---|---|\n'
+              f'| Link releases as sub-issues or [➕ Create New Release]({copilot_url}) | — | — | — |\n\n'
+              '<!-- gh-aw-workflow-id: initiative-release-sync -->\n'
+              '<!-- gh-aw-island-end:initiative-release-sync -->'
+          )
+
+          # Handle the "🤖 **Releases:**" placeholder line.
+          # If it is unaltered, remove it entirely.
+          # If it has been edited, remove it from its current position and
+          # preserve it immediately below the release rollup island.
+          import re
+          PLACEHOLDER = '🤖 **Releases:** Add releases as sub-issues & an agent will create a rollup'
+          releases_pattern = re.compile(r'^(🤖 \*\*Releases:\*\*.*)\n?', re.MULTILINE)
+          releases_match = releases_pattern.search(body)
+          custom_releases_line = None
+
+          if releases_match:
+              releases_line = releases_match.group(1).strip()
+              body = releases_pattern.sub('', body)  # remove from current position
+              if releases_line != PLACEHOLDER:
+                  custom_releases_line = releases_line  # edited — will be placed after island
+
+          island_block = island + ('\n' + custom_releases_line if custom_releases_line else '')
+
+          # Insert island immediately before "### Key Milestones" heading.
+          # Step 1 guarantees this heading is present (it injects it if missing).
+          # Result: ## ✅ Execute... → island → (edited releases line) → ### Key Milestones → user content
+          milestones_pattern = re.compile(r'^### Key Milestones\s*$', re.MULTILINE)
+          m = milestones_pattern.search(body)
+          if m:
+              insert_at = m.start()
+              new_body = body[:insert_at].rstrip('\n') + '\n\n' + island_block + '\n\n' + body[insert_at:]
+          else:
+              print('### Key Milestones heading not found; appending island to end of body.')
+              new_body = body + island_block
+          data = json.dumps({'body': new_body}).encode('utf-8')
+          req = request.Request(api_url, data=data, method='PATCH', headers={
+              'Authorization': f'token {token}',
+              'Accept': 'application/vnd.github+json',
+              'Content-Type': 'application/json',
+              'User-Agent': 'GitHub-Actions-Initiative-Postprocess'
+          })
+          try:
+              with request.urlopen(req) as resp:
+                  print('Release rollup island injected. Status:', resp.status)
+          except Exception as e:
+              print('Failed to inject release rollup island:', e)
+              sys.exit(1)
+          PY

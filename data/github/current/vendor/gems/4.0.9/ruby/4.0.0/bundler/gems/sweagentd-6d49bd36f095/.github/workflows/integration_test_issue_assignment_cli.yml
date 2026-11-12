@@ -1,0 +1,205 @@
+name: "Test Copilot Coding Agent Agent-Task CLI"
+
+on:
+  workflow_call:
+    secrets:
+      token:
+        required: true
+      datadog_api_key:
+        required: true
+    inputs:
+      reporting_id:
+        required: true
+        type: string
+      capi_base_url:
+        description: "Copilot API base URL"
+        type: string
+        default: "https://api.githubcopilot.com"
+      integration_id:
+        description: "Copilot-Integration-Id header value"
+        type: string
+        default: "playground-dev"
+      github_api_url:
+        description: "GitHub API base URL (for proxima tenants)"
+        type: string
+        default: "https://api.github.com"
+      github_server_url:
+        description: "GitHub Server URL (for gh CLI)"
+        type: string
+        default: "https://github.com"
+      repo_nwo:
+        description: "Repository used for the issue-assignment integration test"
+        type: string
+        default: "github/cca-automated-testing"
+      stamp:
+        description: "Stamp name for reporting"
+        type: string
+        default: "dotcom"
+      stagger_delay_seconds:
+        description: "Seconds to wait before launching the generated Copilot SWE workflow"
+        type: number
+        default: 0
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sweagentd (for actions)
+        uses: actions/checkout@v6
+        with:
+          path: sweagentd
+
+      - name: Stagger generated workflow launch
+        if: ${{ inputs.stagger_delay_seconds > 0 }}
+        run: |
+          echo "Waiting ${{ inputs.stagger_delay_seconds }} seconds before launching ${{ inputs.reporting_id }}"
+          sleep "${{ inputs.stagger_delay_seconds }}"
+
+      - name: Create issue
+        id: create_issue
+        env:
+          GH_TOKEN: ${{ secrets.token }}
+          GH_HOST: ${{ inputs.github_api_url }}
+        run: |
+          output=$(gh issue create -R ${{inputs.repo_nwo}} --title "Create file for ${{ github.run_id }}" --body "create a file titled \"Test Job API - Run ${{ github.run_id }}\", and in it write \"run successful\"" --assignee @copilot)
+          issue_number=$(echo "$output" | grep -oE '[^/]+$')
+          if [ -z "$issue_number" ] || [ "$issue_number" = "null" ]; then
+            echo "Failed to extract issue number from gh output: $output"
+            exit 1
+          fi
+          if ! issue_response=$(curl -s --fail-with-body \
+            -H "Authorization: Bearer ${{ secrets.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            "${{ inputs.github_api_url }}/repos/${{ inputs.repo_nwo }}/issues/$issue_number"); then
+            echo "Failed to fetch issue details for issue #$issue_number"
+            exit 1
+          fi
+          issue_id=$(echo "$issue_response" | jq -r '.id // empty')
+          if [ -z "$issue_id" ]; then
+            echo "Failed to extract issue ID from response: $issue_response"
+            exit 1
+          fi
+          echo "Created issue number $issue_number"
+          echo "Created issue ID $issue_id"
+          echo "issue_number=$issue_number" >> $GITHUB_ENV
+          echo "issue_id=$issue_id" >> $GITHUB_ENV
+          echo "issue_number=$issue_number" >> "$GITHUB_OUTPUT"
+          echo "issue_url=$output" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for session creation
+        id: wait_for_session_creation
+        timeout-minutes: 5
+        run: |
+          echo "Finding session for issue #$issue_number (ID: $issue_id)"
+
+          while true; do
+            sessions_http_code=$(curl -s -G -o /tmp/sessions_response.json -w "%{http_code}" \
+              -H "Authorization: Bearer ${{ secrets.token }}" \
+              -H "Copilot-Integration-Id: ${{ inputs.integration_id }}" \
+              --data-urlencode "event_identifiers=issue::$issue_number,issue_id::$issue_id" \
+              "${{ inputs.capi_base_url }}/agents/sessions")
+
+            if [ "$sessions_http_code" -lt 200 ] || [ "$sessions_http_code" -ge 300 ]; then
+              echo "Sessions API returned HTTP $sessions_http_code, retrying in 10 seconds..."
+              cat /tmp/sessions_response.json
+              sleep 10
+              continue
+            fi
+
+            session=$(jq -rc --arg issue_event_id "issue::$issue_number" --arg issue_database_event_id "issue_id::$issue_id" '
+              [
+                .sessions[]?
+                | select(
+                    ((.event_identifiers // []) | index($issue_event_id)) or
+                    ((.event_identifiers // []) | index($issue_database_event_id))
+                  )
+              ]
+              | sort_by(.created_at // "")
+              | reverse
+              | .[0] // empty
+            ' /tmp/sessions_response.json)
+
+            if [ -n "$session" ]; then
+              session_id=$(echo "$session" | jq -r '.id // empty')
+              pull_request_id=$(echo "$session" | jq -r '.resource_id // empty')
+              pull_request_number=$(echo "$session" | jq -r '.resource_number // empty')
+              echo "Found session $session_id for issue #$issue_number (ID: $issue_id)"
+              echo "Session resource: pull_request_id=$pull_request_id pull_request_number=$pull_request_number"
+              echo "session_id=$session_id" >> $GITHUB_ENV
+
+              echo "session_id=$session_id" >> "$GITHUB_OUTPUT"
+              echo "pull_request_number=$pull_request_number" >> "$GITHUB_OUTPUT"
+              echo "pull_request_url=${{ inputs.github_server_url }}/${{ inputs.repo_nwo }}/pull/$pull_request_number" >> "$GITHUB_OUTPUT"
+              break
+            fi
+
+            session_count=$(jq -r '(.sessions // []) | length' /tmp/sessions_response.json)
+            echo "No matching session found yet for issue #$issue_number (ID: $issue_id) among $session_count matching sessions, sleeping for 10 seconds..."
+            jq -r '(.sessions // [])[0:5][] | "candidate session id=\(.id) state=\(.state) resource=\(.resource_type)/\(.resource_id) number=\(.resource_number // "") events=\((.event_identifiers // []) | join(",")) created_at=\(.created_at // "")"' /tmp/sessions_response.json
+            sleep 10
+          done
+      - id: wait_for_cca
+        timeout-minutes: 15
+        uses: ./sweagentd/.github/actions/wait_for_cca
+        with:
+          token: ${{ secrets.token }}
+          session_id: $session_id
+          capi_base_url: ${{ inputs.capi_base_url }}
+          integration_id: ${{ inputs.integration_id }}
+
+      - name: Cleanup issue
+        id: cleanup_issue
+        if: steps.create_issue.outcome == 'success'
+        run: |
+          echo "Cleaning up issue number $issue_number"
+
+          curl -s --fail-with-body -X PATCH -H "Authorization: Bearer ${{ secrets.token }}" -H "Accept: application/vnd.github+json" ${{ inputs.github_api_url }}/repos/${{ inputs.repo_nwo }}/issues/$issue_number -d '{"state": "closed"}'
+
+      - id: cleanup_pr
+        uses: ./sweagentd/.github/actions/cleanup_pr
+        if: ${{ steps.wait_for_session_creation.outcome == 'success' }}
+        with:
+          token: ${{ secrets.token }}
+          session_id: $session_id
+          repo_nwo: ${{ inputs.repo_nwo }}
+          capi_base_url: ${{ inputs.capi_base_url }}
+          integration_id: ${{ inputs.integration_id }}
+          github_api_url: ${{ inputs.github_api_url }}
+          github_server_url: ${{ inputs.github_server_url }}
+      - id: validate_session
+        uses: ./sweagentd/.github/actions/validate_session
+        with:
+          token: ${{ secrets.token }}
+          session_id: $session_id
+          capi_base_url: ${{ inputs.capi_base_url }}
+          integration_id: ${{ inputs.integration_id }}
+      - name: Write job summary
+        id: write_summary
+        if: ${{ always() }}
+        uses: ./sweagentd/.github/actions/write_integration_summary
+        with:
+          test_name: "Issue Assignment CLI Integration Test"
+          reporting_id: ${{ inputs.reporting_id }}
+          job_status: ${{ job.status }}
+          repo_nwo: ${{ inputs.repo_nwo }}
+          github_server_url: ${{ inputs.github_server_url }}
+          capi_base_url: ${{ inputs.capi_base_url }}
+          session_id: ${{ steps.wait_for_session_creation.outputs.session_id }}
+          session_workflow_run_id: ${{ steps.wait_for_cca.outputs.workflow_run_id }}
+          pull_request_number: ${{ steps.cleanup_pr.outputs.pull_request_number || steps.wait_for_session_creation.outputs.pull_request_number }}
+          pull_request_url: ${{ steps.cleanup_pr.outputs.pull_request_url || steps.wait_for_session_creation.outputs.pull_request_url }}
+          issue_number: ${{ steps.create_issue.outputs.issue_number }}
+          issue_url: ${{ steps.create_issue.outputs.issue_url }}
+
+      - id: notify_datadog
+        if: ${{ always() && github.event_name == 'schedule' }}
+        uses: ./sweagentd/.github/actions/notify_datadog
+        with:
+          datadog_api_key: ${{ secrets.datadog_api_key }}
+          job_status: ${{ job.status }}
+          test_type: ${{ inputs.reporting_id }}
+          test_name: "Issue Assignment CLI Integration Test"
+          stamp: ${{ inputs.stamp }}

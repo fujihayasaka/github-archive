@@ -1,0 +1,155 @@
+name: Run dependabot e2e tests against GHES
+run-name: Run dependabot e2e tests against ${{ inputs.hostname }}
+
+on: # yamllint disable-line rule:truthy
+  workflow_dispatch:
+    inputs:
+      hostname:
+        description: 'Hostname of GHES instance to run tests against'
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      hostname:
+        description: 'Hostname of GHES instance to run tests against'
+        required: true
+        type: string
+    secrets:
+      DEPENDABOT_TESTING_BOT_PAT:
+        description: "dependabot-testing-bot's PAT"
+        required: true
+      SLACK_FIRST_RESPONDER_BOT_API_TOKEN:
+        description: "Slack API token for sending alerts"
+        required: true
+      DOTCOM_LOGIN:
+        description: "dependabot-testing-bot's login"
+        required: true
+      DOTCOM_PASSWORD:
+        description: "dependabot-testing-bot's password"
+        required: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      packages: read
+      contents: read
+    steps:
+      - name: Setup the host for testing
+        id: env_setup
+        uses: github/enterprise-releases/actions/env_setup@master
+        with:
+          hostname: https://${{ inputs.hostname }}
+          create_user: true
+          create_organization: true
+
+      - name: Checkout Repository for github/ghe-tester
+        uses: actions/checkout@v6
+        with:
+          repository: github/ghe-tester
+          token: ${{ secrets.DEPENDABOT_TESTING_BOT_PAT }}
+          path: enable-github-connect-dir
+
+      - name: Install Bundler Dependencies
+        run: |
+          cd enable-github-connect-dir
+          sudo gem install bundler -v "= 2.5.22"
+          sudo bundle _2.5.22_ install
+
+      - name: Enable GitHub Connect
+        id: enable_github_connect
+        shell: bash
+        env:
+          GHES_BOT_PUBLIC_KEY: ${{ steps.env_setup.outputs.ssh_public_key }}
+          GHES_BOT_PRIVATE_KEY: ${{ steps.env_setup.outputs.ssh_private_key }}
+          DOTCOM_LOGIN: ${{ secrets.DOTCOM_LOGIN }}
+          DOTCOM_PASSWORD: ${{ secrets.DOTCOM_PASSWORD }}
+        run: script/github-connect-enable ${{ inputs.hostname }}
+        working-directory: enable-github-connect-dir
+
+      - name: Checkout Repository for github/github
+        uses: actions/checkout@v6
+        with:
+          repository: "github/github"
+          token: ${{ secrets.DEPENDABOT_TESTING_BOT_PAT }}
+
+      - name: Install Dependencies
+        run: |
+          cd test/e2e
+          npm install
+          npx playwright install --with-deps
+
+      - name: Start an Actions runner
+        id: start_runner
+        uses: github/enterprise-releases/actions/start_runner@master
+        with:
+          hostname: ${{ steps.env_setup.outputs.hostname }}
+          org: ${{ steps.env_setup.outputs.organization }}
+          token: ${{ steps.env_setup.outputs.runner_token }}
+          labels: "dependabot"
+
+      - name: Run Tests
+        id: test
+        env:
+          GITHUB_HOST: https://${{ steps.env_setup.outputs.hostname }}
+          GITHUB_FEATURE_USERNAME: ${{ steps.env_setup.outputs.username }}
+          GITHUB_FEATURE_PASSWORD: ${{ steps.env_setup.outputs.password }}
+          SNEK_CONF_REPO_ORG_OVERRIDE: ${{ steps.env_setup.outputs.organization }}
+          OCTOKIT_URL: https://${{ steps.env_setup.outputs.hostname }}/api/v3
+          GHEBOOT_INSTANCE: true
+          TARGET_ENV: ghes
+          GITHUB_TOKEN: ${{ steps.env_setup.outputs.user_token }}
+          SNEK_DEFAULT_PAT: ${{ steps.env_setup.outputs.user_token }}
+        run: |
+          cd test/e2e
+          if [[ "${{ steps.env_setup.outputs.hostname }}" == *"3-11"* ]]; then
+            echo "Skipping tests for hostname 3-11"
+          elif [[ "${{ steps.env_setup.outputs.hostname }}" == *"3-12"* || "${{ steps.env_setup.outputs.hostname }}" == *"3-13"* || "${{ steps.env_setup.outputs.hostname }}" == *"3-14"* ]]; then
+            TARGET_PACKAGEMANAGERS=npm,pip,maven,bundler,composer,nuget,gomod,github-actions npx playwright test ./spec/dependabot/newAdvisory.spec.ts ./spec/dependabot/pullRequestFormat.spec.ts ./spec/dependabot/pullRequestConflict.spec.ts ./spec/dependabot/vulnerableDependency.spec.ts --grep="@ghes" --config=./spec/dependabot/dependabot.config.ts --workers=1 --retries=5
+          else
+            AUTO_PAGE_RELOAD_DISABLED_ON_ENVIRONMENT=true npx playwright test ./spec/dependabot --grep="@ghes" --config=./spec/dependabot/dependabot.config.ts --workers=1 --retries=5
+          fi
+
+      - name: Archive artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: ${{ inputs.hostname }}
+          path: |
+            test/e2e/test-results/**/*
+
+      - name: Checkout Repository for github/ghe-tester
+        if: always()
+        uses: actions/checkout@v6
+        with:
+          repository: github/ghe-tester
+          token: ${{ secrets.DEPENDABOT_TESTING_BOT_PAT }}
+          path: disable-github-connect-dir
+
+      - name: Install Bundler Dependencies
+        if: always()
+        run: |
+          cd disable-github-connect-dir
+          sudo gem install bundler -v "= 2.5.22"
+          sudo bundle install
+
+      - name: Disable GitHub Connect
+        id: disable_github_connect
+        if: always()
+        shell: bash
+        env:
+          GHES_BOT_PUBLIC_KEY: ${{ steps.env_setup.outputs.ssh_public_key }}
+          GHES_BOT_PRIVATE_KEY: ${{ steps.env_setup.outputs.ssh_private_key }}
+          DOTCOM_LOGIN: ${{ secrets.DOTCOM_LOGIN }}
+          DOTCOM_PASSWORD: ${{ secrets.DOTCOM_PASSWORD }}
+        run: script/github-connect-disable ${{ inputs.hostname }}
+        working-directory: disable-github-connect-dir
+
+      - name: Cleanup the environment
+        id: env_cleanup
+        if: always() && steps.env_setup.outcome == 'success'
+        uses: github/enterprise-releases/actions/env_cleanup@master
+        with:
+          cleanup_payload: ${{ steps.env_setup.outputs.cleanup_payload }}
+          outcome: ${{ steps.test.outcome }}

@@ -2310,6 +2310,10 @@ class Api::Repositories < Api::App
     status = data.dig("security_and_analysis", "secret_scanning_delegated_bypass", "status")
     delegated_bypass = SecretScanning::Features::Repo::DelegatedBypass.new(repo)
 
+    # Validate reviewers before changing any settings so a 422 has no side effects.
+    reviewers_data = data.dig("security_and_analysis", "secret_scanning_delegated_bypass_options", "reviewers")
+    bypassers = build_delegated_bypass_reviewers(repo, reviewers_data) if reviewers_data.present? && status == "enabled"
+
     if status == "enabled"
       delegated_bypass.enable(actor: current_user)
     elsif status == "disabled"
@@ -2324,32 +2328,44 @@ class Api::Repositories < Api::App
       owner: T.must(repo.owner),
     )
 
-    # Handle reviewers if provided
-    reviewers_data = data.dig("security_and_analysis", "secret_scanning_delegated_bypass_options", "reviewers")
-    if reviewers_data.present? && status == "enabled"
-      update_delegated_bypass_reviewers(repo, reviewers_data)
+    if bypassers
+      _, err = SecretScanning::Services::DelegatedBypassService.update_bypassers_for_source(
+        repo,
+        nil, # security_configuration_id
+        bypassers,
+        current_user
+      )
+      deliver_error! 422, message: err if err.present?
     end
   end
 
-  sig { params(repo: Repository, reviewers_data: T::Array[T.untyped]).void }
-  def update_delegated_bypass_reviewers(repo, reviewers_data)
-    reviewers_data.each do |reviewer|
-      unless %w[ROLE TEAM].include?(reviewer["reviewer_type"])
-        deliver_error! 422, message: "Invalid reviewer_type '#{reviewer['reviewer_type']}'. Must be one of: ROLE, TEAM"
+  sig { params(repo: Repository, reviewers_data: T::Array[T.untyped]).returns(T::Array[GitHub::Proto::SecretScanning::Bypassers::V1::Bypasser]) }
+  def build_delegated_bypass_reviewers(repo, reviewers_data)
+    org = repo.organization
+    deliver_error! 422, message: "Delegated bypass reviewers can only be set on organization-owned repositories" if org.nil?
+
+    reviewers_data.map do |reviewer|
+      reviewer_id = reviewer["reviewer_id"]
+      reviewer_type = reviewer["reviewer_type"]
+      mode = reviewer["mode"] || "ALWAYS"
+
+      unless %w[ROLE TEAM].include?(reviewer_type)
+        deliver_error! 422, message: "Invalid reviewer_type '#{reviewer_type}'. Must be one of: ROLE, TEAM"
       end
-      reviewer["owner_scope"] = "REPOSITORY_SCOPE"
-      reviewer["owner_id"] = repo.id
-    end
+      unless %w[ALWAYS EXEMPT].include?(mode)
+        deliver_error! 422, message: "Invalid mode '#{mode}'. Must be one of: ALWAYS, EXEMPT"
+      end
+      unless reviewer_id.is_a?(Integer) && SecretScanning::Services::DelegatedBypassService.is_valid_bypasser?(reviewer_id, reviewer_type, org)
+        deliver_error! 422, message: "Invalid reviewer_id '#{reviewer_id}' for reviewer_type '#{reviewer_type}'"
+      end
 
-    _, err = SecretScanning::Services::DelegatedBypassService.update_bypassers_for_source(
-      repo,
-      nil, # security_configuration_id
-      reviewers_data,
-      current_user
-    )
-
-    if err.present?
-      deliver_error! 422, message: err
+      GitHub::Proto::SecretScanning::Bypassers::V1::Bypasser.new(
+        bypasser_id: reviewer_id,
+        bypasser_type: reviewer_type.to_sym,
+        mode: mode.to_sym,
+        owner_scope: GitHub::Proto::SecretScanning::Types::V1::OwnerScope::REPOSITORY_SCOPE,
+        owner_id: repo.id,
+      )
     end
   end
 

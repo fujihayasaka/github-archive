@@ -75,6 +75,8 @@ class QueriesController < ApplicationController
       return render status: :not_found, plain: "Could not find operation"
     end
 
+    log_data.update("graphql.operation.name": params[:operation_name])
+
     operation_type = operation.definition_node.operation_type
 
     if !request.post? && operation_type != "query"

@@ -1,0 +1,120 @@
+name: "Test Copilot Coding Agent Job API"
+
+on:
+  workflow_call:
+    secrets:
+      token:
+        required: true
+      datadog_api_key:
+        required: false
+    inputs:
+      repo_nwo:
+        required: true
+        type: string
+      reporting_id:
+        required: true
+        type: string
+      capi_base_url:
+        description: "Copilot API base URL"
+        type: string
+        default: "https://api.githubcopilot.com"
+      integration_id:
+        description: "Copilot-Integration-Id header value"
+        type: string
+        default: "playground-dev"
+      github_api_url:
+        description: "GitHub API base URL (for proxima tenants)"
+        type: string
+        default: "https://api.github.com"
+      github_server_url:
+        description: "GitHub Server URL"
+        type: string
+        default: "https://github.com"
+      stamp:
+        description: "Stamp name for reporting"
+        type: string
+        default: "dotcom"
+      stagger_delay_seconds:
+        description: "Seconds to wait before launching the generated Copilot SWE workflow"
+        type: number
+        default: 0
+      notify_datadog:
+        description: "Emit the integration service check to Datadog on scheduled runs"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Stagger generated workflow launch
+        if: ${{ inputs.stagger_delay_seconds > 0 }}
+        run: |
+          echo "Waiting ${{ inputs.stagger_delay_seconds }} seconds before launching ${{ inputs.reporting_id }}"
+          sleep "${{ inputs.stagger_delay_seconds }}"
+
+      - name: Create Job
+        id: create-job
+        run: |
+          response=$(curl --fail-with-body ${{ inputs.capi_base_url }}/agents/swe/v1/jobs/${{ inputs.repo_nwo }} -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Copilot-Integration-Id: ${{ inputs.integration_id }}" -d '{"problem_statement": "create a file titled \"Test Job API: Run ${{ github.run_id }}\", and in it write \"run successful\""}')
+          session_id=$(echo "$response" | jq -r '.session_id')
+          echo "Created coding agent session $session_id"
+          echo "session_id=$session_id" >> $GITHUB_ENV
+          echo "session_id=$session_id" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.token }}
+      - id: wait_for_cca
+        timeout-minutes: 15
+        uses: ./.github/actions/wait_for_cca
+        with:
+          token: ${{ secrets.token }}
+          session_id: $session_id
+          capi_base_url: ${{ inputs.capi_base_url }}
+          integration_id: ${{ inputs.integration_id }}
+      - id: cleanup_pr
+        uses: ./.github/actions/cleanup_pr
+        if: steps.create-job.outcome == 'success'
+        with:
+          token: ${{ secrets.token }}
+          session_id: $session_id
+          repo_nwo: ${{ inputs.repo_nwo }}
+          capi_base_url: ${{ inputs.capi_base_url }}
+          integration_id: ${{ inputs.integration_id }}
+          github_api_url: ${{ inputs.github_api_url }}
+          github_server_url: ${{ inputs.github_server_url }}
+      - id: validate_session
+        uses: ./.github/actions/validate_session
+        with:
+          token: ${{ secrets.token }}
+          session_id: $session_id
+          capi_base_url: ${{ inputs.capi_base_url }}
+          integration_id: ${{ inputs.integration_id }}
+      - name: Write job summary
+        id: write_summary
+        if: ${{ always() }}
+        uses: ./.github/actions/write_integration_summary
+        with:
+          test_name: "Job API Integration Test"
+          reporting_id: ${{ inputs.reporting_id }}
+          job_status: ${{ job.status }}
+          repo_nwo: ${{ inputs.repo_nwo }}
+          github_server_url: ${{ inputs.github_server_url }}
+          capi_base_url: ${{ inputs.capi_base_url }}
+          session_id: ${{ steps.create-job.outputs.session_id }}
+          session_workflow_run_id: ${{ steps.wait_for_cca.outputs.workflow_run_id }}
+          pull_request_number: ${{ steps.cleanup_pr.outputs.pull_request_number }}
+          pull_request_url: ${{ steps.cleanup_pr.outputs.pull_request_url }}
+      - id: notify_datadog
+        if: ${{ always() && inputs.notify_datadog && github.event_name == 'schedule' }}
+        uses: ./.github/actions/notify_datadog
+        with:
+          datadog_api_key: ${{ secrets.datadog_api_key }}
+          job_status: ${{ job.status }}
+          test_type: ${{ inputs.reporting_id }}
+          test_name: "Job API Integration Test"
+          stamp: ${{ inputs.stamp }}

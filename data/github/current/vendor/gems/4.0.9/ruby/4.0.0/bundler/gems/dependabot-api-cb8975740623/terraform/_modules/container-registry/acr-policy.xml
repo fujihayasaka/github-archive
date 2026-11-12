@@ -1,0 +1,45 @@
+<!-- https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-policies -->
+<policies>
+    <inbound>
+      <base />
+      <!-- Store ACR login server for reuse -->
+      <set-variable name="acr-login-server" value="ACR_LOGIN_SERVER" />
+      <!-- Get AAD token for ACR -->
+      <authentication-managed-identity resource="https://management.azure.com/" output-token-variable-name="aad-token" ignore-error="false" />
+      <!-- Exchange AAD token for ACR refresh token -->
+      <send-request mode="new" response-variable-name="acr-refresh-response" timeout="20" ignore-error="false">
+          <set-url>@($"https://{(string)context.Variables["acr-login-server"]}/oauth2/exchange")</set-url>
+          <set-method>POST</set-method>
+          <set-header name="Content-Type" exists-action="override">
+              <value>application/x-www-form-urlencoded</value>
+          </set-header>
+          <set-body>@($"grant_type=access_token&service={(string)context.Variables["acr-login-server"]}&access_token={(string)context.Variables["aad-token"]}")</set-body>
+      </send-request>
+      <!-- Extract refresh token -->
+      <set-variable name="acr-refresh-token" value="@(((IResponse)context.Variables["acr-refresh-response"]).Body.As<JObject>()["refresh_token"].ToString())" />
+      <!-- Exchange refresh token for access token -->
+      <send-request mode="new" response-variable-name="acr-access-response" timeout="20" ignore-error="false">
+          <set-url>@($"https://{(string)context.Variables["acr-login-server"]}/oauth2/token")</set-url>
+          <set-method>POST</set-method>
+          <set-header name="Content-Type" exists-action="override">
+              <value>application/x-www-form-urlencoded</value>
+          </set-header>
+          <set-body>@($"grant_type=refresh_token&service={(string)context.Variables["acr-login-server"]}&scope=repository:*:pull&refresh_token={(string)context.Variables["acr-refresh-token"]}")</set-body>
+      </send-request>
+      <!-- Extract access token and set Authorization header -->
+      <set-variable name="acr-access-token" value="@(((IResponse)context.Variables["acr-access-response"]).Body.As<JObject>()["access_token"].ToString())" />
+      <set-backend-service backend-id="acr-backend" />
+      <set-header name="Authorization" exists-action="override">
+          <value>@("Bearer " + (string)context.Variables["acr-access-token"])</value>
+      </set-header>
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

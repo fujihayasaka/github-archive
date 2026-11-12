@@ -240,18 +240,9 @@ class Business < ApplicationRecord::Domain::Users
     through: :organization_memberships,
     dependent: :destroy
 
-  # Reading organizations through the `business_organization_memberships` join is
-  # wasteful on Enterprise Server: there is a single global business that owns every
-  # organization, so the join filters nothing and is pure overhead. The owning
-  # business is denormalized onto `organizations.business_id` by
-  # Business::OrganizationMembership's commit callbacks, and this model already trusts
-  # that column (see #soft_deleted_organizations), so #organization_ids and
-  # #organization_display_logins can read straight from it and skip the join.
-  #
-  # Both fall back to reading through the association when it is already loaded (the
-  # in-memory records are then the cheaper, canonical source) or outside a single,
-  # non-multi-tenant business environment where the column is not maintained. The memos
-  # are cleared by #reset_memoized_attributes on reload.
+  # GHES has one business that owns every organization. Skip the membership join and
+  # business_id filter because older organizations may not have that column populated.
+  # Loaded associations and other environments retain their existing readers.
   sig { returns(T::Array[T.untyped]) }
   def organization_ids
     return super if organizations.loaded?
@@ -260,14 +251,11 @@ class Business < ApplicationRecord::Domain::Users
     @organization_ids_without_join ||= Organization
       .active
       .excluding_github_enterprise_org
-      .where(business_id: id)
       .pluck(:id)
   end
 
-  # Display logins of this business's organizations. Mirrors #organization_ids: on
-  # Enterprise Server it reads the logins straight from `organizations.business_id`
-  # instead of joining through `business_organization_memberships`. This is the hot
-  # path behind the Actions enterprise-policy checks, which only need the logins.
+  # Display logins for Actions enterprise-policy checks, using the same GHES fast
+  # path as #organization_ids.
   sig { returns(T::Array[T.untyped]) }
   def organization_display_logins
     return organizations.map(&:display_login) if organizations.loaded?
@@ -276,7 +264,6 @@ class Business < ApplicationRecord::Domain::Users
     @organization_display_logins_without_join ||= Organization
       .active
       .excluding_github_enterprise_org
-      .where(business_id: id)
       .pluck(:display_login)
   end
 
@@ -288,12 +275,7 @@ class Business < ApplicationRecord::Domain::Users
     super
   end
 
-  # Whether the organization readers above can safely read from the denormalized
-  # `organizations.business_id` column instead of joining through
-  # `business_organization_memberships`. Only true for a persisted business in a
-  # single, non-multi-tenant business environment, where the column is kept in sync
-  # by Business::OrganizationMembership's commit callbacks. An unsaved business has
-  # no id to match on, so we leave it to the association.
+  # Only a saved business in a single, non-multi-tenant environment can read all organizations.
   sig { returns(T::Boolean) }
   private def read_organizations_without_join?
     id.present? &&

@@ -1,0 +1,149 @@
+#!/bin/bash
+
+set -eo pipefail
+
+cd "$(dirname "$0")/.."
+
+DOCKERFILE=Dockerfile.enterprise
+DOCKERTAG=dependabot-api
+PREFIX=ghcr.io/github/dependabot-api
+export DOCKER_BUILDKIT=1
+
+if [[ -z $GITHUB_SHA ]]; then
+  echo "GITHUB_SHA is required."
+  exit 1
+fi
+
+# Use RUNNER_TEMP if available (Actions), otherwise create a temp dir and
+# ensure it is cleaned up on exit.
+if [[ -n "${RUNNER_TEMP:-}" ]]; then
+  WORKSPACE="$RUNNER_TEMP"
+else
+  WORKSPACE="$(mktemp -d)"
+fi
+DOCKER_SECRET_ARGS=""
+
+# ---------------------------------------------------------------------------
+# ANG package mirror setup
+#
+# This replicates the logic from internal-actions' create-pkg-mirror-files
+# script (https://github.com/github/internal-actions/blob/main/script/create-pkg-mirror-files)
+# since that script isn't available on self-hosted runners.
+#
+# Required env vars: SITES_API_URL, SITES_API_PASSWORD
+# Optional env var:  OIDC_TOKEN (used for X-Ang-Authentication header and APT auth)
+# ---------------------------------------------------------------------------
+setup_ang_pkg_mirror() {
+  if [[ -z "$SITES_API_URL" || -z "$SITES_API_PASSWORD" ]]; then
+    echo "SITES_API_URL or SITES_API_PASSWORD not set. Skipping ANG package mirror setup."
+    return 1
+  fi
+
+  echo "Fetching enabled and deployable pkg-mirror hosts from ANG..."
+
+  # Use a temporary netrc file to pass credentials to curl, avoiding secrets
+  # in process argv (which can be visible to other processes on shared runners).
+  local netrc_file="${WORKSPACE}/ang-netrc"
+  local sites_host
+  sites_host=$(echo "$SITES_API_URL" | sed -E 's|https?://([^/]+).*|\1|')
+  (umask 077; printf "machine %s login internal-actions password %s\n" "$sites_host" "$SITES_API_PASSWORD" > "$netrc_file")
+
+  local curl_args=(
+    -sf
+    --retry 3
+    --retry-delay 2
+    --netrc-file "$netrc_file"
+  )
+
+  # The ANG sites API expects an OIDC token in the X-Ang-Authentication header
+  if [[ -n "$OIDC_TOKEN" ]]; then
+    curl_args+=(-H "X-Ang-Authentication: ${OIDC_TOKEN}")
+  fi
+
+  local pkg_mirror_hosts
+  pkg_mirror_hosts=$(curl "${curl_args[@]}" \
+    "${SITES_API_URL}/hostnames?app=pkg&role=mirror&enabled=true&deployable=true" 2>/dev/null || echo "[]")
+
+  rm -f "$netrc_file"
+
+  # Pick a random host from the JSON array response
+  local pkg_mirror_host
+  if command -v jq &>/dev/null; then
+    pkg_mirror_host=$(echo "$pkg_mirror_hosts" | jq -r 'if length > 0 then .[env.RANDOM // 0 | tonumber % length] else empty end' 2>/dev/null || true)
+    # jq fallback: just grab first
+    if [[ -z "$pkg_mirror_host" ]]; then
+      pkg_mirror_host=$(echo "$pkg_mirror_hosts" | jq -r 'first // empty' 2>/dev/null || true)
+    fi
+  else
+    # Fallback: extract first quoted string from the JSON array
+    pkg_mirror_host=$(echo "$pkg_mirror_hosts" | grep -o '"[^"]*"' | head -1 | tr -d '"' || true)
+  fi
+
+  if [[ -z "$pkg_mirror_host" ]]; then
+    echo "WARNING: No pkg-mirror hosts returned from ANG. Skipping package mirror setup."
+    return 1
+  fi
+
+  echo "Using pkg-mirror host: ${pkg_mirror_host}"
+
+  # Extract short name (e.g. pkg-mirror-a0b0d93) and build ANG URL
+  # The Dockerfile base images use Ubuntu focal
+  local short_name
+  short_name=$(echo "$pkg_mirror_host" | grep -o 'pkg-mirror-[a-f0-9]\{7\}')
+  local ang_url="https://${short_name}-ang.githubapp.com/github-focal/"
+
+  # Create pkg-mirror-host file
+  echo "$ang_url" > "${WORKSPACE}/pkg-mirror-host"
+  echo "Created ${WORKSPACE}/pkg-mirror-host -> ${ang_url}"
+
+  # Create apt-auth-conf file
+  # Prefer OIDC_TOKEN for APT auth (matches internal-actions behavior), fall back to SITES_API_PASSWORD
+  local apt_auth_password="${OIDC_TOKEN:-${SITES_API_PASSWORD}}"
+  (umask 077; echo "machine ${ang_url} login apt password ${apt_auth_password}" > "${WORKSPACE}/apt-auth-conf")
+  echo "Created ${WORKSPACE}/apt-auth-conf"
+
+  DOCKER_SECRET_ARGS="--secret id=apt-auth-conf,src=${WORKSPACE}/apt-auth-conf --secret id=pkg-mirror-host,src=${WORKSPACE}/pkg-mirror-host"
+  return 0
+}
+
+if [[ -n "$CI" ]]; then
+  setup_ang_pkg_mirror || echo "Continuing build without ANG package mirror."
+fi
+
+# Clean up sensitive files (and temp workspace if we created it) on exit.
+cleanup() {
+  rm -f "${WORKSPACE}/apt-auth-conf" "${WORKSPACE}/ang-netrc"
+  # Remove the temp workspace dir if we created it (not RUNNER_TEMP)
+  if [[ -z "${RUNNER_TEMP:-}" ]]; then
+    rm -rf "$WORKSPACE"
+  fi
+}
+trap cleanup EXIT
+
+# shellcheck disable=SC2086
+docker build -f $DOCKERFILE \
+  -t "$PREFIX/$DOCKERTAG:$GITHUB_SHA" \
+  --build-arg GITHUB_SHA="${GITHUB_SHA}" \
+  --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+  $DOCKER_SECRET_ARGS \
+  .
+
+if [[ "${1:-""}" = "--build-only" ]]; then
+  echo "completed build"
+  exit
+fi
+
+if [[ -n "$CI" ]]; then
+  push_url="$PREFIX/$DOCKERTAG:$GITHUB_SHA"
+  digest=$(docker push "$push_url" | tail -1 | cut -f 3 -d " ")
+
+  printf "\n\n"
+  echo "dependabot-api=$push_url@$digest"
+
+  echo "### Enterprise Build Info" >> "$GITHUB_STEP_SUMMARY"
+  echo ":rocket: The image has been published! :rocket:" >> "$GITHUB_STEP_SUMMARY"
+  echo "To use the new image in \`bp-dev\` issue the following in \`~/enterprise2\`:" >> "$GITHUB_STEP_SUMMARY"
+  echo "\`\`\`plaintext" >> "$GITHUB_STEP_SUMMARY"
+  echo "./script/update-service.rb dependabot-api $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+  echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+fi

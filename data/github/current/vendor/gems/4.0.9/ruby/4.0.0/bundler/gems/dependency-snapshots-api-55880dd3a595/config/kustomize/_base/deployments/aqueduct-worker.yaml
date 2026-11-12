@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: aqueduct-worker
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "aqueduct-worker"
+        heaven.githubapp.com/image-placeholder: "dependency-snapshots-api"
+        heaven.githubapp.com/deploy-requirement: "true"
+spec:
+    replicas: 2
+    selector:
+        matchLabels:
+            app: dependency-snapshots-api
+            role: aqueduct-worker
+    template:
+        metadata:
+            labels:
+                app: dependency-snapshots-api
+                role: aqueduct-worker
+                azure.workload.identity/use: "true"
+        spec:
+            serviceAccountName: azure-access
+            terminationGracePeriodSeconds: 60
+            dnsPolicy: ClusterFirst
+            containers:
+                - name: aqueduct-worker
+                  image: dependency-snapshots-api
+                  command: ["./bin/ds-aqueduct-worker"]
+                  resources:
+                    requests:
+                        cpu: 200m
+                        memory: "128Mi"
+                    limits:
+                        cpu: 1
+                        memory: "512Mi"
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: STATS_ADDR
+                      value: "$(KUBE_NODE_HOSTNAME):28125"
+                    - name: GOMAXPROCS
+                      value: "2"

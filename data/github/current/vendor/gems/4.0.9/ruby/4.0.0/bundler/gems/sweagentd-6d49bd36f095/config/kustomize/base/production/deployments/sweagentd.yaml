@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sweagentd
+spec:
+  replicas: 16
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: "13%" # ~1/8th
+      maxSurge: "50%"
+  selector:
+    matchLabels:
+      app: sweagentd
+  template:
+    metadata:
+      labels:
+        app: sweagentd
+        azure.workload.identity/use: "true"
+      annotations:
+        fluentbit.io/parser: logfmt
+        observability.github.com/splunk_index: sweagentd
+        moda.github.net/opt-out-resource-quotas: "true"
+    spec:
+      dnsPolicy: Default
+      containers:
+        - name: sweagentd
+          image: sweagentd
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 500m
+              memory: 200Mi
+            limits:
+              cpu: 2000m
+              memory: 1Gi
+          envFrom:
+            - configMapRef:
+                name: kube-cluster-metadata
+            - secretRef:
+                name: vault-secrets
+            - configMapRef:
+                name: application-config
+          env:
+            # Moda metadata
+            - name: KUBE_CONTAINER_NAME
+              value: "sweagentd"
+            - name: STATS_ADDR
+              value: "$(KUBE_NODE_HOSTNAME):28125"
+            - name: KUBE_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: KUBE_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: APP_SHA
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['heaven.githubapp.com/sha']
+            - name: APP_REF
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['heaven.githubapp.com/ref']
+            - name: SWEAGENTD_HTTP_PROXY
+              value: "http://network-proxy.service.github.net:3128"
+            - name: SWEAGENTD_HTTPS_PROXY
+              value: "http://network-proxy.service.github.net:3128"
+            - name: GOMAXPROCS
+              value: "1"
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          readinessProbe:
+            exec:
+              command:
+                - cat
+                - /tmp/consumer_healthy
+            initialDelaySeconds: 5
+            periodSeconds: 5

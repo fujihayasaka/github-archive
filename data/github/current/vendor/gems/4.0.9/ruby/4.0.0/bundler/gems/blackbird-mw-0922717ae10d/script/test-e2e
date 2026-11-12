@@ -1,0 +1,400 @@
+#!/usr/bin/env bash
+#
+# Part of running the end-to-end tests for blackbird-mw
+#
+# This script is only intended to be run from within a specific docker container.
+#
+# To start the e2e tests in Actions for just the mw repo, use `make e2e-test`
+# or `script/test-e2e-entrypoint`. To start the e2e tests locally, go into your
+# local copy of the blackbird repo and use `make test-e2e` or
+# `script/test-e2e-entrypoint` in that repo.
+
+set -euo pipefail
+
+# Docker compose files that bring up all the necessary services.
+overlays=(-f docker-compose.yml -f docker-compose.mw.yml)
+
+# Returns the commit sha of the repo in the current directory. Supports both
+# Jujutsu and Git repos. Fails if there are unstaged changes, since those are
+# not part of the sha but would be used in any build.
+function get_repo_commit() {
+  # Check if it's a Jujutsu repo. Do this first because a directory can be both
+  # a Jujutsu and Git repo, and in that case prefer the Jujutsu data.
+  if command -v jj > /dev/null 2>&1; then
+    if [ -d ".jj" ]; then
+      local jj_commit
+      jj_commit=$(jj log -r @ --no-graph -T 'commit_id' 2> /dev/null)
+      if [ -z "$jj_commit" ]; then
+        echo "Error: Failed to get Jujutsu commit" >&2
+        return 1
+      fi
+      echo "$jj_commit"
+      return 0
+    fi
+  fi
+
+  # Check if it's a Git repo.
+  if git rev-parse --git-dir > /dev/null 2>&1; then
+    if ! git diff --quiet 2> /dev/null; then
+      echo "Error: There are unstaged changes in the Git repository" >&2
+      return 1
+    fi
+    if ! git diff --cached --quiet 2> /dev/null; then
+      echo "Error: There are uncommitted changes in the Git repository" >&2
+      return 1
+    fi
+    local git_commit
+    git_commit=$(git rev-parse HEAD 2> /dev/null)
+    if [ -z "$git_commit" ]; then
+      echo "Error: Failed to get Git commit" >&2
+      return 1
+    fi
+    echo "$git_commit"
+    return 0
+  fi
+
+  echo "Error: Directory $(pwd) is neither a Jujutsu nor a Git repository" >&2
+  return 1
+}
+
+# The clib docker image to use depends on how the test is run. If it is run in
+# CI, then the pinned image should be used (and the env var will not already be
+# set). But if it is run on a local machine like a Mac, that pinned image
+# cannot be used because the architecture is different, so a locally-built
+# version must be provided.
+function determine_clib_image() {
+  if [[ ! -v BLACKBIRD_CLIB_IMAGE ]]; then
+    export BLACKBIRD_CLIB_IMAGE=$(./clib-image-version.sh)
+  fi
+  echo "Using clibs from $BLACKBIRD_CLIB_IMAGE"
+}
+
+function build_blackbird_mw_binaries() {
+  args=()
+  args+=("--secret" "id=netrc,src=$HOME/.netrc")
+  args+=("-f" "Dockerfile.build-mw-binaries")
+  args+=("--build-arg" "BUILDER_IMAGE=$BLACKBIRD_BUILD_IMAGE")
+  args+=("--build-arg" "BLACKBIRD_CLIB_IMAGE=$BLACKBIRD_CLIB_IMAGE")
+  if [[ "$BLACKBIRD_BUILD_IMAGE" == blackbird-build-image* ]]; then
+    # If a locally-built build image was used, then this is probably running on
+    # a Mac, and so the default FINAL_IMAGE needs to be overridden.
+    args+=("--build-arg" "FINAL_IMAGE=$BLACKBIRD_BUILD_IMAGE")
+  fi
+  # zstd is better and faster compression than the default gzip.
+  args+=("--output" "type=docker,compression=zstd")
+  args+=("--progress" "plain")
+  args+=("-t" "$BLACKBIRD_MW_IMAGE")
+  args+=(".")
+
+  docker build "${args[@]}"
+}
+
+function build_bootstrap_skeema_image() {
+  script/create-bootstrap-skeema-image
+}
+
+function pull_docker_images() {
+  docker compose "${overlays[@]}" pull --ignore-pull-failures --quiet
+}
+
+function endgroup() {
+  echo "::endgroup::"
+}
+
+# Try a command a few times.
+function try_three_times() {
+  "$@" || "$@" || "$@"
+}
+
+function setup_spokes() {
+  echo "Bootstrapping spokes"
+  pushd deps/spokes-proto
+  try_three_times script/bootstrap --pristine                                                                   # NB: clones https://github.com/git-tfs/git-tfs.github.com as repo_id: 1
+  script/clone-repo https://github.com/go-git/go-git-fixtures --sha a03e4cc8537c7efb96694b2cc796d8a23d657475    # repo_id: 2
+  script/clone-repo https://github.com/go-git/go-git-fixtures --sha a03e4cc8537c7efb96694b2cc796d8a23d657475    # repo_id: 3 (just for flushing)
+  script/clone-repo https://github.com/mojombo/grit --sha 5608567286e64a1c55c5e7fcd415364e04f8986e              # repo_id: 4 (for testing delta indexing)
+  script/clone-repo https://github.com/github/grit --sha 13d5737ee6de729ed85d951cccaa3127cd22dcde               # repo_id: 5 (for testing delta indexing)
+  script/clone-repo https://github.com/rewinfrey/java-test --sha 19706a438d247482a4e4745a4b14288f06b2df0d       # repo_id: 6 (for testing force push indexing)
+  script/clone-repo https://github.com/mbellani/code-search-test --sha 0e09ba85005a883aeedeb8b9b37f4e4a7f820929 # repo_id: 7 (for testing epoch branching)
+  script/generate-certs > /dev/null 2>&1
+  docker compose up --wait --quiet-pull
+  docker network ls
+  popd
+}
+
+function start_docker_dependencies() {
+  exit_code=0
+  (
+    IFS=' '
+    echo "Running docker compose "${overlays[@]}" up --no-recreate --wait"
+  )
+  (
+    docker compose "${overlays[@]}" up --no-recreate --wait --quiet-pull
+  ) || exit_code=$?
+  if [[ "$exit_code" != 0 ]]; then
+    echo "*** 'docker compose up' failed"
+
+    # Prepare to try again
+    docker compose "${overlays[@]}" ps --all --format '{{.Name}} {{.Service}} {{.Health}}' |
+      while IFS=' ' read -r container service health; do
+        echo "docker inspect ${container} - ${health:-unknown}"
+        docker inspect --format='{{json .State.Health}}' "${container}" | jq
+        echo "compose down -v ${service} - ${health:-unknown}"
+        docker compose "${overlays[@]}" down -v "${service}"
+      done
+  fi
+  return $exit_code
+}
+
+function setup_docker_dependencies() {
+  try_three_times start_docker_dependencies
+}
+
+function install_clibs() {
+  binaries_container_id=$(docker run -d -it "$BLACKBIRD_CLIB_IMAGE" /bin/bash) || {
+    echo "Failed to run $BLACKBIRD_CLIB_IMAGE container"
+    return 1
+  }
+
+  mkdir -p lib
+  docker cp "$binaries_container_id:/usr/local/lib/libblackbird_core.a" "lib/libblackbird_core.a"
+  docker cp "$binaries_container_id:/usr/local/lib/libblackbird_client.a" "lib/libblackbird_client.a"
+  docker cp "$binaries_container_id:/usr/local/lib/liblinguist.a" "lib/liblinguist.a"
+
+  docker stop "$binaries_container_id" || true
+  docker rm -v "$binaries_container_id" || true
+}
+
+function build_test_binary() {
+  install_clibs
+  script/vendor
+
+  # Same as run_tests, but with the `-c` arg to compile without running the
+  # tests. For some reason trying to create a variable set of args didn't work,
+  # claiming that the files didn't exist. :(
+  CGO_LDFLAGS="-g -O2 -ldl -lm -L./lib" RUN_INT_TESTS=True BLACKBIRD_MW_ENV=test go test -c -p 1 -v ./internal/test/integration/*.go
+  echo "Finished building test binary"
+}
+
+function run_tests() {
+  exit_code=0
+  CGO_LDFLAGS="-g -O2 -ldl -lm -L./lib" RUN_INT_TESTS=True BLACKBIRD_MW_ENV=test go test -p 1 -v ./internal/test/integration/*.go || exit_code=$?
+  if [[ "$exit_code" != 0 ]]; then
+    echo "End to end tests FAILED. Look above or in the logs to determine why." > "$BLACKBIRD_LOGDIR/test_result"
+  else
+    echo "End to end tests PASSED." > "$BLACKBIRD_LOGDIR/test_result"
+  fi
+}
+
+function stop_containers() {
+  echo "Stopping mw containers"
+  docker compose "${overlays[@]}" down -v >/dev/null || true
+  docker compose "${overlays[@]}" rm -v >/dev/null || true
+  docker compose -f deps/spokes-proto/docker-compose.yml down -v >/dev/null || true
+  docker compose -f deps/spokes-proto/docker-compose.yml rm -v >/dev/null || true
+}
+
+# Logs every line of the command to run to both stdout and a file. stdout gets
+# the prefix prepended to each line, and the log file gets that along with the
+# timestamp it was written.
+function run_and_log() {
+  to_run="$1"
+  prefix="$2"
+  logfile="$BLACKBIRD_LOGDIR/$prefix"
+  "$to_run" 2>&1 | sed -u "s/^/[$prefix] /" | tee >(
+    ts "[%Y-%m-%d %H:%M:%.S]" > "$logfile"
+  )
+}
+
+# Saves the output of a command (generally getting logs from docker) to a file.
+function dump_logs() {
+  logfile="$BLACKBIRD_LOGDIR/$1"
+  shift 1
+  echo "Dumping logs for '$@' to ${logfile}"
+  "$@" >> "${logfile}" 2>&1 || true
+}
+
+function save_logs() {
+  dump_logs "container-status.log" \
+    docker compose "${overlays[@]}" ps
+  dump_logs "blackbird-1.log" \
+    docker compose "${overlays[@]}" logs blackbird-1
+  dump_logs "blackbird-2.log" \
+    docker compose "${overlays[@]}" logs blackbird-2
+  dump_logs "blackbird-1-index-state.log" \
+    sh -c 'docker compose exec -T blackbird-1 find /data/blackbird/idx -type f | wc -l'
+  dump_logs "blackbird-2-index-state.log" \
+    sh -c 'docker compose exec -T blackbird-2 find /data/blackbird/idx -type f | wc -l'
+  dump_logs "blackbird-cache-1.log" \
+    docker compose "${overlays[@]}" logs blackbird-cache-1
+  dump_logs "blackbird-mw-admin.log" \
+    docker compose "${overlays[@]}" logs blackbird-mw-admin
+  dump_logs "blackbird-mw-ingest.log" \
+    docker compose "${overlays[@]}" logs blackbird-mw-ingest
+  dump_logs "blackbird-mw-query.log" \
+    docker compose "${overlays[@]}" logs blackbird-mw-query
+  dump_logs "blackbird-mw-semantic.log" \
+    docker compose "${overlays[@]}" logs blackbird-mw-semantic
+  dump_logs "fake-github.log" \
+    docker compose "${overlays[@]}" logs fake-github
+  dump_logs "azurite.log" \
+    docker compose "${overlays[@]}" logs azurite
+  dump_logs "azurite-storage-init.log" \
+    docker compose "${overlays[@]}" logs azurite-storage-init
+  dump_logs "redis.log" \
+    docker compose "${overlays[@]}" logs redis
+  dump_logs "mysql.log" \
+    docker compose "${overlays[@]}" logs mysql
+  dump_logs "kafka-1.log" \
+    docker compose "${overlays[@]}" logs kafka
+  dump_logs "kafka-2.log" \
+    docker compose "${overlays[@]}" logs kafka-2
+  dump_logs "kafka-potomac.log" \
+    docker compose "${overlays[@]}" logs kafka-potomac
+  dump_logs "database-state.log" \
+    docker compose exec -T mysql mysql --user root --database blackbird_test --execute "SELECT * FROM blackbird_corpus_state;"
+  dump_logs "kafka-1-topics.log" \
+    docker compose exec -T kafka kafka-topics --bootstrap-server blackbird-mw-kafka:29092 --list --exclude-internal
+  dump_logs "kafka-1-consumer-groups.log" \
+    docker compose exec -T kafka kafka-consumer-groups --bootstrap-server blackbird-mw-kafka:29092 --all-groups --describe
+  dump_logs "kafka-2-topics.log" \
+    docker compose exec -T kafka kafka-topics --bootstrap-server blackbird-mw-kafka-2:29092 --list --exclude-internal
+  dump_logs "kafka-2-consumer-groups.log" \
+    docker compose exec -T kafka kafka-consumer-groups --bootstrap-server blackbird-mw-kafka-2:29092 --all-groups --describe
+  dump_logs "kafka-potomac-topics.log" \
+    docker compose exec -T kafka kafka-topics --bootstrap-server blackbird-mw-kafka-potomac:29092 --list --exclude-internal
+  dump_logs "kafka-potomac-consumer-groups.log" \
+    docker compose exec -T kafka kafka-consumer-groups --bootstrap-server blackbird-mw-kafka-potomac:29092 --all-groups --describe
+}
+
+function wait_for_blackbird_build() {
+  BLACKBIRD_BUILD_SENTINEL="$1"
+  echo "Waiting for blackbird build to finish"
+  until [ -f "$BLACKBIRD_BUILD_SENTINEL" ]; do
+    sleep 1
+  done
+  echo "Blackbird build has finished"
+}
+
+function setup_credentials() {
+  # The token used to access repos and docker images is in
+  # $HOME/.blackbird-e2e-token. It needs to be put into a handful of different
+  # files so that Rust and Go can both access private crates, and so that
+  # docker images on ghcr.io can be pulled.
+  user=$(cat "$HOME/.blackbird-e2e-user")
+  token=$(cat "$HOME/.blackbird-e2e-token")
+  echo "https://github:${token}@github.com" > "$HOME/.git-credentials"
+  git config --global credential.helper "store"
+  echo "$token" | docker login ghcr.io -u "$user" --password-stdin
+}
+
+function main() {
+  # If the blackbird repo is being built (e.g. the tests are running locally,
+  # or in CI in the blackbird repo), then the build of it's binaries and clibs
+  # needs to be waited on. This is the name of a sentinal file that is written
+  # at the end of that build (we can't use a PID because it is created in
+  # another shell, and wait does not work in that case).  If it is empty, then
+  # an existing docker image is being used, so no build needs to be waited on.
+  BLACKBIRD_BUILD_SENTINEL="${1:-}"
+
+  setup_credentials
+
+  determine_clib_image
+
+  # NOTE: The numbers for the different parts that are logged are incrementing
+  # so that they are printed out roughly in the order they run. There's a gap
+  # between the prerequisites and the tests so that it's a little easier to add
+  # additional prerequisites without changing all the numbers. They start at 11
+  # so that there are some earlier numbers available for when the tests start
+  # from the blackbird repo, which logs additional stuff.
+
+  # This env var is used when pulling the docker images, so it must be set
+  # early on. It must also be set here instead of in one of the helper
+  # functions, as those end up running in a subshell which causes the export to
+  # not exist in the main shell.  Even if the image doesn't exist yet, it will
+  # by the time the containers are started.
+  commit=$(get_repo_commit)
+  export BLACKBIRD_MW_IMAGE="blackbird-mw:sha-${commit:0:8}"
+
+  # Defaults for the clusters and corpus
+  export BLACKBIRD_MW_OUTPUT_CORPUS=${BLACKBIRD_MW_OUTPUT_CORPUS:-blue}
+  export BLACKBIRD_CLUSTERNAME=${BLACKBIRD_CLUSTERNAME:-zeta}
+  export BLACKBIRD_MW_CACHE_CLUSTER=${BLACKBIRD_MW_CACHE_CLUSTER:-cache-001}
+
+  run_and_log pull_docker_images "11-pull" &
+  PULL_PID=$!
+
+  run_and_log setup_spokes "12-spokes" &
+  SPOKES_PID=$!
+
+  run_and_log build_bootstrap_skeema_image "13-skeema" &
+  SKEEMA_PID=$!
+
+  if [[ "${CI:-false}" != "true" && -n "$BLACKBIRD_BUILD_SENTINEL" ]]; then
+    # When running locally, the clibs are being built, so they need to be
+    # available before the test binary and mw binaries are built.
+    wait_for_blackbird_build "$BLACKBIRD_BUILD_SENTINEL"
+  fi
+
+  run_and_log build_test_binary "14-build-test-binary" &
+  BUILD_TEST_BINARY_PID=$!
+
+  # We don't bother backgrounding this because it is the last thing needed
+  # before setting up the docker dependencies.
+  run_and_log build_blackbird_mw_binaries "15-build-mw"
+
+  echo "Waiting for docker images to be pulled"
+  wait "$PULL_PID"
+  echo "Docker images have been pulled"
+
+  echo "Waiting for spokes to be setup"
+  wait "$SPOKES_PID"
+  echo "Spokes has been setup"
+
+  echo "Waiting for bootstrap-skeema image to be built"
+  wait "$SKEEMA_PID"
+  echo "bootstrap-skeema image has been built"
+
+  if [[ "${CI:-false}" == "true" && -n "$BLACKBIRD_BUILD_SENTINEL" ]]; then
+    # When running in CI, the blackbird binaries are needed prior to starting
+    # them up in Docker.
+    wait_for_blackbird_build "$BLACKBIRD_BUILD_SENTINEL"
+  fi
+
+  exit_code=0
+  run_and_log setup_docker_dependencies "16-start-docker" || exit_code=$?
+  if [[ "$exit_code" != 0 ]]; then
+    echo "*** setting up docker containers failed with exit code ${exit_code}"
+    save_logs
+    exit $exit_code
+  fi
+
+  echo "Waiting for test binary to be built"
+  wait "$BUILD_TEST_BINARY_PID"
+  echo "Test binary has been built"
+
+  if [[ "${CI:-false}" != "true" ]]; then
+    # Stopping the containers takes ~30s. In CI, the whole VM is thrown away at
+    # the end, so it doesn't matter if the containers are still running. So
+    # let's save a little time. But if this is run on a person's local machine,
+    # then let's be a good citizen and get rid of the containers.
+    trap stop_containers EXIT
+  fi
+
+  exit_code=0
+  run_and_log run_tests "20-run-tests" || exit_code=$?
+  if [[ "$exit_code" != 0 ]]; then
+    echo "*** 'go test' failed with exit code ${exit_code}"
+  fi
+
+  save_logs
+
+  if [[ "${WAIT:-false}" == "true" ]]; then
+    echo "Waiting before removing the containers. Please press any key when finished."
+    read -ep ""
+  fi
+
+  exit $exit_code
+}
+
+main $@

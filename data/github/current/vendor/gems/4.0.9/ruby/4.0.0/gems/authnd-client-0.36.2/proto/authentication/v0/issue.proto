@@ -1,0 +1,325 @@
+syntax = "proto3";
+package github.authentication.v0;
+
+option go_package = "client/proto/authentication/v0";
+option ruby_package = "Authnd::Proto";
+
+import "authentication/v0/attributes.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// IssueTokenRequest captures the parameters needed to issue a new token credential.
+message IssueTokenRequest {
+	// The type of token to issue.
+	string type = 1;
+
+	// The expiry date for the token.
+	google.protobuf.Timestamp expires_at_time = 2; // https://github.com/twitchtv/twirp/blob/main/docs/best_practices.md#naming-conventions
+
+	// The attributes to associate with the token.
+	repeated Attribute attributes = 3;
+}
+
+// IssueTokenResponse captures the response to an IssueToken request.
+message IssueTokenResponse {
+	// Result is a high level result of the issue attempt.
+	enum Result {
+		// RESULT_UNKNOWN
+		// Should never be used because it is the zero value for this
+		// field and will be invisible when encoded into JSON.
+		RESULT_UNKNOWN = 0;
+		// The token was issued successfully.
+		RESULT_SUCCESS = 1;
+		// The supplied attributes were invalid.
+		RESULT_INVALID_ATTRIBUTES = 2;
+		// An unsupported token type was specified
+		RESULT_UNSUPPORTED_TOKEN_TYPE = 3;
+		// The user ID was not found.
+		RESULT_FAILED_USER_UNKNOWN = 4;
+		// The user is suspended.
+		RESULT_FAILED_USER_SUSPENDED = 5;
+		// RESULT_FAILED_GENERIC indicates the issuing failed.
+		// If possible a more descriptive result code should be used.
+		RESULT_FAILED_GENERIC = -1;
+	}
+
+	// Result is the overall result of issuing the token.
+	Result result = 1;
+
+	// Error is a more detailed error message describing the problem (if result != RESULT_SUCCESS)
+	string error = 2;
+
+	// Token is the generated token (if result == RESULT_SUCCESS)
+	string token = 3;
+
+	// A unique identifier for the token which cannot be used for authentication but can be used to revoke or modify the token.
+	int64 token_id = 4;
+
+	// This value is provided by the client and we're returning it back to them as confirmation
+	google.protobuf.Timestamp expires_at_time = 5;
+}
+
+// IssueSignedAuthTokenRequest captures the parameters needed to issue a new signed auth token.
+message IssueSignedAuthTokenRequest {
+        // The ID of the user to which this token will be bound.
+        uint64 user_id = 1;
+
+        // The ID of the user session to which this token will be bound. If zero, the resulting SAT will be scoped only to the user ID.
+        uint64 session_id = 2;
+
+        // The desired scope for this token.
+        string scope = 3;
+
+        // The expiry date for the token.
+        google.protobuf.Timestamp expires_at_time = 4;
+
+        // Any user-provided attributes to associate with this token.
+        // Note that attributes with timestamp values are not supported, due to
+        // historical deficiencies in the dotcom implementation. If you need
+        // to transmit timestamp information, use Unix-epoch integers.
+        repeated Attribute attributes = 5;
+}
+
+// ScopeExpiry captures the expiration time for the given scope during token generation.
+message ScopeExpiry {
+	// The desired scope for a token.
+	string scope = 1;
+
+	// The expiry date for the token.
+	google.protobuf.Timestamp expires_at_time = 2;
+}
+
+// IssueSignedAuthTokensRequest captures the parameters needed to issue a series of new signed auth tokens.
+message BatchIssueSignedAuthTokenRequest {
+	// The ID of the user to which this token will be bound.
+	uint64 user_id = 1;
+
+	// The ID of the user session to which this token will be bound. If zero, the resulting SAT will be scoped only to the user ID.
+	uint64 session_id = 2;
+
+	// The desired scopes+expirations for these tokens.
+	repeated ScopeExpiry scopes_with_expirations = 3;
+
+	// Any user-provided attributes to associate with this token.
+	// Note that attributes with timestamp values are not supported, due to
+	// historical deficiencies in the dotcom implementation. If you need
+	// to transmit timestamp information, use Unix-epoch integers.
+	repeated Attribute attributes = 4;
+}
+
+// IssueSignedAuthTokenResponse holds a signed auth token or an error response.
+message IssueSignedAuthTokenResponse {
+        // The token, as generated from the parameters of a token request.
+        string token = 1;
+
+        // Any error message information.
+        string error = 2;
+
+	// Provided by the client and we're returning it back to them as confirmation
+	google.protobuf.Timestamp expires_at_time = 3;
+}
+
+// Token captures the expiration time for the given token during generation.
+message TokenExpiry {
+	// The desired scope for a token.
+	string token = 1;
+
+	// The expiry date for the token.
+	google.protobuf.Timestamp expires_at_time = 2;
+}
+
+// IssueSignedAuthTokenResponse holds a series of tokens and expirations OR an error response.
+message BatchIssueSignedAuthTokenResponse {
+	// The tokens with expirations, as generated from the parameters of a token request.
+	repeated TokenExpiry tokens = 1;
+
+	// Any error message information.
+	string error = 2;
+}
+
+// IssueIdentityTokenRequest captures the parameters needed to issue a new identity token.
+message IssueIdentityTokenRequest {
+        // The claims to include in the token.
+        Claims claims = 1;
+		// The lifetime of the token. Not to exceed the default of 6 hrs.
+		google.protobuf.Duration lifetime = 2;
+}
+
+// Claims are the claims to include JWT identity token.
+message Claims {
+        // Sub is the subject of the token, which is usually the user ID.
+        string sub = 1;
+
+        // Aud is the audience of the token.
+        string aud = 2;
+
+        // Act is the actor claims of the actor issuing the token.
+        ActorClaims act = 3;
+
+        // AdditionalClaims are extra claims to include in the issued token.
+        // Standard claims (sub, aud, act, iss, iat, nbf, exp) cannot be overridden, but
+        // this enables claims like repository_id that can be useful in scenarios like OIDC.
+        map<string, string> additional_claims = 4;
+}
+
+// ActorClaims are the claims of the actor issuing the token.
+message ActorClaims {
+        // Sub is the subject of the actor, which is usually the user ID.
+        string sub = 1;
+}
+
+// IssueIdentityTokenResponse holds a JWT identity token.
+message IssueIdentityTokenResponse {
+        // The token, a JWT identity token.
+        string token = 1;
+}
+
+message DiscoveryDocumentRequest {}
+
+message DiscoveryDocumentResponse {
+	repeated string claims = 1;
+	repeated string algorithms = 2;
+	repeated string scopes = 3;
+}
+
+message JwksRequest {}
+
+message JwksResponse {
+	repeated PublicKey keys = 2;
+}
+
+message PublicKey {
+	string kty = 1;
+	string alg = 2;
+	string use = 3;
+	string kid = 4;
+	string n = 5;
+	string e = 6;
+	repeated string x5c = 7;
+	string x5t = 8;
+}
+
+// AuthorizationContexts captures the authorization contexts to bind to a stateless app token.
+message AuthorizationContexts {
+	// The list of authorization contexts.
+	repeated AuthorizationContext contexts = 1;
+}
+
+// AuthorizationContext captures one authorization context bound to a stateless app token.
+message AuthorizationContext {
+	// OAuth authorization context.
+	message OAuth {
+		// The MySQL primary key of OauthAuthorization.
+		uint64 id = 1;
+	}
+
+	// Installation authorization context.
+	message Installation {
+		// The MySQL primary key of IntegrationInstallation.
+		uint64 id = 1;
+	}
+
+	// Scoped installation authorization context.
+	message ScopedInstallation {
+		// The MySQL primary key of ScopedIntegrationInstallation.
+		uint64 id = 1;
+	}
+
+	// Site-scoped installation authorization context.
+	message SiteScopedInstallation {
+		// The MySQL primary key of SitescopedIntegrationInstallation.
+		uint64 id = 1;
+	}
+
+	// Exactly one authorization context kind must be set.
+	oneof kind {
+		OAuth oauth = 1;
+		Installation installation = 2;
+		ScopedInstallation scoped_installation = 3;
+		SiteScopedInstallation site_scoped_installation = 4;
+	}
+}
+
+//
+// Stateless app token mapping:
+//
+// Definitions:
+// - Principal: who the token represents (JWT sub)
+// - App/Integration: which GitHub App owns the token (JWT aid)
+// - Authorization context(s): backing records the token is bound to (JWT azc / azc[])
+//
+// TOKEN_TYPE_U2S (future support):
+// - Integration acting on behalf of a user, bound to oauth or installation context.
+// - Principal: attributes[actor.type="user"] + attributes[actor.id] -> JWT sub "user/<id>"
+// - App/Integration: attributes[application.type="Integration"] + attributes[application.id] -> JWT aid "<id>"
+// - Authorization context -> OauthAuthorization OR installation-bound OAuthAccess -> Authorization context -> JWT azc one of:
+//   - "oauth/<authorization_id>"
+//   - "scoped/<installation_id>"
+//   - "site/<installation_id>"
+//
+// TOKEN_TYPE_S2S:
+// - Integration acting as itself, bound to installation authenticatable contexts (multi-installation future).
+// - Principal: attributes[application.type="Integration"] + attributes[application.id]  -> JWT sub "integration/<id>"
+// - App/Integration: attributes[application.id] -> JWT aid "<id>"
+// - Authorization context(s): authenticatable_type/id (installation authenticatable) -> JWT azc[] one of:
+//   - "inst/<id>"
+//   - "scoped/<id>"
+//   - "site/<id>"
+//
+// IssueStatelessAppTokenRequest captures the parameters needed to issue a stateless app token (JWT).
+message IssueStatelessAppTokenRequest {
+	enum TokenType {
+		// TOKEN_TYPE_UNKNOWN should never be used (zero value).
+		TOKEN_TYPE_UNKNOWN = 0;
+		// Server-to-server token.
+		TOKEN_TYPE_S2S = 1;
+		// User-to-server token.
+		TOKEN_TYPE_U2S = 2;
+	}
+
+	// The Token Type request (S2S or U2S)
+	TokenType token_type = 1;
+
+	// The attributes to associate with the token.
+	repeated Attribute attributes = 2;
+
+	// The expiry date for the token.
+	google.protobuf.Timestamp expires_at_time = 3;
+
+	// The authorization contexts bound to this token.
+	AuthorizationContexts authorization_contexts = 4;
+}
+
+// IssueStatelessAppTokenResponse holds the resulting JWT token or an error message.
+message IssueStatelessAppTokenResponse {
+	// Result is a high level result of the issue attempt.
+	enum Result {
+		// RESULT_UNKNOWN should never be used (zero value).
+		RESULT_UNKNOWN = 0;
+		// The token was issued successfully.
+		RESULT_SUCCESS = 1;
+		// The request contained invalid arguments.
+		RESULT_INVALID_ARGUMENTS = 2;
+		// RESULT_FAILED_GENERIC indicates the issuing failed.
+		RESULT_FAILED_GENERIC = -1;
+	}
+
+	// Result is the overall result of issuing the token.
+	Result result = 1;
+
+	// The signed JSON web token (JWT), if result == RESULT_SUCCESS.
+	string token = 2;
+
+	// A unique identifier for the token which cannot be used for authentication but can be used to revoke or modify the
+	// token. The JTI for the JWT.
+	string token_id = 3;
+
+	// Any error message (if result != RESULT_SUCCESS).
+	string error = 4;
+
+	// The expiration time of the token, returned for confirmation.
+	google.protobuf.Timestamp expires_at_time = 5;
+
+	// The FNV-1a 64-bit hash of the token_id, as a positive integer.
+	int64 credential_id = 6;
+}

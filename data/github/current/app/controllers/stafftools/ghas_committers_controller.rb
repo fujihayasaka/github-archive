@@ -14,7 +14,10 @@ class Stafftools::GhasCommittersController < StafftoolsController
   def index
     skus = [GitHub::Turboghas::SKU::Bundled]
     unless GitHub.global_business.advanced_security_products_bundled?
-      skus = [GitHub::Turboghas::SKU::CodeSecurity, GitHub::Turboghas::SKU::SecretSecurity]
+      # Skip unpurchased products, since their summary requests are slow on large instances
+      skus = [GitHub::Turboghas::SKU::CodeSecurity, GitHub::Turboghas::SKU::SecretSecurity].select do |sku|
+        GitHub.global_business.advanced_security_license_for_sku(sku:).purchased?
+      end
     end
 
     render "stafftools/ghas_committers/index", locals: { skus: skus }

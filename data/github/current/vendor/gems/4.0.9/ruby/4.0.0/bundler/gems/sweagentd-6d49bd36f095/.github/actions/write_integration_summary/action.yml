@@ -1,0 +1,199 @@
+name: "Write integration test summary"
+description: "Append clickable integration test artifact links to the GitHub Actions job summary"
+inputs:
+  test_name:
+    description: "Human-readable test name"
+    required: true
+  reporting_id:
+    description: "Integration test reporting id"
+    required: true
+  job_status:
+    description: "Current job status"
+    required: false
+    default: ""
+  repo_nwo:
+    description: "Target repository owner/name"
+    required: false
+    default: ""
+  capi_base_url:
+    description: "Copilot API base URL"
+    required: false
+    default: "https://api.githubcopilot.com"
+  github_server_url:
+    description: "GitHub Server URL"
+    required: false
+    default: "https://github.com"
+  session_id:
+    description: "Primary Copilot Coding Agent session id"
+    required: false
+    default: ""
+  session_workflow_run_id:
+    description: "GitHub Actions workflow run id for the primary Copilot Coding Agent session"
+    required: false
+    default: ""
+  comment_session_id:
+    description: "Copilot Coding Agent session id created from a PR comment"
+    required: false
+    default: ""
+  comment_session_workflow_run_id:
+    description: "GitHub Actions workflow run id for the PR-comment Copilot Coding Agent session"
+    required: false
+    default: ""
+  pull_request_number:
+    description: "Related pull request number"
+    required: false
+    default: ""
+  pull_request_url:
+    description: "Related pull request URL"
+    required: false
+    default: ""
+  comment_id:
+    description: "Related issue comment id"
+    required: false
+    default: ""
+  comment_url:
+    description: "Related issue comment URL"
+    required: false
+    default: ""
+  issue_number:
+    description: "Related issue number"
+    required: false
+    default: ""
+  issue_url:
+    description: "Related issue URL"
+    required: false
+    default: ""
+  head_sha:
+    description: "Related pull request head SHA"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Write integration test summary
+      shell: bash
+      env:
+        TEST_NAME: ${{ inputs.test_name }}
+        REPORTING_ID: ${{ inputs.reporting_id }}
+        JOB_STATUS: ${{ inputs.job_status }}
+        REPO_NWO: ${{ inputs.repo_nwo }}
+        GITHUB_SERVER_URL_INPUT: ${{ inputs.github_server_url }}
+        SESSION_ID: ${{ inputs.session_id }}
+        SESSION_WORKFLOW_RUN_ID: ${{ inputs.session_workflow_run_id }}
+        COMMENT_SESSION_ID: ${{ inputs.comment_session_id }}
+        COMMENT_SESSION_WORKFLOW_RUN_ID: ${{ inputs.comment_session_workflow_run_id }}
+        PULL_REQUEST_NUMBER: ${{ inputs.pull_request_number }}
+        PULL_REQUEST_URL: ${{ inputs.pull_request_url }}
+        COMMENT_ID: ${{ inputs.comment_id }}
+        COMMENT_URL: ${{ inputs.comment_url }}
+        ISSUE_NUMBER: ${{ inputs.issue_number }}
+        ISSUE_URL: ${{ inputs.issue_url }}
+        HEAD_SHA: ${{ inputs.head_sha }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "${GITHUB_STEP_SUMMARY:-}" ]; then
+          echo "GITHUB_STEP_SUMMARY is not set; skipping integration test summary"
+          exit 0
+        fi
+
+        github_server_url="${GITHUB_SERVER_URL_INPUT}"
+
+        if [ -z "$PULL_REQUEST_URL" ] && [ -n "$PULL_REQUEST_NUMBER" ] && [ -n "$REPO_NWO" ]; then
+          PULL_REQUEST_URL="$github_server_url/$REPO_NWO/pull/$PULL_REQUEST_NUMBER"
+        fi
+
+        if [ -z "$COMMENT_URL" ] && [ -n "$COMMENT_ID" ] && [ -n "$PULL_REQUEST_URL" ]; then
+          COMMENT_URL="$PULL_REQUEST_URL#issuecomment-$COMMENT_ID"
+        fi
+
+        if [ -z "$ISSUE_URL" ] && [ -n "$ISSUE_NUMBER" ] && [ -n "$REPO_NWO" ]; then
+          ISSUE_URL="$github_server_url/$REPO_NWO/issues/$ISSUE_NUMBER"
+        fi
+
+        target_actions_run_value() {
+          local run_id="$1"
+          if [ -n "$REPO_NWO" ]; then
+            printf '[`%s`](%s/%s/actions/runs/%s)' "$run_id" "$github_server_url" "$REPO_NWO" "$run_id"
+          else
+            printf '`%s`' "$run_id"
+          fi
+        }
+
+        session_value() {
+          local session_id="$1"
+          if [ -n "$REPO_NWO" ]; then
+            printf '[`%s`](%s/%s/sessions/%s)' "$session_id" "$github_server_url" "$REPO_NWO" "$session_id"
+          else
+            printf '`%s`' "$session_id"
+          fi
+        }
+
+        add_row() {
+          local label="$1"
+          local value="$2"
+          if [ -n "$value" ]; then
+            printf '| %s | %s |\n' "$label" "$value" >> "$GITHUB_STEP_SUMMARY"
+            row_count=$((row_count + 1))
+          fi
+        }
+
+        {
+          echo "### Integration test artifacts: $TEST_NAME"
+          echo ""
+          echo "- **Reporting id:** \`$REPORTING_ID\`"
+          echo "- **Status:** \`${JOB_STATUS:-unknown}\`"
+          if [ -n "$REPO_NWO" ]; then
+            echo "- **Target repository:** [$REPO_NWO]($github_server_url/$REPO_NWO)"
+          fi
+          echo ""
+          echo "| Artifact | Link / Value |"
+          echo "| --- | --- |"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        row_count=0
+
+        if [ -n "$SESSION_ID" ]; then
+          add_row "Primary session" "$(session_value "$SESSION_ID")"
+        fi
+
+        if [ -n "$SESSION_WORKFLOW_RUN_ID" ]; then
+          add_row "Primary session workflow" "$(target_actions_run_value "$SESSION_WORKFLOW_RUN_ID")"
+        fi
+
+        if [ -n "$COMMENT_SESSION_ID" ]; then
+          add_row "Comment session" "$(session_value "$COMMENT_SESSION_ID")"
+        fi
+
+        if [ -n "$COMMENT_SESSION_WORKFLOW_RUN_ID" ]; then
+          add_row "Comment session workflow" "$(target_actions_run_value "$COMMENT_SESSION_WORKFLOW_RUN_ID")"
+        fi
+
+        if [ -n "$PULL_REQUEST_URL" ]; then
+          add_row "Pull request" "[#${PULL_REQUEST_NUMBER:-unknown}]($PULL_REQUEST_URL)"
+        elif [ -n "$PULL_REQUEST_NUMBER" ]; then
+          add_row "Pull request" "#$PULL_REQUEST_NUMBER"
+        fi
+
+        if [ -n "$COMMENT_URL" ]; then
+          add_row "Comment" "[${COMMENT_ID:-comment}]($COMMENT_URL)"
+        elif [ -n "$COMMENT_ID" ]; then
+          add_row "Comment id" "\`$COMMENT_ID\`"
+        fi
+
+        if [ -n "$ISSUE_URL" ]; then
+          add_row "Issue" "[#${ISSUE_NUMBER:-unknown}]($ISSUE_URL)"
+        elif [ -n "$ISSUE_NUMBER" ]; then
+          add_row "Issue" "#$ISSUE_NUMBER"
+        fi
+
+        if [ -n "$HEAD_SHA" ]; then
+          add_row "PR head SHA" "\`$HEAD_SHA\`"
+        fi
+
+        if [ "$row_count" -eq 0 ]; then
+          echo "| Artifacts | _No related artifacts were discovered before this step._ |" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+        echo "" >> "$GITHUB_STEP_SUMMARY"

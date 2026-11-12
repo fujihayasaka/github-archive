@@ -1,0 +1,57 @@
+name: Multi-Ecosystem E2E Tests
+
+on: # yamllint disable-line rule:truthy
+  workflow_dispatch:
+  schedule:
+    - cron: 0 1-23/3 * * *
+
+defaults:
+  run:
+    working-directory: test/e2e
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_HOST: https://github.com
+      GITHUB_FEATURE_USERNAME: dependabot-testing-bot
+      GITHUB_FEATURE_PASSWORD: ${{ secrets.DEPENDABOT_TESTING_BOT_PASSWORD }}
+      GITHUB_FEATURE_LOGIN_TWO_FACTOR_TOTP: ${{ secrets.DEPENDABOT_TESTING_BOT_TOTP }}
+      TARGET_ENV: dotcom
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          repository: "github/github"
+          token: ${{ secrets.DEPENDABOT_TESTING_BOT_PAT }}
+
+      - name: Install Dependencies
+        run: |
+          npm install
+          npx playwright install --with-deps
+
+      - name: Run Tests
+        run: |
+          npx playwright test ./ --config=./spec/dependabot/dependabot.config.ts --workers=5 --retries=5 --grep="@multiEcosystem"
+
+      - name: Archive artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          path: |
+            test/e2e/test-results/**/*
+
+      - name: Notify in Slack
+        env:
+          CHANNEL_ID: C08TN8A2DTN # dependabot-multi-ecosystem-updates channel
+          MESSAGE: ":rotating_light: Multi-ecosystem E2E Test ${{ github.workflow }} failed for dotcom: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run> - Please investigate and update"
+        if: ${{ failure() }}
+        run: |
+          curl -X POST \
+            --url "https://slack.com/api/chat.postMessage" \
+            --data "{\"channel\":\"$CHANNEL_ID\",\"text\":\"$MESSAGE\"}" \
+            --header "Authorization: Bearer ${{ secrets.SLACK_FIRST_RESPONDER_BOT_API_TOKEN }}" \
+            --header "Content-Type: application/json; charset=utf-8"
+
+permissions:
+  contents: read

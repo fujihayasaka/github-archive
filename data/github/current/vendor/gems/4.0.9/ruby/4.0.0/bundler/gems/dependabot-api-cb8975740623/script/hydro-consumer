@@ -1,0 +1,48 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative "../config/environment"
+require "slop"
+
+options = Slop.parse(help: true, strict: true, validate_types: true) do |opt|
+  opt.banner = "usage: #{__FILE__} <processor>"
+
+  opt.separator ""
+  opt.separator "processor: The specific app/processor class to run"
+
+  opt.on "-h", "--help" do
+    puts opt
+    exit
+  end
+end
+
+processor_class = options.arguments.first
+
+if processor_class.nil?
+  puts "Error: a processor class is required. \n\n"
+  puts options
+  exit 1
+end
+
+begin
+  processor = processor_class.constantize.new
+rescue NameError
+  puts "Error: '#{processor_class}' is not a valid processor class."
+  exit 1
+end
+
+begin
+  consumer = Dependabot.hydro_consumer(processor.options)
+  Dependabot.hydro_client.run(processor,
+                              consumer: consumer,
+                              shutdown_signals: %i(INT TERM))
+rescue StandardError => e
+  transaction = processor.class.to_s
+  rollup = Digest::SHA256.hexdigest("#{e.class}#{transaction}")
+  error_context = {
+    rollup: rollup,
+    transaction: transaction,
+  }
+  Dependabot::Exceptions.report(e, error_context)
+  exit 1
+end

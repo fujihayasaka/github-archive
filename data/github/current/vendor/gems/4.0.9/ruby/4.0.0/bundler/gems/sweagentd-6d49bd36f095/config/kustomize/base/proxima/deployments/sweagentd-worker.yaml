@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sweagentd-worker
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: "13%" # ~1/8th
+      maxSurge: "50%"
+  selector:
+    matchLabels:
+      app: sweagentd-worker
+  template:
+    metadata:
+      labels:
+        app: sweagentd-worker
+        azure.workload.identity/use: "true"
+      annotations:
+        fluentbit.io/parser: logfmt
+        observability.github.com/splunk_index: sweagentd
+    spec:
+      dnsPolicy: ClusterFirst
+      containers:
+        - name: sweagentd-worker
+          image: sweagentd
+          command: ["/app/bin/sweagentd-worker"] # override the default command
+          resources:
+            requests:
+              cpu: 200m
+              memory: 200Mi
+            limits:
+              cpu: 2000m
+              memory: 500Mi
+          envFrom:
+            - configMapRef:
+                name: application-config
+            - configMapRef:
+                name: kube-cluster-metadata
+            - secretRef:
+                name: vault-secrets
+          env:
+            # Override HYDRO_GROUP_NAME with worker-specific value from configMap
+            - name: HYDRO_GROUP_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: application-config
+                  key: HYDRO_WORKER_GROUP_NAME
+            # Moda metadata
+            - name: KUBE_CONTAINER_NAME
+              value: "sweagentd-worker"
+            - name: KUBE_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: KUBE_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: APP_SHA
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['heaven.githubapp.com/sha']
+            - name: APP_REF
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['heaven.githubapp.com/ref']
+            - name: GOMAXPROCS
+              value: "1"
+            - name: STATS_ADDR
+              value: "$(KUBE_NODE_HOSTNAME):28125"
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          readinessProbe:
+            exec:
+              command:
+                - cat
+                - /tmp/consumer_healthy
+            initialDelaySeconds: 5
+            periodSeconds: 5

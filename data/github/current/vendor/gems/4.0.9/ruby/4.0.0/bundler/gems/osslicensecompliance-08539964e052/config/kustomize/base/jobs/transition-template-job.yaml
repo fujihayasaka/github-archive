@@ -1,0 +1,57 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: transition-template-job
+  annotations:
+    heaven.githubapp.com/inject-heaven-env-vars-into-containers: "transition"
+    heaven.githubapp.com/image-placeholder: "osslicensecompliance"
+    moda.github.net/inject-otel-env-vars-into-containers: "transition"
+spec:
+  template:
+    metadata:
+      labels:
+        app: osslicensecompliance
+        role: transition
+        azure.workload.identity/use: "true"
+      annotations:
+        fluentbit.io/parser: logfmt
+        observability.github.com/splunk_index: osslicensecompliance
+    spec:
+      serviceAccountName: azure-access
+      containers:
+      - name: transition
+        image: osslicensecompliance
+        command: ["/usr/bin/tools/istio-job-wrapper", "bin/transitions"]
+        env:
+          - name: script
+            value: build
+          - name: STATS_PERIOD
+            value: "5s"
+          - name: STATS_ADDR
+            value: "$(KUBE_NODE_HOSTNAME):28125"
+          - name: APP_SHA
+            valueFrom:
+              fieldRef:
+                  fieldPath: metadata.annotations['heaven.githubapp.com/sha']
+          - name: APP_REF
+            valueFrom:
+              fieldRef:
+                  fieldPath: metadata.annotations['heaven.githubapp.com/ref']
+        envFrom:
+          - configMapRef:
+              name: kube-cluster-metadata
+          - configMapRef:
+              name: environment
+          - secretRef:
+              name: vault-secrets
+        resources:
+          requests:
+              cpu: "50m"
+          limits:
+              cpu: "1.0"
+      dnsPolicy: ClusterFirst
+      restartPolicy: Never
+  backoffLimit: 0
+  # This deadline is not used when instantiating this template to run
+  # transitions. It only applies here in the "no-op" case.
+  activeDeadlineSeconds: 100

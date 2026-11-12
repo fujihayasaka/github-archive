@@ -1,0 +1,88 @@
+syntax = "proto3";
+
+package github.dependency_graph_platform.sbom.v1;
+
+import "google/protobuf/timestamp.proto";
+import "types/v1/job_status.proto";
+
+option go_package = "github.com/github/dependency-graph-platform-proto/gen/go/sbom/v1";
+
+service SBOM {
+  // Retrieve an SBOM for the repository synchronously.
+  // Deprecated: Use CreateSBOM along with GetSBOMResult instead.
+  rpc GetSBOM(GetSBOMRequest) returns (GetSBOMResponse);
+
+  // Request an SBOM generation job.
+  rpc CreateSBOM(CreateSBOMRequest) returns (CreateSBOMResponse);
+
+  // Get the results of an SBOM generation job by UUID
+  // Returns a signed Azure link when the job is fully processed
+  rpc GetSBOMResult(GetSBOMResultRequest) returns (GetSBOMResultResponse);
+
+  // Check the readiness of an SBOM generation job by UUID
+  // Returns status only without generating a signed Azure link
+  rpc PollSBOMResult(PollSBOMResultRequest) returns (PollSBOMResultResponse);
+}
+
+message GetSBOMRequest {
+  uint64 repository_id = 1;
+}
+
+message GetSBOMResponse {
+  string sbom_file_name = 1;
+  string sbom_contents = 2;
+}
+
+message CreateSBOMRequest {
+  uint64 repository_id = 1;
+}
+
+message CreateSBOMResponse {
+  string sbom_uuid = 1;
+}
+
+message GetSBOMResultRequest {
+  uint64 repository_id = 1;
+  string sbom_uuid = 2;
+
+  // Optional: Requester can specify the TTL of the returned sbom_url (default: 5 minutes)
+  uint32  signed_link_ttl_minutes = 3;
+}
+
+message GetSBOMResultResponse {
+  uint64 repository_id = 1;
+  github.dependency_graph_platform.types.v1.JobStatus status = 2;
+  // Timestamp after which a PROCESSING result should be considered failed.
+  google.protobuf.Timestamp deadline = 3;
+
+  // SBOM information is only available when status is COMPLETED.
+  //
+  // File name is a stable value generated when the report is complete.
+  string sbom_file_name = 4;
+  // A signed, time-limited URL to download the file; the expiry is set at the time
+  // of request rather than at the time of report generation. This URL may embed
+  // credentials or access tokens and should be treated as sensitive and not logged.
+  string sbom_url = 5;
+
+  // Error information is only available when status is FAILED or BLOCKED.
+  //
+  // A user-facing error value to be included in responses.
+  string user_error_message = 6;
+}
+
+message PollSBOMResultRequest {
+  uint64 repository_id = 1;
+  string sbom_uuid = 2;
+}
+
+message PollSBOMResultResponse {
+  uint64 repository_id = 1;
+  github.dependency_graph_platform.types.v1.JobStatus status = 2;
+  // Timestamp after which a PROCESSING result should be considered failed.
+  google.protobuf.Timestamp deadline = 3;
+
+  // Error information is only available when status is FAILED or BLOCKED.
+  //
+  // A user-facing error value to be included in responses.
+  string user_error_message = 6;
+}

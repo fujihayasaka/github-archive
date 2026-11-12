@@ -1,0 +1,61 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    annotations:
+        heaven.githubapp.com/image-placeholder: dependency-graph-api
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: rebuild-package-release-vulnerabilities-count
+    name: rebuild-package-release-vulnerabilities-count
+spec:
+    concurrencyPolicy: Forbid
+    failedJobsHistoryLimit: 5
+    jobTemplate:
+        spec:
+            template:
+                metadata:
+                    annotations:
+                        fluentbit.io/parser: logfmt_sloppy
+                        observability.github.com/logger: fluent-bit
+                        observability.github.com/splunk_index: dependency-graph-api
+                spec:
+                    containers:
+                        - command:
+                            - /usr/bin/tools/istio-job-wrapper
+                            - script/run-with-lock
+                            - -lock=rebuild_package_release_vulnerabilities_count
+                            - -wait=false
+                            - bundle
+                            - exec
+                            - rake
+                            - rebuild_package_release_vulnerabilities_count
+                          env:
+                            - name: DOGSTATSD_HOST
+                              valueFrom:
+                                fieldRef:
+                                    fieldPath: spec.nodeName
+                          envFrom:
+                            - configMapRef:
+                                name: environment
+                            - secretRef:
+                                name: vault-secrets
+                          image: dependency-graph-api
+                          name: rebuild-package-release-vulnerabilities-count
+                          resources:
+                            limits:
+                                cpu: 8000m
+                                memory: 8Gi
+                            requests:
+                                memory: 500Mi
+                          volumeMounts:
+                            - mountPath: /etc/github/metadata.json
+                              name: github-metadata
+                              readOnly: true
+                    dnsPolicy: ClusterFirst
+                    restartPolicy: Never
+                    volumes:
+                        - hostPath:
+                            path: /etc/github/metadata.json
+                          name: github-metadata
+            ttlSecondsAfterFinished: 86400
+    schedule: '*/45 * * * *'
+    successfulJobsHistoryLimit: 2

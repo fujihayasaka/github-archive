@@ -1,0 +1,497 @@
+syntax = "proto3";
+
+package sweagentd.jobs.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "jobs/v1";
+option ruby_package = "Sweagentd::JobsAPI::V1";
+
+// JobsAPI service is used for all `service -> sweagentd` communication about Jobs.
+service JobsAPI {
+    // ListJobsForPullRequest returns the list of jobs associated with a given pull request.
+    rpc ListJobsForPullRequest(ListJobsForPullRequestRequest) returns (ListJobsForPullRequestResponse);
+    // ListJobsForPullRequestByNumber returns all jobs for a pull request number across every assignment.
+    rpc ListJobsForPullRequestByNumber(ListJobsForPullRequestByNumberRequest) returns (ListJobsForPullRequestByNumberResponse);
+    // CreateJob creates a new job for the given repository and owner.
+    rpc CreateJob(CreateJobRequest) returns (CreateJobResponse);
+    // CreateJobForAssignment creates a new job for an existing assignment.
+    rpc CreateJobForAssignment(CreateJobForAssignmentRequest) returns (CreateJobForAssignmentResponse);
+    // GetJobBySessionID retrieves a job by its associated session ID.
+    rpc GetJobBySessionID(GetJobBySessionIDRequest) returns (GetJobBySessionIDResponse);
+    // CreateCommand creates a new command for the given job.
+    rpc CreateCommand(CreateCommandRequest) returns (CreateCommandResponse);
+    // CreateAssignment creates a new empty assignment for the given repository.
+    rpc CreateAssignment(CreateAssignmentRequest) returns (CreateAssignmentResponse);
+    // UpdateAssignment patches fields on an existing assignment.
+    // Only non-zero fields in the request are applied. The operation is idempotent.
+    rpc UpdateAssignment(UpdateAssignmentRequest) returns (UpdateAssignmentResponse);
+    // CancelJob cancels a job by its associated session ID.
+    // If the job is running, the agent's workflow run is terminated.
+    // If the job is pending or queued, it is finalized as cancelled.
+    // Returns an error if the job is already in a terminal state.
+    rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
+    // CreateAgentCompute provisions a compute environment for a coding agent job.
+    // It sets up the environment (clone repository, install dependencies, write
+    // MCP config), and launches the Copilot CLI inside it.
+    // Returns a compute ID for tracking and teardown.
+    rpc CreateAgentCompute(CreateAgentComputeRequest) returns (CreateAgentComputeResponse);
+    // DeleteAgentCompute tears down a compute environment by its ID.
+    rpc DeleteAgentCompute(DeleteAgentComputeRequest) returns (DeleteAgentComputeResponse);
+    // StopAgentCompute stops a running compute environment by its ID.
+    // The sandbox is suspended (not deleted) and can be resumed later
+    // via ResumeAgentCompute.
+    rpc StopAgentCompute(StopAgentComputeRequest) returns (StopAgentComputeResponse);
+    // ResumeAgentCompute resumes a previously paused compute environment by its ID.
+    rpc ResumeAgentCompute(ResumeAgentComputeRequest) returns (ResumeAgentComputeResponse);
+    // ListUserMemoriesForBillingEntity returns one page of memories from a single
+    // user partition constrained to a billing entity.
+    rpc ListUserMemoriesForBillingEntity(ListUserMemoriesForBillingEntityRequest) returns (ListUserMemoriesForBillingEntityResponse);
+    // DeleteUserMemoriesForBillingEntity deletes one bounded page of
+    // memories from a single user partition within a billing entity.
+    rpc DeleteUserMemoriesForBillingEntity(DeleteUserMemoriesForBillingEntityRequest)
+        returns (DeleteUserMemoriesForBillingEntityResponse);
+}
+
+message ListJobsForPullRequestRequest {
+    int64 repo_id = 1;
+    int64 owner_id = 2;
+    int64 pull_request_id = 3;
+}
+
+message ListJobsForPullRequestResponse {
+    repeated Job jobs = 1;
+}
+
+// RepositoryRef identifies an additional (read-only) repository attached to a job.
+message RepositoryRef {
+    int64 repo_id = 1;
+    int64 owner_id = 2;
+    string repo_node_id = 3;
+    string owner_node_id = 4;
+}
+
+// CreateJobRepositoryRef identifies an additional (read-only) repository to attach when creating a job.
+message CreateJobRepositoryRef {
+    uint64 repo_id = 1;
+    uint64 owner_id = 2;
+}
+
+message CreateJobRequest {
+    uint64 actor_id = 1;
+    uint64 repo_id = 2;
+    uint64 owner_id = 3;
+    string problem_statement = 4;
+    string custom_agent = 5;
+    CustomAgentAttributes custom_agent_attributes = 6;
+    int64 agent_id = 7;
+    string event_url = 8;
+    repeated string event_identifiers = 9;
+    string event_content = 10;
+    Features features = 11;
+    string model = 12;
+    // The event type for this job. If empty, defaults to "api_call_received".
+    string event_type = 13;
+    // Additional read-only repositories to attach to the job.
+    repeated CreateJobRepositoryRef additional_repositories = 14;
+}
+
+message CreateJobForAssignmentRequest {
+    uint64 actor_id = 1;
+    uint64 repo_id = 2;
+    uint64 owner_id = 3;
+    string problem_statement = 4;
+    uint64 agent_id = 5;
+    string event_url = 6;
+    repeated string event_identifiers = 7;
+    string event_content = 8;
+    string assignment_id = 9;
+    string custom_agent = 10;
+    CustomAgentAttributes custom_agent_attributes = 11;
+    Features features = 12;
+    // The AI model to use for this job. If empty, defaults to the previous job's model or "auto".
+    string model = 13;
+    // The event type for this job. If empty, defaults to "api_call_received".
+    string event_type = 14;
+    // Additional read-only repositories to attach to the job.
+    repeated CreateJobRepositoryRef additional_repositories = 15;
+    // Optional id of a session this job should resume. When set, the launched
+    // runtime container is told (via env) which session to load from progress
+    // history, and sweagentd's GetProgress(history=true) walk-back uses the
+    // sessionId to skip past unrelated previous jobs in the same assignment.
+    // Empty for new (non-resume) jobs; behavior in that case is unchanged.
+    string resume_session_id = 16;
+}
+
+message CustomAgentAttributes {
+    string display_name = 1;
+    string description = 2;
+    string prompt = 3;
+    repeated string tools = 4;
+    map<string, string> permissions = 5;
+    // mcp_servers is a map of server names to their configurations.
+    // This field is only available through the internal Twirp API, not the public Jobs API.
+    map<string, MCPServer> mcp_servers = 6;
+    // github_mcp_toolsets configures which toolsets are enabled on the built-in GitHub MCP server.
+    repeated string github_mcp_toolsets = 7;
+    // skills is the list of skill names to preload into this agent's context.
+    repeated string skills = 8;
+}
+
+// CopilotSetupStepsFeature describes the copilot-setup-steps feature configuration.
+message CopilotSetupStepsFeature {
+    // skip indicates that copilot-setup-steps should not be applied
+    // even though the feature is configured.
+    bool skip = 1;
+
+    // exclude is a list of customization property names to ignore when
+    // applying copilot-setup-steps. Mutually exclusive with `only`. An error
+    // will be thrown if both are used.
+    repeated string exclude = 2;
+
+    // only is an allow-list of customization property names to honor when
+    // applying copilot-setup-steps. When non-empty, every property not listed
+    // here is ignored, including any new properties added to the service's
+    // known set in the future. Mutually exclusive with `exclude`. An error
+    // will be thrown if both are used.
+    repeated string only = 3;
+}
+
+// MCPServer represents the configuration for an individual MCP server.
+// The type field determines which fields are relevant:
+// - For remote servers (type: "http" or "sse"): use url and headers
+// - For local servers (type: "local" or "stdio"): use command, args, and env
+message MCPServer {
+    // tools is a list of tools to include from this server. Use ["*"] to include all tools.
+    repeated string tools = 1;
+    // type indicates the server type: "http", "sse", "local", or "stdio".
+    string type = 2;
+
+    // Remote server fields (used when type is "http" or "sse")
+    // url is the URL of the remote server.
+    string url = 3;
+    // headers are HTTP headers to include in requests to remote servers.
+    map<string, string> headers = 4;
+
+    // Local server fields (used when type is "local" or "stdio")
+    // command is the command to run for the server.
+    string command = 5;
+    // args are the arguments to pass to the command.
+    repeated string args = 6;
+    // env are environment variables to set for the server process.
+    map<string, string> env = 7;
+}
+
+// Features describes the features of the environment that must be
+// created for the agent to run the job.
+message Features {
+    // Branch contains details about the branch provided to the agent to use
+    // during execution of the job.
+    BranchFeature branch = 1;
+
+    // PullRequest contains details about the pull request provided to the agent
+    // to use during execution of the job.
+    PullRequestFeature pull_request = 2;
+
+    // copilot_setup_steps configures the Copilot setup steps feature.
+    // Presence or absence of this field alone does not control whether setup
+    // steps run; callers should use the fields within CopilotSetupStepsFeature
+    // (for example, copilot_setup_steps.skip) to enable or disable setup steps.
+    CopilotSetupStepsFeature copilot_setup_steps = 3;
+}
+
+// BranchFeature describes the branch that will be created for the job.
+message BranchFeature {
+    // Name is the name of the branch created for the job.
+    string name = 1;
+
+    // BaseRef is the base ref that the branch is created from.
+    string base_ref = 2;
+}
+
+// PullRequestFeature describes the pull request that will be created for the job.
+message PullRequestFeature {
+    // BaseRef is the base branch that the pull request targets.
+    string base_ref = 4;
+
+    // HeadRef is the branch that will be used for the PR (but still targeting
+    // the BaseRef).
+    // If not specified, but the branch feature is specified, the branch feature's
+    // resulting branch will be used.
+    // If neither is specified, a new branch will be created from the BaseRef.
+    string head_ref = 5;
+}
+
+message CreateJobResponse {
+    string job_id = 1;
+    string session_id = 2;
+    int64 pull_request_id = 3;
+    int64 pull_request_number = 4;
+}
+
+message CreateJobForAssignmentResponse {
+    string job_id = 1;
+    string session_id = 2;
+}
+
+message Job {
+    string id = 1;
+    int64 repo_id = 2;
+    int64 owner_id = 3;
+    string repo_node_id = 4;
+    string owner_node_id = 5;
+    string assignment_id = 6;
+    int64 pull_request_id = 7;
+    string compute_id = 8;
+    string session_id = 9;
+    EventType event_type = 10;
+    string event_url = 11;
+    repeated string event_identifiers = 12;
+    JobStatus status = 13;
+    google.protobuf.Timestamp created_at = 14;
+    google.protobuf.Timestamp launched_at = 15;
+    google.protobuf.Timestamp queued_at = 16;
+    google.protobuf.Timestamp completed_at = 17;
+    google.protobuf.Timestamp updated_at = 18;
+    string model = 19;
+    string branch_name = 20;
+    string base_commit = 21;
+    int64 actor_id = 22;
+    string event_content = 23;
+    // Additional read-only repositories attached to the job.
+    repeated RepositoryRef additional_repositories = 24;
+    // is_triggered is true when the job was started by a trigger/automation rather than a direct user action.
+    bool is_triggered = 25;
+    // automation_id is the id of the user-defined automation that triggered the job, if any.
+    string automation_id = 26;
+}
+
+enum JobStatus {
+    JOB_STATUS_INVALID = 0;
+    JOB_STATUS_PENDING = 1;
+    JOB_STATUS_QUEUED = 2;
+    JOB_STATUS_RUNNING = 3;
+    JOB_STATUS_COMPLETED = 4;
+    JOB_STATUS_FAILED = 5;
+    JOB_STATUS_CANCELLED = 6;
+    JOB_STATUS_TIMED_OUT = 7;
+}
+
+enum EventType {
+    EVENT_TYPE_INVALID = 0;
+    EVENT_TYPE_ISSUE_ASSIGNMENT = 1;
+    EVENT_TYPE_PULL_REQUEST_COMMENT = 2;
+    EVENT_TYPE_PULL_REQUEST_REVIEW = 3;
+    EVENT_TYPE_CODE_SCANNING_ALERTS_ASSIGNMENT = 4;
+    EVENT_TYPE_API_CALL_RECEIVED = 5;
+}
+
+message GetJobBySessionIDRequest {
+    string session_id = 1;
+    int64 repo_id = 2;
+    int64 owner_id = 3;
+}
+
+message GetJobBySessionIDResponse {
+    Job job = 1;
+}
+
+message CreateCommandRequest {
+    // The ID of the job to which we should attach this command to
+    string job_id = 1;
+    // The owner ID of the repository where the job belongs
+    int64 owner_id = 2;
+    // The repository ID where the job belongs
+    int64 repo_id = 3;
+    // An external ID to correlate this command with an external system (e.g. Sessions API)
+    string external_id = 4;
+    // The ID of the actor (user or bot) creating this command
+    int64 actor_id = 5;
+    // The content of the command (e.g. "change approach", "more tests", etc.)
+    string content = 6;
+    // The timestamp when the command was created in the external system (e.g. Sessions API)
+    int64 timestamp = 7;
+}
+
+message CreateCommandResponse {
+    // The ID of the newly created command
+    string id = 1;
+    // An external ID to correlate this command with an external system (e.g. Sessions API)
+    string external_id = 2;
+    // The ID of the job to which this command was attached
+    string job_id = 3;
+}
+
+message CreateAssignmentRequest {
+    // The owner ID of the repository where the assignment belongs
+    int64 owner_id = 1;
+    // The repository ID where the assignment belongs
+    int64 repo_id = 2;
+    // The ID of the actor (user) creating this assignment
+    int64 actor_id = 3;
+    // Additional read-only repositories to attach to all jobs in this assignment.
+    repeated CreateJobRepositoryRef additional_repositories = 4;
+}
+
+message CreateAssignmentResponse {
+    // The ID of the newly created assignment
+    string id = 1;
+    // The timestamp when the assignment was created (Unix timestamp in seconds)
+    int64 created_at = 2;
+    // The owner ID of the repository
+    int64 owner_id = 3;
+    // The repository ID
+    int64 repo_id = 4;
+}
+
+message UpdateAssignmentRequest {
+    // The ID of the assignment to update.
+    string assignment_id = 1;
+    // The owner ID of the repository where the assignment belongs.
+    int64 owner_id = 2;
+    // The repository ID where the assignment belongs.
+    int64 repo_id = 3;
+    // The internal GitHub pull request ID. Only applied when non-zero.
+    int64 pull_request_id = 4;
+    // The GitHub-visible pull request number. Only applied when non-zero.
+    int64 pull_request_number = 5;
+}
+
+message UpdateAssignmentResponse {}
+
+message CancelJobRequest {
+    // The session ID associated with the job to cancel.
+    string session_id = 1;
+    // The owner ID of the repository where the job belongs.
+    int64 owner_id = 2;
+    // The repository ID where the job belongs.
+    int64 repo_id = 3;
+}
+
+message CancelJobResponse {
+    // The status of the job after cancellation.
+    JobStatus status = 1;
+}
+
+// ComputeResources describes the compute resources allocated to the environment.
+message ComputeResources {
+    string cpu = 1;
+    string memory = 2;
+}
+
+message CreateAgentComputeRequest {
+    uint64 repository_id = 1;
+    uint64 repository_owner_id = 2;
+    string branch_name = 3;
+    uint64 actor_id = 4;
+    int64 agent_id = 5;
+    string problem_statement = 6;
+    ComputeResources resources = 7;
+    repeated string cli_flags = 8;
+    ComputeLifecycle lifecycle = 9;
+    // ID of the scope (user or org) of the compute, used for billing and token scoping.
+    uint64 scope_id = 10;
+}
+
+// ComputeLifecycle controls auto-suspend and auto-delete behavior.
+// If not set, defaults to auto-suspend disabled.
+message ComputeLifecycle {
+    bool auto_suspend_enabled = 1;
+    int32 auto_suspend_idle_timeout_min = 2;
+    string suspend_mode = 3; // "Memory" or "Disk"
+    int32 auto_delete_after_min = 4;
+}
+
+message CreateAgentComputeResponse {
+    string compute_id = 1;
+}
+
+message DeleteAgentComputeRequest {
+    string compute_id = 1;
+    uint64 actor_id = 2;
+    reserved 3, 4;
+    reserved "repository_id", "agent_id";
+}
+
+message DeleteAgentComputeResponse {}
+
+message StopAgentComputeRequest {
+    string compute_id = 1;
+    uint64 actor_id = 2;
+    reserved 3, 4;
+    reserved "repository_id", "agent_id";
+    // delay is how long to wait before actually stopping the compute. If
+    // unset, a server-side default delay is used. If set to 0, the compute
+    // is stopped immediately without scheduling a delayed job.
+    optional google.protobuf.Duration delay = 5;
+}
+
+message StopAgentComputeResponse {}
+
+message ResumeAgentComputeRequest {
+    string compute_id = 1;
+    uint64 actor_id = 2;
+    reserved 3, 4;
+    reserved "repository_id", "agent_id";
+}
+
+message ResumeAgentComputeResponse {}
+
+message ListUserMemoriesForBillingEntityRequest {
+    uint64 user_id = 1;
+    uint64 organization_id = 2;
+    uint64 enterprise_id = 3;
+    uint32 limit = 4;
+    string continuation_token = 5;
+    google.protobuf.Timestamp snapshot_time = 6;
+}
+
+message ListUserMemoriesForBillingEntityResponse {
+    repeated Memory memories = 1;
+    string continuation_token = 2;
+}
+
+message Memory {
+    string id = 1;
+    string subject = 2;
+    string fact = 3;
+    repeated string citations = 4;
+    string reason = 5;
+    MemorySource source = 6;
+    google.protobuf.Timestamp created_at = 7;
+    google.protobuf.Timestamp updated_at = 8;
+}
+
+message MemorySource {
+    string interaction_id = 1;
+    string agent = 2;
+    string commit_sha = 3;
+    string base_model = 4;
+    uint64 user_id = 5;
+    string user_login = 6;
+}
+
+message DeleteUserMemoriesForBillingEntityRequest {
+    uint64 user_id = 1;
+    uint64 organization_id = 2;
+    uint64 enterprise_id = 3;
+    uint32 limit = 4;
+    string continuation_token = 5;
+    google.protobuf.Timestamp snapshot_time = 6;
+}
+
+message DeleteUserMemoriesForBillingEntityResponse {
+    uint32 deleted_count = 1;
+    string continuation_token = 2;
+}
+
+message ListJobsForPullRequestByNumberRequest {
+    int64 repo_id = 1;
+    int64 owner_id = 2;
+    int64 pull_request_number = 3;
+}
+
+message ListJobsForPullRequestByNumberResponse {
+    repeated Job jobs = 1;
+}

@@ -1,0 +1,32 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: restart-slow-query-api
+spec:
+    concurrencyPolicy: Forbid
+    failedJobsHistoryLimit: 2
+    jobTemplate:
+        spec:
+            activeDeadlineSeconds: 600
+            template:
+                metadata:
+                    annotations:
+                        fluentbit.io/parser: logfmt_sloppy
+                        observability.github.com/logger: fluent-bit
+                        observability.github.com/splunk_index: dependency-graph-api
+                        sidecar.istio.io/inject: "false"
+                spec:
+                    containers:
+                        - command:
+                            - sh
+                            - -c
+                            - kubectl rollout restart deployment/slow-query-api
+                          image: bitnami/kubectl:latest@sha256:fc4a5171e6c9a379a9dd86d43f851a6247c31ad3b5919e93f13e916820040b0b
+                          name: restart
+                    dnsPolicy: ClusterFirst
+                    restartPolicy: Never
+                    serviceAccountName: restart-slow-query-api
+            ttlSecondsAfterFinished: 86400
+    schedule: 23 * * * *
+    successfulJobsHistoryLimit: 2

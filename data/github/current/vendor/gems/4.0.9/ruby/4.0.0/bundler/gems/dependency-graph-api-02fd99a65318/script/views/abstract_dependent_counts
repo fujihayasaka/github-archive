@@ -1,0 +1,26 @@
+#!/usr/bin/env ruby
+#
+# Usage: script/views/abstract_dependent_counts [start|stop|restart|status]
+
+require_relative "../etl/daemon"
+require_relative "../../config/environment"
+
+script   = __FILE__
+interval = 15.minutes
+
+Daemon.run(script) do
+  1.step do |i|
+    rebuild_id = [Process.pid, i].join(":")
+
+    DependencyGraph.logger.info("Starting rebuild",
+      "gh.dependency_graph.daemon.rebuild_id" => rebuild_id,
+    )
+    Views::AbstractRepositoryDependencyCount.update
+    Views::AbstractPackageDependencyCount.update
+    DependencyGraph.logger.info("Finished rebuild",
+      "gh.dependency_graph.daemon.rebuild_id" => rebuild_id,
+    )
+
+    sleep interval
+  end
+end

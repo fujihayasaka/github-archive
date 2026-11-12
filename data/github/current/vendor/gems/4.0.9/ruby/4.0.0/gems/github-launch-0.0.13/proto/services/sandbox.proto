@@ -1,0 +1,276 @@
+syntax = "proto3";
+package git_hub.launch.services.sandbox;
+
+option go_package = "github.com/github/launch/services/pb/sandbox";
+
+// LaunchSandboxService is the internal service-to-service interface for
+// sandbox operations. These methods are called by sweagentd (and other
+// internal services) via mTLS/HMAC instead of the public REST API.
+//
+// Because the caller is a service (not the end user), the user identity
+// is passed explicitly in each request rather than being extracted from
+// an API Gateway token.
+service LaunchSandboxService {
+    rpc GetSandbox (GetSandboxRequest) returns (GetSandboxResponse);
+    rpc CreateSandbox (CreateSandboxRequest) returns (CreateSandboxResponse);
+    rpc DeleteSandbox (DeleteSandboxRequest) returns (DeleteSandboxResponse);
+    rpc StopSandbox (StopSandboxRequest) returns (StopSandboxResponse);
+    rpc ResumeSandbox (ResumeSandboxRequest) returns (ResumeSandboxResponse);
+    rpc GenerateSandboxToken (GenerateSandboxTokenRequest) returns (GenerateSandboxTokenResponse);
+    // StopSandboxesForSpammyActor stops all active sandboxes owned by a spammy actor.
+    rpc StopSandboxesForSpammyActor (StopSandboxesForSpammyActorRequest) returns (StopSandboxesForSpammyActorResponse);
+}
+
+// GetSandboxRequest is the request for retrieving a sandbox.
+message GetSandboxRequest {
+    // The sandbox ID to retrieve.
+    string sandbox_id = 1;
+    // Whether to include a fresh sandbox token in the response.
+    bool include_token = 2;
+    // The actor (user) on whose behalf this request is made.
+    ActorIdentity actor = 3;
+}
+
+// ActorIdentity carries the user identity for service-to-service calls.
+// In the REST API this is extracted from the API Gateway IET; in Twirp
+// the calling service provides it explicitly.
+message ActorIdentity {
+    // The GitHub database ID of the user.
+    uint64 id = 1;
+    // The GitHub login of the user.
+    string login = 2;
+}
+
+// GetSandboxResponse is the response for retrieving a sandbox.
+message GetSandboxResponse {
+    // The sandbox details.
+    SandboxProto sandbox = 1;
+}
+
+// StopSandboxesForSpammyActorRequest is the request for stopping active sandboxes
+// owned by an actor that has been marked spammy.
+message StopSandboxesForSpammyActorRequest {
+    // The spammy actor whose active sandboxes should be stopped.
+    ActorIdentity actor = 1;
+}
+
+// StopSandboxesForSpammyActorResponse is the response for stopping active
+// sandboxes owned by a spammy actor.
+message StopSandboxesForSpammyActorResponse {
+    // The number of active sandboxes stopped.
+    uint32 stopped_count = 1;
+    // The IDs of active sandboxes stopped.
+    repeated string stopped_sandbox_ids = 2;
+}
+
+// SandboxProto represents a sandbox instance in the Twirp API.
+message SandboxProto {
+    string id = 1;
+    string state = 2;
+    string created_at = 3;
+    map<string, string> labels = 4;
+    string vmm_type = 5;
+    SourcesRef sources_ref = 6;
+    Resources resources = 7;
+    string token = 8;
+    string provider = 9;
+    SandboxURLs urls = 10;
+    repeated Port ports = 11;
+    EgressPolicy egress_policy = 12;
+    LifecyclePolicy lifecycle = 13;
+}
+
+// SourcesRef specifies the source reference (disk image or snapshot).
+message SourcesRef {
+    DiskImage image = 1;
+    SnapshotRef snapshot = 2;
+}
+
+// DiskImage represents a disk image source.
+message DiskImage {
+    string id = 1;
+    string name = 2;
+    bool is_public = 3;
+}
+
+// SnapshotRef represents a snapshot source reference.
+message SnapshotRef {
+    string id = 1;
+}
+
+// Resources specifies the resource allocation for a sandbox.
+message Resources {
+    string cpu = 1;
+    string memory = 2;
+    string disk = 3;
+    GPU gpu = 4;
+}
+
+// GPU represents GPU resource configuration.
+message GPU {
+    string sku = 1;
+    string quantity = 2;
+}
+
+// SandboxURLs contains provider URLs used to interact with a sandbox.
+message SandboxURLs {
+    string streaming_url = 1;
+    string command_url = 2;
+    repeated PortURL ports = 3;
+}
+
+// PortURL represents a forwarded port and its URL.
+message PortURL {
+    uint32 port = 1;
+    string url = 2;
+}
+
+// Port represents a forwarded port on a sandbox.
+message Port {
+    uint32 port = 1;
+    string url = 2;
+}
+
+// EgressPolicy defines the egress policy configuration.
+message EgressPolicy {
+    string default_action = 1;
+    string traffic_inspection = 2;
+    repeated HostRule host_rules = 3;
+}
+
+// HostRule defines a host rule for egress policy.
+message HostRule {
+    string pattern = 1;
+    string action = 2;
+}
+
+// LifecyclePolicy controls sandbox auto-suspend and auto-delete behavior.
+message LifecyclePolicy {
+    AutoSuspendPolicy auto_suspend = 1;
+    AutoDeletePolicy auto_delete = 2;
+}
+
+// AutoSuspendPolicy controls whether and when an idle sandbox is suspended.
+message AutoSuspendPolicy {
+    bool enabled = 1;
+    int32 idle_timeout = 2;
+    string suspend_mode = 3;
+}
+
+// AutoDeletePolicy controls when a sandbox is auto-deleted.
+message AutoDeletePolicy {
+    int32 delete_after = 1;
+}
+
+// CreateSandboxRequest is the request for creating a sandbox.
+message CreateSandboxRequest {
+    ActorIdentity actor = 1;
+    string image = 2;
+    CreateSandboxSourceRef source_ref = 3;
+    Resources resources = 4;
+    map<string, string> labels = 5;
+    EgressPolicy egress_policy = 6;
+    LifecyclePolicy lifecycle = 7;
+    map<string, string> environment_variables = 8;
+    repeated PortRequest ports = 9;
+    map<string, Repositories> repositories = 10;
+    // Type of the entity that should be billed for this sandbox. One of
+    // "Enterprise", "Organization", or "User". Optional; when unset the
+    // sandbox service skips the ConfigsD-backed access control check.
+    string billable_owner_type = 11;
+    // Database ID of the billable owner.
+    uint64 billable_owner_id = 12;
+}
+
+// Repositories holds configuration for a repository on a Sandbox.
+// Currently, only Agent secrets are supported. The structure supports future
+// expansion, e.g. multiple repos and additional settings.
+message Repositories {
+    map<string, Secrets> secrets = 1;
+}
+
+// Secrets is an empty object to support future expansion, e.g. requesting
+// user secrets for the repo.
+message Secrets {}
+
+// CreateSandboxSourceRef specifies the source for sandbox creation.
+message CreateSandboxSourceRef {
+    SnapshotRef snapshot = 1;
+    DiskImageRef image = 2;
+}
+
+// DiskImageRef is a reference to a disk image for sandbox creation.
+message DiskImageRef {
+    string id = 1;
+    string name = 2;
+    bool is_public = 3;
+}
+
+// PortRequest represents a port forwarding request.
+message PortRequest {
+    uint32 port = 1;
+    string activation_mode = 2;
+    bool public = 3;
+    CORSConfig cors = 4;
+}
+
+// CORSConfig represents CORS configuration for a forwarded port.
+message CORSConfig {
+    repeated string allow_origins = 1;
+    repeated string allow_methods = 2;
+    repeated string allow_headers = 3;
+    bool allow_credentials = 4;
+    int32 max_age = 5;
+}
+
+// CreateSandboxResponse is the response for creating a sandbox.
+message CreateSandboxResponse {
+    SandboxProto sandbox = 1;
+}
+
+message DeleteSandboxRequest {
+    string sandbox_id = 1;
+    ActorIdentity actor = 2;
+}
+
+message DeleteSandboxResponse {}
+
+message StopSandboxRequest {
+    string sandbox_id = 1;
+    ActorIdentity actor = 2;
+}
+
+message StopSandboxResponse {
+    SnapshotProto snapshot = 1;
+}
+
+// SnapshotProto represents a snapshot in the Twirp API.
+message SnapshotProto {
+    string id = 1;
+    string sandbox_id = 2;
+    string created_at = 3;
+    map<string, string> labels = 4;
+    string vmm_type = 5;
+    Resources resources = 6;
+}
+
+message ResumeSandboxRequest {
+    string sandbox_id = 1;
+    bool include_token = 2;
+    ActorIdentity actor = 3;
+}
+
+message ResumeSandboxResponse {
+    SandboxProto sandbox = 1;
+}
+
+message GenerateSandboxTokenRequest {
+    string sandbox_id = 1;
+    ActorIdentity actor = 2;
+    string user = 3;
+}
+
+message GenerateSandboxTokenResponse {
+    string token = 1;
+    SandboxURLs urls = 2;
+}

@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: push-consumer
+  annotations:
+    heaven.githubapp.com/inject-heaven-env-vars-into-containers: "dependency-snapshots-api"
+    heaven.githubapp.com/image-placeholder: "dependency-snapshots-api"
+    heaven.githubapp.com/deploy-requirement: "true"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: dependency-snapshots-api
+      role: push-consumer
+  template:
+    metadata:
+      labels:
+        app: dependency-snapshots-api
+        role: push-consumer
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: azure-access
+      dnsPolicy: ClusterFirst
+      containers:
+        - name: dependency-snapshots-api
+          image: dependency-snapshots-api
+          command: ["./bin/ds-hydro-consumer", "--consumer=repo-push"]
+          resources:
+            requests:
+              memory: 1Gi
+              cpu: 1000m
+            limits:
+              memory: 4Gi
+              cpu: 2000m
+          env:
+            - name: STATS_ADDR
+              value: "$(KUBE_NODE_HOSTNAME):28125"
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  containerName: dependency-snapshots-api
+                  resource: limits.cpu
+            - name: KAFKA_CONSUMER_GROUP
+              value: "dsapi-push-consumer-v1"
+          envFrom:
+            - configMapRef:
+                name: environment
+            - configMapRef:
+                name: kube-cluster-metadata
+            - secretRef:
+                name: vault-secrets
+          # Zero-downtime deploys
+          # https://thehub.github.com/engineering/products-and-services/internal/moda/feature-documentation/pod-lifecycle/#required-prestop-hook
+          # https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#container-hooks
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          readinessProbe:
+            exec:
+              command: ["true"]
+            initialDelaySeconds: 10

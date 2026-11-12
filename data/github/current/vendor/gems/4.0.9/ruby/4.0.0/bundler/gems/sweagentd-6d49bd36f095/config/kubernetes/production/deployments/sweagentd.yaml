@@ -1,0 +1,87 @@
+# This file was generated with Kustomize. Please do not edit manually.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: sweagentd
+spec:
+    replicas: 16
+    selector:
+        matchLabels:
+            app: sweagentd
+    strategy:
+        rollingUpdate:
+            maxSurge: 50%
+            maxUnavailable: 13% # ~1/8th
+        type: RollingUpdate
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt
+                moda.github.net/opt-out-resource-quotas: "true"
+                observability.github.com/splunk_index: sweagentd
+            labels:
+                app: sweagentd
+                azure.workload.identity/use: "true"
+        spec:
+            containers:
+                - env:
+                    - name: KUBE_CONTAINER_NAME
+                      value: sweagentd
+                    - name: STATS_ADDR
+                      value: $(KUBE_NODE_HOSTNAME):28125
+                    - name: KUBE_NAMESPACE
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.namespace
+                    - name: KUBE_POD_NAME
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.name
+                    - name: APP_SHA
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.annotations['heaven.githubapp.com/sha']
+                    - name: APP_REF
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.annotations['heaven.githubapp.com/ref']
+                    - name: SWEAGENTD_HTTP_PROXY
+                      value: http://network-proxy.service.github.net:3128
+                    - name: SWEAGENTD_HTTPS_PROXY
+                      value: http://network-proxy.service.github.net:3128
+                    - name: GOMAXPROCS
+                      value: "1"
+                  envFrom:
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                    - configMapRef:
+                        name: application-config
+                  image: sweagentd
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command:
+                                - sleep
+                                - "5"
+                  name: sweagentd
+                  ports:
+                    - containerPort: 8080
+                      name: http
+                      protocol: TCP
+                  readinessProbe:
+                    exec:
+                        command:
+                            - cat
+                            - /tmp/consumer_healthy
+                    initialDelaySeconds: 5
+                    periodSeconds: 5
+                  resources:
+                    limits:
+                        cpu: 2000m
+                        memory: 1Gi
+                    requests:
+                        cpu: 500m
+                        memory: 200Mi
+            dnsPolicy: Default

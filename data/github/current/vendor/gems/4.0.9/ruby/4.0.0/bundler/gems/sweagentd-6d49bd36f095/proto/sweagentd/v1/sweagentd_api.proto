@@ -1,0 +1,529 @@
+syntax = "proto3";
+package sweagentd.sweagentd_api.v1;
+
+import "google/protobuf/empty.proto";
+
+option go_package = "sweagentd/v1";
+option ruby_package = "MonolithTwirp::Sweagentd::SweagentdAPI::V1";
+
+// SweagentdAPI is used for all sweagentd -> dotcom communication.
+service SweagentdAPI {
+    //  ConfigurationForRepository returns the configuration that sweagentd cares about for a given repository.
+    rpc ConfigurationForRepository(ConfigurationForRepositoryRequest) returns (ConfigurationForRepositoryResponse);
+
+    //  MCPConfigurationForRepository returns the MCP settings that sweagentd cares about for a given repository.
+    rpc MCPConfigurationForRepository(MCPConfigurationForRepositoryRequest) returns (MCPConfigurationForRepositoryResponse);
+
+    // CreatePullRequest creates a pull request in the given repository.
+    rpc CreatePullRequest(CreatePullRequestRequest) returns (CreatePullRequestResponse);
+
+    // MintUserToServerTokenForRepo mints a user to server token for the given repository.
+    rpc MintUserToServerTokenForRepo(MintUserToServerTokenForRepoRequest) returns (MintUserToServerTokenForRepoResponse);
+
+    // MintUserToServerTokenForRepos mints a user-to-server token scoped to
+    // zero or more repositories. When repository_ids is empty, the token is
+    // scoped to the user's installation under scope_id without any
+    // repository attached (used for compute environments created without a
+    // repository).
+    rpc MintUserToServerTokenForRepos(MintUserToServerTokenForReposRequest) returns (MintUserToServerTokenForReposResponse);
+
+    // MintServerToServerTokenForRepo mints a server to server token for the given repository.
+    rpc MintServerToServerTokenForRepo(MintServerToServerTokenForRepoRequest) returns (MintServerToServerTokenForRepoResponse);
+
+    // MintServerToServerTokenForRepos mints a server to server token scoped to the given repositories.
+    rpc MintServerToServerTokenForRepos(MintServerToServerTokenForReposRequest) returns (MintServerToServerTokenForReposResponse);
+
+    // EnterpriseAgents returns all enterprise agents available to a user for a given repository.
+    rpc EnterpriseAgents(EnterpriseAgentsRequest) returns (EnterpriseAgentsResponse);
+
+    // ResolveUserIDToDisplayLogin returns the displayLogin for a submitted user ID. This is anticipated only to be used for Proxima.
+    rpc ResolveUserIDToDisplayLogin(ResolveUserIDToDisplayLoginRequest) returns (ResolveUserIDToDisplayLoginResponse);
+
+    // GetOrganizationCustomInstructions returns the custom instructions for a given organization.
+    rpc GetOrganizationCustomInstructions(GetOrganizationCustomInstructionsRequest) returns (GetOrganizationCustomInstructionsResponse);
+
+    // AuthorizeCustomAgentRepoForUser authorizes that the user can see custom agents from the given repository.
+    rpc AuthorizeCustomAgentRepoForUser(AuthorizeCustomAgentRepoForUserRequest) returns (AuthorizeCustomAgentRepoForUserResponse);
+
+    // GetIssueById retrieves an issue by its ID.
+    rpc GetIssueById(GetIssueByIdRequest) returns (GetIssueByIdResponse);
+
+    // IsBypassActor checks if the calling app is configured as a bypass actor for repository rulesets.
+    rpc IsBypassActor(IsBypassActorRequest) returns (IsBypassActorResponse);
+
+    // GetAgenticApps retrieves the list of agentic applications.
+    rpc GetAgenticApps(GetAgenticAppsRequest) returns (GetAgenticAppsResponse);
+
+    // RevokeTokens revokes tokens associated with a specific repository.
+    rpc RevokeTokens(RevokeTokensRequest) returns (RevokeTokensResponse);
+
+    // SignCommit signs a commit on behalf of the agent.
+    rpc SignCommit(SignCommitRequest) returns (SignCommitResponse);
+
+    // GetOrganizationCCARunnerSettings returns the CCA runner settings for a given organization.
+    rpc GetOrganizationCCARunnerSettings(GetOrganizationCCARunnerSettingsRequest) returns (GetOrganizationCCARunnerSettingsResponse);
+
+    // GetEffectiveTriggerActorPolicy returns the combined org+repo
+    // trigger-actor policy for a given repository under "least permissive wins".
+    // Used by sweagentd to determine whether read-access users may trigger
+    // event-based automations in this repository: the answer is true only when
+    // both the owning organization and the repository itself permit it.
+    rpc GetEffectiveTriggerActorPolicy(GetEffectiveTriggerActorPolicyRequest) returns (GetEffectiveTriggerActorPolicyResponse);
+
+    // GetRepositoryInstallation returns the installation details for a given agent on a repository.
+    rpc GetRepositoryInstallation(GetRepositoryInstallationRequest) returns (GetRepositoryInstallationResponse);
+
+    // IntegrationNeedsAuthorizationFromUser returns whether the given agentic app needs authorization from the given user.
+    rpc IntegrationNeedsAuthorizationFromUser(IntegrationNeedsAuthorizationFromUserRequest) returns (IntegrationNeedsAuthorizationFromUserResponse);
+
+    // ManagedSettingsRepository returns the repository ID that holds enterprise-managed
+    // Copilot settings for the enterprise that pays for the given user's Copilot license.
+    // This is distinct from EnterpriseAgents, which resolves the enterprise via the
+    // *owner of the repository*. ManagedSettingsRepository instead resolves the enterprise
+    // via the user's primary billable Copilot customer, mirroring the semantics of the
+    // /copilot_internal/managed_settings HTTP endpoint.
+    rpc ManagedSettingsRepository(ManagedSettingsRepositoryRequest) returns (ManagedSettingsRepositoryResponse);
+
+}
+
+message ConfigurationForRepositoryRequest {
+    // The github repository id for the repository that we want to get configuration for.
+    int64 repository_id = 1;
+
+    // The user id for the user that we want to get configuration for.
+    uint64 user_id = 2;
+
+    // The agent id for the agent that we want to get configuration for.
+    int64 agent_id = 3;
+}
+
+message ConfigurationForRepositoryResponse {
+    // An all up "true or false" about whether sweagentd is enabled for this repository.
+    // This will gate whether or not we do any additional checks or work for the repository.
+    // Right now, this correlates to any padawan interactions being viable for the repository.
+    bool is_sweagentd_enabled = 1 [deprecated = true];
+
+    // tenant_slug is a property that will be provided in proxima environments. It is the slug of the tenant the repo belongs to.
+    string tenant_slug = 2;
+
+    // tenant_id is a property that will be provided in proxima environments. It is the id of the tenant the repo belongs to.
+    string tenant_id = 3;
+
+    // is_agent_enabled is a boolean that indicates whether or not the specific agent is enabled for the repository and user.
+    // This is the new field that should be checked instead of is_sweagentd_enabled for agent-specific enablement.
+    bool is_agent_enabled = 4;
+
+    // snippy_blocking_mode indicates how the agent should handle code that matches public code.
+    SnippyBlockingMode snippy_blocking_mode = 5;
+
+    // Whether the agent uses CodeQL code scanning to review its work.
+    bool use_codeql = 6;
+
+    // Whether the agent uses Copilot Code Review to check its work.
+    bool use_ccr = 7;
+
+    // Whether the agent uses secret scanning to check its work.
+    bool use_secret_scanning = 8;
+
+    // Whether the agent uses dependency vulnerability checks against the GitHub Advisory Database.
+    bool use_dependency_vuln_checks = 9;
+
+    // Whether the firewall is enabled for the repository.
+    bool is_firewall_enabled = 10;
+
+    // Whether the firewall should use the default rules.
+    bool should_firewall_use_default_rules = 11;
+
+    // The list of firewall rules allowed for the repository.
+    repeated string firewall_allowed_rules = 12;
+
+    // automations_disabled is true when an admin has disabled triggered
+    // Copilot coding agent work for this repo (effective repo+org policy).
+    bool automations_disabled = 13;
+
+    // repo_memory_disabled is true when a repo admin has disabled agentic
+    // memory for this repository. "Missing" and "false" are treated
+    // identically (memory is enabled by default).
+    bool repo_memory_disabled = 14;
+}
+
+message ResolveUserIDToDisplayLoginRequest {
+    // The user id for the user that we want to resolve.
+    uint64 user_id = 1;
+}
+
+message ResolveUserIDToDisplayLoginResponse {
+    // display_login is the suffix-less login for the user.
+    string display_login = 1;
+}
+
+message MCPConfigurationForRepositoryRequest {
+    // The github repository id for the repository that we want to get configuration for.
+    uint64 repository_id = 1;
+
+    // The user id for the user that we want to get configuration for.
+    uint64 user_id = 2;
+}
+
+message MCPConfigurationForRepositoryResponse {
+    // mcp_configuration_json is the effective JSON configuration for the MCP settings for the repository.
+    // It's OK for us to use a string here -- we will adhere to UTF8, and we will make sure that the file is not too large on the handler side.
+    string mcp_configuration_json = 1;
+
+    // is_mcp_enabled is a boolean that indicates whether or not the MCP settings are enabled for the repository and user.
+    // it's expected that policies set on the monolith side can be used to populate this field.
+    bool is_mcp_enabled = 2;
+}
+
+message CreatePullRequestRequest {
+    uint64 repository_id = 1;
+    string base_branch_name = 2;
+    string head_branch_name = 3;
+    string pr_name = 4;
+    string pr_description = 5;
+    bool draft = 6;
+    uint64 attribution_user_id = 7;
+    string session_id = 8;
+    int64 agent_id = 9;
+}
+
+message CreatePullRequestResponse {
+    PullRequest pull_request = 1;
+}
+
+message PullRequest {
+    uint64 id = 1;
+    uint64 github_number = 2;
+    uint64 repository_id = 3;
+}
+
+message MintUserToServerTokenForRepoRequest {
+  // The user id for the user that we want to get a token for.
+  uint64 user_id = 1;
+  // The github repository id for the repository to scope the token to.
+  uint64 repository_id = 2;
+  int64 agent_id = 3;
+  // Optional map of permissions to request for the token.
+  map<string, string> permissions = 4;
+}
+
+message MintUserToServerTokenForRepoResponse {
+  string token = 1;
+}
+
+message MintUserToServerTokenForReposRequest {
+  // The user id for the user that we want to get a token for.
+  uint64 user_id = 1;
+  // The agent id for the agent that we want to get a token for.
+  int64 agent_id = 2;
+  // ID of the scope (user or org) the token should be issued for. Used as
+  // the installation target when repositories is empty. Either scope_id
+  // or a non-empty repositories must be provided. When repositories is
+  // non-empty, scope_id is ignored and the target is derived from the
+  // shared owner of the repositories (which must all belong to the same
+  // organization, mirroring MintServerToServerTokenForRepos).
+  uint64 scope_id = 3;
+  // The repositories to scope the token to. May be empty, in which case
+  // the token is scoped installation-wide under scope_id (no repository
+  // restriction) and the top-level permissions field is used.
+  repeated RepositoryScope repositories = 4;
+  // Permissions to request for the token. Used when repositories is empty
+  // (installation-wide scope). Ignored when repositories is non-empty;
+  // per-repository permissions on RepositoryScope are used instead.
+  map<string, string> permissions = 5;
+}
+
+message MintUserToServerTokenForReposResponse {
+  string token = 1;
+}
+
+message MintServerToServerTokenForRepoRequest {
+  // The github repository id for the repository to scope the token to.
+  uint64 repository_id = 1;
+  int64 agent_id = 2;
+  // Optional map of permissions to request for the token.
+  map<string, string> permissions = 3;
+}
+
+message MintServerToServerTokenForRepoResponse {
+  string token = 1;
+}
+
+// RepositoryScope describes a single repository to be included in the token scope.
+message RepositoryScope {
+  // The github repository id for the repository.
+  uint64 repository_id = 1;
+  // Optional map of permissions to request for the token, scoped to this repository.
+  map<string, string> permissions = 2;
+}
+
+message MintServerToServerTokenForReposRequest {
+  // The agent id (GitHub App ID) for the agent that we want to get a token for.
+  int64 agent_id = 1;
+  // The repositories to scope the token to. Must contain at least one entry. All
+  // repositories should be part of the same organization.
+  repeated RepositoryScope repositories = 2;
+}
+
+message MintServerToServerTokenForReposResponse {
+  string token = 1;
+}
+
+message EnterpriseAgentsRequest {
+    // DEPRECATED. Ignored if specified.
+    uint64 user_id = 1 [deprecated = true];
+    oneof find_agents_by {
+        // The repository ID to use to look up enterprise-level custom agents.
+        uint64 repository_id = 2;
+        // The owner ID to use to look up enterprise-level custom agents.
+        uint64 owner_id = 3;
+        // The owner name to use to look up enterprise-level custom agents.
+        string owner_name = 4;
+    }
+
+}
+
+message EnterpriseAgentsResponse {
+    // The repository ID for the repository.
+    uint64 repository_id = 1;
+}
+
+message GetOrganizationCustomInstructionsRequest {
+    // The organization id for the organization that we want to get custom instructions for.
+    uint64 organization_id = 1;
+}
+
+message GetOrganizationCustomInstructionsResponse {
+    // The custom instructions text for the organization.
+    string organization_custom_instructions = 1;
+}
+
+message AuthorizeCustomAgentRepoForUserRequest {
+  uint64 user_id = 1;
+  uint64 repository_id = 2;
+}
+
+message AuthorizeCustomAgentRepoForUserResponse {
+  bool can_access = 1;
+}
+
+message GetIssueByIdRequest {
+  uint64 issue_id = 1;
+}
+
+message GetIssueByIdResponse {
+  Issue issue = 1;
+}
+
+message Issue {
+  uint64 id = 1;
+  uint64 number = 2;
+  uint64 repository_id = 3;
+  string repository_nwo = 4; // e.g. "owner/repo"
+  string title = 5;
+  string body = 6;
+  string state = 7; // "open" or "closed"
+  uint64 author_id = 8;
+  int64 created_at = 9; // Unix timestamp
+  int64 updated_at = 10; // Unix timestamp
+  repeated string labels = 11;
+  string html_url = 12;
+}
+
+message IsBypassActorRequest {
+  uint64 repository_id = 1;
+  uint64 actor_id = 2;
+}
+
+message IsBypassActorResponse {
+  // True if the actor can bypass any rulesets.
+  bool is_bypass_actor = 1;
+
+  // Rulesets that can be bypassed by this actor.
+  repeated BypassableRuleset rulesets = 2;
+}
+
+message BypassableRuleset {
+  // The ruleset ID.
+  uint64 ruleset_id = 1;
+
+  // The ruleset name for debugging purposes.
+  string ruleset_name = 2;
+
+  // The bypass mode for this actor on this ruleset.
+  BypassMode bypass_mode = 3;
+}
+
+enum BypassMode {
+  BYPASS_MODE_INVALID = 0;
+  BYPASS_MODE_ANY = 1;
+  BYPASS_MODE_PULL_REQUEST = 2;
+  BYPASS_MODE_EXEMPT = 3;
+}
+
+enum SnippyBlockingMode {
+  SNIPPY_BLOCKING_MODE_INVALID = 0;
+  SNIPPY_BLOCKING_MODE_ALLOWED = 1;
+  SNIPPY_BLOCKING_MODE_BLOCKED = 2;
+}
+
+message GetAgenticAppsRequest {
+
+}
+
+message GetAgenticAppsResponse {
+  repeated AgenticApp agentic_apps = 1;
+}
+
+message AgenticApp {
+  int64 app_id = 1;
+  string app_login = 2;
+  int64 app_bot_id = 3;
+  string bot_login = 4;
+  string commit_login = 5;
+  string commit_email = 6;
+  bool has_source = 7; // deprecated, use agent_source instead
+  string source_url = 8; // deprecated, use agent_source instead.
+
+  AgentSource agent_source = 9;
+  repeated string model_vendors = 10; // The model vendors for the agentic app (e.g. ["Anthropic", "OpenAI"]), used for model filtering
+  string app_slug = 11; // URL-friendly slug for the app, used for @mentions (no spaces)
+}
+
+message AgentSource {
+  string url = 1; // repository URL for the agent source code, e.g. a GitHub repo URL
+  string sha = 2; // the specific commit SHA that the agent source code is pinned to
+}
+
+message RevokeTokensRequest {
+  uint64 repository_id = 1;
+  repeated string tokens = 2;
+  int64 agent_id = 3;
+}
+
+message RevokeTokensResponse {
+  int32 total_revoked = 1;
+  repeated string failed_tokens = 2; // do we need this or make it fail fast?
+}
+
+message SignCommitRequest {
+  uint64 repository_id = 1;
+  string payload = 2;
+  int64 agent_id = 3;
+  uint64 attribution_user_id = 4;
+}
+
+message SignCommitResponse {
+  string signature = 1;
+}
+
+message LabeledRunner {
+  repeated string labels = 1;
+  string group = 2;
+}
+
+message GetOrganizationCCARunnerSettingsRequest {
+  // The organization id for the organization that we want to get runner settings for.
+  uint64 organization_id = 1;
+}
+
+message GetOrganizationCCARunnerSettingsResponse {
+  // The runner configuration for CCA jobs in this organization.
+  oneof runner {
+    // standard_runner indicates the standard GitHub-hosted runner.
+    google.protobuf.Empty standard_runner = 1;
+    // labeled_runner indicates a runner identified by custom labels.
+    LabeledRunner labeled_runner = 2;
+  }
+
+  // Whether repositories in this organization are allowed to customize the runner type.
+  bool allow_repository_customization = 3;
+}
+
+message GetEffectiveTriggerActorPolicyRequest {
+  // The repository id whose effective (org AND repo) trigger-actor policy is being requested.
+  uint64 repository_id = 1;
+}
+
+message GetEffectiveTriggerActorPolicyResponse {
+  // Whether read-access users may trigger event-based automations in this
+  // repository. True only when both the owning organization (when applicable)
+  // and the repository permit it. When false (the default), only users with
+  // write access can trigger automations.
+  bool allow_read_access_triggers = 1;
+}
+
+message GetRepositoryInstallationRequest {
+  // The GitHub repository id for the repository.
+  uint64 repository_id = 1;
+
+  // The agent id (integration id) for the agent to look up.
+  // Defaults to the global Copilot agent when omitted or 0.
+  int64 agent_id = 2;
+}
+
+enum RepositoryOwnerType {
+  REPOSITORY_OWNER_TYPE_INVALID = 0;
+  REPOSITORY_OWNER_TYPE_USER = 1;
+  REPOSITORY_OWNER_TYPE_ORGANIZATION = 2;
+}
+
+message GetRepositoryInstallationResponse {
+  // The installation id for the agent on the repository owner.
+  // 0 if no installation exists.
+  int64 installation_id = 1;
+
+  // The type of the repository owner.
+  RepositoryOwnerType owner_type = 2;
+
+  // The client ID (key) of the agent's integration.
+  string client_id = 3;
+
+  // Whether the resolved agent is a global agent.
+  bool is_global = 4;
+
+  // The login of the repository owner.
+  string owner_login = 5;
+
+  // The name of the repository.
+  string repo_name = 6;
+
+  // The ID of the repository owner.
+  uint64 owner_id = 7;
+
+  // The GitHub App's installation permissions on the repository, expressed as
+  // a map of permission name (e.g. "contents", "pull_requests") to access
+  // level (e.g. "read", "write"). Used to enforce that triggers originating
+  // from a GitHub App cannot cause Copilot to exercise permissions the App
+  // itself lacks. May be empty if the installation has no permissions or the
+  // dotcom handler has not yet been updated to populate it.
+  map<string, string> permissions = 8;
+}
+
+message IntegrationNeedsAuthorizationFromUserRequest {
+  // The user id for the user whose authorization state we want to check.
+  uint64 user_id = 1;
+
+  // The agent id (integration id) for the agent to check.
+  // Defaults to the global Copilot agent when omitted or 0.
+  int64 agent_id = 2;
+}
+
+message IntegrationNeedsAuthorizationFromUserResponse {
+  // True when the agent requires additional authorization from the user.
+  bool needs_authorization = 1;
+
+  // When needs_authorization is true, this field may contain a URL that the user can visit to authorize the agentic app.
+  string authorization_url = 2;
+}
+
+message ManagedSettingsRepositoryRequest {
+  // The user id whose licensing enterprise we want to resolve.
+  uint64 user_id = 1;
+}
+
+message ManagedSettingsRepositoryResponse {
+  // The repository ID for the .github-private repo configured as the
+  // subagent-definitions source on the user's billing enterprise.
+  uint64 repository_id = 1;
+}

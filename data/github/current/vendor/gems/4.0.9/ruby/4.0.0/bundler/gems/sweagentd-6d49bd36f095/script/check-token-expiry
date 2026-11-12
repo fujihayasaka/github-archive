@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Usage:
+#   GH_TOKEN=<token> script/check-token-expiry [stamp] [api_url]
+#   STAMP=<stamp> API_URL=<api_url> GH_TOKEN=<token> script/check-token-expiry
+# Defaults:
+#   stamp=dotcom
+#   api_url=https://api.github.com
+# Requires GH_TOKEN env var. For local testing: GH_TOKEN=$(gh auth token) script/check-token-expiry
+
+set -euo pipefail
+
+if [ -z "${GH_TOKEN:-}" ]; then
+  echo "Error: GH_TOKEN is not set." >&2
+  echo "For local testing: GH_TOKEN=\$(gh auth token) script/check-token-expiry" >&2
+  exit 1
+fi
+token="$GH_TOKEN"
+stamp="${1:-${STAMP:-dotcom}}"
+api_url="${2:-${API_URL:-https://api.github.com}}"
+api_url="${api_url%/}"
+
+headers=$(curl -sS --max-time 10 -D - -o /dev/null -H "Authorization: Bearer $token" "$api_url/user")
+http_status=$(echo "$headers" | head -1 | awk '{print $2}')
+
+if [ "$http_status" != "200" ]; then
+  echo "Error: API request failed for stamp '$stamp' at '$api_url' with HTTP $http_status" >&2
+  exit 1
+fi
+
+expiry_header=$(echo "$headers" \
+  | grep -i "^github-authentication-token-expiration:" \
+  | sed 's/^[^:]*: //' \
+  | tr -d '\r') || true
+
+if [ -z "$expiry_header" ]; then
+  echo "No expiry header found for stamp '$stamp' at '$api_url' - token may be a classic PAT or have no expiration set"
+  exit 0
+fi
+
+echo "Stamp: $stamp"
+echo "API URL: $api_url"
+echo "Token expires at: $expiry_header"
+
+# GNU date (Linux) / BSD date (macOS) — strip " UTC" suffix and use -u
+expiry_no_tz="${expiry_header% UTC}"
+if expiry_epoch=$(date -u -d "$expiry_no_tz" +%s 2>/dev/null); then
+  :
+elif expiry_epoch=$(date -u -jf "%Y-%m-%d %H:%M:%S" "$expiry_no_tz" +%s 2>/dev/null); then
+  :
+else
+  echo "Error: unable to parse expiry date '$expiry_header'" >&2
+  exit 1
+fi
+
+now_epoch=$(date -u +%s)
+seconds_remaining=$(( expiry_epoch - now_epoch ))
+# Negative values are intentional for expired tokens — monitors alert on < N days
+days_remaining=$(( seconds_remaining / 86400 ))
+echo "Days until expiry: $days_remaining"

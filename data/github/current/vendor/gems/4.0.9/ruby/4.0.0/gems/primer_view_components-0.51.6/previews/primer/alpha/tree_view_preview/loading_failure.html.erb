@@ -1,0 +1,88 @@
+<% subject_id = SecureRandom.hex %>
+
+<div style="max-width: 400px">
+  <%= render(Primer::Alpha::TreeView.new(data: { interaction_subject: subject_id })) do |tree_view| %>
+    <% tree_view.with_sub_tree(label: "primer") do |sub_tree| %>
+      <% sub_tree.with_leading_visual_icons do |icons| %>
+        <% icons.with_expanded_icon(icon: :"file-directory-open-fill", color: :accent) %>
+        <% icons.with_collapsed_icon(icon: :"file-directory-fill", color: :accent) %>
+      <% end %>
+
+      <% sub_tree.with_loading_spinner(src: primer_view_components.tree_view_items_path(loader: "spinner", fail: true)) %>
+    <% end %>
+  <% end %>
+</div>
+
+<script>
+  function ready(fn) {
+    if (document.readyState !== 'loading') {
+      fn()
+    } else {
+      document.addEventListener('DOMContentLoaded', fn)
+    }
+  }
+
+  ready(() => {
+    const subject = document.querySelector("[data-interaction-subject='<%= subject_id %>']")
+    if (!subject) return
+
+    const includeFragment = subject.querySelector('tree-view-include-fragment')
+    if (!includeFragment) return
+
+    function retryButton() {
+      return subject.querySelector("[data-target='tree-view-sub-tree-node.retryButton']")
+    }
+
+    function focusTreeItem() {
+      const treeItem = subject.querySelector("[role='treeitem']")
+      if (treeItem) treeItem.focus()
+    }
+
+    function makeRetryTabbable() {
+      const retry = retryButton()
+      if (!retry) return
+      // Remove tabindex="-1" so the button can be reached by keyboard.
+      retry.removeAttribute('tabindex')
+    }
+
+    function addRetryFocusHandler() {
+      const retry = retryButton()
+      if (!retry) return
+
+      if (retry.dataset.focusHandlerAttached === "true") return
+      retry.dataset.focusHandlerAttached = "true"
+
+      retry.addEventListener('click', () => {
+        focusTreeItem()
+      })
+    }
+
+    // When the failure UI loads, ensure Retry is tabbable
+    includeFragment.addEventListener('loadend', (_event) => {
+      makeRetryTabbable()
+      addRetryFocusHandler()
+      subject.setAttribute('data-ready', 'true')
+    })
+
+    // If include-fragment swaps in new markup on re-render, re-apply tabindex removal.
+    includeFragment.addEventListener('include-fragment-replaced', () => {
+      makeRetryTabbable()
+      addRetryFocusHandler()
+    })
+
+    // If Retry exists and the user presses Tab while focused inside this TreeView,
+    // redirect focus to Retry so it is reachable without requiring a mouse click.
+    subject.addEventListener('keydown', (event) => {
+      if (event.key !== 'Tab' || event.shiftKey) return
+      const active = document.activeElement
+      if (!(active instanceof HTMLElement)) return
+      if (!subject.contains(active)) return
+      if (active.getAttribute('role') !== 'treeitem') return
+      const retry = retryButton()
+      if (!retry) return
+      makeRetryTabbable()
+      event.preventDefault()
+      retry.focus()
+    })
+  })
+</script>

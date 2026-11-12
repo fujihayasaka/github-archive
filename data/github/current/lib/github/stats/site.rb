@@ -261,19 +261,31 @@ module GitHub
             # - https://github.com/github/security-center/issues/2789#issuecomment-1577151303
             # - https://github.com/github/github/pull/274404#discussion_r1224853600
 
-            summary = business.advanced_security_license.entity_summary
-
-            stats["active_committers"] = summary.active_committers
             stats["purchased_committers"] = business.advanced_security_license.seats
-            stats["maximum_committers"] = summary.maximum_committers
-
-            # Secret Protection license stats
             stats["secret_protection_licenses"] = business.secret_protection.seats
-            stats["secret_protection_active_committers"] = business.secret_protection.entity_summary.active_committers
-
-            # Code Security license stats
             stats["code_security_licenses"] = business.code_security.seats
-            stats["code_security_active_committers"] = business.code_security.entity_summary.active_committers
+
+            # Committer counts are omitted if TurboGHAS times out
+            begin
+              summary = business.advanced_security_license.entity_summary
+              stats["active_committers"] = summary.active_committers
+              stats["maximum_committers"] = summary.maximum_committers
+
+              bundled = business.advanced_security_products_bundled?
+              {
+                "secret_protection_active_committers" => business.secret_protection,
+                "code_security_active_committers" => business.code_security,
+              }.each do |key, license|
+                # When unbundled, summaries for unpurchased products report 0 active committers, so skip those slow requests
+                stats[key] = if bundled || license.purchased?
+                  license.entity_summary.active_committers
+                else
+                  0
+                end
+              end
+            rescue Faraday::Error => e
+              Failbot.report!(e, catalog_service: "github/licensing")
+            end
 
             stats
           end

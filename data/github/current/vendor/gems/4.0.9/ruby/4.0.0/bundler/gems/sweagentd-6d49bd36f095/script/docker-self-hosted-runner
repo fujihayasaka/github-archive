@@ -1,0 +1,248 @@
+#!/bin/bash
+set -e
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+
+mkdir -p actions-runner
+
+# Keep Actions services + feature flags in a known-good state before starting the runner.
+# This is only needed when actually running the listener (not for setup/config commands).
+requested_command="${1:-run}"
+if [ "$requested_command" = "run" ] || [ "$requested_command" = "./run.sh" ]; then
+    if [ "${SKIP_FOUR_NINES_SETUP:-0}" != "1" ] && [ -x /workspaces/actions/actions-dotnet/src/Scripts/toggle-four-nines ]; then
+        echo "Ensuring Actions four-nines services and flags..."
+        /workspaces/actions/actions-dotnet/src/Scripts/toggle-four-nines on || echo "  Warning: could not enable four-nines setup"
+    fi
+fi
+
+# Clean up any previous runner state so the runner starts fresh and can pick up new jobs.
+echo "Cleaning up previous runner state..."
+# Stop the RunnerService supervisor if running (started by start-actions)
+for pid in $(ps aux | grep '[R]unnerService.js' | grep -v grep | awk '{print $2}'); do
+    echo "  Stopping RunnerService $pid"
+    kill "$pid" 2>/dev/null || true
+done
+# Find and terminate any running Runner.Listener or Runner.Worker processes
+for pid in $(ps aux | grep '[R]unner\.\(Worker\|Listener\)' | awk '{print $2}'); do
+    echo "  Stopping runner process $pid"
+    kill "$pid" 2>/dev/null || true
+done
+# Clean up work directory for fresh start
+rm -rf actions-runner/_work
+# Allow time for the broker session to expire from the killed runner
+sleep 3
+
+# Cancel all queued/in-progress workflow runs so the runner doesn't get stuck on old jobs.
+if [ -f /workspaces/github/bin/rails ]; then
+    echo "Cancelling stale workflow runs..."
+    cat > /tmp/cancel_stale_runs.rb << 'RUBY'
+conn = Actions::WorkflowRunExecution.connection
+stale = conn.select_all("SELECT id FROM workflow_run_executions WHERE repository_id = 1 AND status IN (0, 1)")
+ids = stale.map { |r| r['id'] }
+if ids.any?
+  conn.execute("UPDATE workflow_run_executions SET status = 2, conclusion = 3 WHERE id IN (#{ids.join(',')})")
+  conn.execute("UPDATE check_suites SET status = 2, conclusion = 3 WHERE repository_id = 1 AND id IN (#{ids.join(',')})")
+  conn.execute("UPDATE check_runs SET status = 2, conclusion = 3 WHERE repository_id = 1 AND check_suite_id IN (#{ids.join(',')})")
+  puts "  Cancelled #{ids.length} stale run(s): #{ids.join(', ')}"
+else
+  puts "  No stale runs to cancel."
+end
+RUBY
+    cd /workspaces/github
+    bin/rails runner /tmp/cancel_stale_runs.rb 2>/dev/null || echo "  Warning: could not cancel stale runs (server may not be running)"
+    cd "$SCRIPT_DIR"
+fi
+echo "Done."
+
+# Defaults
+image_name="mcr.microsoft.com/devcontainers/typescript-node:24-bookworm"
+runner_user="node"
+fallback_runner_version="2.328.0"
+
+# Handle "set" command to change the image or runner user
+if [ "$1" = "set" ]; then
+    if [ ! -z "$2" ]; then
+        image_name="$2"
+    fi
+    if [ ! -z "$3" ]; then
+        runner_user="$3"
+    fi
+cat <<EOF > ./actions-runner/.docker-self-hosted-runner
+image_name=$image_name
+runner_user=$runner_user
+EOF
+    echo "Setup updated."
+    exit 0
+fi
+
+# Load tool settings
+if [ -e "actions-runner/.docker-self-hosted-runner" ]; then
+    . ./actions-runner/.docker-self-hosted-runner
+fi
+
+# Map "config" to "./config.sh" and "run" to "./run.sh", default to run
+command="$1"
+if [ -z "$2" ]; then
+    command_args=""
+else
+    shift
+    command_args="$@"
+fi
+if [ "$command" = "" ]; then
+    command="./run.sh"
+elif [ "$command" = "run" ]; then
+    command="./run.sh"
+elif [ "$command" = "config" ]; then
+    command="./config.sh"
+fi
+full_command="${command} ${command_args}"
+
+# Auto-register the runner on every "run" to ensure fresh credentials.
+# After a codespace sleep/restart, token signing keys rotate and stale runner
+# credentials cause "keyfunc returned empty verification key set" 401s from
+# the broker-listener.  Re-registering with --replace gets a fresh key pair.
+auto_register_token=""
+if [ "$command" = "./run.sh" ] && [ -f /workspaces/github/bin/rails ]; then
+    echo "Generating fresh runner registration token..."
+    auto_register_token=$(cd /workspaces/github && bin/rails runner '
+      scope = Organization.find_by_login("github").runner_creation_token_scope
+      token = User.find_by_login("monalisa").signed_auth_token(scope: scope, expires: 1.hour.from_now)
+      print token
+    ' 2>/dev/null) || true
+    if [ -n "$auto_register_token" ]; then
+        echo "  ✓ Registration token obtained"
+    else
+        echo "  Warning: could not generate registration token (server may not be running)"
+        echo "  Runner will start with existing credentials — this may fail if keys rotated"
+    fi
+fi
+
+cat <<EOF > ./actions-runner/docker-self-hosted-runner-bootstrap.sh
+#!/bin/bash
+set -e
+
+# Function to get the latest runner version, with fallback
+set_runner_version() {
+    echo "Fetching latest GitHub Actions runner version..."
+
+    # Get latest version from GitHub API
+    if command -v jq > /dev/null 2>&1; then
+        # Use jq if available for more robust JSON parsing
+        latest_version=\$(curl -s https://api.github.com/repos/actions/runner/releases/latest | jq -r '.tag_name' | sed 's/^v//')
+    else
+        # Fallback to sed parsing
+        latest_version=\$(curl -s https://api.github.com/repos/actions/runner/releases/latest | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
+    fi
+
+    if [ -z "\$latest_version" ] || [ "\$latest_version" = "null" ]; then
+        echo "Warning: Could not fetch latest runner version from GitHub API"
+        echo "Using fallback version: $fallback_runner_version"
+        runner_version="$fallback_runner_version"
+    else
+        echo "✓ Using latest runner version: \$latest_version"
+        runner_version="\$latest_version"
+    fi
+    echo ""
+}
+
+# Install git if needed
+if ! type -P git > /dev/null 2>&1; then
+    sudo apt-get update
+    sudo apt-get install -y git
+fi
+
+# Install git-lfs if needed
+if ! type -P git-lfs > /dev/null 2>&1; then
+    sudo apt-get update
+    sudo apt-get install -y git-lfs
+fi
+
+cd "\$(dirname "\$0")"
+cd /actions-runner
+if [ ! -e "config.sh" ] && [ ! -e "run.sh" ]; then
+    # Fetch the latest runner version
+    set_runner_version
+
+    curl -o actions-runner-linux-x64-\${runner_version}.tar.gz -L https://github.com/actions/runner/releases/download/v\${runner_version}/actions-runner-linux-x64-\${runner_version}.tar.gz
+    tar xzf ./actions-runner-linux-x64-\${runner_version}.tar.gz
+    rm -rf ./actions-runner-linux-x64-\${runner_version}.tar.gz
+    chown -R $runner_user:$runner_user .
+fi
+
+# Auto-register with fresh credentials if a token was provided via env var.
+# This ensures the runner always has valid signing keys for the broker,
+# even after a codespace sleep/restart that rotates token service keys.
+if [ -n "\$RUNNER_REGISTRATION_TOKEN" ] && [ -e "config.sh" ]; then
+    echo "Re-registering runner with fresh credentials..."
+    # Preserve the runner name from existing config, or use a generated one
+    RUNNER_NAME=""
+    if [ -e ".runner" ] && command -v python3 > /dev/null 2>&1; then
+        RUNNER_NAME=\$(python3 -c "import json,sys; print(json.load(open('.runner'))['agentName'])" 2>/dev/null || true)
+    fi
+    if [ -z "\$RUNNER_NAME" ]; then
+        RUNNER_NAME="codespaces-\$(hostname | tail -c 7)"
+    fi
+
+    # Remove stale credentials so config.sh starts clean
+    rm -f .credentials .credentials_rsaparams .runner
+
+    sudo su $runner_user -c "
+        export RUNNER_ALLOW_RUNASROOT=1
+        ./config.sh \
+            --url http://github.localhost:80/github \
+            --token \$RUNNER_REGISTRATION_TOKEN \
+            --name \$RUNNER_NAME \
+            --labels docker-self-hosted-runner \
+            --replace \
+            --unattended
+    "
+    # Clear the token from the environment after use
+    unset RUNNER_REGISTRATION_TOKEN
+    echo "  ✓ Runner re-registered as \$RUNNER_NAME"
+fi
+
+sudo su $runner_user -c 'export GITHUB_ACTIONS_RUNNER_TRACE=1; $full_command'
+EOF
+chmod +x ./actions-runner/docker-self-hosted-runner-bootstrap.sh
+
+docker_run_env=""
+if [ -n "$auto_register_token" ]; then
+    docker_run_env="-e RUNNER_REGISTRATION_TOKEN=$auto_register_token"
+fi
+
+docker_command="$(cat <<EOF
+  docker run \
+    --init \
+    --userns=host \
+    --cgroupns=host \
+    --privileged \
+    --pid=host \
+    --network=host \
+    --name=actions-runner-$$  \
+    --mount=type=bind,source=$(pwd)/actions-runner,target=/actions-runner \
+    --mount=type=bind,source=/sys/fs/cgroup,target=/sys/fs/cgroup \
+    -i \
+    --rm
+EOF
+)"
+
+_container_name="actions-runner-$$"
+_cleanup_done=false
+cleanup() {
+    if [ "$_cleanup_done" = true ]; then return; fi
+    _cleanup_done=true
+    echo ""
+    echo "Shutting down runner..."
+    # Stop the specific container started by this script
+    docker stop --timeout 3 "$_container_name" 2>/dev/null || true
+    # If the docker run process is still alive, terminate it
+    if [ -n "$_docker_pid" ] && kill -0 "$_docker_pid" 2>/dev/null; then
+        kill "$_docker_pid" 2>/dev/null
+    fi
+    wait 2>/dev/null
+}
+trap cleanup INT TERM EXIT
+
+${docker_command} ${docker_run_env} ${image_name} /actions-runner/docker-self-hosted-runner-bootstrap.sh &
+_docker_pid=$!
+wait $_docker_pid 2>/dev/null

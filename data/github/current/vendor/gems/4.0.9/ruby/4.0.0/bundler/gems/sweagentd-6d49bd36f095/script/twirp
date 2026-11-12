@@ -1,0 +1,867 @@
+#!/usr/bin/env bash
+
+set -eou pipefail
+
+SCRIPT_DIR="$( cd "$( dirname "$0" )" && pwd )"
+
+# Default API base URLs for Twirp
+PRODUCTION_TWIRP_BASE_URL="https://sweagentd-twirp.service.iad.github.net/twirp"
+LOCAL_TWIRP_BASE_URL="http://localhost:2209/twirp"
+LOCAL_GITHUB_API_BASE_URL="http://api.github.localhost"
+PRODUCTION_GITHUB_API_BASE_URL="https://api.github.com"
+
+# Parse command line options for environment
+LOCAL_MODE=true
+STAGING_MODE=false
+STAGING_ENVIRONMENT="staging"  # Default staging environment
+
+# Custom agent options
+CUSTOM_AGENT_NAME=""
+CUSTOM_AGENT_ATTRIBUTES=""
+AGENT_ID=""
+
+# Features option (raw JSON)
+FEATURES_JSON=""
+
+# Name-based lookup options
+OWNER_NAME=""
+REPO_NAME=""
+USER_NAME=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --production)
+            LOCAL_MODE=false
+            STAGING_MODE=false
+            shift
+            ;;
+        --staging)
+            LOCAL_MODE=false
+            STAGING_MODE=true
+            STAGING_ENVIRONMENT="staging"
+            shift
+            ;;
+        --staging=*)
+            LOCAL_MODE=false
+            STAGING_MODE=true
+            STAGING_ENVIRONMENT="${1#*=}"
+            # Validate staging environment
+            if [[ "$STAGING_ENVIRONMENT" != "staging" && "$STAGING_ENVIRONMENT" != "jedi-knight" && "$STAGING_ENVIRONMENT" != "sith-lord" ]]; then
+                echo "Error: Invalid staging environment '$STAGING_ENVIRONMENT'. Valid environments are: staging, jedi-knight, sith-lord" >&2
+                exit 1
+            fi
+            shift
+            ;;
+        --local)
+            LOCAL_MODE=true
+            STAGING_MODE=false
+            shift
+            ;;
+        --agent-name)
+            CUSTOM_AGENT_NAME="$2"
+            shift 2
+            ;;
+        --agent-attributes)
+            CUSTOM_AGENT_ATTRIBUTES="$2"
+            shift 2
+            ;;
+        --agent-id)
+            AGENT_ID="$2"
+            shift 2
+            ;;
+        --features)
+            FEATURES_JSON="$2"
+            shift 2
+            ;;
+        --nwo)
+            OWNER_NAME="${2%%/*}"
+            REPO_NAME="${2#*/}"
+            shift 2
+            ;;
+        --user)
+            USER_NAME="$2"
+            shift 2
+            ;;
+        --help|-h)
+            help
+            exit 0
+            ;;
+        -*)
+            echo "Unknown option: $1" >&2
+            help
+            exit 1
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# Function to set up environment based on mode
+setup_environment() {
+    if [ "$LOCAL_MODE" = true ]; then
+        # Local development mode
+        BASE_URL="${BASE_URL:-$LOCAL_TWIRP_BASE_URL}"
+        GITHUB_API_BASE_URL="${GITHUB_API_BASE_URL:-$LOCAL_GITHUB_API_BASE_URL}"
+    elif [ "$STAGING_MODE" = true ]; then
+        # Staging mode - build URL based on environment
+        local staging_url
+        if [ "$STAGING_ENVIRONMENT" = "staging" ]; then
+            staging_url="https://sweagentd-twirp-staging.service.iad.github.net/twirp"
+        elif [ "$STAGING_ENVIRONMENT" = "jedi-knight" ]; then
+            staging_url="https://sweagentd-twirp-staging-jedi-knight.service.iad.github.net/twirp"
+        elif [ "$STAGING_ENVIRONMENT" = "sith-lord" ]; then
+            staging_url="https://sweagentd-twirp-staging-sith-lord.service.iad.github.net/twirp"
+        fi
+        BASE_URL="${BASE_URL:-$staging_url}"
+        GITHUB_API_BASE_URL="${GITHUB_API_BASE_URL:-$PRODUCTION_GITHUB_API_BASE_URL}"
+    else
+        # Production mode
+        BASE_URL="${BASE_URL:-$PRODUCTION_TWIRP_BASE_URL}"
+        GITHUB_API_BASE_URL="${GITHUB_API_BASE_URL:-$PRODUCTION_GITHUB_API_BASE_URL}"
+    fi
+}
+
+function help() {
+  echo "Usage: $0 [--production|--staging[=environment]|--local] <command> [options]"
+  echo
+  echo "Environment Options:"
+  echo "  --production                        Use production environment"
+  echo "  --staging[=environment]             Use staging environment (default: staging)"
+  echo "                                      Valid environments: staging, jedi-knight, sith-lord"
+  echo "  --local                             Use local development environment (default)"
+  echo
+  echo "Commands:"
+  echo "  list-jobs [<repo_id> <owner_id>] <pull_request_id>"
+  echo "  create-assignment [<actor_id>] [<repo_id> <owner_id>]"
+  echo "  create-job [<actor_id>] [<repo_id> <owner_id>] <problem_statement> [base_branch_name] [event_content]"
+  echo "  create-job-for-issue [<actor_id>] [<repo_id> <owner_id>] <issue_id> [additional_instructions] [base_branch_name] [event_content]"
+  echo "  create-job-for-assignment [<actor_id>] [<repo_id> <owner_id>] <assignment_id> <problem_statement> [event_content]"
+  echo "  create-command <job_id> [<owner_id> <repo_id>] [<actor_id>] <content> [timestamp]"
+  echo
+  echo "Custom Agent Options (for create-job, create-job-for-assignment, and create-job-for-issue):"
+  echo "  --agent-id <id>                     Agent (app) ID"
+  echo "  --agent-name <name>                 Custom agent name"
+  echo "  --agent-attributes <json>           Custom agent attributes as JSON object"
+  echo
+  echo "Features Options (for create-job and create-job-for-assignment):"
+  echo "  --features <json>                   Features as a JSON object (e.g. '{\"pull_request\":{},\"branch\":{\"base_ref\":\"main\"}}')"
+  echo
+  echo "Name-based Lookup Options:"
+  echo "  --nwo <owner/repo>                  Owner and repo (resolved to IDs via GitHub API)"
+  echo "  --user <name>                       Actor login name (resolved to actor_id via GitHub API)"
+  echo "                                      Defaults to 'monalisa' using MONALISA_PAT for local mode"
+  echo
+  echo "Examples:"
+  echo "  $0 list-jobs 123456 789012 42"
+  echo "  $0 create-job 987654 123456 789012 'Fix the bug in function foo'"
+  echo "  $0 create-job 987654 123456 789012 'Fix the bug in function foo' 'main'"
+  echo "  $0 create-job 987654 123456 789012 'Fix the bug in function foo' 'main' 'User prompt here'"
+  echo "  $0 --agent-name 'my-agent' create-job 987654 123456 789012 'Fix the bug'"
+  echo "  $0 --agent-name 'my-agent' --agent-attributes '{\"display_name\":\"My Agent\",\"prompt\":\"You are helpful\"}' create-job 987654 123456 789012 'Fix the bug'"
+  echo "  $0 --features '{\"pull_request\":{}}' create-job 987654 123456 789012 'Fix the bug'"
+  echo "  $0 --features '{\"branch\":{\"name\":\"my-branch\",\"base_ref\":\"main\"}}' create-job 987654 123456 789012 'Fix the bug'"
+  echo "  $0 --features '{\"pull_request\":{\"base_ref\":\"main\",\"head_ref\":\"my-branch\"}}' create-job 987654 123456 789012 'Fix the bug'"
+  echo "  $0 create-job-for-issue 987654 123456 789012 456"
+  echo "  $0 create-job-for-issue 987654 123456 789012 456 'Fix the issue with the login system'"
+  echo "  $0 create-job-for-issue 987654 123456 789012 456 'Fix the issue with the login system' 'main'"
+  echo "  $0 create-job-for-issue 987654 123456 789012 456 'Fix the issue with the login system' 'main' 'User prompt here'"
+  echo "  $0 --agent-name 'my-agent' create-job-for-issue 987654 123456 789012 456"
+  echo "  $0 --staging list-jobs 123456 789012 42"
+  echo "  $0 --staging=jedi-knight create-job 987654 123456 789012 'Fix the bug'"
+  echo "  $0 --production create-command abc123 789012 123456 987654 'test command'"
+  echo
+  echo "  # Name-based lookups (resolves names to IDs via GitHub API):"
+  echo "  $0 --nwo github/private-server create-job 987654 'Fix the bug'"
+  echo "  $0 --nwo github/private-server --user monalisa create-job 'Fix the bug'"
+}
+
+function get_hmac_key() {
+  go run "$SCRIPT_DIR/hmac.go"
+}
+
+function build_custom_agent_json() {
+  # Return a JSON fragment to append to the request
+  local result=""
+
+  if [ -n "$AGENT_ID" ]; then
+    result=",\"agent_id\":$AGENT_ID"
+  fi
+  
+  if [ -n "$CUSTOM_AGENT_NAME" ]; then
+    result="$result,\"custom_agent\":\"$CUSTOM_AGENT_NAME\""
+  fi
+  
+  if [ -n "$CUSTOM_AGENT_ATTRIBUTES" ]; then
+    result="${result},\"custom_agent_attributes\":$CUSTOM_AGENT_ATTRIBUTES"
+  fi
+  
+  echo "$result"
+}
+
+function build_features_json() {
+  # Return a JSON fragment for features to append to the request
+  if [ -n "$FEATURES_JSON" ]; then
+    echo ",\"features\":$FEATURES_JSON"
+  fi
+}
+
+# Get the GitHub PAT for API calls.
+# Local mode: uses MONALISA_PAT (required).
+# Staging/production: uses USER_TOKEN, falling back to gh auth token.
+function get_github_pat() {
+  if [ "$LOCAL_MODE" = true ]; then
+    if [ -n "${MONALISA_PAT:-}" ]; then
+      echo "$MONALISA_PAT"
+      return
+    fi
+    echo "❌ Error: MONALISA_PAT environment variable is required for local mode." >&2
+    echo "If you are not in a Codespace, please set this variable before running the script." >&2
+    exit 1
+  fi
+
+  # Staging/production: try USER_TOKEN, then gh auth token
+  if [ -n "${USER_TOKEN:-}" ]; then
+    echo "$USER_TOKEN"
+    return
+  fi
+
+  if command -v gh >/dev/null 2>&1; then
+    local token
+    token=$(gh auth token 2>/dev/null)
+    if [ -n "$token" ]; then
+      echo "$token"
+      return
+    fi
+  fi
+
+  echo "❌ Error: No GitHub token available. Set USER_TOKEN or run 'gh auth login'." >&2
+  exit 1
+}
+
+# Resolve a GitHub user login to a numeric ID.
+# Usage: resolve_user_id <login>
+function resolve_user_id() {
+  local login="$1"
+  local pat
+  pat=$(get_github_pat)
+
+  local response
+  response=$(curl --silent --show-error --fail \
+    -H "Authorization: token $pat" \
+    "$GITHUB_API_BASE_URL/users/$login") || {
+    echo "❌ Error: Failed to resolve user '$login' via $GITHUB_API_BASE_URL/users/$login" >&2
+    exit 1
+  }
+  echo "$response" | jq -r '.id'
+}
+
+# Resolve an owner/repo pair to repo_id and owner_id.
+# Prints two lines: repo_id then owner_id.
+# Usage: resolve_repo_ids <owner> <repo>
+function resolve_repo_ids() {
+  local owner="$1"
+  local repo="$2"
+  local pat
+  pat=$(get_github_pat)
+
+  local response
+  response=$(curl --silent --show-error --fail \
+    -H "Authorization: token $pat" \
+    "$GITHUB_API_BASE_URL/repos/$owner/$repo") || {
+    echo "❌ Error: Failed to resolve repo '$owner/$repo' via $GITHUB_API_BASE_URL/repos/$owner/$repo" >&2
+    exit 1
+  }
+  local repo_id owner_id
+  repo_id=$(echo "$response" | jq -r '.id')
+  owner_id=$(echo "$response" | jq -r '.owner.id')
+  echo "$repo_id"
+  echo "$owner_id"
+}
+
+# Apply name-based lookups. Call after setup_environment and before command
+# dispatch. Sets RESOLVED_OWNER_ID, RESOLVED_REPO_ID, RESOLVED_ACTOR_ID.
+function resolve_names() {
+  RESOLVED_OWNER_ID=""
+  RESOLVED_REPO_ID=""
+  RESOLVED_ACTOR_ID=""
+
+  # Default --user to monalisa when not specified and --owner/--repo are used
+  if [ -n "$OWNER_NAME" ] && [ -z "$USER_NAME" ]; then
+    USER_NAME="monalisa"
+  fi
+
+  if [ -n "$OWNER_NAME" ] && [ -n "$REPO_NAME" ]; then
+    echo "🔍 Resolving repo $OWNER_NAME/$REPO_NAME ..."
+    local ids
+    ids=$(resolve_repo_ids "$OWNER_NAME" "$REPO_NAME")
+    RESOLVED_REPO_ID=$(echo "$ids" | sed -n '1p')
+    RESOLVED_OWNER_ID=$(echo "$ids" | sed -n '2p')
+    echo "   repo_id=$RESOLVED_REPO_ID owner_id=$RESOLVED_OWNER_ID"
+  elif [ -n "$OWNER_NAME" ]; then
+    echo "🔍 Resolving owner $OWNER_NAME ..."
+    RESOLVED_OWNER_ID=$(resolve_user_id "$OWNER_NAME")
+    echo "   owner_id=$RESOLVED_OWNER_ID"
+  fi
+
+  if [ -n "$USER_NAME" ]; then
+    echo "🔍 Resolving user $USER_NAME ..."
+    RESOLVED_ACTOR_ID=$(resolve_user_id "$USER_NAME")
+    echo "   actor_id=$RESOLVED_ACTOR_ID"
+  fi
+}
+
+function make_request() {
+  local endpoint="$1"
+  local data="$2"
+
+  REQ_HMAC_KEY=$(get_hmac_key)
+
+  local temp_file=$(mktemp)
+  local status_code=$(curl --request "POST" "$BASE_URL/$endpoint" \
+    --header "Content-Type:application/json" \
+    --header "Request-HMAC:${REQ_HMAC_KEY}" \
+    --data "$data" \
+    --silent \
+    --show-error \
+    --write-out "%{http_code}" \
+    --output "$temp_file")
+
+  local response=$(cat "$temp_file")
+  rm "$temp_file"
+
+  # Return status code and response separated by a delimiter
+  echo "${status_code}|${response}"
+}
+
+function list_jobs_for_pull_request() {
+  local repo_id=""
+  local owner_id=""
+  local pull_request_id=""
+
+  if [ -n "$RESOLVED_REPO_ID" ]; then
+    repo_id="$RESOLVED_REPO_ID"
+    owner_id="$RESOLVED_OWNER_ID"
+    pull_request_id="${1:-}"
+  else
+    repo_id="${1:-}"
+    owner_id="${2:-}"
+    pull_request_id="${3:-}"
+  fi
+
+  if [ -z "$repo_id" ] || [ -z "$owner_id" ] || [ -z "$pull_request_id" ]; then
+    echo "❌ Error: repo_id, owner_id, and pull_request_id are required"
+    echo "Usage: $0 [--nwo <owner/repo>] list-jobs [<repo_id> <owner_id>] <pull_request_id>"
+    exit 1
+  fi
+
+  echo "🔄 Listing jobs for pull request: $pull_request_id, repo: $repo_id, owner: $owner_id"
+
+  local data="{\"repo_id\":$repo_id,\"owner_id\":$owner_id,\"pull_request_id\":$pull_request_id}"
+  local result=$(make_request "sweagentd.jobs.v1.JobsAPI/ListJobsForPullRequest" "$data")
+
+  local status_code=$(echo "$result" | cut -d'|' -f1)
+  local response=$(echo "$result" | cut -d'|' -f2-)
+
+  if [[ "$status_code" =~ ^2[0-9][0-9]$ ]]; then
+    echo "✅ Jobs for pull request $pull_request_id:"
+    echo "$response" | jq '.'
+  else
+    echo "❌ Error: Request failed with status code $status_code"
+    echo "$response" | jq '.' 2>/dev/null || echo "$response"
+    exit 1
+  fi
+}
+
+function create_assignment() {
+  local actor_id=""
+  local repo_id=""
+  local owner_id=""
+
+  # Determine positional arg layout based on resolved flags
+  local shift_count=0
+  if [ -n "$RESOLVED_REPO_ID" ]; then
+    repo_id="$RESOLVED_REPO_ID"
+    owner_id="$RESOLVED_OWNER_ID"
+    shift_count=$((shift_count + 2))
+  fi
+  if [ -n "$RESOLVED_ACTOR_ID" ]; then
+    actor_id="$RESOLVED_ACTOR_ID"
+    shift_count=$((shift_count + 1))
+  fi
+
+  case $shift_count in
+    3) ;; # --nwo + --user: no positional args needed
+    2) # --nwo only
+      actor_id="${1:-}"
+      ;;
+    1) # --user only
+      repo_id="${1:-}"
+      owner_id="${2:-}"
+      ;;
+    0) # no flags
+      actor_id="${1:-}"
+      repo_id="${2:-}"
+      owner_id="${3:-}"
+      ;;
+  esac
+
+  if [ -z "$repo_id" ] || [ -z "$owner_id" ]; then
+    echo "❌ Error: repo_id and owner_id are required"
+    echo "Usage: $0 [--nwo <owner/repo>] [--user <name>] create-assignment [<actor_id>] [<repo_id> <owner_id>]"
+    exit 1
+  fi
+
+  echo "🔄 Creating assignment for repo: $repo_id, owner: $owner_id${actor_id:+, actor: $actor_id}"
+
+  local data="{\"repo_id\":$repo_id,\"owner_id\":$owner_id"
+  if [ -n "$actor_id" ]; then
+    data="$data,\"actor_id\":$actor_id"
+  fi
+  data="$data}"
+
+  local result=$(make_request "sweagentd.jobs.v1.JobsAPI/CreateAssignment" "$data")
+
+  local status_code=$(echo "$result" | cut -d'|' -f1)
+  local response=$(echo "$result" | cut -d'|' -f2-)
+
+  if [[ "$status_code" =~ ^2[0-9][0-9]$ ]]; then
+    echo "✅ Assignment created successfully:"
+    echo "$response" | jq '.'
+  else
+    echo "❌ Error: Request failed with status code $status_code"
+    echo "$response" | jq '.' 2>/dev/null || echo "$response"
+    exit 1
+  fi
+}
+
+function create_job() {
+  local actor_id=""
+  local repo_id=""
+  local owner_id=""
+  local problem_statement=""
+  local base_branch_name=""
+  local event_content=""
+
+  # Determine positional arg layout based on resolved flags
+  local shift_count=0
+  if [ -n "$RESOLVED_REPO_ID" ]; then
+    repo_id="$RESOLVED_REPO_ID"
+    owner_id="$RESOLVED_OWNER_ID"
+    shift_count=$((shift_count + 2))
+  fi
+  if [ -n "$RESOLVED_ACTOR_ID" ]; then
+    actor_id="$RESOLVED_ACTOR_ID"
+    shift_count=$((shift_count + 1))
+  fi
+
+  case $shift_count in
+    3) # --nwo + --user: create-job <problem_statement> [base_branch_name] [event_content]
+      problem_statement="${1:-}"
+      base_branch_name="${2:-}"
+      event_content="${3:-}"
+      ;;
+    2) # --nwo only: create-job <actor_id> <problem_statement> [base_branch_name] [event_content]
+      actor_id="${1:-}"
+      problem_statement="${2:-}"
+      base_branch_name="${3:-}"
+      event_content="${4:-}"
+      ;;
+    1) # --user only: create-job <repo_id> <owner_id> <problem_statement> [base_branch_name] [event_content]
+      repo_id="${1:-}"
+      owner_id="${2:-}"
+      problem_statement="${3:-}"
+      base_branch_name="${4:-}"
+      event_content="${5:-}"
+      ;;
+    0) # no flags: create-job <actor_id> <repo_id> <owner_id> <problem_statement> [base_branch_name] [event_content]
+      actor_id="${1:-}"
+      repo_id="${2:-}"
+      owner_id="${3:-}"
+      problem_statement="${4:-}"
+      base_branch_name="${5:-}"
+      event_content="${6:-}"
+      ;;
+  esac
+
+  if [ -z "$actor_id" ] || [ -z "$repo_id" ] || [ -z "$owner_id" ] || [ -z "$problem_statement" ]; then
+    echo "❌ Error: actor_id, repo_id, owner_id, and problem_statement are required"
+    echo "Usage: $0 [--nwo <owner/repo>] [--user <name>] create-job [<actor_id>] [<repo_id> <owner_id>] <problem_statement> [base_branch_name] [event_content]"
+    exit 1
+  fi
+
+  echo "🔄 Creating job for repo: $repo_id, owner: $owner_id, actor: $actor_id"
+  echo "   Additional instructions: $problem_statement"
+  if [ -n "$base_branch_name" ]; then
+    echo "   Base branch: $base_branch_name"
+  fi
+  if [ -n "$event_content" ]; then
+    echo "   Event content: $event_content"
+  fi
+  if [ -n "$CUSTOM_AGENT_NAME" ]; then
+    echo "   Custom agent: $CUSTOM_AGENT_NAME"
+  fi
+  if [ -n "$FEATURES_JSON" ]; then
+    echo "   Features: $FEATURES_JSON"
+  fi
+  local data="{\"actor_id\":$actor_id,\"repo_id\":$repo_id,\"owner_id\":$owner_id,\"problem_statement\":\"$problem_statement\""
+  if [ -n "$base_branch_name" ]; then
+    data="$data,\"base_branch_name\":\"$base_branch_name\""
+  fi
+  if [ -n "$event_content" ]; then
+    data="$data,\"event_content\":\"$event_content\""
+  fi
+  
+  # Add custom agent fields
+  local custom_agent_json=$(build_custom_agent_json)
+  data="$data$custom_agent_json"
+
+  # Add features fields
+  local features_json=$(build_features_json)
+  data="$data$features_json"
+  
+  data="$data}"
+
+  local result=$(make_request "sweagentd.jobs.v1.JobsAPI/CreateJob" "$data")
+
+  local status_code=$(echo "$result" | cut -d'|' -f1)
+  local response=$(echo "$result" | cut -d'|' -f2-)
+
+  if [[ "$status_code" =~ ^2[0-9][0-9]$ ]]; then
+    echo "✅ Job created successfully:"
+    echo "$response" | jq '.'
+  else
+    echo "❌ Error: Request failed with status code $status_code"
+    echo "$response" | jq '.' 2>/dev/null || echo "$response"
+    exit 1
+  fi
+}
+
+function create_job_for_issue() {
+  local actor_id=""
+  local repo_id=""
+  local owner_id=""
+  local issue_id=""
+  local additional_instructions=""
+  local base_branch_name=""
+  local event_content=""
+
+  # Determine positional arg layout based on resolved flags
+  local shift_count=0
+  if [ -n "$RESOLVED_REPO_ID" ]; then
+    repo_id="$RESOLVED_REPO_ID"
+    owner_id="$RESOLVED_OWNER_ID"
+    shift_count=$((shift_count + 2))
+  fi
+  if [ -n "$RESOLVED_ACTOR_ID" ]; then
+    actor_id="$RESOLVED_ACTOR_ID"
+    shift_count=$((shift_count + 1))
+  fi
+
+  case $shift_count in
+    3) # --nwo + --user
+      issue_id="${1:-}"
+      additional_instructions="${2:-}"
+      base_branch_name="${3:-}"
+      event_content="${4:-}"
+      ;;
+    2) # --nwo only
+      actor_id="${1:-}"
+      issue_id="${2:-}"
+      additional_instructions="${3:-}"
+      base_branch_name="${4:-}"
+      event_content="${5:-}"
+      ;;
+    1) # --user only
+      repo_id="${1:-}"
+      owner_id="${2:-}"
+      issue_id="${3:-}"
+      additional_instructions="${4:-}"
+      base_branch_name="${5:-}"
+      event_content="${6:-}"
+      ;;
+    0) # no flags
+      actor_id="${1:-}"
+      repo_id="${2:-}"
+      owner_id="${3:-}"
+      issue_id="${4:-}"
+      additional_instructions="${5:-}"
+      base_branch_name="${6:-}"
+      event_content="${7:-}"
+      ;;
+  esac
+
+  if [ -z "$actor_id" ] || [ -z "$repo_id" ] || [ -z "$owner_id" ] || [ -z "$issue_id" ]; then
+    echo "❌ Error: actor_id, repo_id, owner_id, and issue_id are required"
+    echo "Usage: $0 [--nwo <owner/repo>] [--user <name>] create-job-for-issue [<actor_id>] [<repo_id> <owner_id>] <issue_id> [additional_instructions] [base_branch_name] [event_content]"
+    exit 1
+  fi
+
+  echo "🔄 Creating job for issue: $issue_id, repo: $repo_id, owner: $owner_id, actor: $actor_id"
+  if [ -n "$additional_instructions" ]; then
+    echo "   Additional instructions: $additional_instructions"
+  fi
+  if [ -n "$base_branch_name" ]; then
+    echo "   Base branch: $base_branch_name"
+  fi
+  if [ -n "$event_content" ]; then
+    echo "   Event content: $event_content"
+  fi
+  if [ -n "$CUSTOM_AGENT_NAME" ]; then
+    echo "   Custom agent: $CUSTOM_AGENT_NAME"
+  fi
+  if [ -n "$FEATURES_JSON" ]; then
+    echo "   Features: $FEATURES_JSON"
+  fi
+  # Build JSON data conditionally
+  local data="{\"actor_id\":$actor_id,\"repo_id\":$repo_id,\"owner_id\":$owner_id,\"issue_id\":$issue_id"
+  if [ -n "$additional_instructions" ]; then
+    data="$data,\"additional_instructions\":\"$additional_instructions\""
+  fi
+  if [ -n "$base_branch_name" ]; then
+    data="$data,\"base_branch_name\":\"$base_branch_name\""
+  fi
+  if [ -n "$event_content" ]; then
+    data="$data,\"event_content\":\"$event_content\""
+  fi
+  
+  # Add custom agent fields
+  local custom_agent_json=$(build_custom_agent_json)
+  data="$data$custom_agent_json"
+  
+  data="$data}"
+  local result=$(make_request "sweagentd.jobs.v1.JobsAPI/CreateJobForIssue" "$data")
+
+  local status_code=$(echo "$result" | cut -d'|' -f1)
+  local response=$(echo "$result" | cut -d'|' -f2-)
+
+  if [[ "$status_code" =~ ^2[0-9][0-9]$ ]]; then
+    echo "✅ Job for issue created successfully:"
+    echo "$response" | jq '.'
+  else
+    echo "❌ Error: Request failed with status code $status_code"
+    echo "$response" | jq '.' 2>/dev/null || echo "$response"
+    exit 1
+  fi
+}
+
+function create_job_for_assignment() {
+  local actor_id=""
+  local repo_id=""
+  local owner_id=""
+  local assignment_id=""
+  local problem_statement=""
+  local event_content=""
+
+  # Determine positional arg layout based on resolved flags
+  local shift_count=0
+  if [ -n "$RESOLVED_REPO_ID" ]; then
+    repo_id="$RESOLVED_REPO_ID"
+    owner_id="$RESOLVED_OWNER_ID"
+    shift_count=$((shift_count + 2))
+  fi
+  if [ -n "$RESOLVED_ACTOR_ID" ]; then
+    actor_id="$RESOLVED_ACTOR_ID"
+    shift_count=$((shift_count + 1))
+  fi
+
+  case $shift_count in
+    3) # --nwo + --user
+      assignment_id="${1:-}"
+      problem_statement="${2:-}"
+      event_content="${3:-}"
+      ;;
+    2) # --nwo only
+      actor_id="${1:-}"
+      assignment_id="${2:-}"
+      problem_statement="${3:-}"
+      event_content="${4:-}"
+      ;;
+    1) # --user only
+      repo_id="${1:-}"
+      owner_id="${2:-}"
+      assignment_id="${3:-}"
+      problem_statement="${4:-}"
+      event_content="${5:-}"
+      ;;
+    0) # no flags
+      actor_id="${1:-}"
+      repo_id="${2:-}"
+      owner_id="${3:-}"
+      assignment_id="${4:-}"
+      problem_statement="${5:-}"
+      event_content="${6:-}"
+      ;;
+  esac
+
+  if [ -z "$actor_id" ] || [ -z "$repo_id" ] || [ -z "$owner_id" ] || [ -z "$assignment_id" ] || [ -z "$problem_statement" ]; then
+    echo "❌ Error: actor_id, repo_id, owner_id, assignment_id, and problem_statement are required"
+    echo "Usage: $0 [--nwo <owner/repo>] [--user <name>] create-job-for-assignment [<actor_id>] [<repo_id> <owner_id>] <assignment_id> <problem_statement> [event_content]"
+    exit 1
+  fi
+
+  echo "🔄 Creating job for assignment: $assignment_id, repo: $repo_id, owner: $owner_id, actor: $actor_id"
+  echo "   Problem statement: $problem_statement"
+  if [ -n "$event_content" ]; then
+    echo "   Event content: $event_content"
+  fi
+  if [ -n "$CUSTOM_AGENT_NAME" ]; then
+    echo "   Custom agent: $CUSTOM_AGENT_NAME"
+  fi
+  if [ -n "$FEATURES_JSON" ]; then
+    echo "   Features: $FEATURES_JSON"
+  fi
+  local data="{\"actor_id\":$actor_id,\"repo_id\":$repo_id,\"owner_id\":$owner_id,\"assignment_id\":\"$assignment_id\",\"problem_statement\":\"$problem_statement\""
+  if [ -n "$event_content" ]; then
+    data="$data,\"event_content\":\"$event_content\""
+  fi
+
+  # Add custom agent fields
+  local custom_agent_json=$(build_custom_agent_json)
+  data="$data$custom_agent_json"
+
+  # Add features fields
+  local features_json=$(build_features_json)
+  data="$data$features_json"
+
+  data="$data}"
+  local result=$(make_request "sweagentd.jobs.v1.JobsAPI/CreateJobForAssignment" "$data")
+
+  local status_code=$(echo "$result" | cut -d'|' -f1)
+  local response=$(echo "$result" | cut -d'|' -f2-)
+
+  if [[ "$status_code" =~ ^2[0-9][0-9]$ ]]; then
+    echo "✅ Job for assignment created successfully:"
+    echo "$response" | jq '.'
+  else
+    echo "❌ Error: Request failed with status code $status_code"
+    echo "$response" | jq '.' 2>/dev/null || echo "$response"
+    exit 1
+  fi
+}
+
+function create_command() {
+  local job_id=""
+  local owner_id=""
+  local repo_id=""
+  local actor_id=""
+  local content=""
+  local timestamp=""
+
+  # Determine positional arg layout based on resolved flags
+  local shift_count=0
+  if [ -n "$RESOLVED_REPO_ID" ]; then
+    repo_id="$RESOLVED_REPO_ID"
+    owner_id="$RESOLVED_OWNER_ID"
+    shift_count=$((shift_count + 2))
+  fi
+  if [ -n "$RESOLVED_ACTOR_ID" ]; then
+    actor_id="$RESOLVED_ACTOR_ID"
+    shift_count=$((shift_count + 1))
+  fi
+
+  case $shift_count in
+    3) # --nwo + --user: create-command <job_id> <content> [timestamp]
+      job_id="${1:-}"
+      content="${2:-}"
+      timestamp="${3:-}"
+      ;;
+    2) # --nwo only: create-command <job_id> <actor_id> <content> [timestamp]
+      job_id="${1:-}"
+      actor_id="${2:-}"
+      content="${3:-}"
+      timestamp="${4:-}"
+      ;;
+    1) # --user only: create-command <job_id> <owner_id> <repo_id> <content> [timestamp]
+      job_id="${1:-}"
+      owner_id="${2:-}"
+      repo_id="${3:-}"
+      content="${4:-}"
+      timestamp="${5:-}"
+      ;;
+    0) # no flags: create-command <job_id> <owner_id> <repo_id> <actor_id> <content> [timestamp]
+      job_id="${1:-}"
+      owner_id="${2:-}"
+      repo_id="${3:-}"
+      actor_id="${4:-}"
+      content="${5:-}"
+      timestamp="${6:-}"
+      ;;
+  esac
+
+  if [ -z "$job_id" ] || [ -z "$owner_id" ] || [ -z "$repo_id" ] || [ -z "$actor_id" ] || [ -z "$content" ]; then
+    echo "❌ Error: job_id, owner_id, repo_id, actor_id, and content are required"
+    echo "Usage: $0 [--nwo <owner/repo>] [--user <name>] create-command <job_id> [<owner_id> <repo_id>] [<actor_id>] <content> [timestamp]"
+    exit 1
+  fi
+
+  if [ -z "$timestamp" ]; then
+    # If timestamp is not provided, default to now in Unix format
+    timestamp=$(date +%s)
+  fi
+
+  echo "🔄 Creating command for session: $job_id, repo: $repo_id, owner: $owner_id, actor: $actor_id"
+  echo "   Content: $content"
+  echo "   Timestamp: $timestamp"
+
+  local data="{\"job_id\":\"$job_id\",\"owner_id\":$owner_id,\"repo_id\":$repo_id,\"actor_id\":$actor_id,\"content\":\"$content\",\"timestamp\":$timestamp}"
+  local result=$(make_request "sweagentd.jobs.v1.JobsAPI/CreateCommand" "$data")
+
+  local status_code=$(echo "$result" | cut -d'|' -f1)
+  local response=$(echo "$result" | cut -d'|' -f2-)
+
+  if [[ "$status_code" =~ ^2[0-9][0-9]$ ]]; then
+    echo "✅ Command created successfully:"
+    echo "$response" | jq '.'
+  else
+    echo "❌ Error: Request failed with status code $status_code"
+    echo "$response" | jq '.' 2>/dev/null || echo "$response"
+    exit 1
+  fi
+}
+
+# Setup environment based on options
+setup_environment
+
+# Resolve name-based lookups to IDs
+resolve_names
+
+# Parse command line arguments
+COMMAND="${1:-}"
+shift || true
+
+case "$COMMAND" in
+  "list-jobs")
+    list_jobs_for_pull_request "$@"
+    ;;
+  "create-assignment")
+    create_assignment "$@"
+    ;;
+  "create-job")
+    create_job "$@"
+    ;;
+  "create-job-for-issue")
+    create_job_for_issue "$@"
+    ;;
+  "create-job-for-assignment")
+    create_job_for_assignment "$@"
+    ;;
+  "create-command")
+    create_command "$@"
+    ;;
+  "help"|"-h"|"--help")
+    help
+    ;;
+  "")
+    echo "❌ Error: No command specified"
+    echo
+    help
+    exit 1
+    ;;
+  *)
+    echo "❌ Error: Unknown command '$COMMAND'"
+    echo
+    help
+    exit 1
+    ;;
+esac

@@ -1,0 +1,25 @@
+#!/bin/bash
+
+set -e
+
+SERVICE_ADDRESS=${SERVICE_ADDRESS:-http://localhost:9597}
+# check for --no-server flag, if it's not set then call bin/ds-api
+if [ "$1" = "--no-server" ]; then
+    echo "assuming DS api already running @ ${SERVICE_ADDRESS}"
+    pong=$(curl -s -d {} -H 'Content-Type: application/json' "${SERVICE_ADDRESS}"/twirp/github.dependency_snapshots_api.DiagnosticService/Ping || echo "")
+    # if pong is empty, then the server is not running
+    if [ -z "$pong" ]; then
+        echo "Server not running. Please start the server (preferably in the debugger) and re-run this script."
+        exit 1
+    fi
+else
+    echo "starting DS api..."
+    # sometimes bin/ds-api is still running for some reason. find it and kill it if necessary.
+    if [ -n "$(pgrep -f bin/ds-api)" ]; then
+        echo "ds-api is already running, killing it to restart the service"
+        kill $(pgrep -f bin/ds-api)
+    fi
+    bin/ds-api &
+fi
+set -x
+go test -race -tags integration -count 1 ./test

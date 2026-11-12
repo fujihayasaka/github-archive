@@ -1,0 +1,132 @@
+syntax = "proto3";
+
+package github.secretscanning.bypassers.v1;
+
+import "api/v1/shared.proto";
+import "google/protobuf/empty.proto";
+
+option go_package = "github.com/github/secret-scanning-proto/gen/go/v1/bypassers";
+option ruby_package = "GitHub::Proto::SecretScanning::Bypassers::V1";
+
+service BypasserAPI {
+  // AddBypasser adds a Bypasser to a repo or organization
+  rpc AddBypasser(github.secretscanning.bypassers.v1.AddBypasserRequest) returns (github.secretscanning.bypassers.v1.AddBypasserResponse);
+
+  // RemoveBypasser removes a Bypasser from a repo or organization
+  rpc RemoveBypasser(github.secretscanning.bypassers.v1.RemoveBypasserRequest) returns (google.protobuf.Empty);
+
+  // RemoveBypassersForSource removes all the bypassers for a source.
+  rpc RemoveBypassersForSource(github.secretscanning.bypassers.v1.RemoveBypassersForSourceRequest) returns (google.protobuf.Empty);
+
+  // UpdateBypassersForSource adds/removes bypassers to set the list to what's in the request, for the given source.
+  rpc UpdateBypassersForSource(github.secretscanning.bypassers.v1.UpdateBypassersForSourceRequest) returns (github.secretscanning.bypassers.v1.UpdateBypassersForSourceResponse);
+
+  // GetBypassers gets the list of Bypassers for a repo or organization
+  rpc GetBypassers(github.secretscanning.bypassers.v1.GetBypassersRequest) returns (github.secretscanning.bypassers.v1.GetBypassersResponse);
+}
+
+message Bypasser {
+  // The primary key of the bypasser record in the DB
+  uint64 id = 1;
+
+  // The repository, organization, or business ID to which this bypasser belongs
+  uint64 owner_id = 2;
+
+  // Either REPOSITORY_SCOPE, ORGANIZATION_SCOPE, or BUSINESS_SCOPE
+  github.secretscanning.v1.OwnerScope owner_scope = 3;
+
+  // ID of the entity that can bypass (e.g. user, team, org, business).
+  uint64 bypasser_id = 4;
+
+  // buf:lint:ignore ENUM_VALUE_PREFIX Dotcom likes to convert between strings like "TEAM" and symbols used for this enum
+  // buf:lint:ignore ENUM_ZERO_VALUE_SUFFIX
+  enum BypasserType {
+    UNKNOWN = 0;
+    reserved 1; // formerly USER = 1;
+    TEAM = 2;
+    ROLE = 3;
+    ORG_ADMIN = 4;
+    BUSINESS_TEAM = 5;
+    ENTERPRISE_OWNER = 6;
+    ENTERPRISE_ROLE = 7;
+    INTEGRATION = 8;
+  }
+
+  // Type of the entity that can bypass (e.g. user, team, org, business).
+  BypasserType bypasser_type = 5;
+
+  // ID of the security configuration, if set
+  uint64 security_configuration_id = 6;
+
+  // buf:lint:ignore ENUM_VALUE_PREFIX Dotcom likes to convert between strings like "ALWAYS" and symbols used for this enum
+  // buf:lint:ignore ENUM_ZERO_VALUE_SUFFIX
+  enum BypasserMode {
+    ALWAYS = 0; // Bypasser can approve own and others' bypass requests
+    reserved 1; // this is PRS_ONLY in github-ui; we don't use it in TSS
+    EXEMPT = 2; // Bypasser is exempt completely from push protection and can't review bypass requests
+  }
+
+  // Mode of the bypasser (e.g. always bypass, exempt from bypass)
+  BypasserMode mode = 7;
+}
+
+message AddBypasserRequest {
+  // the bypasser to add to the repo or org
+  Bypasser bypasser = 1;
+}
+
+message AddBypasserResponse {
+  // the newly created bypasser
+  Bypasser bypasser = 1;
+}
+
+message RemoveBypasserRequest {
+  // the ID of the bypasser to remove from the repo or org
+  uint64 id = 1;
+}
+
+message RemoveBypassersForSourceRequest {
+  // the scope and ID of the repo or org to remove bypassers for
+  oneof owner_scope {
+    uint64 repository_id = 1;
+    uint64 organization_id = 2;
+    uint64 business_id = 4;
+  }
+  // the security configuration ID, if set
+  uint64 security_configuration_id = 3;
+}
+
+message UpdateBypassersForSourceRequest {
+  // the bypassers to set
+  repeated Bypasser bypassers = 1;
+
+  // the owner scope to set them for
+  oneof owner_scope {
+    uint64 repository_id = 2;
+    uint64 organization_id = 3;
+    uint64 business_id = 5;
+  }
+  // the security configuration ID, if set
+  uint64 security_configuration_id = 4;
+}
+
+message UpdateBypassersForSourceResponse {
+  // the bypassers that were just set
+  repeated Bypasser bypassers = 1;
+}
+
+message GetBypassersRequest {
+  // the scope and ID of the repo or org to retrieve bypassers for
+  oneof owner_scope {
+    uint64 repository_id = 1;
+    uint64 organization_id = 2;
+    uint64 business_id = 4;
+  }
+  // the security configuration ID, if set
+  uint64 security_configuration_id = 3;
+}
+
+message GetBypassersResponse {
+  // the list of bypassers for the given repo or org
+  repeated Bypasser bypassers = 1;
+}

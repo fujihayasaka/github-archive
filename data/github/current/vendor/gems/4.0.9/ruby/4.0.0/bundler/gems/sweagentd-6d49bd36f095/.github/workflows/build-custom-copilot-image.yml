@@ -1,0 +1,263 @@
+name: Build Custom Copilot Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_sha:
+        description: 'Runtime submodule commit SHA to build. Leave empty to use the SHA pinned in the repo.'
+        required: false
+        default: ''
+  push:
+    branches: [main]
+    paths:
+      - "runtime"
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  build:
+    runs-on: copilot-coding-agent-image-generation-runner
+    snapshot: 
+        image-name: Curated/4488
+    env:
+      # Pin to the same version as sweagentd (internal/launcher/playwright.go)
+      PLAYWRIGHT_VERSION: "0.0.40"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+
+      - name: Checkout runtime at specified SHA
+        if: inputs.runtime_sha != ''
+        run: |
+          cd runtime
+          git fetch origin ${{ inputs.runtime_sha }}
+          git checkout ${{ inputs.runtime_sha }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ./runtime/.nvmrc
+
+      - run: npm ci
+        working-directory: ./runtime
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HUSKY: 0
+
+      - name: Install Linux sysroot for glibc compatibility
+        if: runner.os == 'Linux'
+        run: script/runtime-linux-sysroot-env >> "$GITHUB_ENV"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build runtime
+        run: |
+          mkdir -p copilot-developer-action
+          ./runtime/script/action-build ./copilot-developer-action
+        env:
+          EBPF_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.EBPF_DOWNLOAD_GITHUB_TOKEN }}"
+          BLACKBIRD_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.BLACKBIRD_DOWNLOAD_GITHUB_TOKEN }}"
+          AUTOFIND_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.AUTOFIND_DOWNLOAD_GITHUB_TOKEN }}"
+          GPGSIGN_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.GPGSIGN_DOWNLOAD_GITHUB_TOKEN }}"
+
+      - name: Verify glibc requirements for native addons
+        if: runner.os == 'Linux'
+        working-directory: ./runtime
+        run: ./script/linux/verify-glibc-requirements.sh
+        env:
+          EXPECTED_GLIBC_VERSION: "2.28"
+          SEARCH_PATH: src/runtime
+
+      - name: Install runtime to well-known path
+        run: |
+          sudo mkdir -p /opt/copilot-runtime
+          sudo rm -rf /opt/copilot-runtime/copilot-developer-action-main
+          sudo mv copilot-developer-action /opt/copilot-runtime/copilot-developer-action-main
+
+      - name: Install Node.js via setup.sh
+        run: |
+          # setup.sh expects RUNNER_TOOL_CACHE to be set (Actions runner env var)
+          export RUNNER_TOOL_CACHE="${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}"
+          sudo -E /opt/copilot-runtime/copilot-developer-action-main/script/setup.sh /opt/copilot-runtime/ghcca-node
+
+      - name: Pre-install Playwright MCP globally
+        run: |
+          export PATH="/opt/copilot-runtime/ghcca-node/node/bin:$PATH"
+          echo "Installing @playwright/mcp@${PLAYWRIGHT_VERSION} globally with ghcca-node npm..."
+          /opt/copilot-runtime/ghcca-node/node/bin/npm install -g "@playwright/mcp@${PLAYWRIGHT_VERSION}"
+          echo "Playwright MCP installed: $(/opt/copilot-runtime/ghcca-node/node/bin/npm list -g @playwright/mcp 2>/dev/null || echo 'not found')"
+
+      - name: Create systemd service for Playwright MCP pre-start
+        run: |
+          sudo tee /etc/systemd/system/playwright-mcp.service << EOF
+          [Unit]
+          Description=Playwright MCP Server (pre-started for coding agent)
+          After=network.target copilot-prewarm-cache.service
+          Wants=copilot-prewarm-cache.service
+
+          [Service]
+          ExecStart=/opt/copilot-runtime/ghcca-node/node/bin/npx --no-install @playwright/mcp@${PLAYWRIGHT_VERSION} --port 3100 --headless
+          Restart=always
+          Environment=HOME=/root
+          Environment=PATH=/opt/copilot-runtime/ghcca-node/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+          sudo systemctl enable playwright-mcp
+          echo "Playwright MCP systemd service created and enabled (will start on boot)"
+
+      - name: Install boot-time mkcert CA generation service
+        run: |
+          # Generate the mkcert CA at VM boot so each job VM gets a fresh key,
+          # while keeping keygen out of workflow startup critical path.
+          sudo tee /usr/local/bin/setup-mkcert-ca.sh << 'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          CAROOT="/opt/copilot-runtime/mkcert-ca"
+          mkdir -p "$CAROOT"
+          if [ ! -f "$CAROOT/rootCA.pem" ] || [ ! -f "$CAROOT/rootCA-key.pem" ]; then
+            TRUST_STORES=system,java CAROOT="$CAROOT" /opt/copilot-runtime/copilot-developer-action-main/ebpf/in-path/mkcert -install
+          fi
+          chmod 644 "$CAROOT/rootCA.pem"
+          if id -u runner >/dev/null 2>&1; then
+            chown root:runner "$CAROOT/rootCA-key.pem"
+            chmod 640 "$CAROOT/rootCA-key.pem"
+          else
+            chmod 600 "$CAROOT/rootCA-key.pem"
+          fi
+          EOF
+          sudo chmod 755 /usr/local/bin/setup-mkcert-ca.sh
+          sudo tee /etc/systemd/system/copilot-mkcert-ca.service << 'EOF'
+          [Unit]
+          Description=Generate mkcert CA for Copilot firewall at boot
+          ConditionPathExists=/opt/copilot-runtime/copilot-developer-action-main/ebpf/in-path/mkcert
+          After=network-online.target copilot-prewarm-cache.service
+          Wants=network-online.target copilot-prewarm-cache.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/bin/setup-mkcert-ca.sh
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+          sudo systemctl enable copilot-mkcert-ca
+          echo "Boot-time mkcert generation service installed and enabled"
+
+      - name: Install boot-time filesystem cache pre-warming service
+        run: |
+          # Pre-warm the page cache for critical copilot runtime files at VM boot.
+          # Without this, the first access to /opt/copilot-runtime/ files incurs
+          # slow reads from the VM image backing store, adding ~7s to MCP node
+          # process startup vs a standard image where files are freshly extracted
+          # to local disk.
+          sudo tee /usr/local/bin/prewarm-copilot-cache.sh << 'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          # Read all runtime files into the page cache so node/npm don't pay
+          # cold-read penalties when the workflow starts.
+          RUNTIME_DIR="/opt/copilot-runtime"
+          if [ ! -d "$RUNTIME_DIR" ]; then
+            echo "prewarm-cache: $RUNTIME_DIR does not exist, skipping" >&2
+            exit 0
+          fi
+          echo "prewarm-cache: warming page cache for $RUNTIME_DIR..."
+          find "$RUNTIME_DIR" -type f -exec cat {} + > /dev/null
+          echo "prewarm-cache: done"
+          SCRIPT
+          sudo chmod 755 /usr/local/bin/prewarm-copilot-cache.sh
+          sudo tee /etc/systemd/system/copilot-prewarm-cache.service << 'EOF'
+          [Unit]
+          Description=Pre-warm page cache for Copilot runtime files
+          After=local-fs.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/bin/prewarm-copilot-cache.sh
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+          sudo systemctl enable copilot-prewarm-cache
+          echo "Boot-time filesystem cache pre-warming service installed and enabled"
+
+      - name: Pre-create MCP temp directories
+        run: |
+          sudo mkdir -p /opt/copilot-runtime/mcp-server
+          if id -u runner >/dev/null 2>&1; then
+            sudo chown runner:runner /opt/copilot-runtime/mcp-server
+          fi
+          sudo chmod 775 /opt/copilot-runtime/mcp-server
+
+      - name: Create squashfs image for cached actions
+        run: |
+          if ! command -v mksquashfs &>/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq squashfs-tools
+          fi
+          WORK=$(mktemp -d)
+          for subdir in /opt/actionarchivecache/*/; do
+            name=$(basename "$subdir")
+            mkdir -p "$WORK/$name"
+            for archive in "$subdir"*.tar.gz; do
+              archive_name=$(basename "$archive" .tar.gz)
+              mkdir -p "$WORK/$name/$archive_name"
+              tar -xzf "$archive" -C "$WORK/$name/$archive_name"
+            done
+          done
+          sudo mksquashfs "$WORK" /opt/actionarchivecache.squashfs -comp zstd -Xcompression-level 3 -processors $(nproc)
+          rm -rf "$WORK"
+          sudo mkdir -p /var/opt/actionarchivecache
+          echo "/opt/actionarchivecache.squashfs /var/opt/actionarchivecache squashfs ro,noatime,loop,threads=multi 0 0" | sudo tee -a /etc/fstab
+          echo "overlay /opt/actionarchivecache overlay lowerdir=/var/opt/actionarchivecache:/opt/actionarchivecache,ro,x-systemd.requires-mounts-for=/var/opt/actionarchivecache 0 0" | sudo tee -a /etc/fstab
+          echo 'ACTIONS_RUNNER_SYMLINK_CACHED_ACTIONS=true' | sudo tee -a /etc/environment
+
+      - name: Install pid-ns-exec for PID namespace isolation
+        run: |
+          # pid-ns-exec wraps a command in a PID + mount namespace so that
+          # agent bash sessions cannot see host processes via ps or /proc.
+          # The helper is built from tracked source under .github/tools and
+          # receives CAP_SYS_ADMIN as a file capability (no sudo at runtime).
+          # See: https://github.com/github/sweagentd/issues/10411
+          go build -trimpath -o /tmp/pid-ns-exec ./.github/tools/pid-ns-exec
+          sudo install -o root -g root -m 755 /tmp/pid-ns-exec /usr/local/bin/pid-ns-exec
+          sudo setcap cap_sys_admin+ep /usr/local/bin/pid-ns-exec
+          rm -f /tmp/pid-ns-exec
+          echo "pid-ns-exec installed: $(getcap /usr/local/bin/pid-ns-exec)"
+
+      - name: Verify installation
+        run: |
+          echo "=== Runtime directory ==="
+          ls -la /opt/copilot-runtime/copilot-developer-action-main/
+          echo "=== Node.js version ==="
+          /opt/copilot-runtime/ghcca-node/node/bin/node --version
+          echo "=== MCP servers ==="
+          echo "--- blackbird-mcp-server ---"
+          ls -la /opt/copilot-runtime/copilot-developer-action-main/blackbird-mcp-server/ || echo "No blackbird"
+          test -x /opt/copilot-runtime/copilot-developer-action-main/blackbird-mcp-server/blackbird-mcp-server && echo "blackbird-mcp-server: executable OK" || echo "blackbird-mcp-server: NOT executable"
+          echo "--- github-mcp-server ---"
+          ls -la /opt/copilot-runtime/copilot-developer-action-main/github-mcp-server/ || echo "No github-mcp"
+          test -x /opt/copilot-runtime/copilot-developer-action-main/github-mcp-server/github-mcp-server && echo "github-mcp-server: executable OK" || echo "github-mcp-server: NOT executable"
+          echo "--- Playwright MCP ---"
+          export PATH="/opt/copilot-runtime/ghcca-node/node/bin:$PATH"
+          npm list -g @playwright/mcp 2>/dev/null || echo "not found"
+          echo "=== Systemd services ==="
+          systemctl is-enabled playwright-mcp || true
+          systemctl is-enabled copilot-mkcert-ca || true
+          echo "=== pid-ns-exec ==="
+          test -x /usr/local/bin/pid-ns-exec
+          test "$(stat -c '%U:%G' /usr/local/bin/pid-ns-exec)" = "root:root"
+          test "$(stat -c '%a' /usr/local/bin/pid-ns-exec)" = "755"
+          getcap /usr/local/bin/pid-ns-exec | grep -q 'cap_sys_admin=ep'
+          /usr/local/bin/pid-ns-exec true
+          ns_pids=$(/usr/local/bin/pid-ns-exec sh -c 'ps -e --no-headers | wc -l')
+          host_pids=$(ps -e --no-headers | wc -l)
+          echo "host PIDs: $host_pids; ns PIDs: $ns_pids"
+          test "$ns_pids" -le 5
+          test "$ns_pids" -lt "$host_pids"
+          echo "=== Image build complete ==="

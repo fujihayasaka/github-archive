@@ -1,0 +1,61 @@
+name: GHES
+
+env:
+  AWS_ENDPOINT: 'http://localhost:10005/'
+  ENTERPRISE: '1'
+  SCHEMA: './db/enterprise_structure.sql'
+
+on: # yamllint disable-line rule:truthy
+  push:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish the image (keep false to build-only and avoid overwriting published images)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: self-hosted
+    permissions:
+      contents: read
+      packages: write
+    if: ${{ github.actor != 'dependabot[bot]' }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: script/cibuild-enterprise-publish ${{ github.event_name == 'workflow_dispatch' && !inputs.publish && '--build-only' || '' }}
+        env:
+          SITES_API_URL: https://sites-ang.githubapp.com
+          SITES_API_PASSWORD: ${{ secrets.SITES_API_PASSWORD }}
+
+
+  build-verify:
+    # Builds the enterprise image but doesn't publish it
+    # Used on dependabot triggered runs where we don't have access to all the publishing secrets
+    runs-on: self-hosted
+    permissions:
+      contents: read
+      packages: read
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: script/cibuild-enterprise-publish --build-only
+        env:
+          SITES_API_URL: https://sites-ang.githubapp.com
+          SITES_API_PASSWORD: ${{ secrets.SITES_API_PASSWORD }}

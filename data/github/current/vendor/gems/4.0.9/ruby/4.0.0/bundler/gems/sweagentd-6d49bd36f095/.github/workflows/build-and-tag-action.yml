@@ -1,0 +1,91 @@
+name: Build and Publish Runtime Action
+
+env:
+  HUSKY: 0
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version override (defaults to workflow commit SHA)"
+        required: false
+        type: string
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: runtime-build-${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-push-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: sweagentd
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ./sweagentd/runtime/.nvmrc
+
+      - run: npm ci
+        working-directory: ./sweagentd/runtime
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.COPILOT_DEVELOPER_ACTION_PAT }}
+          repository: github/copilot-developer-action
+          path: copilot-developer-action
+          ref: main
+
+      - run: ./sweagentd/runtime/script/action-build ./copilot-developer-action
+        working-directory: ./
+        env:
+          EBPF_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.EBPF_DOWNLOAD_GITHUB_TOKEN }}"
+          BLACKBIRD_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.BLACKBIRD_DOWNLOAD_GITHUB_TOKEN }}"
+          AUTOFIND_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.AUTOFIND_DOWNLOAD_GITHUB_TOKEN }}"
+          GPGSIGN_DOWNLOAD_GITHUB_TOKEN: "${{ secrets.GPGSIGN_DOWNLOAD_GITHUB_TOKEN }}"
+
+      - name: Remove CCA V3 runtime from git output
+        working-directory: ./copilot-developer-action
+        run: |
+          # CCA V3 carries SDK-resolved CLI platform binaries that exceed git blob limits.
+          # Keep the git-published action on legacy runtimes; CCA V3 is packaged by release/tarball paths.
+          rm -rf dist-cca-v3
+
+      - name: Commit changes
+        working-directory: ./copilot-developer-action
+        run: |
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+
+          SOURCE_SHA="${{ github.event.inputs.version || github.sha }}"
+
+          if [[ ! "$SOURCE_SHA" =~ ^[0-9A-Za-z._-]+$ ]]; then
+            echo "Invalid SOURCE_SHA: must match ^[0-9A-Za-z._-]+$" >&2
+            exit 1
+          fi
+
+          # Create orphan branch (isolated history)
+          git checkout --orphan "build-${SOURCE_SHA}"
+
+          # Stage all changes from the build
+          git add .
+          git commit -m "Runtime build from ${SOURCE_SHA}"
+
+          # Create and push the SHA-based tag
+          git tag "runtime-${SOURCE_SHA}"
+          git push origin "runtime-${SOURCE_SHA}"
+
+          # Create and push the latest tag (force push to overwrite existing)
+          git tag -f latest
+          git push -f origin latest

@@ -1,0 +1,603 @@
+#!/bin/bash
+#
+# SWE Agent Job Management Script
+#
+# This script provides a unified interface for managing SWE Agent jobs and memories.
+# It supports local development, staging, and production environments.
+# For production and staging, it can automatically use GitHub CLI authentication.
+#
+# Usage:
+#   script/job-api [--production|--staging[=environment]] [--version=<version>] <command> <repo_owner>/<repo_name> [args...]
+#
+# Commands:
+#   new <repo> <json_payload>           - Create a new job
+#   get <repo> <job_id>                 - Get job details
+#   get <repo> session <session_id>     - Get session details
+#   cancel <repo> <job_id>              - Cancel a job
+#   cancel <repo> session <session_id>  - Cancel a session
+#
+# Options:
+#   --production                        - Use production environment
+#   --staging[=environment]             - Use staging environment (default: staging)
+#                                         Valid environments: staging, jedi-knight, sith-lord
+#   --local                             - Use local development environment (default)
+#   --version=<version>                 - API version to use (v0, v1, default) - uses v1 if not specified
+#
+# Environment Variables:
+#   USER_TOKEN                          - Token for production/staging API (auto-detected from gh CLI if not set)
+#   MONALISA_PAT                        - Token for local development (Codespace)
+#   JOB_API_BASE_URL                    - Override API base URL
+#
+# Examples:
+#   script/job-api new github/private-server '{"problem_statement":"create a nice readme"}'
+#   script/job-api get github/private-server 12345
+#   script/job-api --version=v0 get github/private-server 12345
+#   script/job-api --version=default get github/private-server 12345
+
+set -e
+
+# Function to show help
+show_help() {
+    cat << 'EOF'
+SWE Agent Job Management Script
+
+Usage:
+  script/job-api [--production|--staging[=environment]] [--version=<version>] <command> <repo_owner>/<repo_name> [args...]
+
+Commands:
+  new <repo> <json_payload>           - Create a new job
+  get <repo> <job_id>                 - Get job details
+  get <repo> session <session_id>     - Get session details
+  cancel <repo> <job_id>              - Cancel a job
+  cancel <repo> session <session_id>  - Cancel a session
+
+Options:
+  --production                        - Use production environment
+  --staging[=environment]             - Use staging environment (default: staging)
+                                        Valid environments: staging, jedi-knight, sith-lord
+  --local                             - Use local development environment (default)
+  --version=<version>                 - API version to use (v0, v1, default) - defaults to v1
+  --help, -h                          - Show this help message
+
+Options for 'new' command:
+  --no-pr                             - Do not add default PR feature
+                                        By default, PR title is auto-generated from problem_statement
+  --docker                            - After job creation, tail the Docker container log file
+                                        Polls runtime-logs/ for a log matching the job ID
+  --actions                           - After job creation, tail the Actions runner Worker log
+                                        Watches actions-runner/_diag/ for new Worker log files
+
+Environment Variables:
+  USER_TOKEN                          - Token for production/staging API (auto-detected from gh CLI if not set)
+  MONALISA_PAT                        - Token for local development (Codespace, default)
+  JOB_API_BASE_URL                    - Override API base URL
+
+Examples:
+  script/job-api new github/private-server '{"problem_statement":"create a nice readme"}'
+  script/job-api new github/private-server '{"problem_statement":"fix the bug"}' --no-pr
+  script/job-api new github/private-server '{"problem_statement":"fix the bug"}' --docker
+  script/job-api new github/private-server '{"problem_statement":"fix the bug"}' --actions
+  script/job-api new github/private-server '{"problem_statement":"test","custom_agents":{"agent_id":"123"}}'
+  script/job-api get github/private-server 12345
+  script/job-api get github/private-server session abc123
+  script/job-api --staging cancel github/private-server 12345
+  script/job-api --staging=jedi-knight get github/private-server 12345
+  script/job-api --staging=sith-lord cancel github/private-server 12345
+  script/job-api --production cancel github/private-server 12345
+  script/job-api --proxima=staffship-01 new coding-agent-test/test-cca '{"problem_statement":"create a nice readme"}'
+  script/job-api --version=v0 get github/private-server 12345
+  script/job-api --version=default get github/private-server 12345
+
+Notes:
+  - For 'new' command: <json_payload> is required and can contain any fields (problem_statement,
+    custom_agents, app_id, features, etc.).
+  - By default, PR title is auto-generated from problem_statement (truncated to 50 chars).
+  - Use --no-pr to skip PR creation.
+EOF
+}
+
+# Configuration
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Default API base URLs
+PRODUCTION_API_BASE_URL="https://api.githubcopilot.com/agents/swe"
+STAGING_API_BASE_URL="https://api.githubcopilot.com/agents/swe-staging"
+LOCAL_API_BASE_URL="http://localhost:2208"
+# e.g. https://copilot-api.test-prodweu01.ghe.com/agents/swe/jobs/coding-agent-test/test-cca
+PROXIMA_API_BASE_URL="https://copilot-api.<tenant>.ghe.com/agents/swe"
+
+# Parse command line options
+LOCAL_MODE=true
+STAGING_MODE=false
+PROXIMA_MODE=false
+STAGING_ENVIRONMENT="staging"  # Default staging environment
+API_VERSION="v1"  # Default to v1
+PROXIMA_TENANT=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --production)
+            LOCAL_MODE=false
+            STAGING_MODE=false
+            shift
+            ;;
+        --staging)
+            LOCAL_MODE=false
+            STAGING_MODE=true
+            STAGING_ENVIRONMENT="staging"
+            shift
+            ;;
+        --staging=*)
+            LOCAL_MODE=false
+            STAGING_MODE=true
+            STAGING_ENVIRONMENT="${1#*=}"
+            # Validate staging environment
+            if [[ "$STAGING_ENVIRONMENT" != "staging" && "$STAGING_ENVIRONMENT" != "jedi-knight" && "$STAGING_ENVIRONMENT" != "sith-lord" ]]; then
+                echo "Error: Invalid staging environment '$STAGING_ENVIRONMENT'. Valid environments are: staging, jedi-knight, sith-lord" >&2
+                exit 1
+            fi
+            shift
+            ;;
+        --proxima=*)
+            LOCAL_MODE=false
+            PROXIMA_MODE=true
+            PROXIMA_TENANT="${1#*=}"
+            shift
+            ;;
+        --local)
+            LOCAL_MODE=true
+            STAGING_MODE=false
+            shift
+            ;;
+        --version=*)
+            API_VERSION="${1#*=}"
+            if [[ "$API_VERSION" != "v0" && "$API_VERSION" != "v1" && "$API_VERSION" != "default" ]]; then
+                echo "Error: Invalid API version '$API_VERSION'. Valid versions are: v0, v1, default" >&2
+                exit 1
+            fi
+            shift
+            ;;
+        --help|-h)
+            show_help
+            exit 0
+            ;;
+        -*)
+            echo "Unknown option: $1" >&2
+            show_help
+            exit 1
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# Function to set up environment based on mode
+setup_environment() {
+    # Build API URLs with version
+    local version_path=""
+    if [ "$API_VERSION" != "default" ]; then
+        version_path="/$API_VERSION"
+    fi
+    
+    local production_url="https://api.githubcopilot.com/agents/swe${version_path}"
+    # Build staging URL based on environment
+    local staging_url_suffix=""
+    if [ "$STAGING_ENVIRONMENT" != "staging" ]; then
+        staging_url_suffix="-${STAGING_ENVIRONMENT}"
+    fi
+    local staging_url="https://api.githubcopilot.com/agents/swe-staging${staging_url_suffix}${version_path}"
+    local local_url="http://localhost:2208${version_path}"
+    
+    if [ "$LOCAL_MODE" = true ]; then
+        # Local development mode
+        export USER_TOKEN="${MONALISA_PAT}"
+        export JOB_API_BASE_URL="${JOB_API_BASE_URL:-$local_url}"
+        
+        if [ -z "${MONALISA_PAT}" ]; then
+            echo "Error: MONALISA_PAT environment variable is required for local mode." >&2
+            echo "If you are not in a Codespace, please set this variable before running the script." >&2
+            exit 1
+        fi
+    elif [ "$STAGING_MODE" = true ]; then
+        # Staging mode
+        export JOB_API_BASE_URL="${JOB_API_BASE_URL:-$staging_url}"
+        
+        if [ -z "${USER_TOKEN}" ]; then
+            # Try to get token from GitHub CLI
+            if command -v gh >/dev/null 2>&1; then
+                echo "USER_TOKEN not found, attempting to get token from GitHub CLI..." >&2
+                export USER_TOKEN=$(gh auth token 2>/dev/null)
+                if [ -z "${USER_TOKEN}" ]; then
+                    echo "Error: Could not get token from GitHub CLI. Please run 'gh auth login' or set USER_TOKEN environment variable." >&2
+                    exit 1
+                fi
+            else
+                echo "Error: USER_TOKEN environment variable is required for staging mode." >&2
+                echo "Please set this variable with an appropriately scoped token or install GitHub CLI." >&2
+                exit 1
+            fi
+        fi
+    elif [ "$PROXIMA_MODE" = true ]; then
+        # Proxima mode
+        if [ -z "$PROXIMA_TENANT" ]; then
+            echo "Error: Proxima tenant must be provided with --proxima=<tenant>" >&2
+            exit 1
+        fi
+
+        # Set JOB_API_BASE_URL for Proxima based off of PROXIMA_API_BASE_URL
+        local proxima_url="${PROXIMA_API_BASE_URL//<tenant>/$PROXIMA_TENANT}${version_path}"
+        export JOB_API_BASE_URL="${JOB_API_BASE_URL:-$proxima_url}"
+
+        if [ -z "${USER_TOKEN}" ]; then
+            echo "Error: USER_TOKEN environment variable is required for proxima mode." >&2
+            echo "Please set this variable with an appropriately scoped token." >&2
+            exit 1
+        fi
+    else
+        # Production mode
+        export JOB_API_BASE_URL="${JOB_API_BASE_URL:-$production_url}"
+        
+        if [ -z "${USER_TOKEN}" ]; then
+            # Try to get token from GitHub CLI
+            if command -v gh >/dev/null 2>&1; then
+                echo "USER_TOKEN not found, attempting to get token from GitHub CLI..." >&2
+                export USER_TOKEN=$(gh auth token 2>/dev/null)
+                if [ -z "${USER_TOKEN}" ]; then
+                    echo "Error: Could not get token from GitHub CLI. Please run 'gh auth login' or set USER_TOKEN environment variable." >&2
+                    exit 1
+                fi
+            else
+                echo "Error: USER_TOKEN environment variable is required for production mode." >&2
+                echo "Please set this variable with an appropriately scoped token or install GitHub CLI." >&2
+                exit 1
+            fi
+        fi
+    fi
+}
+
+# Function to create a new job
+cmd_new() {
+    # Parse arguments - positional args first, then flags at the end
+    local no_pr=false
+    local docker_mode=false
+    local actions_mode=false
+    local repo=""
+    local json_payload=""
+    
+    # Collect all arguments, separating positional from flags
+    local positional_args=()
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --no-pr)
+                no_pr=true
+                shift
+                ;;
+            --docker)
+                docker_mode=true
+                shift
+                ;;
+            --actions)
+                actions_mode=true
+                shift
+                ;;
+            -*)
+                echo "Unknown option for 'new' command: $1" >&2
+                exit 1
+                ;;
+            *)
+                positional_args+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    if [ "${#positional_args[@]}" -ne 2 ]; then
+        echo "Usage: script/job-api [options] new <repo> <json_payload> [--no-pr] [--docker] [--actions]" >&2
+        exit 1
+    fi
+
+    repo="${positional_args[0]}"
+    json_payload="${positional_args[1]}"
+    
+    # Validate that json_payload is valid JSON
+    if ! echo "$json_payload" | jq empty 2>/dev/null; then
+        echo "Error: json_payload must be valid JSON" >&2
+        exit 1
+    fi
+    
+    # Handle PR / branch features.
+    #
+    # Two modes:
+    #   1. Default (no --no-pr): inject features.pull_request when neither
+    #      features.branch nor features.pull_request is present in the payload
+    #      (even if other feature keys exist).
+    #   2. --no-pr: always ensure features.branch exists (so the backend doesn't
+    #      default to creating a PR), and strip features.pull_request if present.
+    local has_branch has_pr
+    has_branch=$(echo "$json_payload" | jq 'if has("features") then .features | has("branch") else false end' 2>/dev/null || echo "false")
+    has_pr=$(echo "$json_payload" | jq 'if has("features") then .features | has("pull_request") else false end' 2>/dev/null || echo "false")
+
+    if [ "$no_pr" = false ]; then
+        # Inject a default PR only when neither features.branch nor features.pull_request
+        # is specified in the payload. If either is provided, respect the caller's choice.
+        if [ "$has_pr" != "true" ] && [ "$has_branch" != "true" ]; then
+            local default_title
+            default_title=$(echo "$json_payload" | jq -r '
+                (.problem_statement // "Dev test job") as $ps |
+                if ($ps | length) > 50 then ($ps | .[0:50]) + "..."
+                else $ps
+                end
+            ')
+            echo "Note: Using problem_statement as PR title: \"$default_title\" (use --no-pr to skip)" >&2
+            json_payload=$(echo "$json_payload" | jq --arg title "$default_title" '.features.pull_request.title = $title')
+        fi
+    else
+        if [ "$has_pr" = "true" ]; then
+            # Caller passed features.pull_request but also --no-pr — strip the PR
+            json_payload=$(echo "$json_payload" | jq 'del(.features.pull_request)')
+            echo "Note: --no-pr set, removed features.pull_request from payload" >&2
+        fi
+        # After any modifications, ensure features.branch exists so backend doesn't default to PR.
+        has_branch=$(echo "$json_payload" | jq 'if has("features") then .features | has("branch") else false end' 2>/dev/null || echo "false")
+        if [ "$has_branch" != "true" ]; then
+            json_payload=$(echo "$json_payload" | jq '.features.branch = {}')
+            echo "Note: --no-pr set, will create branch only (no pull request)" >&2
+        fi
+    fi
+    
+    local curl_args=(-s -L -H "Content-Type: application/json" -H "Accept: application/json" --data "$json_payload")
+    if [ "$LOCAL_MODE" = true ]; then
+        curl_args+=(-H "Authorization: Bearer ${USER_TOKEN}")
+    else
+        curl_args+=(-H "Copilot-Integration-Id: copilot-developer-dev" -H "Authorization: Bearer ${USER_TOKEN}")
+    fi
+
+    if [ "$docker_mode" = true ]; then
+        # Capture response body (without -i headers) for JSON parsing
+        local response
+        local http_code
+        response=$(curl -w "\n%{http_code}" "${curl_args[@]}" "$JOB_API_BASE_URL/jobs/$repo")
+        http_code=$(echo "$response" | tail -1)
+        local body
+        body=$(echo "$response" | sed '$d')
+
+        echo "$body"
+
+        if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
+            local job_id
+            job_id=$(echo "$body" | jq -r '.job_id // empty')
+            if [ -z "$job_id" ]; then
+                echo "Error: Could not extract job_id from response" >&2
+                exit 1
+            fi
+
+            echo "" >&2
+            echo "Job created: $job_id" >&2
+            echo "Waiting for container log in runtime-logs/..." >&2
+
+            # Poll for log file matching the job ID prefix
+            local log_dir="../runtime-logs"
+            local log_file=""
+            local attempts=0
+            local max_attempts=60  # Wait up to 60 seconds
+
+            while [ -z "$log_file" ] && [ "$attempts" -lt "$max_attempts" ]; do
+                log_file=$(find "$log_dir" -maxdepth 1 -name "${job_id}-*.log" 2>/dev/null | head -1)
+                if [ -z "$log_file" ]; then
+                    sleep 1
+                    attempts=$((attempts + 1))
+                fi
+            done
+
+            if [ -z "$log_file" ]; then
+                echo "Timed out waiting for log file for job $job_id" >&2
+                exit 1
+            fi
+
+            echo "Tailing log: $log_file" >&2
+            echo "---" >&2
+            tail -n +1 -f "$log_file"
+        else
+            echo "Job creation failed (HTTP $http_code)" >&2
+            exit 1
+        fi
+    elif [ "$actions_mode" = true ]; then
+        local log_dir="$SCRIPT_DIR/actions-runner/_diag"
+
+        # Clean the runner workspace so each job starts with a fresh filesystem
+        echo "Cleaning runner workspace..." >&2
+        rm -rf "$SCRIPT_DIR/actions-runner/_work"
+        echo "Runner workspace cleaned." >&2
+
+        local known_logs
+        known_logs=$(ls "$log_dir"/Worker_*.log 2>/dev/null | sort)
+
+        # Create the job
+        local response
+        local http_code
+        response=$(curl -w "\n%{http_code}" "${curl_args[@]}" "$JOB_API_BASE_URL/jobs/$repo")
+        http_code=$(echo "$response" | tail -1)
+        local body
+        body=$(echo "$response" | sed '$d')
+
+        echo "$body"
+
+        if [[ "$http_code" -lt 200 || "$http_code" -ge 300 ]]; then
+            echo "Job creation failed (HTTP $http_code)" >&2
+            exit 1
+        fi
+
+        echo "" >&2
+        echo "Waiting for Actions runner to pick up job..." >&2
+
+        # Wait for a NEW Worker log file to appear
+        local new_log=""
+        local attempts=0
+        local max_attempts=120
+        while [ -z "$new_log" ] && [ "$attempts" -lt "$max_attempts" ]; do
+            local current_logs
+            current_logs=$(ls "$log_dir"/Worker_*.log 2>/dev/null | sort)
+            new_log=$(comm -13 <(echo "$known_logs") <(echo "$current_logs") | tail -1)
+            if [ -z "$new_log" ]; then
+                sleep 1
+                attempts=$((attempts + 1))
+            fi
+        done
+
+        if [ -z "$new_log" ]; then
+            echo "Timed out waiting for runner to pick up job" >&2
+            exit 1
+        fi
+
+        echo "📋 Streaming job logs..." >&2
+        tail -n +1 -f "$new_log" 2>/dev/null | awk '
+            /Job result after all job steps finish:|Record: t=Job, n=.*s=Completed/ {
+                line = $0
+                sub(/.*Enqueue web console line queue: /, "", line)
+                if (line == $0) { sub(/.*\] /, "", line) }
+                gsub(/\r/, "", line)
+                printf "\r%s\n", line
+                fflush()
+                exit 0
+            }
+            {
+                if (sub(/.*Enqueue web console line queue: /, "", $0) == 0) next
+                gsub(/\x1b\[[0-9;]*m/, "", $0)
+                gsub(/\r/, "", $0)
+                sub(/^[[:space:]]+/, "", $0)
+
+                if ($0 ~ /^##\[error\]/) {
+                    sub(/^##\[error\]/, "ERROR: ", $0)
+                } else if ($0 ~ /^##\[warning\]/) {
+                    sub(/^##\[warning\]/, "WARNING: ", $0)
+                } else if ($0 ~ /^##\[/) {
+                    next
+                }
+                if ($0 ~ /^shell: / || $0 ~ /^env:$/ || $0 ~ /^$/) next
+                if ($0 ~ /^(if |else|fi$|done|do$|while |echo |set |mkdir |curl |MAX_RETRIES|RETRY_COUNT|sleep |STOP_TOKEN|find "|\.\/\*\*\*)/) next
+                if ($0 ~ /^(Current runner version:|Runner name:|Machine name:|Deployments:|Metadata:|Secret source:|Prepare workflow directory|Prepare all required actions|Getting action download info|Download action repository|Complete job name:)/) next
+                if ($0 ~ /^exit [0-9]+$/ || $0 ~ /^fi; \\$/ || $0 ~ /^# /) next
+                if ($0 ~ /^(SHOULD_CONTINUE|GITHUB_[A-Z0-9_]*|COPILOT_[A-Z0-9_]*|BLACKBIRD_MODE|SECRET_SCANNING_URL|PLAYWRIGHT_VERSION|NODE_EXTRA_CA_CERTS|HTTP_PROXY|HTTPS_PROXY|NO_PROXY|SSL_CERT_FILE): /) next
+                if ($0 ~ /^[A-Za-z_][A-Za-z0-9_]*=\$\(/) next
+                if ($0 ~ /\\$/ || $0 ~ /^case / || $0 ~ /^esac$/ || $0 ~ /^node\*\)/ || $0 ~ /^\*\)/ || $0 ~ /^"/) next
+                if ($0 ~ /Authorization: \*\*\*/) next
+
+                printf "\r%s\n", $0
+                fflush()
+            }
+        '
+    else
+        # Original behavior: show full response with headers
+        curl -i "${curl_args[@]}" "$JOB_API_BASE_URL/jobs/$repo"
+    fi
+}
+
+# Function to get job or session details
+cmd_get() {
+    if [ "$#" -lt 2 ]; then
+        echo "Usage: script/job-api [--production|--staging[=environment]] [--version=<version>] get <repo_owner>/<repo_name> <job_id>" >&2
+        echo "       script/job-api [--production|--staging[=environment]] [--version=<version>] get <repo_owner>/<repo_name> session <session_id>" >&2
+        exit 1
+    fi
+    
+    local repo="$1"
+    shift
+    
+    local session_url_part=""
+    if [ "$1" == "session" ]; then
+        session_url_part="/session"
+        shift
+    fi
+    
+    if [ "$#" -ne 1 ]; then
+        echo "Usage: script/job-api [--production|--staging[=environment]] [--version=<version>] get <repo_owner>/<repo_name> <job_id>" >&2
+        echo "       script/job-api [--production|--staging[=environment]] [--version=<version>] get <repo_owner>/<repo_name> session <session_id>" >&2
+        exit 1
+    fi
+    
+    local id="$1"
+    
+    if [ "$LOCAL_MODE" = true ]; then
+        curl -i  -L \
+            -H "Authorization: Bearer ${USER_TOKEN}" \
+            --request "GET" \
+            "$JOB_API_BASE_URL/jobs/${repo}${session_url_part}/$id"
+    else
+        curl -i  -L \
+            -H "Copilot-Integration-Id: copilot-developer-dev" \
+            -H "Authorization: Bearer ${USER_TOKEN}" \
+            --request "GET" \
+            "$JOB_API_BASE_URL/jobs/${repo}${session_url_part}/$id"
+    fi
+}
+
+# Function to cancel a job or session
+cmd_cancel() {
+    if [ "$#" -lt 2 ]; then
+        echo "Usage: script/job-api [--production|--staging[=environment]] [--version=<version>] cancel <repo_owner>/<repo_name> <job_id>" >&2
+        echo "       script/job-api [--production|--staging[=environment]] [--version=<version>] cancel <repo_owner>/<repo_name> session <session_id>" >&2
+        exit 1
+    fi
+    
+    local repo="$1"
+    shift
+    
+    local url_path=""
+    if [ "$1" == "session" ]; then
+        if [ "$#" -ne 2 ]; then
+            echo "Usage: script/job-api [--production|--staging[=environment]] [--version=<version>] cancel <repo_owner>/<repo_name> session <session_id>" >&2
+            exit 1
+        fi
+        url_path="/session/$2"
+    else
+        if [ "$#" -ne 1 ]; then
+            echo "Usage: script/job-api [--production|--staging[=environment]] [--version=<version>] cancel <repo_owner>/<repo_name> <job_id>" >&2
+            exit 1
+        fi
+        url_path="/$1"
+    fi
+    
+    if [ "$LOCAL_MODE" = true ]; then
+        curl -i  -L \
+            -H "Authorization: Bearer ${USER_TOKEN}" \
+            --request "POST" \
+            "$JOB_API_BASE_URL/jobs/${repo}${url_path}/cancel"
+    else
+        curl -i  -L \
+            -H "Copilot-Integration-Id: copilot-developer-dev" \
+            -H "Authorization: Bearer ${USER_TOKEN}" \
+            --request "POST" \
+            "$JOB_API_BASE_URL/jobs/${repo}${url_path}/cancel"
+    fi
+}
+
+# Main command dispatch
+if [ "$#" -lt 2 ]; then
+    echo "Error: Insufficient arguments" >&2
+    show_help
+    exit 1
+fi
+
+setup_environment
+
+command="$1"
+shift
+
+case "$command" in
+    new)
+        cmd_new "$@"
+        ;;
+    get)
+        cmd_get "$@"
+        ;;
+    cancel)
+        cmd_cancel "$@"
+        ;;
+    *)
+        echo "Error: Unknown command '$command'" >&2
+        show_help
+        exit 1
+        ;;
+esac

@@ -6,17 +6,11 @@ module WikiHelper
 
   def wiki_data(page, context = nil, current_user = nil)
     if context.is_a?(String)
-      org_ruby_rendering_cache_key = if page.format == :org
-        state = GitHub::HTML::WikiMarkupFilter.org_ruby_rendering_enabled? ? "enabled" : "disabled"
-        "org-ruby-rendering-#{state}"
-      end
-
       cache_key = [
         page.cache_key,
         context,
         wiki_prefix_on_relative_links?,
         ("secure-user-assets" if FeatureFlag.vexi.enabled_or_raise?(:secure_user_assets, current_repository.owner)), # rubocop:disable GitHub/FeatureManagement/NoVexiEnabledOrRaiseUsage
-        org_ruby_rendering_cache_key,
       ].join(":")
       if GitHub::Goomba::CodeRenderingServiceFilter.skip_quote_rewrite?(entity: page.wiki)
         cache_key += ":skip-quote-rewrite"

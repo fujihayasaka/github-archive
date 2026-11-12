@@ -1,0 +1,7 @@
+require "models/base"
+require "models/rubygem"
+require "models/dependency"
+require "models/version"
+require "models/download_count"
+require "models/gem_download"
+require "models/linkset"

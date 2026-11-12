@@ -1,0 +1,23 @@
+[&lt;&lt; Spokes API](../../../README.md)
+
+# spokes-api/diffs/v2/diff_appliable_result.proto
+
+
+
+## Types
+
+<a name="github.spokes.diffs.v2.DiffAppliableResult"></a>
+
+### DiffAppliableResult
+DiffAppliableResult represents the result of checking if a diff patch can be applied.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| DIFF_APPLIABLE_RESULT_INVALID | 0 | DIFF_APPLIABLE_RESULT_INVALID is the default value and should not be used. |
+| DIFF_APPLIABLE_RESULT_APPLIABLE | 1 | DIFF_APPLIABLE_RESULT_APPLIABLE indicates the patch can be applied to the commit. |
+| DIFF_APPLIABLE_RESULT_CONFLICTS | 2 | DIFF_APPLIABLE_RESULT_CONFLICTS indicates the patch cannot be applied due to conflicts. |
+| DIFF_APPLIABLE_RESULT_INVALID_COMMIT | 3 | DIFF_APPLIABLE_RESULT_INVALID_COMMIT indicates the commit OID does not exist or is not a commit. |
+| DIFF_APPLIABLE_RESULT_MALFORMED_PATCH | 4 | DIFF_APPLIABLE_RESULT_MALFORMED_PATCH indicates the patch content is not valid unified diff format. |
+| DIFF_APPLIABLE_RESULT_ALREADY_APPLIED | 5 | DIFF_APPLIABLE_RESULT_ALREADY_APPLIED indicates the changes in the patch are already present at the given commit, so no changes are needed. |
+
+

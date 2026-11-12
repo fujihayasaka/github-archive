@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    annotations:
+        heaven.githubapp.com/image-placeholder: dependabot-api
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: timerd
+        heaven.githubapp.com/replace-pods-even-if-unchanged: "true"
+        moda.github.net/vpa-updater-enabled: "true"
+    name: timerd
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app: timerd
+    template:
+        metadata:
+            annotations:
+                fluentbit.io/parser: logfmt_sloppy
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: dependabot
+            labels:
+                app: timerd
+        spec:
+            containers:
+                - command:
+                    - bundle
+                    - exec
+                    - bin/timerd
+                    - ./config/scheduled_jobs.rb
+                  env:
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  image: dependabot-api
+                  name: timerd
+                  readinessProbe:
+                    exec:
+                        command:
+                            - stat
+                            - /tmp/timerd_started
+                    initialDelaySeconds: 10
+                    periodSeconds: 5
+                  resources:
+                    limits:
+                        cpu: 1000m
+                        memory: 2Gi
+                    requests:
+                        cpu: 200m
+                        memory: 1Gi
+                  volumeMounts:
+                    - mountPath: /etc/github/metadata.json
+                      name: github-metadata
+                      readOnly: true
+            dnsPolicy: Default
+            volumes:
+                - hostPath:
+                    path: /etc/github/metadata.json
+                  name: github-metadata

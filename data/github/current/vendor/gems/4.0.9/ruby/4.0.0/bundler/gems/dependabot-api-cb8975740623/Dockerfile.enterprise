@@ -1,0 +1,66 @@
+###############################################################
+# STAGE 1 - BUILD
+###############################################################
+# From https://github.com/github/gh-base-image/pkgs/container/gh-base-image%2Fruby-builder
+FROM ghcr.io/github/gh-base-image/ruby-builder:v3.3-noble-20260514212321 AS build
+ARG GITHUB_SHA=latest
+ENV BUNDLE_GEMFILE="/opt/dependabot/Gemfile" \
+    BUNDLE_PATH="/opt/dependabot/vendor/bundle" \
+    BUNDLE_PATH__SYSTEM=false \
+    BUNDLE_WITHOUT="development:test" \
+    DEBIAN_FRONTEND=noninteractive \
+    ENTERPRISE=1 \
+    GITHUB_SHA=${GITHUB_SHA} \
+    HOME="/opt/dependabot" \
+    LANG=C.UTF-8 \
+    RAILS_ENV=production
+WORKDIR /opt/dependabot
+
+# We passed pkg-mirror-host as a secret to the build but it is not sensitive data.
+RUN --mount=type=secret,id=pkg-mirror-host,target=/etc/pkg_mirror_host.txt,required=false \
+    if [ -f /etc/pkg_mirror_host.txt ]; then cat /etc/pkg_mirror_host.txt >> /etc/apt/mirrorlist.txt; fi
+
+RUN --mount=type=secret,id=apt-auth-conf,target=/etc/apt/auth.conf.d/apt_auth.conf,required=false \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+      # WARNING: Any changes to this list need to also get reflected in `dpkg.manifest`
+      default-mysql-client \
+      git \
+      libicu-dev \
+      liblzma-dev \
+      libsodium23 && \
+    echo 'gem: --no-document' >> /etc/gemrc
+COPY . .
+# Obfuscate Ruby source code because it's being sent to customers as part of GHES
+RUN find app lib gen -iname '*.rb' -print0 | xargs -0 "ruby" "/bin/tools/ruby-concealer.rb" 2>&1 | awk '!/already concealed/'
+RUN bundle install --local --jobs=$(nproc) && rake -f lib/tasks/enterprise.rake enterprise:tarball
+
+FROM ghcr.io/github/gh-base-image/go-builder-noble:20260515-165510-g89bdb0304 AS gobuild
+RUN GOBIN=/usr/local/bin go install github.com/ddollar/forego@v0.16.1
+
+################################################################
+## STAGE 2 - RUN. Use base image for main app
+################################################################
+# From https://github.com/github/gh-base-image/pkgs/container/gh-base-image%2Fruby-base
+FROM ghcr.io/github/gh-base-image/ruby-base:v3.3-noble-20260514212342
+ARG GITHUB_SHA=latest
+ENV BUNDLE_DEPLOYMENT=true \
+    BUNDLE_GEMFILE="/opt/dependabot/Gemfile" \
+    BUNDLE_PATH="/opt/dependabot/vendor/bundle" \
+    BUNDLE_PATH__SYSTEM=false \
+    BUNDLE_WITHOUT="development:test" \
+    DEBIAN_FRONTEND=noninteractive \
+    GITHUB_SHA=${GITHUB_SHA} \
+    HOME="/opt/dependabot" \
+    LANG=C.UTF-8 \
+    RAILS_ENV=production
+LABEL org.opencontainers.image.source=https://github.com/github/dependabot-api
+COPY --from=build /opt/dependabot/pkg/*.tar.gz /opt/
+COPY --from=gobuild /usr/local/bin/forego /usr/local/bin/foreman
+COPY script/bootstrap-ghes /usr/local/bin/bootstrap.sh
+COPY dpkg.manifest /etc/dependabot/dpkg.manifest
+RUN sh /usr/local/bin/bootstrap.sh
+WORKDIR /opt/dependabot
+USER dependabot
+COPY /script/entrypoint.sh /entrypoint.sh
+ENTRYPOINT ["/usr/bin/dumb-init", "--", "/entrypoint.sh"]

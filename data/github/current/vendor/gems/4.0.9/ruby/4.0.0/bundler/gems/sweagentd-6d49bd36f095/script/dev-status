@@ -1,0 +1,458 @@
+#!/bin/bash
+#
+# SWE Agent Development Environment Status
+#
+# Checks all local dev services and reports a color-coded health summary.
+# Designed to be the first thing you run when something feels broken.
+#
+# Usage:
+#   script/dev-status          - Show status of all services
+#   script/dev-status --json   - Output status as JSON (for automation)
+#   script/dev-status --quiet  - Exit code only (0 = all healthy, 1 = something down)
+#
+# Checks:
+#   - Docker daemon
+#   - CosmosDB emulator (container + HTTPS endpoint on port 8181)
+#   - Redis (container + PING on port 6381)
+#   - Overmind process manager
+#   - sweagentd HTTP server (port 2208)
+#   - sweagentd Twirp server (port 2209)
+#   - sweagentd Worker (via overmind)
+#   - sweagentd Scheduler (via overmind)
+#   - GitHub server (github.localhost)
+#   - Environment files (.env, .env.cosmos-dev, .env.redis-dev)
+#
+
+set -uo pipefail
+
+# Configuration
+COSMOS_CONTAINER_NAME="${COSMOS_CONTAINER_NAME:-sweagentd-cosmos-dev}"
+COSMOS_HOST_PORT="${COSMOS_HOST_PORT:-8181}"
+REDIS_CONTAINER_NAME="${REDIS_CONTAINER_NAME:-sweagentd-redis-dev}"
+REDIS_HOST_PORT="${REDIS_HOST_PORT:-6381}"
+HTTP_PORT=2208
+TWIRP_PORT=2209
+OVERMIND_SOCKET="/tmp/overmind-sweagentd.sock"
+GITHUB_SERVER_URL="${GITHUB_SERVER_URL:-http://github.localhost}"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
+
+# Symbols
+PASS="${GREEN}✓${NC}"
+FAIL="${RED}✗${NC}"
+WARN="${YELLOW}⚠${NC}"
+
+# Output mode
+OUTPUT_MODE="normal"  # normal, json, quiet
+
+# Track overall status
+TOTAL_CHECKS=0
+PASSED_CHECKS=0
+WARNED_CHECKS=0
+FAILED_CHECKS=0
+
+# JSON accumulator
+JSON_RESULTS=()
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --json)
+            OUTPUT_MODE="json"
+            shift
+            ;;
+        --quiet|-q)
+            OUTPUT_MODE="quiet"
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: $0 [--json] [--quiet] [--help]"
+            echo ""
+            echo "Options:"
+            echo "  --json    Output status as JSON"
+            echo "  --quiet   Exit code only (0 = all healthy, 1 = one or more checks failed)"
+            echo "  --help    Show this help message"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+# JSON string escape helper
+json_escape() {
+    local s=$1
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    s=${s//$'\n'/\\n}
+    printf '%s' "$s"
+}
+
+# Record a check result
+# Usage: record_check "name" "status" "detail"
+#   status: pass, warn, fail
+record_check() {
+    local name="$1"
+    local status="$2"
+    local detail="${3:-}"
+
+    TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
+
+    case "$status" in
+        pass) PASSED_CHECKS=$((PASSED_CHECKS + 1)) ;;
+        warn) WARNED_CHECKS=$((WARNED_CHECKS + 1)) ;;
+        fail) FAILED_CHECKS=$((FAILED_CHECKS + 1)) ;;
+    esac
+
+    if [ "$OUTPUT_MODE" = "json" ]; then
+        local escaped_name escaped_status escaped_detail
+        escaped_name=$(json_escape "$name")
+        escaped_status=$(json_escape "$status")
+        escaped_detail=$(json_escape "$detail")
+        JSON_RESULTS+=("{\"name\":\"${escaped_name}\",\"status\":\"${escaped_status}\",\"detail\":\"${escaped_detail}\"}")
+        return
+    fi
+
+    if [ "$OUTPUT_MODE" = "quiet" ]; then
+        return
+    fi
+
+    local symbol
+    case "$status" in
+        pass) symbol="$PASS" ;;
+        warn) symbol="$WARN" ;;
+        fail) symbol="$FAIL" ;;
+    esac
+
+    if [ -n "$detail" ]; then
+        printf "  %b  %-30s %b%s%b\n" "$symbol" "$name" "$DIM" "$detail" "$NC"
+    else
+        printf "  %b  %-30s\n" "$symbol" "$name"
+    fi
+}
+
+# --------------------------------------------------------------------------
+# Checks
+# --------------------------------------------------------------------------
+
+check_docker() {
+    if ! command -v docker &> /dev/null; then
+        record_check "Docker" "fail" "not installed"
+        return
+    fi
+
+    if ! docker info &> /dev/null 2>&1; then
+        record_check "Docker" "fail" "daemon not running"
+        return
+    fi
+
+    record_check "Docker" "pass" "daemon running"
+}
+
+check_cosmos() {
+    # Container check
+    if ! docker ps --filter "name=${COSMOS_CONTAINER_NAME}" --format "{{.Names}}" 2>/dev/null | grep -q "^${COSMOS_CONTAINER_NAME}$"; then
+        if docker ps -a --filter "name=${COSMOS_CONTAINER_NAME}" --format "{{.Names}}" 2>/dev/null | grep -q "^${COSMOS_CONTAINER_NAME}$"; then
+            record_check "CosmosDB emulator" "fail" "container exists but stopped — run: script/cosmos-dev reset"
+        else
+            record_check "CosmosDB emulator" "fail" "container not found — run: script/cosmos-dev start"
+        fi
+        return
+    fi
+
+    # Endpoint health check (skip TLS to check if emulator process is alive)
+    if ! curl -k -s --max-time 3 "https://localhost:${COSMOS_HOST_PORT}/" > /dev/null 2>&1; then
+        record_check "CosmosDB emulator" "warn" "container running but endpoint not responding"
+        return
+    fi
+
+    # TLS cert vs container IP check — this is the #1 cause of silent in-memory fallback.
+    # The Azure Cosmos SDK does service discovery and reconnects to the container's IP.
+    # If the cert's SANs don't include the current container IP, the SDK's TLS
+    # verification fails and sweagentd silently falls back to in-memory store.
+    local container_ip
+    container_ip=$(docker inspect "${COSMOS_CONTAINER_NAME}" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null)
+
+    if [ -n "$container_ip" ]; then
+        local cert_sans
+        cert_sans=$(echo | openssl s_client -connect "localhost:${COSMOS_HOST_PORT}" 2>/dev/null \
+            | openssl x509 -noout -text 2>/dev/null \
+            | grep -A1 "Subject Alternative Name" \
+            | tail -1 || true)
+
+        if [ -n "$cert_sans" ] && ! echo "$cert_sans" | grep -q "IP Address:${container_ip}"; then
+            # Extract which IPs the cert covers for the diagnostic message
+            local cert_ips
+            cert_ips=$(printf '%s\n' "$cert_sans" | tr ',' '\n' | sed -n 's/.*IP Address:\([0-9.]*\).*/\1/p' | sort -u | tr '\n' ',' | sed 's/,$//')
+            record_check "CosmosDB emulator" "fail" "cert IP mismatch: container=${container_ip}, cert covers=${cert_ips} — run: script/cosmos-dev reset"
+            return
+        fi
+    fi
+
+    record_check "CosmosDB emulator" "pass" "port ${COSMOS_HOST_PORT} responding, TLS valid"
+}
+
+check_redis() {
+    # Container check
+    if ! docker ps --filter "name=${REDIS_CONTAINER_NAME}" --format "{{.Names}}" 2>/dev/null | grep -q "^${REDIS_CONTAINER_NAME}$"; then
+        if docker ps -a --filter "name=${REDIS_CONTAINER_NAME}" --format "{{.Names}}" 2>/dev/null | grep -q "^${REDIS_CONTAINER_NAME}$"; then
+            record_check "Redis" "fail" "container exists but stopped"
+        else
+            record_check "Redis" "fail" "container not found"
+        fi
+        return
+    fi
+
+    # PING check (runs inside container; verifies Redis process is responsive)
+    if docker exec "${REDIS_CONTAINER_NAME}" redis-cli ping 2>/dev/null | grep -q "PONG"; then
+        record_check "Redis" "pass" "container PING responded with PONG"
+    else
+        record_check "Redis" "warn" "container running but not responding to PING"
+    fi
+}
+
+check_overmind() {
+    if ! command -v overmind &> /dev/null; then
+        record_check "Overmind" "fail" "not installed"
+        return
+    fi
+
+    if [ ! -S "$OVERMIND_SOCKET" ]; then
+        record_check "Overmind" "fail" "socket not found (sweagentd not started via script/server)"
+        return
+    fi
+
+    record_check "Overmind" "pass" "socket active"
+}
+
+check_overmind_process() {
+    local process_name="$1"
+    local display_name="$2"
+
+    if [ ! -S "$OVERMIND_SOCKET" ]; then
+        record_check "$display_name" "fail" "overmind not running"
+        return
+    fi
+
+    local status
+    status=$(OVERMIND_SOCKET="$OVERMIND_SOCKET" overmind status 2>/dev/null || true)
+
+    if echo "$status" | grep -q "^${process_name}.*running"; then
+        record_check "$display_name" "pass" "running"
+    elif echo "$status" | grep -q "^${process_name}"; then
+        record_check "$display_name" "warn" "registered but not running"
+    else
+        record_check "$display_name" "fail" "not found in overmind"
+    fi
+}
+
+check_http_server() {
+    if curl -s --max-time 3 "http://localhost:${HTTP_PORT}/_ping" 2>/dev/null | grep -q "OK"; then
+        record_check "HTTP server" "pass" "port ${HTTP_PORT} /_ping OK"
+    else
+        # Check if port is at least listening
+        if command -v ss &> /dev/null && ss -tlnp 2>/dev/null | grep -q ":${HTTP_PORT} "; then
+            record_check "HTTP server" "warn" "port ${HTTP_PORT} listening but /_ping failed"
+        else
+            record_check "HTTP server" "fail" "port ${HTTP_PORT} not listening"
+        fi
+    fi
+}
+
+check_twirp_server() {
+    # Twirp doesn't have a /_ping, just check if port is listening
+    if command -v ss &> /dev/null && ss -tlnp 2>/dev/null | grep -q ":${TWIRP_PORT} "; then
+        record_check "Twirp server" "pass" "port ${TWIRP_PORT} listening"
+    elif curl -s --max-time 3 "http://localhost:${TWIRP_PORT}/" > /dev/null 2>&1; then
+        record_check "Twirp server" "pass" "port ${TWIRP_PORT} responding"
+    else
+        record_check "Twirp server" "fail" "port ${TWIRP_PORT} not listening"
+    fi
+}
+
+check_github_server() {
+    if curl -s --max-time 5 "${GITHUB_SERVER_URL}" > /dev/null 2>&1; then
+        record_check "GitHub server" "pass" "${GITHUB_SERVER_URL}"
+    else
+        record_check "GitHub server" "fail" "${GITHUB_SERVER_URL} not reachable"
+    fi
+}
+
+check_env_files() {
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local repo_root
+    repo_root="$(dirname "$script_dir")"
+
+    local all_present=true
+
+    for envfile in .env .env.cosmos-dev .env.redis-dev; do
+        if [ ! -f "${repo_root}/${envfile}" ]; then
+            record_check "Env: ${envfile}" "warn" "not found"
+            all_present=false
+        fi
+    done
+
+    if [ "$all_present" = true ]; then
+        record_check "Environment files" "pass" ".env, .env.cosmos-dev, .env.redis-dev"
+    fi
+}
+
+check_cosmos_ssl() {
+    # Only relevant if cosmos container is running and endpoint is responding
+    if ! docker ps --filter "name=${COSMOS_CONTAINER_NAME}" --format "{{.Names}}" 2>/dev/null | grep -q "^${COSMOS_CONTAINER_NAME}$"; then
+        return
+    fi
+    if ! curl -k -s --max-time 3 "https://localhost:${COSMOS_HOST_PORT}/" > /dev/null 2>&1; then
+        return
+    fi
+
+    # Skip if the IP mismatch was already detected — that check already told the full story
+    local container_ip
+    container_ip=$(docker inspect "${COSMOS_CONTAINER_NAME}" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null)
+    if [ -n "$container_ip" ]; then
+        local cert_sans
+        cert_sans=$(echo | openssl s_client -connect "localhost:${COSMOS_HOST_PORT}" 2>/dev/null \
+            | openssl x509 -noout -text 2>/dev/null \
+            | grep -A1 "Subject Alternative Name" \
+            | tail -1 || true)
+        if [ -n "$cert_sans" ] && ! echo "$cert_sans" | grep -q "IP Address:${container_ip}"; then
+            # IP mismatch already reported by check_cosmos — don't add a contradictory ✓
+            return
+        fi
+    fi
+
+    # Verify the emulator's certificate against the CA bundle used by the SDK
+    local ca_bundle="${COSMOS_CA_BUNDLE:-$HOME/.cosmos-ca-bundle.pem}"
+    if [ ! -f "$ca_bundle" ]; then
+        record_check "Cosmos SSL cert" "warn" "CA bundle missing — SDK will fall back to in-memory"
+        return
+    fi
+
+    local s_client_output
+    if ! s_client_output=$(echo | openssl s_client -connect "localhost:${COSMOS_HOST_PORT}" -CAfile "$ca_bundle" -verify_return_error 2>&1); then
+        local verify_line
+        verify_line=$(printf '%s\n' "$s_client_output" | grep -F "Verify return code" || true)
+        if [ -n "$verify_line" ]; then
+            record_check "Cosmos SSL cert" "fail" "verification failed: ${verify_line} — run: script/cosmos-dev reset"
+        else
+            record_check "Cosmos SSL cert" "fail" "verification failed against CA bundle — run: script/cosmos-dev reset"
+        fi
+    else
+        record_check "Cosmos SSL cert" "pass" "emulator cert verifies against CA bundle"
+    fi
+}
+
+# --------------------------------------------------------------------------
+# Output
+# --------------------------------------------------------------------------
+
+print_header() {
+    if [ "$OUTPUT_MODE" != "normal" ]; then return; fi
+    echo ""
+    echo -e "${BOLD}sweagentd dev environment status${NC}"
+    echo -e "${DIM}$(date '+%Y-%m-%d %H:%M:%S')${NC}"
+    echo ""
+}
+
+print_section() {
+    if [ "$OUTPUT_MODE" != "normal" ]; then return; fi
+    echo -e "${BOLD}$1${NC}"
+}
+
+print_separator() {
+    if [ "$OUTPUT_MODE" != "normal" ]; then return; fi
+    echo ""
+}
+
+print_summary() {
+    if [ "$OUTPUT_MODE" = "json" ]; then
+        local json="["
+        local first=true
+        for result in "${JSON_RESULTS[@]}"; do
+            if [ "$first" = true ]; then
+                first=false
+            else
+                json+=","
+            fi
+            json+="$result"
+        done
+        json+="]"
+        echo "$json"
+        return
+    fi
+
+    if [ "$OUTPUT_MODE" = "quiet" ]; then
+        return
+    fi
+
+    echo -e "${DIM}─────────────────────────────────────────────${NC}"
+
+    if [ "$FAILED_CHECKS" -eq 0 ] && [ "$WARNED_CHECKS" -eq 0 ]; then
+        echo -e "  ${GREEN}${BOLD}All ${TOTAL_CHECKS} checks passed${NC}"
+    else
+        local summary=""
+        [ "$PASSED_CHECKS" -gt 0 ] && summary+="${GREEN}${PASSED_CHECKS} healthy${NC}"
+        if [ "$WARNED_CHECKS" -gt 0 ]; then
+            [ -n "$summary" ] && summary+=", "
+            summary+="${YELLOW}${WARNED_CHECKS} degraded${NC}"
+        fi
+        if [ "$FAILED_CHECKS" -gt 0 ]; then
+            [ -n "$summary" ] && summary+=", "
+            summary+="${RED}${FAILED_CHECKS} down${NC}"
+        fi
+        echo -e "  $summary"
+    fi
+
+    if [ "$FAILED_CHECKS" -gt 0 ]; then
+        echo ""
+        echo -e "  ${DIM}Tip: Run 'script/server' to start all services${NC}"
+    fi
+    echo ""
+}
+
+# --------------------------------------------------------------------------
+# Main
+# --------------------------------------------------------------------------
+
+print_header
+
+print_section "Infrastructure"
+check_docker
+check_env_files
+print_separator
+
+print_section "Data Stores"
+check_cosmos
+check_cosmos_ssl
+check_redis
+print_separator
+
+print_section "Services"
+check_overmind
+check_http_server
+check_twirp_server
+check_overmind_process "worker" "Worker"
+check_overmind_process "scheduler" "Scheduler"
+print_separator
+
+print_section "External"
+check_github_server
+print_separator
+
+print_summary
+
+# Exit code: 0 if everything healthy, 1 if anything failed
+if [ "$FAILED_CHECKS" -gt 0 ]; then
+    exit 1
+fi
+exit 0

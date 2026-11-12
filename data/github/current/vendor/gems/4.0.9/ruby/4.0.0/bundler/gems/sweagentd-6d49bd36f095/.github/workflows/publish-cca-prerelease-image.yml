@@ -1,0 +1,41 @@
+# Publish CCA Prerelease Base Image
+#
+# Builds the CCA (Copilot Coding Agent) Dockerfile with the prerelease Copilot
+# CLI version, pushes it to GHCR, and registers it as a public disk image via
+# the Sandbox API.
+# This image is used as the base disk image for CCA sandboxes running prerelease.
+#
+# Triggers:
+#   - schedule: hourly at minute 0
+#   - workflow_dispatch: manual trigger for testing / ad-hoc rebuilds
+
+name: Publish CCA Prerelease Base Image
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build only; skip GHCR push and Sandbox API registration. Allows validating from non-main branches.'
+        type: boolean
+        default: false
+
+concurrency:
+  group: publish-cca-prerelease-image
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    uses: ./.github/workflows/publish-image.yaml
+    with:
+      docker_image_name: ghcr.io/github/sweagentd/copilot-cca-prerelease
+      disk_image_name: cca-prerelease
+      devcontainer_path: images/cca/devcontainer.prerelease.json
+      dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+    secrets:
+      SANDBOX_IMAGE_TOKEN: ${{ secrets.SANDBOX_CCA_IMAGE_TOKEN }}

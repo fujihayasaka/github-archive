@@ -1,0 +1,27 @@
+#!/bin/bash
+
+set -e
+
+if [[ -f /usr/local/share/goproxy-init.sh ]]; then
+    /usr/local/share/goproxy-init.sh --override
+fi
+
+if [[ -z "$DS_DEVCONTAINER" ]]; then
+    if [[ -n "${GITHUB_TOKEN-}" ]]; then
+        echo "machine goproxy.githubapp.com login nobody password ${GITHUB_TOKEN}" > "$HOME/.netrc"
+    fi
+
+    # This could has duplication with script/setup-go-auth, feel free to clean it up but make sure it stays in sync!
+    sudo cp .devcontainer/goproxy.sh /etc/profile.d/
+
+    # Sometimes the terminal profile in devcontainer.json is ignored and the shell
+    # is not a login shell. Sourcing goproxy.sh in an extra place should mitigate it
+    # until we figure out why.
+    echo '. /etc/profile.d/goproxy.sh' | sudo tee -a /etc/bash.bashrc
+    echo '. /etc/profile.d/goproxy.sh' | sudo tee -a /etc/zsh/zshrc
+fi
+
+gh extension install github/gh-kustomize
+
+# We have to wait for the post-create hook to have a goproxy token that is able to pull our dependencies for building the tools
+make tools

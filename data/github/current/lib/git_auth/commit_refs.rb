@@ -219,7 +219,7 @@ module GitAuth
           # Generate the "push notices" to send to the user. We generate them out of the same class as we do for
           # the postrx call transitionally, so we need to generate the same structure as we pass there
           if target.normal_repo?
-            notices = PushNotices.call(target.repository, data)
+            notices = PushNotices.call(target.repository, data, hash_algo: target.hash_algo)
             result["messages"] = notices.for_display if notices.any?
           end
         end

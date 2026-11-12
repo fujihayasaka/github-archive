@@ -1,0 +1,274 @@
+version: 2
+registries:
+  ghcr:
+    type: docker-registry
+    url: ghcr.io
+    username: PAT
+    password: ${{secrets.BASE_CONTAINER_IMAGE_READER_DEPENDABOT}}
+  rubygems-github-packages:
+    type: rubygems-server
+    url: https://rubygems.pkg.github.com/github/
+    token: ${{secrets.BASE_CONTAINER_IMAGE_READER_DEPENDABOT}}
+  github-git:
+    type: git
+    url: https://github.com
+    username: x-access-token
+    password: ${{secrets.DEPENDABOT_PRIVATE_REPO_PAT}}
+updates:
+  - package-ecosystem: 'bundler'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    vendor: true
+    versioning-strategy: increase
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "dependency-graph-platform-proto"
+      - dependency-name: "graphql" # ignore updates to graphql because we depend on specific behaviour of the 1.x version
+      - dependency-name: "Sinatra" # ignore updates to Sinatra because we depend on specific behaviour of the 3.x version
+        update-types:
+          - "version-update:semver-major"
+    insecure-external-code-execution: allow # we use internal gems with gemspecs: yarnlock, and proto-dependency-graph-api/ruby
+    labels:
+      - 'dependabot'
+      - 'ruby'
+    registries:
+      - rubygems-github-packages
+      - github-git
+    groups:
+      minor-version-updates:
+        update-types:
+          - "minor"
+      patch-version-updates:
+        update-types:
+          - "patch"
+
+  # Version updates for our Ruby PMAs
+  - package-ecosystem: 'bundler'
+    directories:
+    - "package_manager_adapters/cargo"
+    - "package_manager_adapters/composer"
+    - "package_manager_adapters/maven"
+    - "package_manager_adapters/nuget"
+    - "package_manager_adapters/pub"
+    - "package_manager_adapters/rubygems"
+    schedule:
+      interval: 'weekly'
+    vendor: true
+    versioning-strategy: increase
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: sqlite3 # ignore major updates to sqlite3 because we depend on specific version
+        update-types:
+          - "version-update:semver-major"
+    labels:
+      - 'package-manager-adapters'
+      - 'dependabot'
+      - 'ruby'
+    registries:
+      - rubygems-github-packages
+    groups:
+      minor-version-updates:
+        update-types:
+          - "minor"
+      patch-version-updates:
+        update-types:
+          - "patch"
+
+  # Version updates for our Python PMAs
+  - package-ecosystem: 'pip'
+    directories:
+    - "package_manager_adapters/pypi"
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 5
+    insecure-external-code-execution: "allow" # we provide private registries to Dependabot so we need to ack the risk
+    labels:
+      - 'package-manager-adapters'
+      - 'dependabot'
+      - 'python'
+    groups:
+      minor-version-updates:
+        update-types:
+          - "minor"
+      patch-version-updates:
+        update-types:
+          - "patch"
+
+  # Version updates for Go codebase
+  - package-ecosystem: gomod
+    directory: go/
+    schedule:
+      interval: weekly
+    labels:
+      - 'dependabot'
+      - 'go'
+    groups:
+      minor-version-updates:
+        update-types:
+          - "minor"
+      patch-version-updates:
+        update-types:
+          - "patch"
+
+  # Version updates for our GitHub Actions workflows
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: 'weekly'
+    labels:
+      - 'dependabot'
+      - 'actions'
+    ignore:
+      - dependency-name: "github/internal-actions"
+    groups:
+      all-dependencies:
+        patterns:
+        - "*"
+
+  # Version updates for app's Docker images
+  - package-ecosystem: "docker"
+    directories:
+      - "/"
+    schedule:
+      interval: "weekly"
+    ignore:
+      - dependency-name: jruby # ignore updates to jruby because we depend on specific version
+      - dependency-name: node # ignore updates to node because we depend on specific version
+    labels:
+      - 'dependabot'
+      - 'docker'
+    registries:
+      - ghcr
+    groups:
+      all-dependencies:
+        patterns:
+        - "*"
+
+  # Version updates for PMAs' docker images
+  - package-ecosystem: "docker"
+    directories:
+      - "go/mysql-lock"
+      - "package_manager_adapters/cargo"
+      - "package_manager_adapters/composer"
+      - "package_manager_adapters/go"
+      - "package_manager_adapters/maven"
+      - "package_manager_adapters/npm"
+      - "package_manager_adapters/nuget"
+      - "package_manager_adapters/pub"
+      - "package_manager_adapters/pypi"
+      - "package_manager_adapters/rubygems"
+    schedule:
+      interval: "weekly"
+    ignore:
+      - dependency-name: jruby # ignore updates to jruby because we depend on specific version
+      - dependency-name: node # ignore updates to node because we depend on specific version
+    labels:
+      - 'dependabot'
+      - 'package-manager-adapters'
+      - 'docker'
+    registries:
+      - ghcr
+    groups:
+      all-dependencies:
+        patterns:
+          - "*"
+
+  # Version updates for GHES
+  # https://thehub.github.com/epd/engineering/dev-practicals/containers/container-development/adopt-base-images-for-service/
+  - package-ecosystem: "docker"
+    target-branch: "enterprise-3.19-release"
+    directory: "/"
+    registries:
+      - ghcr
+    schedule:
+      interval: "weekly"
+      time: "21:00"
+    labels:
+      - "ern:not-customer-facing"
+    allow:
+      - dependency-name: "github/*"
+    groups:
+      all-dependencies:
+        patterns:
+          - "*"
+  - package-ecosystem: "docker"
+    target-branch: "enterprise-3.18-release"
+    directory: "/"
+    registries:
+      - ghcr
+    schedule:
+      interval: "weekly"
+      time: "21:00"
+    labels:
+      - "ern:not-customer-facing"
+    allow:
+      - dependency-name: "github/*"
+    groups:
+      all-dependencies:
+        patterns:
+          - "*"
+  - package-ecosystem: "docker"
+    target-branch: "enterprise-3.17-release"
+    directory: "/"
+    registries:
+      - ghcr
+    schedule:
+      interval: "weekly"
+      time: "21:00"
+    labels:
+      - "ern:not-customer-facing"
+    allow:
+      - dependency-name: "github/*"
+    groups:
+      all-dependencies:
+        patterns:
+        - "*"
+  - package-ecosystem: "docker"
+    target-branch: "enterprise-3.16-release"
+    directory: "/"
+    registries:
+      - ghcr
+    schedule:
+      interval: "weekly"
+      time: "21:00"
+    labels:
+      - "ern:not-customer-facing"
+    allow:
+      - dependency-name: "github/*"
+    groups:
+      all-dependencies:
+        patterns:
+        - "*"
+  - package-ecosystem: "docker"
+    target-branch: "enterprise-3.15-release"
+    directory: "/"
+    registries:
+      - ghcr
+    schedule:
+      interval: "weekly"
+      time: "21:00"
+    labels:
+      - "ern:not-customer-facing"
+    allow:
+      - dependency-name: "github/*"
+    groups:
+      all-dependencies:
+        patterns:
+        - "*"
+  - package-ecosystem: "docker"
+    target-branch: "enterprise-3.14-release"
+    directory: "/"
+    registries:
+      - ghcr
+    schedule:
+      interval: "weekly"
+      time: "21:00"
+    labels:
+      - "ern:not-customer-facing"
+    allow:
+      - dependency-name: "github/*"
+    groups:
+      all-dependencies:
+        patterns:
+        - "*"

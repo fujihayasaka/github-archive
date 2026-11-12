@@ -1,0 +1,99 @@
+syntax = "proto3";
+package missioncontrol.automations.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "automations/v1";
+option ruby_package = "CopilotMissionControl::AutomationsAPI::V1";
+
+// AutomationsAPI provides internal runtime lookup endpoints for CCA automations.
+service AutomationsAPI {
+  // HasRepositoryAutomation reports whether a repository has at least one
+  // functional automation for the requested trigger event.
+  rpc HasRepositoryAutomation(HasRepositoryAutomationRequest) returns (HasRepositoryAutomationResponse);
+
+  // ListRepositoryAutomations returns runtime-visible automations for a
+  // repository and trigger event. It is intended for server-to-server runtime
+  // lookup, not user-facing management APIs.
+  rpc ListRepositoryAutomations(ListRepositoryAutomationsRequest) returns (ListRepositoryAutomationsResponse);
+
+  // GetAutomationByID returns a single automation by ID without event filtering.
+  // Used for ad-hoc automation dispatch where the caller already knows which
+  // automation to execute.
+  rpc GetAutomationByID(GetAutomationByIDRequest) returns (GetAutomationByIDResponse);
+}
+
+message HasRepositoryAutomationRequest {
+  uint64 owner_id = 1;
+  uint64 repo_id = 2;
+  string event = 3;
+  repeated string types = 4;
+}
+
+message HasRepositoryAutomationResponse {
+  bool has_automation = 1;
+}
+
+message ListRepositoryAutomationsRequest {
+  uint64 owner_id = 1;
+  uint64 repo_id = 2;
+  string event = 3;
+  repeated string types = 4;
+  int32 page_size = 5;
+  int32 page_number = 6;
+}
+
+message ListRepositoryAutomationsResponse {
+  repeated Automation automations = 1;
+  bool has_next_page = 2;
+}
+
+// Automation is the runtime payload returned to sweagentd.
+//
+// Responses only include runtime-visible automations: not disabled and not
+// soft-deleted. Trigger activity-type matching is intentionally coarse here;
+// callers remain responsible for any deeper event-payload filtering.
+message Automation {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string prompt = 4;
+  repeated AutomationTrigger triggers = 5;
+  repeated string tools = 6;
+  map<string, string> permissions = 7;
+  repeated string github_mcp_toolsets = 8;
+  repeated MCPServer mcp_servers = 9;
+  uint64 owner_id = 10;
+  uint64 repo_id = 11;
+  uint64 user_id = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp updated_at = 14;
+  string model = 15;
+  bool require_actor_write_permission = 16;
+}
+
+message AutomationTrigger {
+  string event = 1;
+  repeated string types = 2;
+  string query = 3;
+  repeated string workflows = 4;
+  repeated string conclusions = 5;
+  repeated string paths = 6;
+}
+
+message MCPServer {
+  string name = 1;
+  string type = 2;
+  string url = 3;
+  repeated string tools = 4;
+}
+
+message GetAutomationByIDRequest {
+  string automation_id = 1;
+  uint64 owner_id = 2;
+  uint64 repo_id = 3;
+}
+
+message GetAutomationByIDResponse {
+  Automation automation = 1;
+}

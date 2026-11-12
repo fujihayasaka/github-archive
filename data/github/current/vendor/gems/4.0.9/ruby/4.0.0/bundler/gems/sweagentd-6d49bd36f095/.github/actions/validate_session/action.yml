@@ -1,0 +1,80 @@
+name: "Validate session"
+description: "Validate that the session has the expected billing values"
+inputs:
+  token:
+    description: "The GitHub token to use for API calls"
+    required: true
+  session_id:
+    description: "The id of the session for this CCA run"
+    required: true
+  capi_base_url:
+    description: "The Copilot API base URL"
+    required: false
+    default: "https://api.githubcopilot.com"
+  integration_id:
+    description: "The Copilot-Integration-Id header value"
+    required: false
+    default: "playground-dev"
+runs:
+  using: "composite"
+  steps:
+    - name: Validate session billing
+      shell: bash
+      run: |
+        echo "Validating session: ${{ inputs.session_id }}"
+
+        http_code=$(curl -sS -o /tmp/validate_session.json -w '%{http_code}' \
+            --retry 2 --retry-delay 5 --retry-all-errors \
+            ${{ inputs.capi_base_url }}/agents/sessions/${{ inputs.session_id }} \
+            -H "Authorization: Bearer ${{ inputs.token }}" \
+            -H "Copilot-Integration-Id: ${{ inputs.integration_id }}") || true
+
+        echo "HTTP status: $http_code"
+
+        if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+          echo "::error::Failed to fetch session after retries (HTTP $http_code)"
+          cat /tmp/validate_session.json 2>/dev/null || true
+          exit 1
+        fi
+
+        response=$(cat /tmp/validate_session.json)
+
+        if ! echo "$response" | jq . > /dev/null 2>&1; then
+          echo "::error::Failed to parse API response as JSON"
+          echo "Response: $response"
+          exit 1
+        fi
+
+        premium_requests=$(echo "$response" | jq -r '.premium_requests // empty')
+        ai_credits=$(echo "$response" | jq -r '.ai_credits // empty')
+
+        if [ -z "$premium_requests" ] && [ -z "$ai_credits" ]; then
+          echo "::error::Neither premium_requests nor ai_credits found in response"
+          echo "Response: $response"
+          exit 1
+        fi
+
+        passed=0
+
+        if [ -n "$premium_requests" ]; then
+          if echo "$premium_requests" | awk '{exit ($1 > 0) ? 0 : 1}'; then
+            echo "premium_requests billing validation passed (value: $premium_requests)"
+            passed=1
+          else
+            echo "premium_requests billing validation failed (expected positive, got: $premium_requests)"
+          fi
+        fi
+
+        if [ -n "$ai_credits" ]; then
+          if echo "$ai_credits" | awk '{exit ($1 > 0) ? 0 : 1}'; then
+            echo "ai_credits billing validation passed (value: $ai_credits)"
+            passed=1
+          else
+            echo "ai_credits billing validation failed (expected positive, got: $ai_credits)"
+          fi
+        fi
+
+        if [ "$passed" -eq 0 ]; then
+          echo "::error::Billing validation failed: neither premium_requests nor ai_credits is positive"
+          exit 1
+        fi

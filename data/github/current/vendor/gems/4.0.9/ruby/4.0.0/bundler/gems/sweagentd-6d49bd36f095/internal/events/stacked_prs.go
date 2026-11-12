@@ -1,0 +1,161 @@
+package events
+
+import (
+	"context"
+	_ "embed"
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/github/go-stats"
+	"github.com/github/sweagentd/internal/github"
+	"github.com/github/sweagentd/internal/goerrors"
+	"github.com/github/sweagentd/internal/jobs"
+	"github.com/openai/openai-go"
+)
+
+//go:embed generate_stacked_pr_title_prompt.txt
+var generateStackedPRTitlePrompt string
+
+//go:embed detect_stacked_pr_intent_prompt.txt
+var detectStackedPRIntentPrompt string
+
+const stackedPRPrefix = "sub-pr-"
+
+// IntentDetectionResult represents the structured output from the LLM intent detector
+type IntentDetectionResult struct {
+	CreatePullRequest bool `json:"create_pull_request"`
+}
+
+// shouldCreateStackedPR decides whether to create a stacked PR (true) or work
+// on the current branch (false) using LLM intent detection.
+//
+// Uses an LLM to detect if the user explicitly wants a new PR.
+// If intent is detected, returns true. If no intent is detected or detection
+// fails, returns false (safe default: work on current branch).
+func (h *Handler) shouldCreateStackedPR(
+	ctx context.Context,
+	text string,
+	actorID int64,
+	sourceID int64,
+	source string,
+) bool {
+	tempJob := &jobs.Job{
+		ActorID: actorID,
+		ID:      fmt.Sprintf("intent-detection-%s-%d", source, sourceID),
+	}
+
+	intentDetected, err := h.detectStackedPRIntent(ctx, tempJob, text)
+	if err != nil {
+		h.obsv.LoggerWithTelemetry(ctx).WithError(err).Warn("Stacked PR intent detection failed, defaulting to work on current branch")
+		h.obsv.Increment(ctx, "events.intent_driven_stacked_pr.detection_failed", stats.Tags{
+			"source": source,
+		})
+		return false
+	}
+
+	h.obsv.Increment(ctx, "events.intent_driven_stacked_pr.detection_success", stats.Tags{
+		"create_stacked_pr": fmt.Sprintf("%t", intentDetected),
+		"source":            source,
+	})
+
+	return intentDetected
+}
+
+// detectStackedPRIntent uses an LLM to detect if the user explicitly wants to create a stacked PR
+func (h *Handler) detectStackedPRIntent(ctx context.Context, job *jobs.Job, commentBody string) (bool, error) {
+	schema := openai.ResponseFormatJSONSchemaJSONSchemaParam{
+		Name:   "intent_detection",
+		Strict: openai.Bool(true),
+		Schema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"create_pull_request": map[string]interface{}{
+					"type":        "boolean",
+					"description": "true if user explicitly wants to create a new PR, false otherwise",
+				},
+			},
+			"required":             []string{"create_pull_request"},
+			"additionalProperties": false,
+		},
+	}
+
+	body := openai.ChatCompletionNewParams{
+		Model: "gpt-4o-mini",
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage(detectStackedPRIntentPrompt),
+			openai.UserMessage(commentBody),
+		},
+		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
+			OfJSONSchema: &openai.ResponseFormatJSONSchemaParam{
+				JSONSchema: schema,
+			},
+		},
+		MaxTokens: openai.Int(20), // Small since we only need a short JSON object
+	}
+
+	userIDStr := fmt.Sprintf("%d", job.ActorID)
+	result, err := h.capiClient.ChatCompletions(ctx, userIDStr, job.ID, &body)
+	if err != nil {
+		return false, goerrors.Errorf("failed to get chat completions for stacked PR intent detection: %w", err)
+	}
+
+	if len(result.Choices) == 0 {
+		return false, goerrors.New("no choices in chat completions response for stacked PR intent detection")
+	}
+
+	content := strings.TrimSpace(result.Choices[0].Message.Content)
+	if content == "" {
+		return false, goerrors.New("empty response from LLM for stacked PR intent detection")
+	}
+
+	var intentResult IntentDetectionResult
+	err = json.Unmarshal([]byte(content), &intentResult)
+	if err != nil {
+		return false, goerrors.Errorf("failed to parse JSON response for stacked PR intent detection: %w", err)
+	}
+
+	return intentResult.CreatePullRequest, nil
+}
+
+// generateStackPRTitle generates a title for a stack PR using the CAPI client
+func (h *Handler) generateStackPRTitle(ctx context.Context, job *jobs.Job, prTitle, commentBody string) (string, error) {
+	userMessage := fmt.Sprintf(`Original pull request title: "%s"\nTriggering comment: %s`, prTitle, commentBody)
+
+	body := openai.ChatCompletionNewParams{
+		Model: "gpt-4o-mini",
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage(generateStackedPRTitlePrompt),
+			openai.UserMessage(userMessage),
+		},
+		MaxTokens: openai.Int(50), // Keep it concise
+	}
+
+	userIdStr := fmt.Sprintf("%d", job.ActorID)
+	result, err := h.capiClient.ChatCompletions(ctx, userIdStr, job.ID, &body)
+	if err != nil {
+		return "", goerrors.Errorf("failed to get chat completions for title generation: %w", err)
+	}
+
+	if len(result.Choices) == 0 {
+		return "", goerrors.New("no choices in chat completions for title generation")
+	}
+
+	generatedTitle := strings.TrimSpace(result.Choices[0].Message.Content)
+	if generatedTitle == "" {
+		return "", goerrors.New("empty title generated by CAPI")
+	}
+
+	// Add [WIP] prefix to indicate work in progress
+	return fmt.Sprintf("[WIP] %s", generatedTitle), nil
+}
+
+func getStackedPRBodyBase(pr github.GQLPullRequest, commentBody string) string {
+	baseBody := fmt.Sprintf("Thanks for the feedback on #%d. I've created this new PR, which merges into #%d, to address your comment. I will work on the changes and keep this PR's description up to date as I make progress.\n\nOriginal PR: #%d\n%s",
+		pr.Number,
+		pr.Number,
+		pr.Number,
+		commentBody,
+	)
+	return baseBody
+}
