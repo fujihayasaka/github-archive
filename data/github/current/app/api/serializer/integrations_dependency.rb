@@ -260,7 +260,13 @@ module Api::Serializer::IntegrationsDependency
     elsif integration.owner.is_a?(Business)
       simple_business_owner_hash(integration.owner, options)
     else
-      simple_user_hash(integration.owner, content_options(options))
+      # Fall back to the ghost user when a User/Org-owned app's owning account
+      # was hard-deleted, preserving the non-null owner contract. Scoped to
+      # owner_type "User" so a missing Business/enterprise owner isn't mislabelled
+      # as a ghost User (its :ea node id resolves without the owner).
+      owner = integration.owner
+      owner ||= User.ghost if integration.user_or_organization_owned?
+      simple_user_hash(owner, content_options(options))
     end
   end
 

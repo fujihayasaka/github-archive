@@ -13,7 +13,7 @@ Gem::Specification.new do |s|
   s.homepage = "https://github.com/github/copilot-twirp".freeze
   s.licenses = ["Nonstandard".freeze]
   s.required_ruby_version = Gem::Requirement.new(">= 3.0".freeze)
-  s.rubygems_version = "3.0.3.1".freeze
+  s.rubygems_version = "3.5.11".freeze
   s.summary = "Generated client/server code for github/github content_safety data.".freeze
 
   s.installed_by_version = "4.0.10".freeze

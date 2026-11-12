@@ -799,14 +799,21 @@ class Integration < ApplicationRecord::Domain::Integrations
   #
   # Returns a Boolean
   def user_owned?
-    owner_type == "User" && owner.type == "User"
+    user_or_organization_owned? && owner&.type == "User"
   end
 
   # Public: Is this integration owned by a organization?
   #
   # Returns a Boolean
   def organization_owned?
-    owner_type == "User" && owner.type == "Organization"
+    user_or_organization_owned? && owner&.type == "Organization"
+  end
+
+  # Public: Is this integration owned by a user or an organization, as opposed to an enterprise?
+  #
+  # Returns a Boolean
+  def user_or_organization_owned?
+    owner_type == "User"
   end
 
   # Public: Is this integration owned by an enterprise?

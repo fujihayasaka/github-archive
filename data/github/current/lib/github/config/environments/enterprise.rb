@@ -284,6 +284,11 @@ GitHub.stats_allowlist += %w(
 # Allow inserting additional metrics via ENV during incidents or debugging without requiring code changes.
 GitHub.stats_allowlist += ENV["ENTERPRISE_STATS_ALLOWLIST"].split(";") if ENV["ENTERPRISE_STATS_ALLOWLIST"]
 
+# How many metric names each allowlist client remembers, so it checks each name against the patterns only once.
+# In a load test with all metrics allowed, the busiest role sent 513 names, so the default leaves plenty of room.
+# 0 turns the cache off.
+GitHub.stats_allowlist_cache_size = GitHub.environment.fetch("ENTERPRISE_STATS_ALLOWLIST_CACHE_SIZE", "4096").to_i
+
 # Disable GitHub Pages size limit
 GitHub.pages_site_size_limit = 0
 

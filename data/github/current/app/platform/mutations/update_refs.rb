@@ -101,6 +101,10 @@ module Platform
           )
         end
 
+        if ref_updates.any? { |ref_update| ref_update.deletion? && ref_update.refname == "refs/heads/#{repository.default_branch}" }
+          raise Errors::Unprocessable.new("Cannot delete the default branch")
+        end
+
         # TODO: Preload the fast-forwardness for all ref updates
         updates_by_commit_and_ancestor = ref_updates
           .reject   { |ref_update| ref_update.creation? || ref_update.deletion? }

@@ -5,6 +5,8 @@ class CheckStepsOrchestrateDeletionJob < ApplicationJob
   include GitHub::Tracing
   include ChecksJobUtility
 
+  OLDEST_CHECK_STEP_SCAN_LIMIT = 5_000
+
   queue_as :orchestrate_check_steps_deletion
   schedule interval: 1.minute
   retry_on_dirty_exit
@@ -88,21 +90,22 @@ class CheckStepsOrchestrateDeletionJob < ApplicationJob
   end
 
   def orchestrate_deletion
-    # We start with the oldest check step ID based off of the creation time. Checks steps in hosted live in a vitess sharded database where
-    # blocks of IDs can be allocated per shard beforehand, so we can't run on the assumption that the smallest ID is the oldest.
-    # Reading from the primary to make sure there no stale data from replication lag
-    oldest_check_step = ActiveRecord::Base.connected_to(role: :writing) do
+    # Check steps are approximately ordered by ID, but Vitess can allocate ID blocks out of order across shards. Read a bounded prefix and
+    # apply the retention threshold in memory so finding a candidate cannot scan the entire table.
+    delete_before = delete_threshold_days.ago
+    oldest_check_step_id = read_connection do
       CheckStep
-        .where("created_at <= ?", delete_threshold_days.ago)
         .order(id: :asc)
-        .limit(1)
-        .pluck(:id)
+        .limit(oldest_check_step_scan_limit)
+        .pluck(:id, :created_at)
+        .find { |_, created_at| created_at <= delete_before }
+        &.first
     end
 
     # All check steps have been deleted so don't schedule anything
-    return if oldest_check_step.empty?
+    return if oldest_check_step_id.nil?
 
-    start_id = oldest_check_step.first
+    start_id = oldest_check_step_id
     GitHub.dogstats.count("checks.orchestrate_check_steps_deletion.start_id", start_id)
 
     number_of_batches = self.parallel_count
@@ -138,5 +141,9 @@ class CheckStepsOrchestrateDeletionJob < ApplicationJob
       key = "check_steps_delete_job_#{batch_number}"
       !concurrency_key_for_batch_exists?(key)
     end
+  end
+
+  def oldest_check_step_scan_limit
+    OLDEST_CHECK_STEP_SCAN_LIMIT
   end
 end

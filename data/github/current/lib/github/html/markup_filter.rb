@@ -21,10 +21,17 @@ module GitHub::HTML
     end
 
     def self.cache_key(context)
-      [
+      keys = [
         ("plaintext" if context[:plaintext]),
         ("sourcepos" if context[:use_sourcepos]),
-      ].reject(&:blank?).join(":")
+      ]
+
+      if context[:blob].is_a?(TreeEntry)
+        state = WikiMarkupFilter.org_ruby_rendering_enabled? ? "enabled" : "disabled"
+        keys << "org-ruby-rendering-#{state}"
+      end
+
+      keys.reject(&:blank?).join(":")
     end
 
     attr_reader :blob
@@ -78,11 +85,15 @@ module GitHub::HTML
           content, frontmatter = parse_frontmatter(blob.data, result)
           renderer = GitHub::Markup.renderer(blob.name, content, symlink: !!blob.symlink_source)
 
-          html = if renderer
+          if renderer && skip_renderer_for_org_mode?(renderer)
+            result[:rendered] = false
+            html = ERB::Util.force_escape(blob.data)
+            frontmatter = nil
+          elsif renderer
             result[:rendered] = renderer.name
-            renderer.render(blob.name, content, options: markup_options).to_s.html_safe # rubocop:disable Rails/OutputSafety
-          else
-            content
+            html = renderer.render(blob.name, content, options: markup_options).to_s.html_safe # rubocop:disable Rails/OutputSafety
+          elsif renderer.nil?
+            html = content
           end
 
           html = EscapeHelper.safe_join([frontmatter, html]) if frontmatter
@@ -98,6 +109,10 @@ module GitHub::HTML
 
       # force utf8 encoding on the returned value
       utf8(html)
+    end
+
+    def skip_renderer_for_org_mode?(renderer)
+      renderer.name == "org-ruby" && !WikiMarkupFilter.org_ruby_rendering_enabled?
     end
 
     def parse_frontmatter(content, result)

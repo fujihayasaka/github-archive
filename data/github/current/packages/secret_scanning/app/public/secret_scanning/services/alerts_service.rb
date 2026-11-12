@@ -217,6 +217,18 @@ module SecretScanning
       def set_alert_assignee(repository, alert_number, assignee_ids, assigned_by)
         assignee_id = assignee_ids.first
 
+        # Validate the assignee before the write reaches TSS. The RPC below is not
+        # rolled back by anything that follows it, so a check placed after it would
+        # leave the assignment persisted.
+        if assignee_id
+          assignee_candidate = User.find_by(id: assignee_id)
+          unless SecretScanning::AccessControl::AlertAssignee.new(repository).assignable?(assignee_candidate)
+            return SecretScanning::Errors::InvalidAssignee.new(
+              "User cannot be assigned to alerts in this repository"
+            )
+          end
+        end
+
         request = GitHub::Proto::SecretScanning::Api::V2::SetAlertAssigneeRequest.new(
           repository_id: repository.id,
           alert_number:,

@@ -70,11 +70,6 @@ module Repository::TokenScanningDependency
     return false unless self.owner.is_a?(::Organization)
     return false if !actor.is_a?(User)
 
-    return true if self.has_org_delegated_bypass_fgp?(actor)
-    return true if self.has_repo_delegated_bypass_fgp?(actor)
-    # Repo admins aren't included in the FGP above, but we still want them to be able to view the bypass requests list
-    return true if self.adminable_by?(actor)
-
     actor_user = T.cast(actor, User)
     can_review_bypass_request, _ = SecretScanning::Services::DelegatedBypassService.can_review_bypass_request?(self, actor_user)
     can_review_bypass_request

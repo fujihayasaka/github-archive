@@ -27,6 +27,10 @@ module Platform
 
       def resolve(ref:)
         assert_repo_is_writable(ref.repository)
+        if ref.branch? && ref.default_branch?
+          raise Errors::Unprocessable.new("Cannot delete the default branch")
+        end
+
         reflog_data = build_reflog_hash(context: context, via: "DeleteRef mutation")
         ref.delete(context[:viewer], reflog_data: reflog_data)
         {}
