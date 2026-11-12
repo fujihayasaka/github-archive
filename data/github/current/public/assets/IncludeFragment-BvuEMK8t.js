@@ -1,0 +1,1 @@
+import{lm as e,xm as t,zr as n}from"./main-D0KdNlO7.js";var r=e();function i({ref:e,children:i,src:a,...o}){let{isServer:s}=n();return(0,r.jsx)(`include-fragment`,{...o,ref:e,...s?{}:{src:a,"data-nonce":t()},children:i})}i.displayName=`IncludeFragment`;export{i as t};

@@ -150,6 +150,13 @@ class IntegrationInstallation::AbilityCollection < Ability::Collection
              "organization_codespaces_secrets",
              "organization_private_registries"
           return parent.async_adminable_by?(actor)
+        when "organization_elm_exporter_secrets"
+          # Org admins or holders of the ELM exporter secrets fine-grained
+          # permission may manage (read/write) these secrets.
+          return parent.async_adminable_by?(actor).then do |adminable|
+            next true if adminable
+            parent.async_can_write_organization_elm_exporter_secrets?(actor)
+          end
         when "organization_custom_org_roles"
           return parent.async_can_access_custom_org_roles?(actor, action)
         when "organization_custom_roles"

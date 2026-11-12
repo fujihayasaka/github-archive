@@ -1,0 +1,1 @@
+import{lm as e,mc as t}from"./main-D0KdNlO7.js";import{n,t as r}from"./LabelWithLink-CPTORDit.js";var i=e();const a=({children:e=`Preview`,feedbackUrl:a,className:o})=>(0,i.jsx)(r,{className:o,label:(0,i.jsx)(t,{variant:`success`,children:e}),link:a?(0,i.jsx)(n,{feedbackUrl:a}):void 0});a.displayName=`BetaLabel`;export{a as t};

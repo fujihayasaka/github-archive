@@ -697,6 +697,13 @@ module GitHub::Routers
            %r{^enterprise/migration/\d+/report-git-sync(/|$)}
         ::Api::Enterprise::Migrations
 
+      when %r{\Aenterprise/live-migrations(/|\z)}
+        if GitHub.enterprise?
+          ::Api::Enterprise::LiveMigrations
+        else
+          ::Api::Root
+        end
+
       when %r{^enterprise/announcement}
         if GitHub.enterprise?
           ::Api::Enterprise::Announcement
@@ -972,6 +979,9 @@ module GitHub::Routers
 
       when %r{^organizations/\d+/actions/secrets(/|$)}
         ::Api::OrganizationActionsSecrets
+
+      when %r{^organizations/\d+/elm-exporter/secrets(/|$)}
+        ::Api::OrganizationElmExporterSecrets
 
       when %r{^organizations/\d+/actions/variables(/|$)}
         ::Api::OrganizationActionsVariables
@@ -2089,6 +2099,8 @@ module GitHub::Routers
         convert_enterprise_key_to_id(env, path, $1, "/settings/#{$2}", "/enterprises")
       when %r{^/organizations/([^/]+)/org-properties/values}
         convert_organization_key_to_id(env, path, $1, "/org-properties/values", "/organizations")
+      when %r{^/organizations/([^/]+)/elm-exporter/(.*)}
+        convert_organization_key_to_id(env, path, $1, "/elm-exporter/#{$2}", "/organizations")
       when %r{^/internal/blackbird/repos/([^/]+)/([^/]+)(.*)}
         convert_repository_key_to_id(env, path, $1, $2, $3, "/internal/blackbird/repositories")
       when %r{^/internal/blackbird/users/([^/]+)\z}

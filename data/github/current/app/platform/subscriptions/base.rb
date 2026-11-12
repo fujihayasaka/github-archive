@@ -38,7 +38,7 @@ module Platform
       end
 
       def stats_event_name
-        self.class.name.split("::").last.underscore
+        self.class.name&.split("::")&.last&.underscore
       end
 
       def self.visible?(context)

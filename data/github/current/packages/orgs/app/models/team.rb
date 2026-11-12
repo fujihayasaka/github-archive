@@ -1816,7 +1816,13 @@ class Team < ApplicationRecord::Domain::Users
       if removed_user_ids && removed_user_ids.size > 0
         org_members_to_remove = T.must(organization&.prevent_removal_of_scim_managed_users(users: users.to_a, reason: :any, db_connection: :writing))
         if org_members_to_remove.any?
-          organization&.bulk_remove_members(org_members_to_remove, send_notification: send_notification)
+          # Guard: exclude users who still belong to other org teams.
+          # Pre-SCIM manual teams may lack OrganizationMembershipEntry records,
+          # causing prevent_removal_of_scim_managed_users to incorrectly mark
+          # those users as removable.
+          # See https://github.com/github/authentication/issues/6872
+          org_members_to_remove = T.must(organization).filter_users_with_remaining_team_membership(org_members_to_remove)
+          organization&.bulk_remove_members(org_members_to_remove, send_notification: send_notification) if org_members_to_remove.any?
         end
       end
     end
@@ -1884,9 +1890,13 @@ class Team < ApplicationRecord::Domain::Users
 
         # EMUs + Enterprise Team synced members should not be removed if they have any org memberships
         if removed_count.present? && removed_count > 0 && !organization&.prevent_removal_of_scim_managed_user?(user: user, reason: :any, db_connection: :writing)
-          begin
-            organization&.remove_member(user, send_notification: send_notification)
-          rescue Organization::NoAdminsError, Organization::UnableToRemoveEmuError, Organization::UnableToRemoveEnterpriseTeamMemberError, Organization::BusinessTeamsDependency::UnableToRemoveBusinessTeamMemberError
+          # Guard: skip removal if user still belongs to other org teams.
+          # See https://github.com/github/authentication/issues/6872
+          if T.must(organization).filter_users_with_remaining_team_membership([user]).any?
+            begin
+              organization&.remove_member(user, send_notification: send_notification)
+            rescue Organization::NoAdminsError, Organization::UnableToRemoveEmuError, Organization::UnableToRemoveEnterpriseTeamMemberError, Organization::BusinessTeamsDependency::UnableToRemoveBusinessTeamMemberError
+            end
           end
         end
       end

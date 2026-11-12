@@ -1,0 +1,1 @@
+import{gm as e,lh as t}from"./main-D0KdNlO7.js";var n=t(e());function r(e){let t=(0,n.lazy)(e);return Object.assign(t,{preload:async()=>{await e()}})}export{r as t};

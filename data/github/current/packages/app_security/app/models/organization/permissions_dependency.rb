@@ -284,6 +284,21 @@ module Organization::PermissionsDependency
   end
 
   sig { params(actor: T.nilable(AuthzdActor)).returns(T::Boolean) }
+  def can_write_organization_elm_exporter_secrets?(actor)
+    async_can_write_organization_elm_exporter_secrets?(actor).sync
+  end
+
+  # Check to see if the user satisfies the write_organization_elm_exporter_secrets Authzd policy with write access
+  sig { params(actor: T.nilable(AuthzdActor)).returns(Promise[T::Boolean]) }
+  def async_can_write_organization_elm_exporter_secrets?(actor)
+    T.bind(self, Organization)
+
+    return T.cast(Promise.resolve(false), Promise[T::Boolean]) unless actor
+    async_authorized_via_policy?(actor, :write_organization_elm_exporter_secrets,
+      { "action.programmatic_access_level": Permission.actions[:write] })
+  end
+
+  sig { params(actor: T.nilable(AuthzdActor)).returns(T::Boolean) }
   def can_write_organization_actions_secrets?(actor)
     async_can_write_organization_actions_secrets?(actor).sync
   end

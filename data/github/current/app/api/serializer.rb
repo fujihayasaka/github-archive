@@ -60,6 +60,7 @@ module Api::Serializer
   extend Api::Serializer::DependabotAlertsDependency
   extend Api::Serializer::DependabotDismissalRequestsDependency
   extend Api::Serializer::CodeSecurityConfigurationsDependency
+  extend Api::Serializer::ElmExporterSecretsDependency
   extend Api::Serializer::DependabotSecretsDependency
   extend Api::Serializer::DeploymentStatusesDependency
   extend Api::Serializer::DiscussionsDependency

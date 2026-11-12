@@ -98,13 +98,15 @@ module Platform
         elsif defined?(@model_name)
           @model_name
         else
-          @model_name = self.name.split("::").last
+          class_name = self.name
+          @model_name = class_name&.split("::")&.last
         end
       end
 
       # Returns type name extracted from the class name egz. `Platform::Objects::Issue` -> `Issue`
       def self.type_name
         class_name = self.name
+        return class_name unless class_name
         if i = class_name.rindex("::")
           class_name[(i + 2)..-1]
         else

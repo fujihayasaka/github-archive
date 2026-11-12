@@ -256,6 +256,7 @@ class Api::Internal::Twirp < ::Api::Internal
   mount ::Api::Internal::Twirp::Elm::Actions::V1::ExportCheckRunsAPIHandler
   mount ::Api::Internal::Twirp::Elm::Actions::V1::ExportCheckSuitesAPIHandler
   mount ::Api::Internal::Twirp::Elm::Actions::V1::ExportCommitStatusChecksAPIHandler
+  mount ::Api::Internal::Twirp::Elm::Actions::V2::ExportCommitStatusChecksAPIHandler
   mount ::Api::Internal::Twirp::Elm::Actions::V1::ImportCommitStatusCheckAPIHandler
   mount ::Api::Internal::Twirp::Elm::Data::V1::ExportAssetsAPIHandler
   mount ::Api::Internal::Twirp::Elm::Issues::V1::ExportIssueEventsAPIHandler

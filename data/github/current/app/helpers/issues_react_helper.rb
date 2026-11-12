@@ -993,11 +993,6 @@ module IssuesReactHelper
       end
 
       add_client_feature_flag(
-        [:issues_diff_based_label_updates],
-        entity: current_repository
-      )
-
-      add_client_feature_flag(
         [:code_scanning_alert_tracking_links_phase_2],
         entity: current_repository
       ) do |_feature_name, repository|

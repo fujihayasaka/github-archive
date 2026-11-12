@@ -266,6 +266,7 @@ module BypassRequestsControllerMethods
       else
         RuleEngine::RuleSuite.find_by(id: @decoded_id)
       end
+      @rule_suite = nil unless @rule_suite&.repository&.readable_by?(current_user)
       render_404 unless @rule_suite
     rescue ArgumentError
       render_404

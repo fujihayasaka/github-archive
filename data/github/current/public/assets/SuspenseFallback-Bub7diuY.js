@@ -1,0 +1,1 @@
+import{lm as e,mp as t}from"./main-D0KdNlO7.js";var n=e();const r=()=>(0,n.jsx)(`div`,{className:`d-flex flex-column flex-items-center pr-py-3`,children:(0,n.jsx)(t,{"aria-label":`Loading`})});r.displayName=`LoadingFallback`;export{r as t};

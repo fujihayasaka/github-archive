@@ -1,0 +1,1 @@
+import{Op as e,gm as t,lh as n}from"./main-D0KdNlO7.js";var r=e(),i=n(t());function a(e,t){let n=(0,r.c)(3),a;n[0]!==t||n[1]!==e?(a=()=>{let n=`web-vitals:${e}`,r=t;return document.addEventListener(n,r),()=>{document.removeEventListener(n,r)}},n[0]=t,n[1]=e,n[2]=a):a=n[2],(0,i.useEffect)(a)}export{a as t};

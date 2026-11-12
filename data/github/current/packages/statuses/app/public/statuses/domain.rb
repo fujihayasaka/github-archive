@@ -336,6 +336,32 @@ module Statuses
       end
     end
 
+    # context is included in the ordering so the query can use
+    # index_statuses_on_repository_id_and_created_at_and_context instead of filesorting.
+    # The keyset predicate and ORDER BY must use the same tuple, or pages will skip or
+    # duplicate rows.
+    sig do
+      params(
+        repository_id: Integer,
+        limit: Integer,
+        created_at_after: T.nilable(Time),
+        context_after: T.nilable(String),
+        id_after: Integer
+      ).returns(T::Array[Status]).checked(:always).on_failure(:raise)
+    end
+    def list_page_for_export(repository_id:, limit:, created_at_after: nil, context_after: nil, id_after: 0)
+      ActiveRecord::Base.connected_to(role: :reading) do
+        relation = Status.includes(:creator).where(repository_id: repository_id).where.not(created_at: nil)
+        if created_at_after
+          relation = relation.where(
+            "created_at > ? OR (created_at = ? AND context > ?) OR (created_at = ? AND context = ? AND id > ?)",
+            created_at_after, created_at_after, context_after, created_at_after, context_after, id_after
+          )
+        end
+        relation.order(:created_at, :context, :id).limit(limit).to_a
+      end
+    end
+
     # Given a repository ID and an array of status attributes hashes, creates multiple status checks in a batch.
     # This method is optimized for large-scale imports and uses raw SQL for performance with Vitess sharding.
     # @param repository_id [Integer] The repository ID where the statuses will be created.

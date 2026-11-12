@@ -3667,6 +3667,43 @@ class Api::AccessControl < Egress::AccessControl
     end
   end
 
+  # A user who has access to write to the Organization ELM exporter secrets API.
+  # Both org admins and holders of the ELM exporter secrets fine-grained
+  # permission may manage (write) these secrets.
+  #
+  # The ELM exporter is GHES-only: its fine-grained resource is only registered in
+  # the `ghes` product line. We therefore deny everywhere but enterprise, and on
+  # enterprise authorize via the fine-grained resource (which itself grants org
+  # admins and holders of the permission).
+  role :organization_elm_exporter_secrets_writer, scope: %w(admin:org) do |context|
+    user, org = extract(context, :user, :resource)
+
+    next false unless user && org
+    next false unless GitHub.enterprise?
+
+    org.resources.organization_elm_exporter_secrets.writable_by?(user)
+  end
+
+  # A user who has access to read Organization ELM exporter secrets metadata (and
+  # the public key used to encrypt new values). Both org admins and holders of
+  # the ELM exporter secrets fine-grained permission may manage these secrets.
+  #
+  # NOTE: this role only authorizes reading secret *metadata* and the encryption
+  # public key. Decrypted secret *values* are only ever read at runtime by the
+  # privileged `elm_exporter_secrets` app (see lib/apps/privileged/elm_exporter_secrets.rb),
+  # never through this generic read permission.
+  #
+  # As with the writer role above, the ELM exporter is GHES-only, so we deny
+  # everywhere but enterprise and authorize via the fine-grained resource there.
+  role :organization_elm_exporter_secrets_reader, scope: %w(admin:org) do |context|
+    user, org = extract(context, :user, :resource)
+
+    next false unless user && org
+    next false unless GitHub.enterprise?
+
+    org.resources.organization_elm_exporter_secrets.readable_by?(user)
+  end
+
   # A user who has access to write to the Dependabot Secrets API
   role :dependabot_secrets_writer do |context|
     user, repo = extract(context, :user, :resource)

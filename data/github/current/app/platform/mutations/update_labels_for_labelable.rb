@@ -9,7 +9,6 @@ module Platform
       description "Updates labels on a labelable object by adding and/or removing specified labels."
 
       visibility :internal
-      feature_flag :issues_diff_based_label_updates
       minimum_accepted_scopes ["public_repo"]
 
       argument :labelable_id, ID, "The id of the labelable object to update labels on.", required: true, loads: Interfaces::Labelable

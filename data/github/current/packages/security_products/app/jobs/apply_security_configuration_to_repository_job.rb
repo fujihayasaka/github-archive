@@ -8,8 +8,57 @@ class ApplySecurityConfigurationToRepositoryJob < ApplicationJob
 
   queue_as :security_configurations
 
+  FANOUT_STAGGER_CONTEXT_KEY = :apply_security_configuration_to_repository_job_fanout_stagger
+
+  # Bulk "apply to all repos" can release thousands of per-repository jobs from a
+  # single parent. The context spreads them at a steady rate of BATCH_SIZE per
+  # BATCH_INTERVAL (250 / 30s) so the per-repo seat-check RPCs arrive at a pace the
+  # turboghas frontend can absorb instead of all at once.
+  class FanoutStaggerContext
+    BATCH_SIZE = 250
+    BATCH_INTERVAL = T.let(30.seconds, ActiveSupport::Duration)
+
+    def initialize
+      @enqueued_count = 0
+    end
+
+    # Spread enqueues evenly across the window (BATCH_SIZE per BATCH_INTERVAL) rather
+    # than releasing BATCH_SIZE jobs at once each interval. Even spacing preserves the
+    # same overall release rate while avoiding a fresh thundering herd at every interval
+    # boundary.
+    def current_wait
+      BATCH_INTERVAL * @enqueued_count / BATCH_SIZE
+    end
+
+    def increment!
+      @enqueued_count += 1
+    end
+  end
+
+  def self.with_fanout_stagger
+    previous_context = Thread.current[FANOUT_STAGGER_CONTEXT_KEY]
+    Thread.current[FANOUT_STAGGER_CONTEXT_KEY] = FanoutStaggerContext.new
+
+    yield
+  ensure
+    Thread.current[FANOUT_STAGGER_CONTEXT_KEY] = previous_context
+  end
+
+  before_enqueue do |job|
+    stagger_context = Thread.current[FANOUT_STAGGER_CONTEXT_KEY]
+    next unless stagger_context
+
+    enqueue_wait = stagger_context.current_wait
+    job.scheduled_at = enqueue_wait.from_now if enqueue_wait.to_i.positive?
+
+    stagger_context.increment!
+  end
+
   retry_on_dirty_exit
-  retry_on_recoverable_exceptions
+  # Spread retries across the polynomial wait window. With 1k+ siblings fanned out from
+  # OrganizationSecurityConfigurationJob the deterministic 3s / 18s / 83s / 258s schedule
+  # otherwise reproduces the original storm on every retry tier.
+  retry_on_recoverable_exceptions(jitter: 0.15)
 
   Error = Class.new(StandardError)
   RetryableError = Class.new(Error)
