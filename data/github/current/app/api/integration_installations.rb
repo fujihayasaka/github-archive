@@ -30,6 +30,8 @@ class Api::IntegrationInstallations < Api::App
     repositories = Repositories::Public.load_repositories(repository_ids)
     Repository.prefill_associations(repositories)
 
+    Configurable.preload_configuration(repositories)
+
     show_blackbird_code_search_status = if current_integration.feature_flag_enabled?(:blackbird_list_repositories_with_index_status, default: false)
       Repository::SearchDependency.prefill_blackbird_code_search_status(repositories)
     end
@@ -95,6 +97,8 @@ class Api::IntegrationInstallations < Api::App
       end
 
     Repository.prefill_associations(repositories)
+
+    Configurable.preload_configuration(repositories)
 
     show_blackbird_code_search_status = if installation.integration.feature_flag_enabled?(:blackbird_list_repositories_with_index_status, default: false)
       Repository::SearchDependency.prefill_blackbird_code_search_status(repositories)

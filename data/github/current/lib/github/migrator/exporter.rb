@@ -189,9 +189,11 @@ module GitHub
                 # gz compression rate is 75%-95% but assuming majority of files consuming
                 # large amounts of storage are images and other binary files so we set
                 # threshold conservatively to 50% compression rate.
-                # This means we allow uncompressed directory to grow 2x of the MAX_EXPORT_ARCHIVE_SIZE
+                # This means we allow uncompressed directory to grow 2x of the configured max export archive size
                 # before we raise an error.
-                if FeatureFlag.vexi.enabled_or_raise?(:octoshift_ll__allow_max_80gb_archive_size, owner) # rubocop:disable GitHub/FeatureManagement/NoVexiEnabledOrRaiseUsage
+                if GitHub.enterprise?
+                  max_size = GitHub.migrations_max_export_archive_size_gb.gigabytes
+                elsif FeatureFlag.vexi.enabled?(:octoshift_ll__allow_max_80gb_archive_size, owner, default: false)
                   max_size = MAX_EXPORT_ARCHIVE_SIZE_NEW
                 else
                   max_size = MAX_EXPORT_ARCHIVE_SIZE

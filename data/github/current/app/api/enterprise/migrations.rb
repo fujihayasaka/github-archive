@@ -37,13 +37,12 @@ class Api::Enterprise::Migrations < Api::Enterprise::App
 
     deliver_error! 404 unless FeatureFlag.vexi.enabled?(:migrations_vnext_api_migrations, biz, default: false)
 
-    control_access :administer_business,
+    control_access :standard_authorization,
       resource: biz,
-      forbid: true,
+      permission: :write_enterprise_live_migrations,
       allow_integrations: true,
-      allow_user_via_granular_actor: true
-
-    deliver_error! 401 unless biz.adminable_by?(current_user)
+      allow_user_via_granular_actor: true,
+      forbid: true
 
     data = receive_with_openapi
 
@@ -70,13 +69,12 @@ class Api::Enterprise::Migrations < Api::Enterprise::App
 
     deliver_error! 404 unless FeatureFlag.vexi.enabled?(:migrations_vnext_api_migrations, biz, default: false)
 
-    control_access :administer_business,
+    control_access :standard_authorization,
       resource: biz,
-      forbid: true,
+      permission: :read_enterprise_live_migrations,
       allow_integrations: true,
-      allow_user_via_granular_actor: true
-
-    deliver_error! 401 unless biz.adminable_by?(current_user)
+      allow_user_via_granular_actor: true,
+      forbid: true
 
     migration_ctx = Mvnd::Migrations::Api::V1::Entities::MigrationContext.new({
       enterprise_id: biz.id,
@@ -100,13 +98,12 @@ class Api::Enterprise::Migrations < Api::Enterprise::App
 
     deliver_error! 404 unless FeatureFlag.vexi.enabled?(:migrations_vnext_api_migrations, biz, default: false)
 
-    control_access :administer_business,
+    control_access :standard_authorization,
       resource: biz,
-      forbid: true,
+      permission: :read_enterprise_live_migrations,
       allow_integrations: true,
-      allow_user_via_granular_actor: true
-
-    deliver_error! 401 unless biz.adminable_by?(current_user)
+      allow_user_via_granular_actor: true,
+      forbid: true
 
     migration_ctx = Mvnd::Migrations::Api::V1::Entities::MigrationContext.new({
       enterprise_id: biz.id,
@@ -131,13 +128,12 @@ class Api::Enterprise::Migrations < Api::Enterprise::App
 
     deliver_error! 404 unless FeatureFlag.vexi.enabled?(:migrations_vnext_api_migrations, biz, default: false)
 
-    control_access :administer_business,
+    control_access :standard_authorization,
       resource: biz,
-      forbid: true,
+      permission: :write_enterprise_live_migrations,
       allow_integrations: true,
-      allow_user_via_granular_actor: true
-
-    deliver_error! 401 unless biz.adminable_by?(current_user)
+      allow_user_via_granular_actor: true,
+      forbid: true
 
     migration_ctx = Mvnd::Migrations::Api::V1::Entities::MigrationContext.new({
       enterprise_id: biz.id,
@@ -162,13 +158,12 @@ class Api::Enterprise::Migrations < Api::Enterprise::App
 
     deliver_error! 404 unless FeatureFlag.vexi.enabled?(:migrations_vnext_api_migrations, biz, default: false)
 
-    control_access :administer_business,
+    control_access :standard_authorization,
       resource: biz,
-      forbid: true,
+      permission: :write_enterprise_live_migrations,
       allow_integrations: true,
-      allow_user_via_granular_actor: true
-
-    deliver_error! 401 unless biz.adminable_by?(current_user)
+      allow_user_via_granular_actor: true,
+      forbid: true
 
     migration_ctx = Mvnd::Migrations::Api::V1::Entities::MigrationContext.new({
       enterprise_id: biz.id,
@@ -193,13 +188,12 @@ class Api::Enterprise::Migrations < Api::Enterprise::App
 
     deliver_error! 404 unless FeatureFlag.vexi.enabled?(:migrations_vnext_api_migrations, biz, default: false)
 
-    control_access :administer_business,
+    control_access :standard_authorization,
       resource: biz,
-      forbid: true,
+      permission: :write_enterprise_live_migrations,
       allow_integrations: true,
-      allow_user_via_granular_actor: true
-
-    deliver_error! 401 unless biz.adminable_by?(current_user)
+      allow_user_via_granular_actor: true,
+      forbid: true
 
     migration_ctx = Mvnd::Migrations::Api::V1::Entities::MigrationContext.new({
       enterprise_id: biz.id,
@@ -224,13 +218,12 @@ class Api::Enterprise::Migrations < Api::Enterprise::App
 
     deliver_error! 404 unless FeatureFlag.vexi.enabled?(:migrations_vnext_api_migrations, biz, default: false)
 
-    control_access :administer_business,
+    control_access :standard_authorization,
       resource: biz,
-      forbid: true,
+      permission: :write_enterprise_live_migrations,
       allow_integrations: true,
-      allow_user_via_granular_actor: true
-
-    deliver_error! 401 unless biz.adminable_by?(current_user)
+      allow_user_via_granular_actor: true,
+      forbid: true
 
     data = receive_with_openapi
 
@@ -253,13 +246,12 @@ class Api::Enterprise::Migrations < Api::Enterprise::App
 
     deliver_error! 404 unless FeatureFlag.vexi.enabled?(:migrations_vnext_api_migrations, biz, default: false)
 
-    control_access :administer_business,
+    control_access :standard_authorization,
       resource: biz,
-      forbid: true,
+      permission: :write_enterprise_live_migrations,
       allow_integrations: true,
-      allow_user_via_granular_actor: true
-
-    deliver_error! 401 unless biz.adminable_by?(current_user)
+      allow_user_via_granular_actor: true,
+      forbid: true
 
     data = receive_with_openapi
     migration_ctx = Mvnd::Migrations::Api::V1::Entities::MigrationContext.new({
@@ -281,13 +273,12 @@ class Api::Enterprise::Migrations < Api::Enterprise::App
 
     deliver_error! 404 unless FeatureFlag.vexi.enabled?(:migrations_vnext_api_migrations, biz, default: false)
 
-    control_access :administer_business,
+    control_access :standard_authorization,
       resource: biz,
-      forbid: true,
+      permission: :write_enterprise_live_migrations,
       allow_integrations: true,
-      allow_user_via_granular_actor: true
-
-    deliver_error! 401 unless biz.adminable_by?(current_user)
+      allow_user_via_granular_actor: true,
+      forbid: true
 
     data = receive_with_openapi
     migration_ctx = Mvnd::Migrations::Api::V1::Entities::MigrationContext.new({
@@ -313,13 +304,12 @@ class Api::Enterprise::Migrations < Api::Enterprise::App
 
     deliver_error! 404 unless FeatureFlag.vexi.enabled?(:migrations_vnext_api_migrations, biz, default: false)
 
-    control_access :administer_business,
+    control_access :standard_authorization,
       resource: biz,
-      forbid: true,
+      permission: :write_enterprise_live_migrations,
       allow_integrations: true,
-      allow_user_via_granular_actor: true
-
-    deliver_error! 401 unless biz.adminable_by?(current_user)
+      allow_user_via_granular_actor: true,
+      forbid: true
 
     data = receive_with_openapi
 
@@ -346,13 +336,12 @@ class Api::Enterprise::Migrations < Api::Enterprise::App
 
     deliver_error! 404 unless FeatureFlag.vexi.enabled?(:migrations_vnext_api_migrations, biz, default: false)
 
-    control_access :administer_business,
+    control_access :standard_authorization,
       resource: biz,
-      forbid: true,
+      permission: :write_enterprise_live_migrations,
       allow_integrations: true,
-      allow_user_via_granular_actor: true
-
-    deliver_error! 401 unless biz.adminable_by?(current_user)
+      allow_user_via_granular_actor: true,
+      forbid: true
 
     data = receive_with_openapi
 
@@ -379,13 +368,12 @@ class Api::Enterprise::Migrations < Api::Enterprise::App
 
     deliver_error! 404 unless FeatureFlag.vexi.enabled?(:migrations_vnext_api_migrations, biz, default: false)
 
-    control_access :administer_business,
+    control_access :standard_authorization,
       resource: biz,
-      forbid: true,
+      permission: :write_enterprise_live_migrations,
       allow_integrations: true,
-      allow_user_via_granular_actor: true
-
-    deliver_error! 401 unless biz.adminable_by?(current_user)
+      allow_user_via_granular_actor: true,
+      forbid: true
 
     data = receive_with_openapi
 

@@ -83,7 +83,10 @@ module RuleEngine
       end
 
       def parameter_schema
-        schema = ParameterSchema::Object.root
+        # Older clients and persisted rules may still send this removed parameter.
+        schema = ParameterSchema::Object.root(
+          transform_fn: ->(params) { params.delete("automatic_copilot_code_review_enabled") if params.is_a?(Hash) },
+        )
 
         schema.add_field(ParameterSchema::Field.new(name: "required_approving_review_count", display_name: "Required approvals",
           type: :integer, required: true, allowed_range: (0..10),

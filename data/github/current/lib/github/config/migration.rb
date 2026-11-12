@@ -30,6 +30,29 @@ module GitHub
       end
       attr_reader :gh_migrator_batch_size
 
+      # Public: The maximum allowed export archive size in gigabytes.
+      # Configurable on GHES via (value in GB):
+      #   ghe-config app.github.migrations-max-export-archive-size-gb 80 && ghe-config-apply
+      # Defaults to unlimited on enterprise, 40GB otherwise.
+      #
+      # Zero is a valid configured value and denotes "no limit" (unlimited).
+      def migrations_max_export_archive_size_gb=(value)
+        return unless value.is_a?(Integer) && value >= 0
+
+        @migrations_max_export_archive_size_gb = value
+      end
+
+      def migrations_max_export_archive_size_gb
+        @migrations_max_export_archive_size_gb ||= if GitHub.enterprise?
+          Float::INFINITY
+        else
+          40
+        end
+
+        # Zero denotes "no limit", so surface it as unlimited to callers.
+        @migrations_max_export_archive_size_gb.zero? ? Float::INFINITY : @migrations_max_export_archive_size_gb
+      end
+
       # Public: The maximum allowable time for gh-migrator exports to run.
       def max_gh_migrator_export_time
         @max_gh_migrator_export_time ||= MAX_GH_MIGRATOR_TIME

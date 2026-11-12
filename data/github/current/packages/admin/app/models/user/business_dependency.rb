@@ -46,7 +46,7 @@ module User::BusinessDependency
   # Creates the BusinessUserAccount for the new user in the global business
   def create_single_business_user_account
     return unless GitHub.single_business_environment?
-    return if organization?
+    return unless user?
     GitHub.global_business&.add_user_accounts([self.id], business_roles_bitfield: 0)
   end
 

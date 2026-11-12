@@ -2257,8 +2257,15 @@ class Organization < User
     integrations = user.integrations
     oauth_apps = self.oauth_applications
 
-    integrations.each do |integration|
-      integration.suspend(reason: "Organization soft deleted", actor: User.staff_user)
+    # Suspending integrations requires the staff user, which is only created
+    # when GitHub.guard_audit_log_staff_actor? is true (it raises otherwise,
+    # e.g. on Enterprise). Skip suspension in that case rather than aborting the
+    # soft delete; OAuth applications are still suspended below.
+    if GitHub.guard_audit_log_staff_actor?
+      staff_user = User.staff_user
+      integrations.each do |integration|
+        integration.suspend(reason: "Organization soft deleted", actor: staff_user)
+      end
     end
 
     oauth_apps.each do |app|

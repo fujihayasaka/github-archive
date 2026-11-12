@@ -1,0 +1,126 @@
+#!/bin/bash
+#
+# Generates the Ruby protobuf/twirp sources for the elm_exporter gem from
+#   internal/proto/elm_exporter/schemas/migration_manager/v1/api.proto
+# using the monolith-twirp-tools gen-ruby Docker image.
+#
+# IMPORTANT — image version: this is pinned to g067dc6afa, which is DIFFERENT
+# from the g80c50a5ac label in .monolith-twirp.yml used for linting. The lint
+# image's protoc-gen-twirp_ruby plugin CANNOT generate proto3 `optional` fields
+# (e.g. ListMigrationsRequest.status) and fails with:
+#   "protoc-gen-twirp_ruby hasn't been updated to support optional fields in proto3"
+# g067dc6afa bundles a plugin build that supports proto3 optional. Do NOT "sync"
+# this to the lint label or generation will break. See AGENTS.md.
+#
+# This generates SOURCES ONLY. The vendored .gem for github/github MUST be built
+# separately with system Ruby in a github/github codespace to get the legacy
+# checksums.yaml format CI requires (see AGENTS.md).
+#
+# WARNING: this script runs `git clean`/`git checkout` against MODULE_ROOT to
+# discard files the image scaffolds there. If you are editing proto files (e.g.
+# changing `option ruby_package`), COMMIT OR STAGE those changes BEFORE running
+# this script, or they will be discarded.
+#
+# Usage (from anywhere):
+#   client/ruby/script/generate
+#
+# You may need to `docker login ghcr.io` first; the default codespace token does
+# not always have pull permission for this image.
+
+set -euo pipefail
+
+# --- Resolve paths ---
+RUBY_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd)"
+REPO_ROOT="$(cd -- "$RUBY_DIR/../.." && pwd)"
+
+# --- Image config ---
+# Pinned to the proto3-optional-capable image (see header note). Override with
+# GEN_RUBY_VERSION only if you know the replacement also supports proto3 optional
+# and stays compatible with the monolith's twirp/google-protobuf versions.
+GEN_RUBY_VERSION="${GEN_RUBY_VERSION:-protoc-3.15.4-g067dc6afa}"
+GEN_RUBY_IMAGE_NAME="ghcr.io/github/monolith-twirp-tools/gen-ruby:${GEN_RUBY_VERSION}"
+
+NAMESPACE=elm_exporter
+MODULE_ROOT=internal/proto/elm_exporter/schemas
+NWO=github/elm-exporter
+
+# Where the image drops its built artifacts, and where our gem's generated
+# sources must end up.
+ARTIFACT_DIR="${REPO_ROOT}/tmp/twirp-gems"
+DEST_DIR="${RUBY_DIR}/lib/mvnd/elm_exporter/api/v1"
+
+# --- Cleanup (runs on every exit, success or failure) ---
+# - Removes the temp unpack dir.
+# - Reverts files the gen-ruby template step scaffolds into the working tree:
+#   it drops Makefile/VERSION files into every schema dir under MODULE_ROOT
+#   (including ones we don't own, e.g. elm_ipc). None of that belongs in the
+#   elm_exporter gem PR; only the extracted *_pb.rb / *_twirp.rb under
+#   client/ruby/lib/... should be committed. Scoped to MODULE_ROOT so it can
+#   never touch client/. The built gems remain in tmp/ (gitignored).
+WORK=""
+cleanup() {
+    [ -n "${WORK}" ] && rm -rf "${WORK}"
+    echo "=== Reverting generator-scaffolded files in ${MODULE_ROOT}..."
+    git -C "${REPO_ROOT}" checkout -- "${MODULE_ROOT}" 2>/dev/null || true
+    git -C "${REPO_ROOT}" clean -fd "${MODULE_ROOT}" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+mkdir -p "${ARTIFACT_DIR}" "${DEST_DIR}"
+
+echo "=== Running gen-ruby (${GEN_RUBY_VERSION})..."
+docker run --rm \
+    -e NAMESPACE="${NAMESPACE}" \
+    -e MODULE_ROOT="${MODULE_ROOT}" \
+    -e NWO="${NWO}" \
+    --name="gen-ruby-elm-exporter-${GEN_RUBY_VERSION}" \
+    -v "${REPO_ROOT}:/repo" \
+    -v "${ARTIFACT_DIR}:/docker-build-artifacts:rw" \
+    "${GEN_RUBY_IMAGE_NAME}" \
+    script/setup generate
+
+# --- Fix ownership/permissions on artifacts written by the (root) container ---
+if [ -w "${ARTIFACT_DIR}" ]; then
+    chmod -R u+w "${ARTIFACT_DIR}" 2>/dev/null || true
+else
+    sudo chown -R "$(id -u):$(id -g)" "${ARTIFACT_DIR}" 2>/dev/null || true
+fi
+
+# --- Locate the built gem and extract the generated Ruby sources ---
+# The image produces a full gem (e.g. monolith-twirp-elm_exporter-migration_manager-<ver>.gem).
+# We want only the generated *_pb.rb / *_twirp.rb for the migration_manager/v1
+# package, relocated into our gem's lib tree.
+echo "=== Extracting generated Ruby sources..."
+WORK="$(mktemp -d)"
+
+GEM_FILE="$(find "${ARTIFACT_DIR}" -type f -name '*elm_exporter*.gem' | sort | tail -1)"
+if [ -z "${GEM_FILE}" ]; then
+    echo "ERROR: no elm_exporter gem found under ${ARTIFACT_DIR}." >&2
+    echo "       Check the gen-ruby output above for failures." >&2
+    exit 1
+fi
+echo "    using ${GEM_FILE}"
+
+gem unpack "${GEM_FILE}" --target="${WORK}" >/dev/null
+
+# Find the generated api_pb.rb / api_twirp.rb inside the unpacked gem and copy
+# them flat into DEST_DIR. The package path is migration_manager/v1, filename api.
+GENERATED=()
+while IFS= read -r f; do
+    GENERATED+=("$f")
+done < <(find "${WORK}" -type f \( -name 'api_pb.rb' -o -name 'api_twirp.rb' \))
+if [ "${#GENERATED[@]}" -eq 0 ]; then
+    echo "ERROR: no api_pb.rb / api_twirp.rb found inside the built gem." >&2
+    echo "       Inspect: gem unpack ${GEM_FILE} --target=/tmp/inspect" >&2
+    exit 1
+fi
+
+for f in "${GENERATED[@]}"; do
+    cp -v "${f}" "${DEST_DIR}/"
+done
+
+echo "=== Done. Generated sources are in:"
+echo "    ${DEST_DIR}"
+echo
+echo "Confirm the generated namespace is Mvnd::ElmExporter::Api::V1 and commit the"
+echo "files under client/ruby/lib/... alongside any proto changes."

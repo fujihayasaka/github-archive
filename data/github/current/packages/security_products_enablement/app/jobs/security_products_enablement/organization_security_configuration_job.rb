@@ -6,6 +6,13 @@ module SecurityProductsEnablement
     include GitHub::Memoizer
     include SecurityConfigurations::RepositoriesDependency
 
+    # IMPORTANT: must be included BEFORE the class's own #around_perform so the
+    # throttler's around-perform wraps (rather than nests inside) the tracker
+    # setup. When the throttler skips block.call we want the inner around_perform
+    # to never fire -- otherwise it would reset #enqueued_any_job and could
+    # clear the tracker out from under the re-enqueued parent.
+    include SecurityCenter::FanoutThrottler
+
     BATCH_SIZE = 100
     VALID_ACTIONS = %i[apply detach update delete]
 
@@ -16,10 +23,23 @@ module SecurityProductsEnablement
     queue_as :security_configurations
 
     retry_on_dirty_exit
-    retry_on_recoverable_exceptions
+    # jitter:0.15 spreads parent retries (e.g. on transient DB unavailability) so
+    # the security_configurations queue doesn't see synchronized retry waves from
+    # all bulk-apply parents that happened to be enqueued in the same window.
+    retry_on_recoverable_exceptions(jitter: 0.15)
 
     before_enqueue do |_|
       job_progress_tracker.start
+    end
+
+    around_perform do |job, block|
+      if job.arguments.dig(0, :action) == :apply
+        # Stagger the child apply jobs so one bulk parent cannot release every
+        # per-repository job into the queue at the same moment.
+        ApplySecurityConfigurationToRepositoryJob.with_fanout_stagger { block.call }
+      else
+        block.call
+      end
     end
 
     around_perform do |job, block|
@@ -166,6 +186,11 @@ module SecurityProductsEnablement
       end
 
       job_progress_tracker.lock_total_jobs
+    end
+
+    sig { override.returns(T::Array[T.class_of(ApplicationJob)]) }
+    def fanout_jobs
+      [ApplySecurityConfigurationToRepositoryJob]
     end
 
     sig do
