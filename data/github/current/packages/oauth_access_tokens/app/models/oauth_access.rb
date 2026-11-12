@@ -318,7 +318,7 @@ class OauthAccess < ApplicationRecord::Domain::Integrations
   before_validation :update_last_issued_at, if: :hashed_token_changed?
 
   validate :ensure_integration_capabilities, if: :installation
-  validate :expiration_is_allowed_by_emu_business, if: -> (token) { token.expires_at_timestamp_changed? && token.personal_access_token? }, on: [:create, :update]
+  validate :expiration_is_allowed_by_enterprise_policy, if: -> (token) { token.expires_at_timestamp_changed? && token.personal_access_token? }, on: [:create, :update]
 
   after_save :destroy_active_credential_authorizations, if: :personal_access_token?
   after_destroy :destroy_authorization, if: :authorization
@@ -1408,7 +1408,14 @@ class OauthAccess < ApplicationRecord::Domain::Integrations
   end
 
   def target_enforces_expiration_limit?
-    user && T.cast(user, User).is_enterprise_managed?
+    target_expiration_limit_enforcer.present?
+  end
+
+  def target_expiration_limit_enforcer
+    return unless user
+
+    token_user = T.cast(user, User)
+    ProgrammaticAccessTokenLifetimeConfiguration.limit_enforcer_for(token_user)
   end
 
   def expiration_exceeds_target_limit?(lifetime_config)
@@ -1419,10 +1426,10 @@ class OauthAccess < ApplicationRecord::Domain::Integrations
     pat_lifetime_in_days == :unlimited || pat_lifetime_in_days > expiration_limit
   end
 
-  def expiration_is_allowed_by_emu_business
-    return unless target_enforces_expiration_limit?
+  def expiration_is_allowed_by_enterprise_policy
+    enterprise = target_expiration_limit_enforcer
+    return unless enterprise
 
-    enterprise = T.cast(user, User).enterprise_managed_business
     lifetime_config = ProgrammaticAccessTokenLifetimeConfiguration.new(enterprise, ProgrammaticAccessTokenType::Classic)
     return unless expiration_exceeds_target_limit?(lifetime_config)
     errors.add(:base, :invalid_expiration, message: "Your enterprise does not allow tokens to be created with expiration above #{lifetime_config.expiration_limit} days")

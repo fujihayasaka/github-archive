@@ -293,7 +293,7 @@ class OauthTokensController < ApplicationController
   end
 
   def allow_custom_default_expires_at?
-    current_user.enterprise_managed_business.present? && ProgrammaticAccessTokenLifetimeConfiguration.expiration_limit_for(current_user.enterprise_managed_business, ProgrammaticAccessTokenType::Classic)
+    ProgrammaticAccessTokenLifetimeConfiguration.expiration_limit_for(current_user, ProgrammaticAccessTokenType::Classic).present?
   end
 
   def user_facing_error?(access)

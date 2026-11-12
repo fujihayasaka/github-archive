@@ -63,6 +63,9 @@ class Businesses::AdvancedSecurityController < Businesses::BusinessController
       hide_pagination: users_and_counts[:count] <= page_size,
       link_renderer: AdvancedSecurityUsersLinkRenderer,
     }
+  rescue AdvancedSecurityLicense::TurboghasError => e
+    Failbot.report(e, catalog_service: "github/licensing")
+    render partial: "businesses/billing_settings/advanced_security_turboghas_error"
   end
 
   def advanced_security_orgs_list # rubocop:todo GitHub/UseRestfulActions
@@ -102,5 +105,8 @@ class Businesses::AdvancedSecurityController < Businesses::BusinessController
       hide_pagination: orgs_and_counts[:total_orgs_count] <= page_size,
       link_renderer: AdvancedSecurityEntitiesLinkRenderer,
     }
+  rescue AdvancedSecurityLicense::TurboghasError => e
+    Failbot.report(e, catalog_service: "github/licensing")
+    render partial: "businesses/billing_settings/advanced_security_turboghas_error"
   end
 end

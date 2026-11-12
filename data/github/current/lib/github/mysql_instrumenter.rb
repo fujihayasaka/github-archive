@@ -45,8 +45,8 @@ module GitHub
         @exception = exception
         @transaction_uuid = transaction_uuid
 
-        @location_key = MysqlInstrumenter.location_key
-        @full_backtrace = MysqlInstrumenter.full_backtrace
+        @full_backtrace = skip?(:backtrace) ? [] : MysqlInstrumenter.full_backtrace
+        @location_key = skip?(:backtrace) ? nil : MysqlInstrumenter.location_key(@full_backtrace)
         @backtrace = skip?(:backtrace) ? [] : MysqlInstrumenter.backtrace_locations
         @digested_sql = skip?(:digested_sql) ? sql : GitHub::SQL::Digester.digest_sql(sql)
         @tags = skip?(:tags) ? [] : MysqlInstrumenter.tags.uniq
@@ -305,7 +305,7 @@ module GitHub
       end
     end
 
-    def self.location_key
+    def self.location_key(full_backtrace)
       Digest::SHA256.hexdigest(full_backtrace.hash.to_s)
     end
 

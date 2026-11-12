@@ -27,6 +27,25 @@ class Configuration
     end
   end
 
+  # Internal: Lightweight, immutable stand-in for a Configuration::Entry used by
+  # the batched preload path, so the hot loop allocates cheap value objects
+  # instead of one full ActiveRecord instance per row (a significant GC cost on
+  # hot preload endpoints). Responds to every method callers invoke on preloaded
+  # read entries: #name, #value, #final, #final?, #target_type, #target_id and
+  # #target.
+  PreloadedEntry = Data.define(:name, :value, :final, :target_type, :target_id) do
+    def final?
+      final
+    end
+
+    # Mirror Configuration::Entry#target. Off the hot path, so building a
+    # throwaway Entry to reach the polymorphic association is fine.
+    def target
+      return GitHub if target_type == "global"
+      Configuration::Entry.new(target_type: target_type, target_id: target_id).target
+    end
+  end
+
   # Internal: Minimal AR class to persist the configuration values
   # Consider this an implementation detail
   class Entry < ApplicationRecord::Domain::ConfigurationEntries
@@ -88,6 +107,32 @@ class Configuration
           SQL
         where(target_conditions).
         order("priority ASC")
+    end
+
+    # Internal: Like #prioritized_for_targets, but returns lightweight immutable
+    # PreloadedEntry value objects instead of full AR Entry instances, so the
+    # batched preload path avoids allocating one ActiveRecord object per matching
+    # row.
+    #
+    # Runs the exact same SQL as #prioritized_for_targets (so hot-endpoint N+1
+    # query allowlists keep matching) but maps the raw result rows into value
+    # objects rather than instantiating models. Typecasts the columns callers
+    # read: `final` especially, since a raw 0/1 is truthy in Ruby and would break
+    # the `final` short-circuit in callers.
+    sig { params(targets: T::Enumerable[Configurable]).returns(T::Array[PreloadedEntry]) }
+    def self.prioritized_entry_values_for_targets(targets)
+      return [] if targets.none?
+
+      boolean = ActiveModel::Type::Boolean.new
+      connection.select_all(prioritized_for_targets(targets)).rows.map do |name, value, final, target_type, target_id, _priority|
+        PreloadedEntry.new(
+          name: name,
+          value: value,
+          final: boolean.cast(final),
+          target_type: target_type,
+          target_id: target_id&.to_i,
+        )
+      end
     end
 
     def target
@@ -184,7 +229,7 @@ class Configuration
     # Iterate over each configuration entry in reverse priority order and populate the entries Hash corresponding to
     # each matching target. Halt early if a lower-priority entry has a "final" flag (indicating we should ignore
     # higher-priority entries).
-    Entry.prioritized_for_targets(all_targets).each do |entry|
+    Entry.prioritized_entry_values_for_targets(all_targets).each do |entry|
       targets_for_entry["#{entry.target_id}\0#{entry.target_type}"].each do |target|
         entries = entries_by_target[target]
         current = entries[entry.name]
@@ -274,7 +319,7 @@ class Configuration
       # Iterate over each configuration entry in reverse priority order, halting
       # early if a lower-priority entry has a "final" flag (indicating we should
       # ignore higher-priority entries).
-      Entry.prioritized_for_targets(targets).each do |entry|
+      Entry.prioritized_entry_values_for_targets(targets).each do |entry|
         current = entries[entry.name]
         next if current && current.final?
         entries[entry.name] = entry

@@ -348,7 +348,7 @@ module Api::Serializer::IssuesDependency
       h[:message] = detail.message
 
       if detail.pull_request_review_id
-        h[:pull_request_review_url] = url("/repos/#{repo}/pulls/#{event.issue.number}/reviews/#{detail.pull_request_review_id}", options)
+        h[:pull_request_review_url] = url("/repos/#{repo}/pulls/#{event.issue.number}/reviews/#{detail.pull_request_review_id}", options) # domain-isolation-query-violation:ignore:packages/issues (SELECT)
         h[:pull_request_review_state_was] = ::PullRequestReview.state_name(detail.pull_request_review_state_was).to_s
       end
       h[:review_request] = detail.review_request_id

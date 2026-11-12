@@ -18,7 +18,7 @@ class StatusesArchiveOrchestrationJob < ApplicationJob
   # There is a large amount of statuses that needs to be archived and a single job every minute has proven to be too slow. The purpose
   # of this job is to parallelize the archiving process and to increase the total amount of records that can be archived per minute.
   def perform
-    return unless GitHub.checks_retention_enabled?
+    return unless GitHub.statuses_retention_enabled?
 
     lock! do
       orchestrate_archiving

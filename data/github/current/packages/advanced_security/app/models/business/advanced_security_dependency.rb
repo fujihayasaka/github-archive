@@ -49,12 +49,18 @@ module Business::AdvancedSecurityDependency
   end
 
   def get_advanced_security_enterprise_users_and_counts(actor:, page:, page_size: 10)
-    response = GitHub::Turboghas.client.get_enterprise_users(Turboghas::Proto::GetEnterpriseUsersRequest.new(
-      business_id: self.id,
-      cursor: Turboghas::Proto::Cursor.new(offset: [0, page].max * page_size),
-      limit: page_size,
-    ))
-    raise StandardError.new(response.error) if response.error.present?
+    begin
+      response = GitHub::Turboghas.client.get_enterprise_users(Turboghas::Proto::GetEnterpriseUsersRequest.new(
+        business_id: self.id,
+        cursor: Turboghas::Proto::Cursor.new(offset: [0, page].max * page_size),
+        limit: page_size,
+      ))
+      raise AdvancedSecurityLicense::TurboghasError.new(response.error.to_s) if response.error.present?
+    rescue AdvancedSecurityLicense::TurboghasError
+      raise
+    rescue StandardError => e
+      raise AdvancedSecurityLicense::TurboghasError, e.message
+    end
 
     feature = AdvancedSecurity::Features::Business::AdvancedSecurity.new(T.bind(self, Business))
     total = feature.num_enterprise_users
@@ -93,12 +99,18 @@ module Business::AdvancedSecurityDependency
   # page is 0-based
   def get_advanced_security_orgs_and_counts(page:, page_size: 10)
     total_orgs = self.organizations.count
-    response = GitHub::Turboghas.client.get_organizations(Turboghas::Proto::GetOrganizationsRequest.new(
-      business_id: self.id,
-      cursor: Turboghas::Proto::Cursor.new(offset: [0, page].max * page_size),
-      limit: page_size,
-    ))
-    raise StandardError.new(response.error) if response.error.present?
+    begin
+      response = GitHub::Turboghas.client.get_organizations(Turboghas::Proto::GetOrganizationsRequest.new(
+        business_id: self.id,
+        cursor: Turboghas::Proto::Cursor.new(offset: [0, page].max * page_size),
+        limit: page_size,
+      ))
+      raise AdvancedSecurityLicense::TurboghasError.new(response.error.to_s) if response.error.present?
+    rescue AdvancedSecurityLicense::TurboghasError
+      raise
+    rescue StandardError => e
+      raise AdvancedSecurityLicense::TurboghasError, e.message
+    end
     orgs = self.organizations.where(id: response.data.organizations.map(&:id)).all.index_by(&:id)
     {
       orgs: response.data.organizations.map do |org|
