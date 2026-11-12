@@ -77,6 +77,7 @@ module Suspension::SuspensionDependency
       if business_user_account = BusinessUserAccount.find_by(user_id: self.id)
         business_user_account.business&.update_license_usage
       end
+      resync_enterprise_membership_roles
       DelistSpammySponsorsListingJob.perform_later(sponsorable: self, actor: actor) if GitHub.sponsors_enabled?
     end
 
@@ -152,6 +153,7 @@ module Suspension::SuspensionDependency
         if business_user_account = BusinessUserAccount.find_by(user_id: self.id)
           business_user_account.business&.update_license_usage
         end
+        resync_enterprise_membership_roles
         RelistNonSpammySponsorsListingJob.perform_later(sponsorable: self, actor: actor) if GitHub.sponsors_enabled?
       end
 
@@ -179,5 +181,27 @@ module Suspension::SuspensionDependency
     end
 
     true
+  end
+
+  private
+
+  # On GHES the BusinessUserAccount role bitfield backs enterprise.members and
+  # the enterprise members listing. update_license_usage is a no-op on GHES, so
+  # after a suspend or unsuspend the affected user's bitfield must be resynced
+  # here or the user is left missing from (or lingering in) the members listing.
+  # Enqueued with targeted user account IDs to avoid a full-business resync on
+  # the normal path. See https://github.com/github/enterprise-primitives/issues/6114.
+  #
+  # Returns nothing.
+  def resync_enterprise_membership_roles
+    return unless GitHub.single_business_environment?
+    return unless is_a?(User)
+
+    BusinessUserAccount.where(user_id: self.id).find_each do |bua|
+      business = bua.business
+      next unless business
+
+      BusinessUserAccountUpdateAttributesJob.perform_later(business, user_account_ids: [bua.id])
+    end
   end
 end

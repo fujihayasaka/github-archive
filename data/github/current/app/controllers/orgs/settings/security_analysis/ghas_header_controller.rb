@@ -27,5 +27,8 @@ class Orgs::Settings::SecurityAnalysis::GhasHeaderController < Orgs::Controller
   def index
     return render_404 unless current_organization.advanced_security_purchased?
     render Organizations::Settings::GhasRepositoriesHeaderComponent.new(sku: GitHub::Turboghas::SKU.from_param(params[:sku]), organization: current_organization), layout: false
+  rescue AdvancedSecurityLicense::TurboghasError => e
+    Failbot.report(e, catalog_service: "github/licensing")
+    render partial: "businesses/billing_settings/advanced_security_turboghas_error"
   end
 end

@@ -87,6 +87,7 @@ module Viewscreen
       @view_type = :markdown
       @view_data = view_data
       @entity = entity
+      @skip_quote_rewrite = opts.delete(:skip_quote_rewrite)
       @html_safe = opts.delete(:html_safe)
       @opts = opts
     end
@@ -121,6 +122,14 @@ module Viewscreen
     end
 
     memoize def view_data
+      # `@view_data` is the code block's decoded text; the template escapes it
+      # wherever it is interpolated.
+      return @view_data if @skip_quote_rewrite
+
+      # Legacy path, gated off by
+      # GitHub::Goomba::CodeRenderingServiceFilter::SKIP_QUOTE_REWRITE_FLAG:
+      # `@view_data` is already-sanitized, serialized HTML whose quote
+      # delimiters we rewrite to `&quot;` and then trust. Remove with the flag.
       data = @view_data.gsub(/"/, "&quot;")
       return data unless @html_safe
       data.html_safe # rubocop:disable Rails/OutputSafety

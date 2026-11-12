@@ -29,7 +29,8 @@ class OrganizationInvitation < ApplicationRecord::Domain::Users
   enum :invitation_source, {
     unknown: 0,
     member: 1,
-    scim: 2
+    scim: 2,
+    enterprise_organization_creation: 3,
   }
 
   # Raised when someone accepts an already-accepted invitation.

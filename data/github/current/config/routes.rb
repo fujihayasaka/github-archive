@@ -2278,9 +2278,6 @@ GitHub::Application.routes.draw do
   get "/_global-navigation/repositories/:owner", to: "context_region/repository_suggestions#index", as: :global_navigation_repository_suggestions
   get "/_global-navigation/tabs/:crumb_type/:crumb_object_identifier", to: "context_region/tabs#show", as: :global_navigation_tabs
 
-  # Global Navigation - Fragments
-  get "/_global-navigation/fragments", to: "global_navigation_fragments#show", as: :global_navigation_fragments
-
   # Global Navigation - Payloads
   get "/_global-navigation/payloads", to: "global_navigation_payloads#show", as: :global_navigation_payloads
 

@@ -222,6 +222,11 @@ module Business::PeopleDependency
       false
   end
 
+  def member_ids_for_organization_owner_assignment(user_ids:)
+    admin_and_organization_member_ids(actor_ids: user_ids) |
+      user_accounts.where(user_id: user_ids).pluck(:user_id).compact
+  end
+
   # Public: Returns filtered members of the enterprise.
   #
   # viewer - required - the user requesting a list of filtered enterprise members

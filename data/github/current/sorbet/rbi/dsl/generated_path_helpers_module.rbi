@@ -6427,9 +6427,6 @@ module GeneratedPathHelpersModule
   def global_advisory_path(*args); end
 
   sig { params(args: T.untyped).returns(String) }
-  def global_navigation_fragments_path(*args); end
-
-  sig { params(args: T.untyped).returns(String) }
   def global_navigation_payloads_path(*args); end
 
   sig { params(args: T.untyped).returns(String) }

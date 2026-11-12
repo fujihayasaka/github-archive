@@ -59,7 +59,6 @@ module ApplicationController::ApplicationLayoutFeatures
     :dashboard_nav_experiment, # related to this UI experiment: https://github.com/github/github/pull/372845
     :global_nav_react, # enables the React version of the global top-nav (including left-nav and the user-menu)
     :global_nav_dual_emit_tab_metrics, # enables dual emission of tab generation timing metrics for the global nav
-    :global_nav_react_blackbird_fragment, # enables the React version of the global nav blackbird search fragment
     :global_nav_exclude_project_count, # excludes project count from repo global nav
     :global_nav_security_count_cache, # enables caching for security count in repo global nav
     :optimized_org_counts, # enables a 5,001 count limit on organization profile tab counts

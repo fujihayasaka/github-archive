@@ -172,7 +172,6 @@ module Site
         current_repository: current_repository,
         current_organization: current_organization,
         selected_link: selected_link,
-        page_breadcrumb_object: page_breadcrumb_object,
         is_search_page: is_search_page? || false,
         view: view,
         source: "rails"

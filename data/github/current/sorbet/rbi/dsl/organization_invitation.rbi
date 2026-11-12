@@ -484,6 +484,12 @@ class OrganizationInvitation
     def direct_member?; end
 
     sig { void }
+    def enterprise_organization_creation!; end
+
+    sig { returns(T::Boolean) }
+    def enterprise_organization_creation?; end
+
+    sig { void }
     def expired!; end
 
     sig { returns(T::Boolean) }
@@ -741,6 +747,9 @@ class OrganizationInvitation
     def eager_load(*args, &blk); end
 
     sig { params(args: T.untyped, blk: T.untyped).returns(PrivateAssociationRelation) }
+    def enterprise_organization_creation(*args, &blk); end
+
+    sig { params(args: T.untyped, blk: T.untyped).returns(PrivateAssociationRelation) }
     def except(*args, &blk); end
 
     sig { params(args: T.untyped, blk: T.untyped).returns(PrivateAssociationRelation) }
@@ -835,6 +844,9 @@ class OrganizationInvitation
 
     sig { params(args: T.untyped, blk: T.untyped).returns(PrivateAssociationRelation) }
     def not_direct_member(*args, &blk); end
+
+    sig { params(args: T.untyped, blk: T.untyped).returns(PrivateAssociationRelation) }
+    def not_enterprise_organization_creation(*args, &blk); end
 
     sig { params(args: T.untyped, blk: T.untyped).returns(PrivateAssociationRelation) }
     def not_expired(*args, &blk); end
@@ -2121,6 +2133,9 @@ class OrganizationInvitation
     def eager_load(*args, &blk); end
 
     sig { params(args: T.untyped, blk: T.untyped).returns(PrivateRelation) }
+    def enterprise_organization_creation(*args, &blk); end
+
+    sig { params(args: T.untyped, blk: T.untyped).returns(PrivateRelation) }
     def except(*args, &blk); end
 
     sig { params(args: T.untyped, blk: T.untyped).returns(PrivateRelation) }
@@ -2215,6 +2230,9 @@ class OrganizationInvitation
 
     sig { params(args: T.untyped, blk: T.untyped).returns(PrivateRelation) }
     def not_direct_member(*args, &blk); end
+
+    sig { params(args: T.untyped, blk: T.untyped).returns(PrivateRelation) }
+    def not_enterprise_organization_creation(*args, &blk); end
 
     sig { params(args: T.untyped, blk: T.untyped).returns(PrivateRelation) }
     def not_expired(*args, &blk); end

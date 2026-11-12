@@ -6427,9 +6427,6 @@ module GeneratedUrlHelpersModule
   def global_advisory_url(*args); end
 
   sig { params(args: T.untyped).returns(String) }
-  def global_navigation_fragments_url(*args); end
-
-  sig { params(args: T.untyped).returns(String) }
   def global_navigation_payloads_url(*args); end
 
   sig { params(args: T.untyped).returns(String) }

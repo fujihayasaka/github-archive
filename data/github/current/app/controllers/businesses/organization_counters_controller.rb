@@ -57,17 +57,21 @@ class Businesses::OrganizationCountersController < Businesses::BusinessControlle
 
   def keyed_info_from_items(items)
     org_ids = items.values.map { |item| item[:organization_id]&.to_i }.compact.uniq
-    counters_by_org_id = \
-      this_business.organizations.where(id: org_ids).each_with_object({}) do |org, counters|
-        counters[org.id] = {
-          organization: org,
-          members: org_member_count(org),
-          repos: org_repo_count(org),
-        }
+    organizations = this_business.organizations.where(id: org_ids).to_a
+    member_ids_by_org_id = organizations.to_h { |org| [org.id, org.member_ids] }
+    unique_member_ids = member_ids_by_org_id.values.flatten.uniq
+    suspended_member_ids = suspended_member_ids(unique_member_ids).to_set
 
-        counters[org.id][:deploy_key_count] = org_deploy_key_count(org)
-        counters[org.id][:two_factor_policy] = org_2fa_policy(org)
-      end
+    counters_by_org_id = organizations.each_with_object({}) do |org, counters|
+      counters[org.id] = {
+        organization: org,
+        members: org_member_count(member_ids_by_org_id.fetch(org.id), suspended_member_ids),
+        repos: org_repo_count(org),
+      }
+
+      counters[org.id][:deploy_key_count] = org_deploy_key_count(org)
+      counters[org.id][:two_factor_policy] = org_2fa_policy(org)
+    end
 
     items.transform_values do |org_params|
       counters_by_org_id[org_params[:organization_id]&.to_i]
@@ -80,12 +84,22 @@ class Businesses::OrganizationCountersController < Businesses::BusinessControlle
     "disabled"
   end
 
-  def org_member_count(org)
-    member_ids = org.member_ids
+  def org_member_count(member_ids, suspended_member_ids)
+    member_ids = member_ids.reject { |member_id| suspended_member_ids.include?(member_id) }
     member_count = member_ids.size
     return member_count if current_user.site_admin?
     spammy_count = User.batched_scope(:id, values: member_ids, batch_size: 10_000) { |s| s.spammy }.count
     member_count - spammy_count
+  end
+
+  def suspended_member_ids(member_ids)
+    return User.where(id: member_ids).suspended.pluck(:id) if GitHub.enterprise?
+    return [] unless this_business.enterprise_managed_user_enabled?
+
+    this_business.user_accounts
+      .batched_scope(:user_id, values: member_ids) { |scope| scope.roles([:suspended]) }
+      .pluck(:user_id)
+      .compact
   end
 
   def org_repo_count(org)

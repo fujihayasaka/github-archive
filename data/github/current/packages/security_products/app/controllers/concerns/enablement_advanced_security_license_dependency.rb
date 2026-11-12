@@ -33,7 +33,7 @@ module EnablementAdvancedSecurityLicenseDependency
       end
 
     rescue AdvancedSecurityLicense::TurboghasError => e
-      Failbot.report(e)
+      Failbot.report(e, catalog_service: "github/licensing")
       payload[:failedToFetchLicenses] = true
     end
 

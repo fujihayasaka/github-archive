@@ -472,7 +472,7 @@ module RepositoryControllerMethods
   #
   # Returns a String with the repo and pull request id in it.
   def pull_request_authorization_token_scope_key
-    "PullRequest:#{current_repository}:#{params[:id]}"
+    "PullRequest:#{current_repository.id}:#{params[:id]}"
   end
 
   # Public: Check if the viewer has write access to the repository being viewed.

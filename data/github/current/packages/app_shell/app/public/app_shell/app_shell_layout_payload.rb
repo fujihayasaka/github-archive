@@ -52,7 +52,6 @@ module AppShell
         current_organization: @current_organization,
         selected_link: @selected_link,
         is_search_page: false, # TODO: get is_search_page
-        page_breadcrumb_object: nil, # TODO: get page_breadcrumb_object
         view: view,
         source: "app_shell"
       )

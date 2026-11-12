@@ -432,12 +432,8 @@ class PullRequest::MergeState
     if merge_commit
       out_of_date_cached_merge = merge_commit.first_parent_oid != before_oid
 
-      if out_of_date_cached_merge && repo.feature_flag_enabled?(:use_cached_before_oid, default: false)
+      if out_of_date_cached_merge
         before_oid = merge_commit.first_parent_oid
-      end
-
-      unless repo.feature_flag_enabled?(:status_check_strict_cache_merge, default: false)
-        out_of_date_cached_merge = false
       end
     else
       GitHub.logger.info("Missing merge commit for MergeState", {

@@ -13,9 +13,6 @@ module GlobalNavigation
     attr_reader :is_search_page
     alias :is_search_page? :is_search_page
 
-    sig { returns(T.untyped) }
-    attr_reader :page_breadcrumb_object
-
     sig { returns(Site::HeaderView) }
     attr_reader :view
 
@@ -33,7 +30,6 @@ module GlobalNavigation
         current_repository: T.nilable(Repository),
         current_organization: T.nilable(Organization),
         selected_link: T.nilable(T.any(Symbol, String)),
-        page_breadcrumb_object: T.untyped,
         is_search_page: T::Boolean,
       ).void
     end
@@ -45,7 +41,6 @@ module GlobalNavigation
       current_repository: nil,
       current_organization: nil,
       selected_link: nil,
-      page_breadcrumb_object: nil,
       is_search_page: false
     )
       super(
@@ -56,7 +51,6 @@ module GlobalNavigation
         source: source
       )
       @selected_link = selected_link
-      @page_breadcrumb_object = page_breadcrumb_object
       @is_search_page = is_search_page
       @view = view
     end
@@ -148,8 +142,6 @@ module GlobalNavigation
           showCommandPalette: command_palette_enabled?,
           isSearchPage: is_search_page?,
           isJumpToSearch: !blackbird_enabled?,
-          fragmentsPath: global_navigation_fragments_path,
-          fragmentsParams: search_params_for_header_search(params),
           searchContext: search_context(params)
         }
       end
@@ -258,31 +250,6 @@ module GlobalNavigation
         user_id: user_id,
         current_business: current_business
       }
-    end
-
-    sig { params(params: T.nilable(ActionController::Parameters)).returns(String) }
-    def search_params_for_header_search(params)
-      return "" unless FeatureFlag.vexi.enabled?(:global_nav_react_blackbird_fragment, current_user, default: false)
-      return "" unless params
-      search_data = search_params(params)
-
-      serialized_params = []
-      serialized_params << "q=#{CGI.escape(params[:q])}" if params[:q].present?
-      serialized_params << "scope=#{CGI.escape(search_data[:scope])}" if search_data[:scope].present?
-      serialized_params << "current_repo_nwo=#{CGI.escape(search_data[:current_repo_nwo])}" if search_data[:current_repo_nwo].present?
-      serialized_params << "repository=#{CGI.escape(search_data[:current_repo_name])}" if search_data[:current_repo_name].present?
-      serialized_params << "org=#{CGI.escape(search_data[:current_repo_org])}" if search_data[:current_repo_org].present?
-      serialized_params << "user_id=#{CGI.escape(search_data[:user_id])}" if search_data[:user_id].present?
-      serialized_params << "is_search_page=true" if is_search_page?
-      serialized_params << "business_context=#{CGI.escape(search_data[:current_business])}" if search_data[:current_business].present?
-
-      if command_palette_enabled?
-        serialized_params << "command_scope_id=#{CGI.escape(page_breadcrumb_object&.id.to_s)}" if page_breadcrumb_object&.id
-        serialized_params << "command_scope_type=#{CGI.escape(page_breadcrumb_object&.class&.name.to_s)}" if page_breadcrumb_object&.class&.name
-        serialized_params << "clear_command_scope=true" if params[:clear_command_scope].present?
-      end
-
-      serialized_params.join("&")
     end
 
     sig { params(params: T.nilable(ActionController::Parameters)).returns(T::Hash[T.untyped, T.untyped]) }

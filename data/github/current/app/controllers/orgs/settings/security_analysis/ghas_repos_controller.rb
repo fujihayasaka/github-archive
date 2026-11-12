@@ -65,5 +65,8 @@ class Orgs::Settings::SecurityAnalysis::GhasReposController < Orgs::Controller
       sku:,
       renderer:,
     }
+  rescue AdvancedSecurityLicense::TurboghasError => e
+    Failbot.report(e, catalog_service: "github/licensing")
+    render partial: "businesses/billing_settings/advanced_security_turboghas_error"
   end
 end
