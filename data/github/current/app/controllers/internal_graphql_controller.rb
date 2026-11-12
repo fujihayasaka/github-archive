@@ -239,6 +239,9 @@ class InternalGraphqlController < ApplicationController
       add_query_time_tags_fn: add_query_time_tags_fn(controller)
     )
 
+    operation_name = T.must(request).env["github.graphql.operation_name"]
+    log_data.update("graphql.operation.name": operation_name) if operation_name.present?
+
     if !result_object.nil?
       result = result_object.to_h
       # Perform secondary work that is related to the result of the query, to be returned in the response

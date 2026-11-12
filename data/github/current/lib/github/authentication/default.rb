@@ -329,7 +329,6 @@ module GitHub
               # ref: https://github.com/github/github/blob/f2e7c81eac642144993998dace73732265797788/lib/github/authentication/token_lookup.rb#L118-L126
               if bot&.installation.nil? && \
                 ActiveRecord::Base.connected_to?(role: :reading) && \
-                FeatureFlag.vexi.enabled?(:token_lookup_from_primary_bot, default: false) && \
                 FeatureFlag.vexi.enabled?(:authnd_installation_fallback_to_primary, default: false)
 
                 ActiveRecord::Base.connected_to(role: :writing) do

@@ -4,8 +4,8 @@
 module GitAuth
   # Generate a list of notices to be displayed to the pushing user in the git CLI.
   class PushNotices
-    def self.call(repo, data)
-      new(repo: repo, data: data).call
+    def self.call(repo, data, hash_algo: nil)
+      new(repo: repo, data: data, hash_algo: hash_algo).call
     end
 
     # Contains the result of calling PushNotices and handles
@@ -29,9 +29,16 @@ module GitAuth
 
     attr_reader :repo, :data
 
-    def initialize(repo:, data:)
+    def initialize(repo:, data:, hash_algo: nil)
       @repo = repo
       @data = data
+      @hash_algo = hash_algo
+    end
+
+    # Callers in gitauth pass the target's algorithm, which avoids a spokes
+    # lookup on GHES (see GitAuth::Target#hash_algo).
+    def hash_algo
+      @hash_algo ||= repo.hash_algo
     end
 
     def call
@@ -89,8 +96,8 @@ module GitAuth
       short_ref_names = data["ref_updates"].filter_map do |ru|
         refname = ru["refname"]
         next unless refname.start_with?("refs/heads/") # must be a branch
-        next if ru["before_oid"] != repo.hash_algo.null_oid # nil before_oid means branch is being created (could be a real rename)
-        next if ru["after_oid"] == repo.hash_algo.null_oid # nil after_oid means branch is being deleted
+        next if ru["before_oid"] != hash_algo.null_oid # nil before_oid means branch is being created (could be a real rename)
+        next if ru["after_oid"] == hash_algo.null_oid # nil after_oid means branch is being deleted
         refname.delete_prefix("refs/heads/")
       end
       return unless short_ref_names
@@ -122,7 +129,7 @@ module GitAuth
     end
 
     def first_head_push?(before_oid, current_ref)
-      repo.hash_algo.null_oid == before_oid && current_ref.start_with?("refs/heads/")
+      hash_algo.null_oid == before_oid && current_ref.start_with?("refs/heads/")
     end
 
     def default_ref_push?

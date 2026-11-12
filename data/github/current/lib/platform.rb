@@ -277,6 +277,14 @@ module Platform
               # and not proceed with cost calculations if so
               at_rate_limit = cost_limiter.should_limit(0)
               if at_rate_limit
+                if request_env
+                  blocked_query = GraphQL::Query.new(
+                    schema,
+                    document: document,
+                    operation_name: operation_name
+                  )
+                  request_env["github.graphql.operation_name"] = blocked_query.selected_operation_name
+                end
                 return handle_early_blocking(cost_limiter, context, variables)
               end
             end

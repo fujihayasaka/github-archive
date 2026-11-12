@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: resque-scheduler
+    annotations:
+        heaven.githubapp.com/deploy-requirement: "true"
+        heaven.githubapp.com/image-placeholder: advisory-db
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: resque-scheduler
+        heaven.githubapp.com/replace-pods-even-if-unchanged: "true"
+spec:
+    minReadySeconds: 10
+    replicas: 1
+    selector:
+        matchLabels:
+            app: resque-scheduler
+    template:
+        metadata:
+            labels:
+                app: resque-scheduler
+            annotations:
+                observability.github.com/logger: fluent-bit
+                fluentbit.io/parser: logfmt_sloppy
+        spec:
+            containers:
+                - name: resque-scheduler
+                  image: advisory-db
+                  command:
+                    - bin/rake
+                    - resque:scheduler
+                  envFrom:
+                    - configMapRef:
+                        name: rails
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: ADVISORY_DB_ROLE
+                      value: "scheduler"
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+                      value: "https://opentelemetry-collector-production.service.iad.github.net/v1/traces"
+                    - name: GITHUB_API_BASE_URL
+                      value: "https://api.github.com"
+                  resources:
+                    requests:
+                        memory: 1Gi
+                    limits:
+                        memory: 2Gi

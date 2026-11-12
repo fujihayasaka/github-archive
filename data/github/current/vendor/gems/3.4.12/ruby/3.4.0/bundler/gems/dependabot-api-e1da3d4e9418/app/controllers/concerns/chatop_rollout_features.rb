@@ -1,0 +1,116 @@
+# frozen_string_literal: true
+
+require "terminal-table"
+
+module ChatopRolloutFeatures
+  extend ActiveSupport::Concern
+
+  PERMITTED_ROLLOUT_FEATURES = %w(
+    add_closed_pr_in_ignore_hash
+    broken_update
+    comment_metrics
+    npm_fallback_version_above_v6
+    dependency_change_validation
+    dependency_has_directory
+    enable_beta_ecosystems
+    enable_pnpm_yarn_dynamic_engine
+    enable_file_parser_python_local
+    exclude_local_composer_packages
+    grouped_updates_experimental_rules
+    ignore_closed_prs
+    last_scheduled_job_still_running
+    log_unknown_errors
+    new_merge_command
+    pause_on_broken_repos
+    proxy_cached
+    proxy_log_response_body_on_auth_failure
+    resync_repo_on_duplicate_directories
+    spread_out_updates
+    spread_out_updates_time_of_day
+    workflow_actions_404_handler
+    version_lowest_prerelease_suffix
+    enable_record_ecosystem_meta
+    enable_corepack_for_npm_and_yarn
+    enable_private_registry_for_corepack
+    enable_shared_helpers_command_timeout
+    enable_dependabot_setting_up_cronjob
+    enable_engine_version_detection
+    avoid_duplicate_updates_package_json
+    allow_refresh_for_existing_pr_dependencies
+    allow_refresh_group_with_all_dependencies
+    enable_enhanced_error_details_for_updater
+    enhanced_grouped_security_error_reporting
+    multi_ecosystems
+    gradle_lockfile_updater
+    gradle_wrapper_updater
+    enable_exclude_paths_subdirectory_manifest_files
+    group_membership_enforcement
+    deprecate_close_command
+    deprecate_reopen_command
+    deprecate_merge_command
+    deprecate_cancel_merge_command
+    deprecate_squash_merge_command
+    disable_close_command
+    disable_reopen_command
+    disable_merge_command
+    disable_cancel_merge_command
+    disable_squash_merge_command
+    enable_oidc_auth
+  ).freeze
+
+  # rubocop:disable Metrics/BlockLength
+  included do
+    chatop :rollout_features,
+           /rollout[-_\s]features/,
+           "rollout features" \
+           "- Retrieve the current state of any features being rolled out" do
+      unless PERMITTED_ROLLOUT_FEATURES.any?
+        jsonrpc_success "No features currently being rolled out."
+        return
+      end
+
+      features = PERMITTED_ROLLOUT_FEATURES.map do |feature|
+        [feature, "#{Dependabot.flipper[feature].percentage_of_actors_value}%"]
+      end
+
+      table = Terminal::Table.new do |t|
+        t.headings = %w(Feature Actors)
+        t.rows = features
+        t.align_column(1, :right)
+        t.style = { border_top: false, border_bottom: false }
+      end
+      jsonrpc_success(["```", table.to_s, "```"].join("\n"))
+    end
+
+    chatop :rollout_feature_actors,
+           /rollout[-_\s]feature[-_\s]actors\s+(?<feature>\S+)\s+(?<percentage>.+)/,
+           "rollout feature actors FEATURE PERCENTAGE" \
+           "- Enable the feature for the specifed percentage of actors" do
+      feature = jsonrpc_params[:feature]
+      # Support a humanized percentage value by dropping any trailing %
+      percentage = jsonrpc_params[:percentage].chomp("%")
+
+      unless PERMITTED_ROLLOUT_FEATURES.include? feature
+        jsonrpc_failure "Feature `#{feature}` cannot be managed via chatops."
+        return
+      end
+
+      rollout(feature, percentage)
+    end
+  end
+  # rubocop:enable Metrics/BlockLength
+
+  def rollout(feature, percentage)
+    unless /\A\d+\z/.match?(percentage)
+      jsonrpc_failure "Please provide the target percentage as an integer value."
+      return
+    end
+
+    Dependabot.flipper[feature].enable_percentage_of_actors(percentage)
+    result = Dependabot.flipper[feature].percentage_of_actors_value
+
+    jsonrpc_success(
+      "#{feature} is now enabled for #{result}% of actors"
+    )
+  end
+end

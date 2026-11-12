@@ -1,0 +1,55 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# We can't just use the protoc installed by the devcontainer feature
+# because the monolith is stuck on a very VERY old version of protoc (3.6.1).
+# This is our workaround until that is sorted.
+PROTOC_VERSION="${PROTOC_VERSION:-3.6.1}"
+PROTOC_DIR="/tmp/protoc-${PROTOC_VERSION}"
+
+# Check if protoc is already present for this version
+if [ ! -f "${PROTOC_DIR}/bin/protoc" ]; then
+    echo "Fetching protoc compiler version ${PROTOC_VERSION}..."
+    PROTOC_DIR=$(./script/fetch-protoc "${PROTOC_VERSION}")
+else
+    echo "Using existing protoc version ${PROTOC_VERSION} at ${PROTOC_DIR}"
+fi
+
+# Add protoc to PATH
+export PATH="${PROTOC_DIR}/bin:${PATH}"
+
+echo "Generating Go code from protocol buffers..."
+
+# Install protoc-gen-twirp_ruby if not present in PATH
+if ! command -v protoc-gen-twirp_ruby >/dev/null 2>&1; then
+    echo "protoc-gen-twirp_ruby not found, installing..."
+    go install github.com/arthurnn/twirp-ruby/protoc-gen-twirp_ruby@v1.11.0
+fi
+
+echo "protoc version: $(protoc --version)"
+
+protoc \
+    --proto_path=proto \
+    --go_out=internal/twirpapi/ \
+    --go_opt=paths=source_relative \
+    --twirp_out=internal/twirpapi/ \
+    --twirp_opt=paths=source_relative \
+    proto/configs/configs.proto
+
+protoc \
+    --proto_path=proto \
+    --ruby_out=ruby/lib/configs/proto \
+    --twirp_ruby_out=ruby/lib/configs/proto \
+    proto/configs/configs.proto
+
+echo ""
+echo "Generated Go files:"
+find internal/twirpapi/configs -type f -name "*.pb.go" -o -name "*.twirp.go"
+
+echo ""
+echo "Generated Ruby files:"
+find ruby/lib/configs/proto -type f -name "*_pb.rb" -o -name "*_twirp.rb"
+
+echo ""
+echo "✅ Protocol buffer generation complete"

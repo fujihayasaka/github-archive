@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: blackbird-ingest-blue
+spec:
+    replicas: 1
+    strategy:
+        type: Recreate # shut down all Kafka consumers before bringing up new ones
+    selector:
+        matchLabels:
+            app: blackbird-ingest-blue
+    template:
+        metadata:
+            labels:
+                app: blackbird-ingest-blue
+            annotations:
+                observability.github.com/logger: fluent-bit
+                observability.github.com/splunk_index: blackbird
+                fluentbit.io/parser: logfmt_sloppy
+        spec:
+            affinity:
+                podAntiAffinity:
+                    preferredDuringSchedulingIgnoredDuringExecution:
+                        - weight: 100
+                          podAffinityTerm:
+                            labelSelector:
+                                matchExpressions:
+                                    - key: app
+                                      operator: In
+                                      values:
+                                        - blackbird-ingest-blue
+                            topologyKey: kubernetes.io/hostname
+            dnsPolicy: ClusterFirst
+            containers:
+                - name: blackbird-ingest-blue
+                  image: blackbird-mw
+                  command: ["/blackbird-ingest"]
+                  ports:
+                    - name: http
+                      containerPort: 8080
+                      protocol: TCP
+                  readinessProbe:
+                    initialDelaySeconds: 5
+                    timeoutSeconds: 5
+                    httpGet:
+                        path: /ready
+                        port: 8080
+                  envFrom:
+                    - configMapRef:
+                        name: kube-cluster-metadata
+                    - secretRef:
+                        name: vault-secrets
+                  env:
+                    - name: BLACKBIRD_MW_ENV
+                      value: "production"
+                    - name: BLACKBIRD_MW_OUTPUT_CORPUS
+                      value: "blue"
+                    - name: BLACKBIRD_MW_STATS_ADDR
+                      value: "$(KUBE_NODE_HOSTNAME):28125"
+                    - name: BLACKBIRD_MW_POD
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.name
+                    - name: BLACKBIRD_MW_KUBE_NAMESPACE
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.namespace
+                    - name: SHARED_KAFKA_BROKERS
+                      value: "hydro-kafka-$(KUBE_CLUSTER_STAMP)-$(KUBE_CLUSTER_STAMP).service.$(KUBE_CLUSTER_STAMP)-az1.consul:9093,hydro-kafka-$(KUBE_CLUSTER_STAMP)-$(KUBE_CLUSTER_STAMP).service.$(KUBE_CLUSTER_STAMP)-az2.consul:9093,hydro-kafka-$(KUBE_CLUSTER_STAMP)-$(KUBE_CLUSTER_STAMP).service.$(KUBE_CLUSTER_STAMP)-az3.consul:9093"
+                    - name: BLACKBIRD_KAFKA_BROKERS
+                      value: "hydro-kafka-blackbird-$(KUBE_CLUSTER_STAMP)-$(KUBE_CLUSTER_STAMP).service.$(KUBE_CLUSTER_STAMP)-az1.consul:9093,hydro-kafka-blackbird-$(KUBE_CLUSTER_STAMP)-$(KUBE_CLUSTER_STAMP).service.$(KUBE_CLUSTER_STAMP)-az2.consul:9093,hydro-kafka-blackbird-$(KUBE_CLUSTER_STAMP)-$(KUBE_CLUSTER_STAMP).service.$(KUBE_CLUSTER_STAMP)-az3.consul:9093"
+                    - name: BLACKBIRD_MW_SPOKESD_URL
+                      value: "http://spokesd.spokesd-$(KUBE_CLUSTER_STAMP).svc.cluster.local"
+                    - name: BLACKBIRD_MW_GITHUB_INTERNAL_API_URL
+                      value: "http://unicorn-internal-api.github-$(KUBE_CLUSTER_STAMP).svc.cluster.local"
+                    - name: MYSQL_SKEEMA_ENV
+                      value: "$(KUBE_CLUSTER_STAMP)-rw"
+                    - name: STAMP
+                      value: "$(KUBE_CLUSTER_STAMP)"
+                    - name: BLACKBIRD_ENV
+                      value: dsa_client
+                    - name: RUST_LOG
+                      value: info
+                    - name: BLACKBIRD_MW_NUM_INGESTION_WORKERS
+                      value: "4"
+                    - name: GOMAXPROCS
+                      value: "2" # less than limits.cpu to avoid throttling
+                  resources:
+                    requests:
+                        cpu: 1.0
+                        memory: "3G"
+                    limits:
+                        cpu: 3.0
+                        memory: "16G"

@@ -1,0 +1,72 @@
+required_builds:
+  - configsd-moda-config-bundle / configsd-moda-config-bundle
+  - configsd-docker-image / configsd-docker-image
+  - configsd-docker-security / configsd-docker-security
+environments:
+  - name: production
+    require_pipeline: true
+    canaryable: true
+    cluster_selector:
+      profile: general
+      region: iad
+    extra_start_message: "[Datadog Dashboard](https://app.datadoghq.com/dashboard/cpc-97s-ksj/kubernetes-namespaces&tpl_var_kube_namespace=configsd-production?&tpl_var_kube_namespace%5B0%5D=configsd-production)"
+    service_mesh:
+      enabled: true
+
+sentry:
+  projects:
+    - configsd
+
+auto_start_pipeline: production_rollout
+auto_retry_count: 1
+
+notifications:
+  slack_channels:
+    - "#configsd-ops"
+
+
+proxima:
+  environment_pattern:
+    secret_environment: production
+    service_mesh:
+      enabled: true
+  rollout_pattern:
+    - kind: deployment
+      config:
+        timeout: 300
+
+
+pipelines:
+  production_rollout:
+    append_proxima_stamps: true
+    thread_notifications: true
+    timeout: 2400
+    stages:
+      - name: canary
+        kind: canary_deployment        # <--- canary will receive staff-only (Hubber) traffic. Staff header required for this to take effect - See https://gh.io/incremental-canary#staff-only-canary-targeted-canary
+        config:
+          environment: production
+          hosts: canary
+          timeout: 1200
+      - name: "canary 10%"
+        kind: canary_percentage
+        config:
+          environment: production
+          percentage: 10           # <--- canary will receive staff traffic and 10% of production traffic
+        # gates:                   # <--- add timer or datadog (recommended) gates here for validation
+        #   - kind: timer
+        #     duration: 120
+      - name: "canary 20%"
+        kind: canary_percentage
+        config:
+          environment: production
+          percentage: 20           # <--- canary will receive staff traffic and 20% of production traffic (ℹ️ Max canary percentage based on replica count. See https://gh.io/incremental-canary#best-practices)
+      - name: full_production
+        kind: deployment
+        start_message: We are now going to do a full deploy. Please pause or cancel the pipeline after the deploy if you want more time before your pull request(s) auto merges.
+        config:
+          environment: production
+          timeout: 1200
+        gates:
+          - kind: timer
+            duration: 60

@@ -1,0 +1,24 @@
+#!/bin/bash
+# script/setup: Set up application for the first time after cloning, or set it
+#               back to the initial first unused state.
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+if [ ${1:-""} = "--pristine" ]; then
+  script/bootstrap --pristine
+else
+  script/bootstrap
+fi
+
+appdir=$(cd $(dirname "$0")/.. && pwd)
+[ -f /etc/app-env ] || [ "$FAST_DEV_LOOP" = "1" ] || {
+  # Wait for the DB before running in the container
+  script/poll-for-db
+  exec "$appdir/script/app-env" $0 $@
+}
+mkdir -p tmp/pids tmp/logs
+
+export BUNDLE_IGNORE_CONFIG=1
+bin/rake db:create db:schema:load db:migrate db:test:prepare

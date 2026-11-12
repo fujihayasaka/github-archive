@@ -518,6 +518,12 @@ module Api::Internal::Twirp::Dependabot
             path = Pathname.new(File.join(f.directory, f.name)).cleanpath.to_path
             path = path.delete_prefix("/") # Remove any leading slash
 
+            # A relative `directory` can leave a leading ".." segment in place even after
+            # cleanpath, letting the path escape the repository root.
+            if invalid_path?(path)
+              raise Error.new(ErrorType::ERROR_TYPE_UNEXPECTED_ERROR, "Invalid path: #{path}")
+            end
+
             hsh[path] = file_to_tree_entry(repository:, file: f)
           end
 
@@ -528,6 +534,8 @@ module Api::Internal::Twirp::Dependabot
         def file_to_tree_entry(repository:, file:)
           if invalid_file_type?(file)
             raise Error.new(ErrorType::ERROR_TYPE_UNEXPECTED_ERROR, "Unexpected file type: #{file.type}")
+          elsif unsupported_symlink_metadata?(file)
+            raise Error.new(ErrorType::ERROR_TYPE_UNEXPECTED_ERROR, "Unexpected symlink_target for file type: #{file.type}")
           elsif submodule?(file)
             # If the file is a submodule, set the oid for the tree entry to the submodule commit oid
             { "oid" => file.content, "mode" => SUBMODULE_MODE }
@@ -545,13 +553,41 @@ module Api::Internal::Twirp::Dependabot
           end
         end
 
+        # TYPE_SYMLINK is rejected because this sink always writes its tree entry at
+        # `directory + name` using the caller-supplied `content` and `mode` (`mode` defaults to
+        # FILE_MODE only when absent) and never consults `symlink_target`. That can disagree with
+        # whatever path a validator upstream evaluated via `symlink_target`. This mismatch was not
+        # limited to landing a plain file at the wrong path: a record that also supplied
+        # `mode: "120000"` would have its tree entry honored by `create_tree_changes` as a genuine
+        # git symlink for any path other than the specially protected `.gitmodules`/
+        # `.gitattributes` (see vendor/gitrpc/lib/gitrpc/backend/create_tree_changes.rb), since
+        # nothing here validated `mode` against the declared type either.
         def invalid_file_type?(dependency_file)
           [
             MonolithTwirp::Dependabot::PullRequests::V1::DependencyFile::Type::TYPE_INVALID,
             MonolithTwirp::Dependabot::PullRequests::V1::DependencyFile::Type.lookup(
               MonolithTwirp::Dependabot::PullRequests::V1::DependencyFile::Type::TYPE_INVALID,
-            )
+            ),
+            MonolithTwirp::Dependabot::PullRequests::V1::DependencyFile::Type::TYPE_SYMLINK,
+            MonolithTwirp::Dependabot::PullRequests::V1::DependencyFile::Type.lookup(
+              MonolithTwirp::Dependabot::PullRequests::V1::DependencyFile::Type::TYPE_SYMLINK,
+            ),
           ].include?(dependency_file.type)
+        end
+
+        # This sink never reads `symlink_target` when writing a file (TYPE_SYMLINK records are
+        # already rejected above, regardless of this check). A non-symlink record carrying a
+        # populated `symlink_target` is therefore always invalid metadata: honoring such a record
+        # would silently write to `directory + name` while a validator upstream may have
+        # evaluated `symlink_target` instead, reopening the same guard/sink path disagreement
+        # this sink is otherwise meant to independently close. Reject it outright rather than
+        # silently ignoring the field.
+        def unsupported_symlink_metadata?(dependency_file)
+          dependency_file.symlink_target.present?
+        end
+
+        def invalid_path?(path)
+          path.split("/").include?("..")
         end
 
         def submodule?(dependency_file)

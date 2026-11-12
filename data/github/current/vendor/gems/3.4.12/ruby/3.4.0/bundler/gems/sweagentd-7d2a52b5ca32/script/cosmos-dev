@@ -1,0 +1,313 @@
+#!/bin/bash
+#
+# SWE Agent Cosmos DB Emulator for Development
+#
+# This script manages a Cosmos DB emulator container for local development.
+# It helps catch race conditions that only appear with real Cosmos DB by providing
+# a consistent development environment that uses actual Cosmos DB instead of in-memory store.
+#
+# Usage:
+#   script/cosmos-dev start   - Start the Cosmos DB emulator container
+#   script/cosmos-dev stop    - Stop and remove the Cosmos DB emulator container
+#   script/cosmos-dev status  - Check if the emulator is running
+#   script/cosmos-dev logs    - Show emulator logs
+#   script/cosmos-dev reset   - Stop, remove, and restart the emulator (fresh start)
+#
+# Environment Variables:
+#   COSMOS_CONTAINER_NAME     - Name of the container (default: sweagentd-cosmos-dev)
+#   COSMOS_HOST_PORT          - Host port to map to (default: 8081)
+#
+
+set -e
+
+# Configuration
+CONTAINER_NAME="${COSMOS_CONTAINER_NAME:-sweagentd-cosmos-dev}"
+HOST_PORT="${COSMOS_HOST_PORT:-8081}"
+COSMOS_IMAGE="mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:2.14.24-7610c980"
+
+# Default Cosmos DB emulator credentials (public, for local development only)
+# These are the standard credentials for the local emulator as documented by Microsoft
+COSMOS_KEY="C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw=="
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Function to print colored output
+info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Check if Docker is available
+check_docker() {
+    if ! command -v docker &> /dev/null; then
+        error "Docker is not installed or not in PATH"
+        exit 1
+    fi
+
+    if ! docker info &> /dev/null; then
+        error "Docker is not running or accessible"
+        exit 1
+    fi
+}
+
+# Check if container is running
+is_running() {
+    docker ps --filter "name=${CONTAINER_NAME}" --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"
+}
+
+# Check if container exists (running or stopped)
+container_exists() {
+    docker ps -a --filter "name=${CONTAINER_NAME}" --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"
+}
+
+# Wait for Cosmos emulator to be ready
+wait_for_cosmos() {
+    info "Waiting for Cosmos DB emulator to be ready..."
+    local max_attempts=60
+    local attempt=1
+    
+    while [ $attempt -le $max_attempts ]; do
+        # Check if the main endpoint is responding
+        if curl -k -s "https://localhost:${HOST_PORT}" > /dev/null 2>&1; then
+            # Also check if the certificate endpoint is available
+            if curl -k -s "https://localhost:${HOST_PORT}/_explorer/emulator.pem" | grep -q "BEGIN CERTIFICATE"; then
+                success "Cosmos DB emulator is ready!"
+                return 0
+            fi
+        fi
+        
+        echo -n "."
+        sleep 2
+        ((attempt++))
+    done
+    
+    echo ""
+    error "Cosmos DB emulator did not become ready within $(($max_attempts * 2)) seconds"
+    return 1
+}
+
+# Start the Cosmos emulator
+start_cosmos() {
+    check_docker
+    
+    if is_running; then
+        warning "Cosmos DB emulator is already running"
+        show_connection_info
+        
+        # If we're being run as part of a process manager (like overmind),
+        # we should keep running to monitor the container instead of exiting
+        if [ "${OVERMIND_SOCKET:-}" != "" ] || [ "${PROCFILE_MODE:-}" != "" ]; then
+            info "Running in process manager mode..."
+        fi
+        return 0
+    fi
+    
+    if container_exists; then
+        info "Starting existing Cosmos DB emulator container..."
+        docker start "${CONTAINER_NAME}"
+    else
+        info "Creating and starting new Cosmos DB emulator container..."
+        info "Using image: ${COSMOS_IMAGE}"
+        
+        docker run -d \
+            --name "${CONTAINER_NAME}" \
+            -p "${HOST_PORT}:8081" \
+            -p "10250-10255:10250-10255" \
+            --env AZURE_COSMOS_EMULATOR_PARTITION_COUNT=10 \
+            --env AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE=false \
+            "${COSMOS_IMAGE}"
+    fi
+
+    if wait_for_cosmos; then
+        info "Downloading Cosmos DB emulator SSL certificate..."
+        # The certificate should be available since wait_for_cosmos checks for it
+        curl --insecure --fail --silent https://localhost:8081/_explorer/emulator.pem > ~/emulatorcert.crt
+        
+        # Install the certificate to the trusted store (Linux)
+        if [ -f ~/emulatorcert.crt ] && [ -s ~/emulatorcert.crt ]; then
+            if [ -d /usr/local/share/ca-certificates/ ]; then
+                info "Installing Cosmos DB emulator SSL certificate to trusted store..."
+                sudo cp ~/emulatorcert.crt /usr/local/share/ca-certificates/cosmos-emulator.crt
+                sudo update-ca-certificates
+                success "Installed Cosmos DB emulator SSL certificate to trusted store"
+                
+                # Create a CA bundle file specifically for Go applications
+                CA_BUNDLE_PATH="$HOME/.cosmos-ca-bundle.pem"
+                info "Creating CA bundle for Go applications..."
+                cat /etc/ssl/certs/ca-certificates.crt > "$CA_BUNDLE_PATH"
+                success "Created CA bundle at $CA_BUNDLE_PATH"
+                
+                # Export environment variables to help applications find certificates
+                export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+                export SSL_CERT_DIR=/etc/ssl/certs
+                export COSMOS_CA_BUNDLE="$CA_BUNDLE_PATH"
+                
+                info "SSL certificate should now be trusted by new processes."
+                info "Environment variables set:"
+                info "  SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"
+                info "  SSL_CERT_DIR=/etc/ssl/certs" 
+                info "  COSMOS_CA_BUNDLE=$CA_BUNDLE_PATH"
+            else
+                warning "Could not find /usr/local/share/ca-certificates/ to install SSL certificate"
+            fi
+        else
+            warning "Could not find downloaded emulatorcert.crt to install SSL certificate"
+        fi
+
+        show_connection_info
+        show_setup_instructions
+        
+        # If we're being run as part of a process manager, keep monitoring
+        if [ "${OVERMIND_SOCKET:-}" != "" ] || [ "${PROCFILE_MODE:-}" != "" ]; then
+            info "Running in process manager mode..."
+        fi
+    else
+        error "Failed to start Cosmos DB emulator"
+        return 1
+    fi
+}
+
+# Stop the Cosmos emulator
+stop_cosmos() {
+    check_docker
+    
+    if ! container_exists; then
+        warning "Cosmos DB emulator container does not exist"
+        return 0
+    fi
+    
+    info "Stopping Cosmos DB emulator..."
+    docker stop "${CONTAINER_NAME}" 2>/dev/null || true
+    docker rm "${CONTAINER_NAME}" 2>/dev/null || true
+    success "Cosmos DB emulator stopped and removed"
+}
+
+# Show status
+show_status() {
+    check_docker
+    
+    if is_running; then
+        success "Cosmos DB emulator is running"
+        docker ps --filter "name=${CONTAINER_NAME}" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+        show_connection_info
+    elif container_exists; then
+        warning "Cosmos DB emulator container exists but is not running"
+        docker ps -a --filter "name=${CONTAINER_NAME}" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    else
+        info "Cosmos DB emulator is not running"
+    fi
+}
+
+# Show logs
+show_logs() {
+    check_docker
+    
+    if ! container_exists; then
+        error "Cosmos DB emulator container does not exist"
+        return 1
+    fi
+    
+    docker logs -f "${CONTAINER_NAME}"
+}
+
+# Reset (stop and restart)
+reset_cosmos() {
+    info "Resetting Cosmos DB emulator..."
+    stop_cosmos
+    start_cosmos
+}
+
+# Show connection information
+show_connection_info() {
+    echo ""
+    success "Cosmos DB Emulator Connection Details:"
+    echo "  Endpoint: https://localhost:${HOST_PORT}/"
+    echo "  Key: ${COSMOS_KEY}"
+    echo "  Connection String: AccountEndpoint=https://localhost:${HOST_PORT}/;AccountKey=${COSMOS_KEY};"
+    echo "  Data Explorer: https://localhost:8081/_explorer/index.html"
+    echo ""
+}
+
+# Show setup instructions
+show_setup_instructions() {
+    echo "To use this emulator in your development environment:"
+    echo ""
+    echo "1. Set these environment variables in your .env file:"
+    echo "   AZURE_COSMOSDB_ENDPOINT=https://localhost:${HOST_PORT}/"
+    echo "   AZURE_COSMOSDB_CONNECTION_STRING=AccountEndpoint=https://localhost:${HOST_PORT}/;AccountKey=${COSMOS_KEY};"
+    echo ""
+    echo "2. Or export them in your shell:"
+    echo "   export AZURE_COSMOSDB_ENDPOINT='https://localhost:${HOST_PORT}/'"
+    echo "   export AZURE_COSMOSDB_CONNECTION_STRING='AccountEndpoint=https://localhost:${HOST_PORT}/;AccountKey=${COSMOS_KEY};'"
+    echo ""
+    echo "3. Start your application with 'script/server' or 'overmind start'"
+    echo ""
+    echo "4. Access the Data Explorer at: https://localhost:8081/_explorer/index.html"
+    echo "   Use this to visually browse databases, collections, and documents"
+    echo ""
+    info "The emulator data will be reset when the container is restarted."
+}
+
+# Show help
+show_help() {
+    echo "SWE Agent Cosmos DB Emulator for Development"
+    echo ""
+    echo "Usage: $0 [command]"
+    echo ""
+    echo "Commands:"
+    echo "  start    Start the Cosmos DB emulator container"
+    echo "  stop     Stop and remove the Cosmos DB emulator container"
+    echo "  status   Check if the emulator is running"
+    echo "  logs     Show emulator logs (follows)"
+    echo "  reset    Stop, remove, and restart the emulator (fresh start)"
+    echo "  help     Show this help message"
+    echo ""
+    echo "Environment Variables:"
+    echo "  COSMOS_CONTAINER_NAME  Name of the container (default: ${CONTAINER_NAME})"
+    echo "  COSMOS_HOST_PORT       Host port to map to (default: ${HOST_PORT})"
+    echo ""
+}
+
+# Main command handling
+case "${1:-help}" in
+    start)
+        start_cosmos
+        ;;
+    stop)
+        stop_cosmos
+        ;;
+    status)
+        show_status
+        ;;
+    logs)
+        show_logs
+        ;;
+    reset)
+        reset_cosmos
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        error "Unknown command: $1"
+        echo ""
+        show_help
+        exit 1
+        ;;
+esac

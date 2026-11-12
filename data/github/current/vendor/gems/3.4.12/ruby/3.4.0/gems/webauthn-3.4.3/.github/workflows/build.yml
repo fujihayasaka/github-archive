@@ -1,0 +1,82 @@
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+# This workflow will download a prebuilt Ruby version, install dependencies and run tests with Rake
+# For more information see: https://github.com/marketplace/actions/setup-ruby-jruby-and-truffleruby
+
+name: build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  test:
+    name: 'Test Ruby ${{ matrix.ruby }} with OpenSSL ${{ matrix.openssl }}'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby:
+          - '3.4'
+          - '3.3'
+          - '3.2'
+          - '3.1'
+        openssl:
+          - '3.5.3'
+          - '3.4.2'
+          - '3.3.4'
+          - '3.2.5'
+          - '3.1.8'
+          - '3.0.17'
+          - '1.1.1w'
+        include:
+          - ruby: truffleruby
+          - ruby: '3.0'
+            openssl: '1.1.1w'
+          - ruby: '2.7'
+            openssl: '1.1.1w'
+          - ruby: '2.6'
+            openssl: '1.1.1w'
+          - ruby: '2.5'
+            openssl: '1.1.1w'
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Install OpenSSL
+      if: matrix.ruby != 'truffleruby'
+      uses: ./.github/actions/install-openssl
+      with:
+        version: ${{ matrix.openssl }}
+
+    - name: Manually set up Ruby
+      if: matrix.ruby != 'truffleruby'
+      uses: ./.github/actions/install-ruby
+      with:
+        version: ${{ matrix.ruby }}
+        openssl-version: ${{ matrix.openssl }}
+
+    - name: Set up Ruby
+      if: matrix.ruby == 'truffleruby'
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: ${{ matrix.ruby }}
+        bundler-cache: true
+
+    - run: bundle exec rspec
+      env:
+        RUBYOPT: ${{ startsWith(matrix.ruby, '3.4') && '--enable=frozen-string-literal' || '' }}
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - run: bundle exec rubocop -f github

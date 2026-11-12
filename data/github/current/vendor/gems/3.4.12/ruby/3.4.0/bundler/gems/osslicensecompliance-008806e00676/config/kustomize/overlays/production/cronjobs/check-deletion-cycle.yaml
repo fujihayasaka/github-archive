@@ -1,0 +1,66 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: check-deletion-cycle
+    annotations:
+        # cluster-preferences - identifying the cluster to run the job on; should only run on that cluster
+        # setting suspend to false allows the job to run on the cluster specified in moda.github.net/cluster-preferences
+        moda.github.net/cluster-preferences: |
+            {
+              "general-1-ash1-iad":  {
+                "spec": {
+                  "suspend": false
+                }
+              }
+            }
+spec:
+    schedule: "5 * * * *" # Every hour at the 5th minute of every hour
+    concurrencyPolicy: Forbid # Do not allow multiple instances of the same job to run, at the same time.
+    successfulJobsHistoryLimit: 2
+    failedJobsHistoryLimit: 2
+    jobTemplate:
+        spec:
+            activeDeadlineSeconds: 100
+            ttlSecondsAfterFinished: 86400
+            template:
+                metadata:
+                  annotations:
+                      observability.github.com/logger: fluent-bit
+                      fluentbit.io/parser: logfmt
+                      observability.github.com/splunk_index: osslicensecompliance
+                  labels:
+                      app: osslicensecompliance
+                      role: check-deletion-cycle
+                spec:
+                    dnsPolicy: ClusterFirst
+                    volumes:
+                        - name: github-metadata
+                          hostPath:
+                            path: /etc/github/metadata.json
+                    restartPolicy: Never
+                    containers:
+                        - name: check-deletion-cycle
+                          image: osslicensecompliance
+                          command: ["./bin/check-deletion-cycle"]
+                          envFrom:
+                            - configMapRef:
+                                name: environment
+                            - configMapRef:
+                                name: kube-cluster-metadata
+                            - secretRef:
+                                name: vault-secrets
+                          env:
+                            - name: STATS_ADDR
+                              value: $(KUBE_NODE_HOSTNAME):28125
+                            - name: GOMAXPROCS
+                              valueFrom:
+                                resourceFieldRef:
+                                  containerName: check-deletion-cycle
+                                  resource: limits.cpu
+                          resources:
+                            limits:
+                                cpu: 3000m
+                                memory: 4Gi
+                            requests:
+                                cpu: 1000m
+                                memory: 1Gi

@@ -1,0 +1,51 @@
+#!/bin/sh
+
+# Bootstrap ensures that your laptop has all the native dependencies and
+# embedded dependabot projects up to date before building the project's
+# containers.
+#
+# Arguments:
+#   --pristine        - Build fresh containers without caching
+#   --nuke-from-orbit - Prune docker, wipe data volumes for MySQL, etc.
+set -eu
+
+echo "==> Bootstrapping..."
+[ -f /etc/app-env ] && exit 0
+
+if ! grep --quiet '"ghcr.io":' ~/.docker/config.json &>/dev/null; then
+  echo "$GITHUB_TOKEN" | docker login ghcr.io --username "${GITHUB_USER:=prebuild}" --password-stdin
+fi
+
+cd "$(dirname "$0")/.."
+if [ "$(uname -s)" = "Darwin" ]; then
+
+  brew bundle check || brew bundle
+
+  if ! [ -f /usr/local/bin/docker ]; then
+        echo "You must run Docker for Mac and let it install its tools."
+        # If the user customized their Docker appdir, `open` might not
+        # be able to find it.
+        open -a Docker 2>/dev/null || true
+        exit 1
+  fi
+fi
+
+cp -n .env.local.example .env.local || :
+
+if [ "${1:-""}" = "--nuke-from-orbit" ]; then
+  echo "Shutting down services..."
+  docker compose stop
+
+  echo "Cleaning up containers..."
+  docker compose rm -v -f
+
+  echo "Cleaning up data volumes..."
+  docker volume ls | awk '/dependabot/ {print $2}' | xargs docker volume rm
+
+  echo "Building new containers..."
+  docker compose build --no-cache
+elif [ "${1:-""}" = "--pristine" ]; then
+  docker compose build --no-cache
+else
+  docker compose build
+fi

@@ -1,0 +1,89 @@
+name: "Acceptance test CLI"
+
+env:
+  HUSKY: 0
+
+on:
+  push:
+  workflow_dispatch:
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      cli: ${{ steps.filter.outputs.cli }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36
+        id: filter
+        with:
+          filters: |
+            cli:
+              - 'runtime/**'
+  cli:
+    needs: changes
+    if: ${{ needs.changes.outputs.cli == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest-xl]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.COPILOT_AGENT_RUNTIME_PAT }}
+          submodules: "recursive"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: runtime/.nvmrc
+          cache: "npm"
+          cache-dependency-path: runtime/package-lock.json
+
+      - name: Build CLI package
+        working-directory: ./runtime
+        shell: bash
+        run: |
+          npm ci
+          npm run build:package
+
+      - name: Pack CLI package
+        working-directory: ./runtime/dist-cli
+        shell: bash
+        run: |
+          npm pack
+
+      # Check that copilot isn't already installed, in case it gets added to action runners in the future
+      # then we'll get alerted.
+      - name: Check copilot is not installed
+        shell: bash
+        run: |
+          if command -v copilot >/dev/null 2>&1; then
+            echo "❌ copilot command is already installed"
+            copilot --version
+            exit 1
+          else
+            echo "✅ copilot command is not installed"
+          fi
+
+      - name: Install packed CLI package
+        working-directory: ./runtime/dist-cli
+        shell: bash
+        run: |
+          npm install -g ./github-copilot-*.tgz
+
+      - name: Run acceptance tests
+        env:
+          COPILOT_HMAC_KEY: ${{ secrets.COPILOT_DEVELOPER_CLI_INTEGRATION_HMAC_KEY }}
+        shell: bash
+        run: |
+          .github/workflows/cli-acceptance-test/run-all-tests.sh

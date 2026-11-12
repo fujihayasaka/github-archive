@@ -1,0 +1,384 @@
+syntax = "proto3";
+
+package DependabotApi.v1;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+message PingResponse {
+  string msg = 1;
+}
+
+service Health {
+  rpc Ping(google.protobuf.Empty) returns (PingResponse);
+}
+
+message PackageEcosystem {
+  enum Name {
+    UNKNOWN = 0;
+    BUNDLER = 1;
+    NPM = 2;
+    PIP = 3;
+    MAVEN = 4;
+    NUGET = 5;
+    COMPOSER = 6;
+    GRADLE = 7;
+    DOCKER = 8;
+    ELM = 9;
+    GITSUBMODULE = 10;
+    MIX = 11;
+    CARGO = 12;
+    GOMOD = 13;
+    TERRAFORM = 14;
+    GITHUB_ACTIONS = 15;
+    PUB = 16;
+    SWIFT = 17;
+    DEVCONTAINERS = 18;
+    DOTNET_SDK = 19;
+    BUN = 20;
+    DOCKER_COMPOSE = 21;
+    UV = 22;
+    HELM = 23;
+    VCPKG = 24;
+    RUST_TOOLCHAIN = 25;
+    CONDA = 26;
+    JULIA = 27;
+    BAZEL = 28;
+    OPENTOFU = 29;
+  }
+
+  enum Support {
+    ALPHA = 0;
+    BETA = 1;
+    GA = 2;
+  }
+
+  Name name = 1;
+  Support support = 2;
+
+  // is_repository_access_supported indicates whether the ecosystem supports
+  // accessing repositories to fetch dependencies. (required)
+  bool is_repository_access_supported = 3;
+}
+
+message UpdateJobError {
+  uint32 id = 1;
+  string type = 2;
+  string msg = 3;
+  string details = 4;
+
+  // error provides additional typed/structured details that vary based on the
+  // specific type of problem that occurred, so that clients don't have to
+  // resort to fragile parsing of the string fields above.
+  oneof error {
+    // git_dependencies_not_reachable_error provides additional details if the error
+    // was caused by an unreachable Git dependency.
+    GitDependenciesNotReachableError git_dependencies_not_reachable_error = 5;
+  }
+
+  message GitDependenciesNotReachableError {
+    // urls is the list of URLs for the unreachable Git dependencies. (required)
+    repeated string urls = 1;
+  }
+}
+
+message UpdateJobWarning {
+  uint32 id = 1;
+  string type = 2;
+  string title = 3;
+  string description = 4;
+}
+
+message UpdateJobStatus {
+  uint32 id = 1;
+
+  enum State {
+    PENDING = 0;
+    CANCELLED = 1;
+    ENQUEUED = 2;
+    PROCESSING = 3;
+    PROCESSED = 4;
+    PROCESSED_WITH_ERRORS = 5;
+    TIMED_OUT = 6;
+    PENDING_RETRY = 7;
+    NO_SUCCESSFUL_RUNS = 8;
+  }
+
+  State state = 2;
+
+  google.protobuf.Timestamp finished_at = 3;
+
+  // (deprecated: use errors)
+  UpdateJobError last_error = 4;
+
+  uint32 update_config_id = 5;
+
+  // package_ecosystem is the ecosystem associated with this update job.
+  // (required)
+  PackageEcosystem package_ecosystem = 6;
+
+  // errors is the unordered list of errors (if any) encountered during the update
+  // job.
+  repeated UpdateJobError errors = 7;
+  string runner_type = 8;
+  string actions_external_id = 9;
+  uint64 actions_workflow_run_id = 10;
+  repeated UpdateJobWarning warnings = 11;
+}
+
+message ConfigFileError {
+  uint32 id = 1;
+  string type = 2;
+  string msg = 3;
+  string details = 4;
+}
+
+message ConfigFile {
+  string path = 1;
+
+  ConfigFileError error = 2;
+}
+
+message UpdateConfig {
+  uint32 id = 1;
+
+  string target_branch = 2;
+
+  PackageEcosystem package_ecosystem = 3;
+
+  message ManifestFile {
+    string path = 1;
+  }
+
+  repeated ManifestFile monitored_manifest_files = 4;
+
+  UpdateJobStatus last_full_update_run = 5;
+
+  string serialized_config_file_yml = 6;
+
+  string serialized_config_file_defaults_yml = 7;
+
+  uint32 multi_ecosystem_config_id = 8;
+}
+
+message DeactivateUpdateConfigsRequest {
+  uint32 repository_github_id = 1;
+}
+
+message DeactivateUpdateConfigsResponse {
+}
+
+message ListUpdateConfigsRequest {
+  uint32 repository_github_id = 1;
+  uint32 owner_github_id = 2;
+  bool config_file_exists = 3;
+}
+
+message ListUpdateConfigsResponse {
+  repeated UpdateConfig update_configs = 1;
+
+  ConfigFile config_file = 2;
+}
+
+message RepositoryStatusRequest {
+  uint32 repository_github_id = 1;
+}
+
+message RepositoryStatusResponse {
+  uint32 repository_github_id = 1;
+
+  bool using_config_file = 2;
+  bool version_updates_enabled = 3;
+  bool paused = 4;
+}
+
+message ResyncConfigFileRequest {
+  uint32 repository_github_id = 1;
+  uint32 owner_github_id = 2;
+}
+
+message ResyncConfigFileResponse {
+}
+
+message TriggerUpdateJobRequest {
+  uint32 repository_github_id = 1;
+  uint32 update_config_id = 2;
+}
+
+message TriggerUpdateJobResponse {
+  UpdateJobStatus update_job = 1;
+}
+
+service UpdateConfigs {
+  rpc DeactivateUpdateConfigs(DeactivateUpdateConfigsRequest) returns (DeactivateUpdateConfigsResponse);
+  rpc ListUpdateConfigs(ListUpdateConfigsRequest) returns (ListUpdateConfigsResponse);
+  rpc RepositoryStatus(RepositoryStatusRequest) returns (RepositoryStatusResponse);
+  rpc ResyncConfigFile(ResyncConfigFileRequest) returns (ResyncConfigFileResponse);
+  rpc TriggerUpdateJob(TriggerUpdateJobRequest) returns (TriggerUpdateJobResponse);
+}
+
+message UnpauseRepositoryRequest {
+  uint32 repository_github_id = 1;
+  string reason = 2;
+}
+
+message UnpauseRepositoryResponse {
+}
+
+service Repositories {
+  rpc Unpause(UnpauseRepositoryRequest) returns (UnpauseRepositoryResponse);
+}
+
+message ListJobsRequest {
+  uint32 repository_github_id = 1;
+
+  uint32 update_config_id = 2;
+}
+
+message PullRequest {
+  uint32 github_number=1;
+}
+
+message UpdateJob {
+  UpdateJobStatus status = 1;
+
+  enum TriggerType {
+    UNKNOWN = 0;
+    SECURITY = 1;
+    SCHEDULED = 2;
+    REBASE = 3;
+  }
+  TriggerType trigger_type = 2;
+  repeated PullRequest pull_requests = 3;
+}
+
+message ListJobsResponse {
+  repeated UpdateJob update_jobs = 1;
+  UpdateConfig update_config = 2;
+}
+
+message GetJobLogsRequest {
+  uint32 repository_github_id = 1;
+
+  uint32 update_job_id = 2;
+}
+
+message GetJobLogsResponse {
+  UpdateJobStatus update_job = 1;
+
+  string update_job_logs = 2;
+}
+
+message GetJobStatusRequest {
+  uint32 repository_github_id = 1;
+
+  uint32 update_job_id = 2;
+}
+
+message GetJobStatusResponse {
+  UpdateJobStatus update_job = 1;
+}
+
+message GetJobStatusByGithubRequestIdRequest {
+  uint32 repository_github_id = 1;
+
+  uint32 github_request_id = 2;
+}
+
+message GetJobStatusByGithubRequestIdResponse {
+  UpdateJobStatus update_job = 1;
+}
+
+message GetJobLogsByGithubRequestIdRequest {
+  uint32 repository_github_id = 1;
+
+  uint32 github_request_id = 2;
+}
+
+message GetJobLogsByGithubRequestIdResponse {
+  UpdateJobStatus update_job = 1;
+
+  string update_job_logs = 2;
+}
+
+message GetJobErrorsRequest {
+  uint32 repository_github_id = 1;
+
+  // A list of specific job ids to check for errors
+  repeated uint32 update_job_ids = 2;
+}
+
+message GetJobErrorsResponse {
+  // Only jobs with errors will be included in the response
+  repeated UpdateJobStatus update_jobs_with_errors = 1;
+}
+
+service UpdateJobs {
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+  rpc GetJobLogs(GetJobLogsRequest) returns (GetJobLogsResponse);
+  rpc GetJobStatus(GetJobStatusRequest) returns (GetJobStatusResponse);
+  // NOTE:
+  //  These methods support accessing an UpdateJob via the RepositoryDependencyUpdate#id in github/github and are used
+  //  exclusively by Security Alert/Update UIs. This interface may be subject to breaking changes in future, prefer to
+  //  use the methods above if possible.
+  rpc GetJobLogsByGithubRequestId(GetJobLogsByGithubRequestIdRequest) returns (GetJobLogsByGithubRequestIdResponse);
+  rpc GetJobStatusByGithubRequestId(GetJobStatusByGithubRequestIdRequest) returns (GetJobStatusByGithubRequestIdResponse);
+
+  rpc GetJobErrors(GetJobErrorsRequest) returns (GetJobErrorsResponse);
+}
+
+message GetRepositoryAccessRequest {
+  uint32 owner_github_id = 1;
+}
+
+message GetRepositoryAccessResponse {
+  reserved 1;
+  reserved "level";
+  repeated uint32 repository_github_ids = 2;
+  bool access_editable = 3;
+}
+
+message SetSelectedRepositoriesRequest {
+  uint32 owner_github_id = 1;
+  repeated uint32 repository_github_ids = 2;
+}
+
+message SetSelectedRepositoriesResponse {
+}
+
+// RepositoryAccessService manages RepositoryAccess.
+service RepositoryAccessService {
+  rpc GetRepositoryAccess(GetRepositoryAccessRequest) returns (GetRepositoryAccessResponse);
+
+  // SetSelectedRepositories does not verify or update the access level.
+  rpc SetSelectedRepositories(SetSelectedRepositoriesRequest) returns (SetSelectedRepositoriesResponse);
+}
+
+message GetEncryptedConfigPayloadRequest {
+  uint32 update_config_id = 1;
+  string public_key = 2;
+}
+
+message GetEncryptedConfigPayloadResponse  {
+  string encrypted_config_payload = 1;
+}
+
+service DebugService {
+  rpc GetEncryptedConfigPayload(GetEncryptedConfigPayloadRequest) returns (GetEncryptedConfigPayloadResponse);
+}
+
+// Run id of workflow with which job is associated
+message GetSecretRequest {
+  uint64 workflow_run_id = 1;
+}
+
+// Define a message to represent the response containing the secret hash and its values
+message GetSecretResponse {
+  string job_token = 1;
+  string cred_token = 2;
+}
+
+service SecretService {
+  // Get a secret value
+  rpc GetSecret(GetSecretRequest) returns (GetSecretResponse) {}
+}

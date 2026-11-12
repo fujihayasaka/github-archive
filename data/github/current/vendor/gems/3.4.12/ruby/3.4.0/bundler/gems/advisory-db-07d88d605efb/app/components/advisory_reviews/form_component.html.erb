@@ -1,0 +1,212 @@
+<%= form_for advisory_review, html: { id: "advisory-review-form", "data-target" => "form-tracker.form" }.merge(test_selector_data_hash("advisory-review-form")) do |outer_form| %>
+  <% outer_form.fields_for :advisory_payload, advisory_payload do |form| %>
+    <div class="Box border mt-5">
+      <div class="p-2">
+        <%= render FormFieldWithErrorsComponent.new(object: advisory_payload, attribute: :summary) do %>
+          <%= form.text_field :summary, placeholder: "Summary", class: "form-control input-lg width-full", disabled: read_only?, **test_selector_data_hash("summary") %>
+        <% end %>
+      </div>
+
+      <%= render MarkdownEditorComponent.new(form: form, attribute: :description, disabled: read_only?, id_prefix: outer_form.options[:html][:id]) %>
+
+      <div class="d-flex flex-items-center py-2 m-2 mt-0">
+        <%= render(Primer::Beta::Link.new(
+          href: "https://guides.github.com/features/mastering-markdown/",
+          scheme: :secondary,
+          underline: false,
+          font_size: 6,
+          target: :_blank,
+        )) do %>
+          <%= render IconComponent.new(icon: "markdown") %>
+          Styling with Markdown is supported
+        <% end %>
+      </div>
+    </div>
+
+    <hr class="mt-2">
+
+    <div class="d-flex flex-items-end container gutter-condensed">
+      <div class="col-3">
+        <h2 class="mb-2 h4">
+          <%= outer_form.label :cve_id %>
+        </h2>
+
+        <%= render FormFieldWithErrorsComponent.new(object: advisory_review, attribute: :cve_id) do %>
+          <%= outer_form.text_field :cve_id, class: "form-control input-lg width-full", placeholder: "e.g. CVE-2021-5555", disabled: read_only?, autocomplete: "off", **test_selector_data_hash("advisory-review-cve-id") %>
+        <% end %>
+      </div>
+
+      <div class="col-9">
+        <h2 class="mb-2 h4">
+          <%= form.label :source_code_location %>
+        </h2>
+
+        <%= render FormFieldWithErrorsComponent.new(object: advisory_payload, attribute: :source_code_location) do %>
+          <%= form.text_field :source_code_location, class: "form-control width-full", placeholder: "e.g. https://github.com/github/catalyst", disabled: read_only?, **test_selector_data_hash("source-code-location") %>
+        <% end %>
+      </div>
+    </div>
+
+    <h2 class="mt-4 mb-2 h4">Affected products</h2>
+
+    <form-table class="d-block" data-action="initialized:form-tracker#reset">
+      <div class="Box Box--condensed">
+        <div class="Box-header Box-title color-bg-default px-2 d-flex">
+          <div class="col-3 px-2">Ecosystem</div>
+          <div class="col-3 px-2">Package name</div>
+          <div class="col-3 px-2">Vulnerable version range</div>
+          <div class="col-3 px-2">Patched version</div>
+        </div>
+        <form-table-suggestions <%= read_only? ? "data-read-only" : "" %>>
+          <div data-target="form-table.body">
+            <% advisory_payload.vulnerability_payloads.each do |index, vulnerability| %>
+              <%= render AdvisoryReviews::VulnerabilityFormRowComponent.new(index: index, vulnerability: vulnerability, name_prefix: "advisory_review[advisory_payload][vulnerabilities]", disabled: read_only?) %>
+            <% end %>
+          </div>
+          <% unless read_only? %>
+            <div data-target="form-table-suggestions.heading" class="Box-row Box-title color-bg-default p-2 d-flex color-bg-attention rounded-top-0">
+              <div class="px-2"><%= suggestion_source %></div>
+            </div>
+            <div data-target="form-table-suggestions.body">
+              <% vulnerability_prediction_attributes.each do |attributes| %>
+                <%= render AdvisoryReviews::VulnerabilityPredictionFormRowComponent.new(prediction_attributes: attributes) %>
+              <% end %>
+            </div>
+          <% end %>
+        </div>
+      </form-table-suggestions>
+
+      <template data-target="form-table.rowTemplate">
+        <%= render AdvisoryReviews::VulnerabilityFormRowComponent.new(name_prefix: "advisory_review[advisory_payload][vulnerabilities]", disabled: read_only?, default_ecosystem: advisory_review.default_ecosystem) %>
+      </template>
+
+      <button data-action="click:form-table#addRow" type="button" class="btn-link Link--secondary no-underline mt-2" <%= "hidden" if read_only? %>>
+        <%= render IconComponent.new(icon: "plus", mr: 1) %>
+        Add an affected product
+      </button>
+    </form-table>
+
+    <div class="d-flex flex-items-end container gutter-condensed">
+      <div class="col-3">
+        <h2 class="mt-4 mb-2 h4">Severity</h2>
+
+        <%= render FormFieldWithErrorsComponent.new(object: advisory_payload, attribute: :severity) do %>
+          <%= render Primer::Beta::Details.new(reset: true, overlay: :default, position: :relative, test_selector: "severity") do |details| %>
+            <% details.with_summary(
+              pr: 2,
+              classes: "width-full",
+              aria: { disabled: read_only?, haspopup: true },
+              tabindex: read_only? ? "-1" : nil,
+            ) do %>
+              <span data-menu-button>
+                <% if advisory_payload.severity %>
+                  <%= render IconComponent.new(icon: "dot-fill", mr: 1, style: "color: ##{severity_color(advisory_payload.severity)}") %>
+                  <%= severity_label(advisory_payload.severity) %>
+                <% else %>
+                  <span class="text-normal color-fg-subtle">Choose a severity</span>
+                <% end %>
+              </span>
+              <span class="dropdown-caret float-right m-2"></span>
+            <% end %>
+            <% details.with_body(tag: :"details-menu", classes: "SelectMenu") do %>
+              <div class="SelectMenu-modal">
+                <div class="SelectMenu-list SelectMenu-list--borderless">
+                  <label tabindex="0" role="menuitemradio" class="SelectMenu-item text-normal" aria-checked="<%= advisory_payload.severity.blank? %>">
+                    <%= render IconComponent.new(icon: "check", classes: "SelectMenu-icon SelectMenu-icon--check") %>
+                    <span class="color-fg-muted">
+                      <%= render IconComponent.new(icon: "dot", mr: 1, color: :muted) %>
+                      No severity
+                    </span>
+                    <span hidden aria-hidden="true" data-menu-button-contents>
+                      <span class="text-normal color-fg-subtle">Choose a severity</span>
+                    </span>
+                    <%= form.radio_button :severity, "", checked: advisory_payload.severity.blank?, hidden: true %>
+                  </label>
+
+                  <% severities.each do |severity| %>
+                    <% checked = severity == advisory_payload.severity %>
+                    <label tabindex="0" role="menuitemradio" class="SelectMenu-item text-normal" aria-checked="<%= checked %>">
+                      <%= render IconComponent.new(icon: "check", classes: "SelectMenu-icon SelectMenu-icon--check") %>
+                      <span data-menu-button-contents>
+                        <%= render IconComponent.new(icon: "dot-fill", mr: 1, style: "color: ##{severity_color(severity)}") %>
+                        <%= severity_label(severity) %>
+                      </span>
+                      <%= form.radio_button :severity, severity, checked: checked, hidden: true %>
+                    </label>
+                  <% end %>
+
+                  <div class="SelectMenu-divider"></div>
+
+                  <button class="SelectMenu-item color-fg-muted" role="menuitem">
+                    <%= render IconComponent.new(icon: "tools", classes: "SelectMenu-icon") %>
+                    Use CVSS calculator
+                  </button>
+                </div>
+              </div>
+            <% end %>
+          <% end %>
+        <% end %>
+      </div>
+
+      <div class="col-9">
+        <h2 class="mt-4 mb-2 h4">
+          <%= form.label :cvss_v3, "CVSS v3.1 vector string" %>
+          <%= render(Primer::Beta::Link.new(href: "https://www.first.org/cvss/calculator/3.1", muted: true, target: :_blank, font_size: 6, ml: 1)) do %>
+            Use calculator
+            <%= render IconComponent.new(icon: "link-external") %>
+          <% end %>
+        </h2>
+
+        <%= render FormFieldWithErrorsComponent.new(object: advisory_payload, attribute: :cvss_v3) do %>
+          <%= form.text_field :cvss_v3, class: "form-control width-full", placeholder: "e.g. CVSS:3.1/AV:_/AC:_/PR:_/UI:_/S:_/C:_/I:_/A:_", disabled: read_only?, **test_selector_data_hash("cvss-v3") %>
+        <% end %>
+
+        <h2 class="mt-4 mb-2 h4">
+          <%= form.label :cvss_v4, "CVSS v4.0 vector string" %>
+          <%= render(Primer::Beta::Link.new(href: "https://www.first.org/cvss/calculator/4.0", muted: true, target: :_blank, font_size: 6, ml: 1)) do %>
+            Use calculator
+            <%= render IconComponent.new(icon: "link-external") %>
+          <% end %>
+        </h2>
+
+        <%= render FormFieldWithErrorsComponent.new(object: advisory_payload, attribute: :cvss_v4) do %>
+          <%= form.text_field :cvss_v4, class: "form-control width-full", placeholder: "e.g. CVSS:4.0/AV:_/AC:_/AT:_/PR:_/UI:_/VC:_/VI:_/VA:_/SC:_/SI:_/SA:_", disabled: read_only?, **test_selector_data_hash("cvss-v4") %>
+        <% end %>
+      </div>
+    </div>
+
+    <%= render CWEs::AutocompleteComponent.new(name_prefix: "advisory_review[advisory_payload]", cwes: advisory_payload.cwe_payloads, disabled: read_only?) %>
+
+    <h2 class="mt-4 mb-2 h4">References</h2>
+
+    <form-table class="d-block" data-action="initialized:form-tracker#reset">
+      <div class="Box">
+        <div data-target="form-table.body">
+          <% advisory_payload.reference_payloads.each do |reference| %>
+            <%= render AdvisoryReviews::ReferenceFormRowComponent.new(reference: reference, name: "advisory_review[advisory_payload][references][]", disabled: read_only?) %>
+          <% end %>
+        </div>
+      </div>
+
+      <template data-target="form-table.rowTemplate">
+        <%= render AdvisoryReviews::ReferenceFormRowComponent.new(name: "advisory_review[advisory_payload][references][]", disabled: read_only?) %>
+      </template>
+
+      <button data-action="click:form-table#addRow" type="button" class="btn-link Link--secondary no-underline mt-2" <%= "hidden" if read_only? %>>
+        <%= render IconComponent.new(icon: "plus", mr: 1) %>
+        Add a reference
+      </button>
+    </form-table>
+
+    <h2 class="mt-4 mb-2 h4">Internal review notes</h2>
+
+    <%= outer_form.text_area :review_notes, rows: 10, placeholder: "Notes", class: "form-control input-contrast width-full", disabled: read_only?, **test_selector_data_hash("advisory-review-notes") %>
+
+    <%= form.hidden_field :withdrawn, **test_selector_data_hash("withdrawn") %>
+    <input
+      type="hidden"
+      name="body_version"
+      value="<%= body_version %>"
+    >
+  <% end %>
+<% end %>

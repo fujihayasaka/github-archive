@@ -115,7 +115,7 @@ module GitHub
 
           bot = Bot.find_by_token(token, push_token_to_audit_log: reduce_authentication_token_lookups)
 
-          if bot.nil? && FeatureFlag.vexi.enabled?(:token_lookup_from_primary_bot, default: false) && ActiveRecord::Base.connected_to?(role: :reading)
+          if bot.nil? && ActiveRecord::Base.connected_to?(role: :reading)
             bot = ActiveRecord::Base.connected_to(role: :writing) do
               ApplicationRecord::Domain::Users.uncached do
                 gtid_result_hash[:token_fallback] = true

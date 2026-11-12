@@ -124,8 +124,6 @@ class WikiController < AbstractRepositoryController
   javascript_bundle :diffs
   stylesheet_bundle :wiki
 
-  preload_features [:org_ruby_rendering], only: [:index, :show, :pages, :toc]
-
   include ActionView::Helpers::FormOptionsHelper
 
   skip_before_action :ask_the_gatekeeper, only: :redirect

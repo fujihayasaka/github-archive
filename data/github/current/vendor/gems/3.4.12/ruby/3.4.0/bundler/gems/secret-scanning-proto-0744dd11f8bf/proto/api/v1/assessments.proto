@@ -1,0 +1,168 @@
+syntax = "proto3";
+
+package github.secretscanning.v1;
+
+option go_package = "github.com/github/secret-scanning-proto/gen/go/v1/api";
+option ruby_package = "GitHub::Proto::SecretScanning::Api::V1";
+
+import "types/v1/scans.proto";
+import "types/v1/owners.proto";
+import "types/v1/job_groups.proto";
+import "google/protobuf/timestamp.proto";
+
+service AssessmentsAPI {
+  rpc CreateAssessment(CreateAssessmentRequest) returns (CreateAssessmentResponse);
+  rpc GetLatestAssessment(GetLatestAssessmentRequest) returns (GetLatestAssessmentResponse);
+  rpc GetTokenTypeResults(GetTokenTypeResultsRequest) returns (GetTokenTypeResultsResponse);
+  rpc GetTokenTypeResultsCSV(GetTokenTypeResultsCSVRequest) returns (GetTokenTypeResultsCSVResponse);
+  rpc GetAssessment(GetAssessmentRequest) returns (GetAssessmentResponse);
+  rpc ListAssessments(ListAssessmentsRequest) returns (ListAssessmentsResponse);
+  rpc GetRepositoryResults(GetRepositoryResultsRequest) returns (GetRepositoryResultsResponse);
+}
+
+message CreateAssessmentRequest {
+  github.secretscanning.types.v1.Owner owner = 1;
+  uint64 requested_by_id = 2;
+}
+
+message CreateAssessmentResponse {
+  // the created number
+  uint32 number = 1;
+}
+
+message GetLatestAssessmentRequest {
+  github.secretscanning.types.v1.Owner owner = 1;
+}
+
+message GetLatestAssessmentResponse {
+  // if the assessment is for a single organization, there will be only one assessment.
+  // if the assessment is for an enterprise, there will be one assessment for the enterprise (which tracks the
+  // EMU repositories) and one assessment per organization.
+  repeated Assessment assessments = 1;
+  // Will be true if this owner meets the criteria to request another assessment
+  bool can_request_another_assessment = 2;
+  // If a new assessment cannot be requested, this will be the timestamp of when the next request can be made
+  google.protobuf.Timestamp next_request_available_at = 3;
+  uint32 distinct_repos_scanned = 4;
+}
+
+message Assessment {
+  // The assessment Number relative to the owner (e.g., all 3 of enterprise A with Org A and Org B inside of it will have Number "1" assessments
+  uint32 Number = 1;
+  // The owner of this assessment
+  github.secretscanning.types.v1.Owner owner = 2;
+  // the user id of the person who requested this assessment
+  uint64 requested_by_id = 3;
+  // the timestamp of when this assessment was requested
+  google.protobuf.Timestamp requested_at = 4;
+  // the timestamp of the last status change
+  google.protobuf.Timestamp last_status_change = 5;
+  // Whether this assessment is complete
+  bool complete = 6;
+  // the status of the assessment is equivalent to the job group status
+  repeated JobGroup job_groups = 7;
+  // the total number of scans wanted across all the job groups
+  uint32 total_scans_wanted = 8;
+  // the total number of scans complete across all the job groups
+  uint32 total_scans_complete = 9;
+  // the total number of scans in progress across all the job groups
+  uint32 total_scans_in_progress = 10;
+
+  message JobGroup {
+    // the internal job group
+    github.secretscanning.types.v1.JobGroup job_group = 1;
+    // the number of scans wanted for this job group
+    uint32 num_scans_wanted = 2;
+    // the number of scans complete for this job group
+    uint32 num_scans_complete = 3;
+    // the number of scans in progress for this job group
+    uint32 num_scans_in_progress = 4;
+  }
+}
+
+message GetTokenTypeResultsRequest {
+  github.secretscanning.types.v1.Owner owner = 1;
+  // the number of the assessment to get; if not specified, the latest assessment will be used
+  uint32 number = 2;
+}
+
+message GetTokenTypeResultsResponse {
+  repeated TokenTypeResult results = 1;
+
+  uint32 total_tokens_found = 2;
+  uint32 total_tokens_found_in_public_repos = 3;
+  uint32 total_tokens_found_push_protected_patterns = 4;
+  uint32 total_tokens_found_non_provider_patterns = 5;
+  uint32 total_repositories_with_results = 6;
+}
+
+message TokenTypeResult {
+  string token_type = 1;
+  string name = 2;
+  string slug = 3;
+  bool push_protected = 4;
+  bool non_provider_pattern = 5;
+  uint32 unique_tokens_found = 6;
+
+  repeated ScanTypeResult scan_types = 7;
+  message ScanTypeResult {
+    github.secretscanning.types.v1.ScanType scan_type = 1;
+    uint32 unique_tokens_found = 2;
+  }
+
+  uint32 unique_repos_found_this_token = 8;
+}
+
+message GetTokenTypeResultsCSVRequest {
+  github.secretscanning.types.v1.Owner owner = 1;
+  // the number of the assessment to get; if not specified, the latest assessment will be used
+  uint32 number = 2;
+  // org_ids_to_names is an organizationID:organizationName mapping; if Owner is an enterprise, not all organizations within
+  // the enterprise need be present, but all organizations _with_ results must be present.
+  map<uint64, string> org_ids_to_names = 3;
+}
+
+message GetTokenTypeResultsCSVResponse {
+  bytes csv = 1;
+}
+
+message GetRepositoryResultsRequest {
+  github.secretscanning.types.v1.Owner owner = 1;
+  uint32 number = 2;
+  repeated uint64 repository_ids = 3;
+}
+
+message GetRepositoryResultsResponse {
+  message RepositoryResult {
+    uint64 repository_id = 1;
+    uint32 unique_tokens_found = 2;
+  }
+
+  repeated RepositoryResult repository_results = 1;
+}
+
+message GetAssessmentRequest {
+  github.secretscanning.types.v1.Owner owner = 1;
+  uint32 number = 2;
+}
+
+message GetAssessmentResponse {
+  Assessment assessment = 1;
+  // Will be true if this owner meets the criteria to request another assessment
+  bool can_request_another_assessment = 2;
+  // If a new assessment cannot be requested, this will be the timestamp of when the next request can be made
+  google.protobuf.Timestamp next_request_available_at = 3;
+  uint32 distinct_repos_scanned = 4;
+}
+
+message ListAssessmentsRequest {
+  github.secretscanning.types.v1.Owner owner = 1;
+}
+
+message ListAssessmentsResponse {
+  message AssessmentSummary {
+    uint32 Number = 1;
+    google.protobuf.Timestamp requested_at = 2;
+  }
+  repeated AssessmentSummary assessment_summaries = 1;
+}

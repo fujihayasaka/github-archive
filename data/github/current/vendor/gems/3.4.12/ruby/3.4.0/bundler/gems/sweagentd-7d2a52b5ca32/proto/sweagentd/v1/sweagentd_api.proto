@@ -1,0 +1,209 @@
+syntax = "proto3";
+package sweagentd.sweagentd_api.v1;
+
+option go_package = "sweagentd/v1";
+option ruby_package = "MonolithTwirp::Sweagentd::SweagentdAPI::V1";
+
+// SweagentdAPI is used for all sweagentd -> dotcom communication.
+service SweagentdAPI {
+    //  ConfigurationForRepository returns the configuration that sweagentd cares about for a given repository.
+    rpc ConfigurationForRepository(ConfigurationForRepositoryRequest) returns (ConfigurationForRepositoryResponse);
+
+    //  MCPConfigurationForRepository returns the MCP settings that sweagentd cares about for a given repository.
+    rpc MCPConfigurationForRepository(MCPConfigurationForRepositoryRequest) returns (MCPConfigurationForRepositoryResponse);
+
+    // CreatePullRequest creates a pull request in the given repository.
+    rpc CreatePullRequest(CreatePullRequestRequest) returns (CreatePullRequestResponse);
+
+    // MintUserToServerTokenForRepo mints a user to server token for the given repository.
+    rpc MintUserToServerTokenForRepo(MintUserToServerTokenForRepoRequest) returns (MintUserToServerTokenForRepoResponse);
+
+    // EnterpriseAgents returns all enterprise agents available to a user for a given repository.
+    rpc EnterpriseAgents(EnterpriseAgentsRequest) returns (EnterpriseAgentsResponse);
+
+    // ResolveUserIDToDisplayLogin returns the displayLogin for a submitted user ID. This is anticipated only to be used for Proxima.
+    rpc ResolveUserIDToDisplayLogin(ResolveUserIDToDisplayLoginRequest) returns (ResolveUserIDToDisplayLoginResponse);
+
+    // GetOrganizationCustomInstructions returns the custom instructions for a given organization.
+    rpc GetOrganizationCustomInstructions(GetOrganizationCustomInstructionsRequest) returns (GetOrganizationCustomInstructionsResponse);
+
+    // AuthorizeCustomAgentRepoForUser authorizes that the user can see custom agents from the given repository.
+    rpc AuthorizeCustomAgentRepoForUser(AuthorizeCustomAgentRepoForUserRequest) returns (AuthorizeCustomAgentRepoForUserResponse);
+
+    // GetIssueById retrieves an issue by its ID.
+    rpc GetIssueById(GetIssueByIdRequest) returns (GetIssueByIdResponse);
+
+    // IsBypassActor checks if the calling app is configured as a bypass actor for repository rulesets.
+    rpc IsBypassActor(IsBypassActorRequest) returns (IsBypassActorResponse);
+}
+
+message ConfigurationForRepositoryRequest {
+    // The github repository id for the repository that we want to get configuration for.
+    int64 repository_id = 1;
+    // The user id for the user that we want to get configuration for.
+    uint64 user_id = 2;
+    // The agent id to use for this request. Defaults to the default Copilot agent.
+    uint64 agent_id = 3;
+}
+
+message ConfigurationForRepositoryResponse {
+    // An all up "true or false" about whether sweagentd is enabled for this repository.
+    // This will gate whether or not we do any additional checks or work for the repository.
+    // Right now, this correlates to any padawan interactions being viable for the repository.
+    bool is_sweagentd_enabled = 1;
+
+    // tenant_slug is a property that will be provided in proxima environments. It is the slug of the tenant the repo belongs to.
+    string tenant_slug = 2;
+
+    // tenant_id is a property that will be provided in proxima environments. It is the id of the tenant the repo belongs to.
+    string tenant_id = 3;
+
+    // is_agent_enabled is a boolean that indicates whether or not the specific agent is enabled for the repository and user.
+    // This is the new field that should be checked instead of is_sweagentd_enabled for agent-specific enablement.
+    bool is_agent_enabled = 4;
+}
+
+message ResolveUserIDToDisplayLoginRequest {
+    // The user id for the user that we want to resolve.
+    uint64 user_id = 1;
+}
+
+message ResolveUserIDToDisplayLoginResponse {
+    // display_login is the suffix-less login for the user.
+    string display_login = 1;
+}
+
+message MCPConfigurationForRepositoryRequest {
+    // The github repository id for the repository that we want to get configuration for.
+    uint64 repository_id = 1;
+
+    // The user id for the user that we want to get configuration for.
+    uint64 user_id = 2;
+}
+
+message MCPConfigurationForRepositoryResponse {
+    // mcp_configuration_json is the effective JSON configuration for the MCP settings for the repository.
+    // It's OK for us to use a string here -- we will adhere to UTF8, and we will make sure that the file is not too large on the handler side.
+    string mcp_configuration_json = 1;
+
+    // is_mcp_enabled is a boolean that indicates whether or not the MCP settings are enabled for the repository and user.
+    // it's expected that policies set on the monolith side can be used to populate this field.
+    bool is_mcp_enabled = 2;
+}
+
+message CreatePullRequestRequest {
+    uint64 repository_id = 1;
+    string base_branch_name = 2;
+    string head_branch_name = 3;
+    string pr_name = 4;
+    string pr_description = 5;
+    bool draft = 6;
+    uint64 attribution_user_id = 7;
+    string session_id = 8;
+}
+
+message CreatePullRequestResponse {
+    PullRequest pull_request = 1;
+}
+
+message PullRequest {
+    uint64 id = 1;
+    uint64 github_number = 2;
+    uint64 repository_id = 3;
+}
+
+message MintUserToServerTokenForRepoRequest {
+  // The user id for the user that we want to get a token for.
+  uint64 user_id = 1;
+  // The github repository id for the repository to scope the token to.
+  uint64 repository_id = 2;
+}
+
+message MintUserToServerTokenForRepoResponse {
+  string token = 1;
+}
+
+message EnterpriseAgentsRequest {
+    // The user id for the user that we want to get enterprise agents for.
+    uint64 user_id = 1;
+    // The github repository id for the repository to get enterprise agents for.
+    uint64 repository_id = 2;
+}
+
+message EnterpriseAgentsResponse {
+    // The repository ID for the repository.
+    uint64 repository_id = 1;
+}
+
+message GetOrganizationCustomInstructionsRequest {
+    // The organization id for the organization that we want to get custom instructions for.
+    uint64 organization_id = 1;
+}
+
+message GetOrganizationCustomInstructionsResponse {
+    // The custom instructions text for the organization.
+    string organization_custom_instructions = 1;
+}
+
+message AuthorizeCustomAgentRepoForUserRequest {
+  uint64 user_id = 1;
+  uint64 repository_id = 2;
+}
+
+message AuthorizeCustomAgentRepoForUserResponse {
+  bool can_access = 1;
+}
+
+message GetIssueByIdRequest {
+  uint64 issue_id = 1;
+}
+
+message GetIssueByIdResponse {
+  Issue issue = 1;
+}
+
+message Issue {
+  uint64 id = 1;
+  uint64 number = 2;
+  uint64 repository_id = 3;
+  string repository_nwo = 4; // e.g. "owner/repo"
+  string title = 5;
+  string body = 6;
+  string state = 7; // "open" or "closed"
+  uint64 author_id = 8;
+  int64 created_at = 9; // Unix timestamp
+  int64 updated_at = 10; // Unix timestamp
+  repeated string labels = 11;
+  string html_url = 12;
+}
+
+message IsBypassActorRequest {
+  uint64 repository_id = 1;
+  uint64 actor_id = 2;
+}
+
+message IsBypassActorResponse {
+  // True if the actor can bypass any rulesets.
+  bool is_bypass_actor = 1;
+
+  // Rulesets that can be bypassed by this actor.
+  repeated BypassableRuleset rulesets = 2;
+}
+
+message BypassableRuleset {
+  // The ruleset ID.
+  uint64 ruleset_id = 1;
+
+  // The ruleset name for debugging purposes.
+  string ruleset_name = 2;
+
+  // The bypass mode for this actor on this ruleset.
+  BypassMode bypass_mode = 3;
+}
+
+enum BypassMode {
+  BYPASS_MODE_INVALID = 0;
+  BYPASS_MODE_ANY = 1;
+  BYPASS_MODE_PULL_REQUEST = 2;
+  BYPASS_MODE_EXEMPT = 3;
+}

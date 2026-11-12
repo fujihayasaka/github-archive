@@ -1,0 +1,47 @@
+#!/usr/bin/env ruby
+#
+# Usage: script/worker [start|stop|restart|status]
+
+require "optparse"
+
+USAGE = "Usage: script/worker [start|stop|restart|status]"
+
+INGEST_SCRIPTS = %w{
+}
+
+PACKAGE_MANAGER_ADAPTERS = %w{
+}
+
+COMMANDS = %w{
+  start
+  stop
+  restart
+  status
+}
+
+command = ARGV[0]
+
+unless COMMANDS.include?(command)
+  puts "Unknown command `#{command}`"
+  puts USAGE
+  exit 1
+end
+
+options = {}
+OptionParser.new do |opts|
+  opts.on("--ingest-only", "Only ingest data, don't connect adapters to external sources to produce data.") do |flag|
+    options[:ingest_only] = true
+  end
+end.parse!(Array(ARGV[2..-1]))
+
+INGEST_SCRIPTS
+  .map { |script| Thread.new { print `#{script} #{command}` } }
+  .each(&:join)
+
+unless options[:ingest_only]
+  command = "start" if command == "restart"
+
+  PACKAGE_MANAGER_ADAPTERS
+    .map { |adapter| Thread.new { print `package_manager_adapters/script/#{command} #{adapter}` } }
+    .each(&:join)
+end

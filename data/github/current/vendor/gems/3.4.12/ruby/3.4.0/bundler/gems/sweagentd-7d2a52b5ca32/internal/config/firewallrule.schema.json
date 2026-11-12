@@ -1,0 +1,250 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Egress Firewall Rules Schema",
+  "description": "Schema for defining egress firewall rules. Latest version at https://github.com/github/ebpf-padawan-egress-firewall/blob/main/schemas/rules.schema.json",
+  "type": "object",
+  "required": [
+    "version",
+    "rules"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "$ref": "#/$defs/semver",
+      "description": "Version of the rules format (must follow semantic versioning)"
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "allow-list",
+        "block-list"
+      ],
+      "default": "allow-list",
+      "description": "Operation mode for the firewall"
+    },
+    "description": {
+      "type": "string",
+      "description": "Description of the group of rules"
+    },
+    "rules": {
+      "type": "array",
+      "description": "List of firewall rules",
+      "items": {
+        "$ref": "#/$defs/base-rule",
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "dns-rule"
+                }
+              }
+            },
+            "then": {
+              "$ref": "#/$defs/dns-rule"
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "ip-rule"
+                }
+              }
+            },
+            "then": {
+              "$ref": "#/$defs/ip-rule"
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "http-rule"
+                }
+              }
+            },
+            "then": {
+              "$ref": "#/$defs/http-rule"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "rule-types": {
+      "type": "string",
+      "enum": [
+        "dns-rule",
+        "ip-rule",
+        "http-rule"
+      ],
+      "description": "Type of rule"
+    },
+    "base-rule": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/rule-types"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the rule"
+        }
+      }
+    },
+    "semver": {
+      "type": "string",
+      "description": "Semantic versioning string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
+      "examples": [
+        "0.0.1",
+        "1.0.0",
+        "2.3.4-alpha.1"
+      ]
+    },
+    "domain-name": {
+      "type": "string",
+      "description": "A valid domain name which matches",
+      "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.([a-z]{2,63})$|^[a-z0-9][a-z0-9\\-]{0,61}$",
+      "examples": [
+        "example.com",
+        "github.com",
+        "api.service.example.org"
+      ]
+    },
+    "url-path": {
+      "type": "string",
+      "description": "URL path segment (alphanumeric with optional slashes)",
+      "pattern": "^[a-zA-Z0-9/\\-_]+$",
+      "examples": [
+        "/api",
+        "/my-org/",
+        "/users/profile"
+      ]
+    },
+    "dns-rule": {
+      "required": [
+        "domain",
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/rule-types"
+        },
+        "name": {
+          "type": "string"
+        },
+        "domain": {
+          "$ref": "#/$defs/domain-name",
+          "description": "Domain name for DNS rule"
+        },
+        "allow-any-subdomain": {
+          "type": "boolean",
+          "description": "Whether to allow any subdomain of the specified domain"
+        }
+      }
+    },
+    "ip-rule": {
+      "required": [
+        "ip"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/rule-types"
+        },
+        "name": {
+          "type": "string"
+        },
+        "ip": {
+          "type": "string",
+          "description": "IP address for IP rule",
+          "format": "ipv4"
+        }
+      }
+    },
+    "http-rule": {
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/rule-types"
+        },
+        "name": {
+          "type": "string"
+        },
+        "url": {
+          "type": "object",
+          "required": [
+            "domain"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "scheme": {
+              "type": "array",
+              "description": "List of scheme for HTTP rule ('http' and/or 'https')",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "http",
+                  "https"
+                ]
+              },
+              "default": [
+                "http",
+                "https"
+              ]
+            },
+            "domain": {
+              "$ref": "#/$defs/domain-name",
+              "description": "Domain name for HTTP rule"
+            },
+            "allow-any-subdomain": {
+              "type": "boolean",
+              "description": "Whether to allow any subdomain of the specified domain",
+              "default": false
+            },
+            "path": {
+              "$ref": "#/$defs/url-path",
+              "description": "Base URL path for HTTP rule",
+              "default": ""
+            }
+          }
+        },
+        "methods": {
+          "type": "array",
+          "description": "List of HTTP methods allowed",
+          "default": [
+            "GET",
+            "POST",
+            "PUT",
+            "DELETE",
+            "PATCH",
+            "HEAD",
+            "OPTIONS"
+          ],
+          "items": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "DELETE",
+              "PATCH",
+              "HEAD",
+              "OPTIONS"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

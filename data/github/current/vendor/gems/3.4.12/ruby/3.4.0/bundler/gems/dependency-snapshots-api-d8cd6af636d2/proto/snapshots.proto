@@ -1,0 +1,161 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package github.dependency_snapshots_api;
+
+option go_package = "./proto";
+
+// The contents of this file are still very similar to https://github.com/github/dependency-graph-api/blob/master/proto/twirp/v1/dependency_graph_api.proto ,
+//  but that should change as we start to develop a more mature API layer (including a dependency graph in our manifest structure).
+
+// Collection of operations dedicated to finding, creating, and retrieving Snapshots.
+// Snapshots are moment-in-time captures of a set of manifests, which contain dependencies.
+// Manifests are files which usually contain a graph of dependencies.
+// Dependencies are all software packages which a given manifest contains direct and indirect references to.
+service SnapshotsService {
+  rpc CreateDependencySnapshot(CreateDependencySnapshotRequest) returns (CreateDependencySnapshotResponse);
+  rpc GetDependencySnapshot(GetDependencySnapshotRequest) returns (GetDependencySnapshotResponse);
+  rpc ExcludeDependencySnapshots(ExcludeDependencySnapshotsRequest) returns (ExcludeDependencySnapshotsResponse);
+  rpc GetIncludedDependencySnapshots(GetIncludedDependencySnapshotsRequest) returns (GetIncludedDependencySnapshotsResponse);
+  rpc GetSnapshotDiff(GetSnapshotDiffRequest) returns (GetSnapshotDiffResponse);
+  rpc GetSnapshotDiffStatus(GetSnapshotDiffStatusRequest) returns (GetSnapshotDiffStatusResponse);
+}
+
+message CreateDependencySnapshotRequest {
+  // the github repository_id
+  uint64 repository_id = 1;
+
+  reserved "repository_metadata";
+  reserved 2;
+
+  // byte-serialized JSON of the dependency snapshot submission request.
+  // To be proxied over to DS-API, in request scope, for processing.
+  // initial schema validation (shape not contents!) happens in the monolith:
+  // https://github.com/github/github/blob/master/app/api/schemas/v3/schemas/repository-snapshot.json
+  bytes payload = 3;
+}
+
+message CreateDependencySnapshotResponse {
+  // unique lookup ID from DS-API backend
+  uint64 snapshot_id = 1;
+
+  // time the snapshot was successfully stored by DS-API backend
+  google.protobuf.Timestamp created_at = 2;
+
+  // There are three possible result outcomes which correspond to the following HTTP status codes and scenarios.
+  // INVALID  - 400 - error deserializing snapshot.
+  // INVALID  - 400 - invalid purl.
+  // ACCEPTED - 201 - snapshot is submitted for the non-default branch.
+  // ACCEPTED - 201 - snapshot is submitted for the default branch and there's already a snapshot with a newer commit SHA.
+  // SUCCESS  - 201 - snapshot is submitted for the default branch and it's the snapshot with the latest commit SHA.
+  // Dependency results for the repo will be successfully updated only in SUCCESS scenario.
+  enum Result {
+    INVALID = 0;
+    ACCEPTED = 1;
+    SUCCESS = 2;
+    REMOVED = 3;
+  }
+  Result result = 4;
+  string message = 5;
+}
+
+message GetDependencySnapshotRequest {
+  // the gh/gh repository_id, NOT the dg-api repository_id.
+  uint64 repository_id = 1;
+
+  // unique lookup ID returned in successful CreateDependencySnapshotResponse.
+  // if a default value is used, this will retrieve the 'default' snapshot for the repository,
+  // which is the default branch's latest submitted snapshot.
+  uint64 snapshot_id = 2;
+}
+
+message GetDependencySnapshotResponse {
+  // "raw" JSON snapshot as byte blob; TODO: add fixed shape
+  // and protobuf components for resp + deprecate payload
+  bytes payload = 1;
+
+  // the gh/gh repository_id, NOT the dg-api repository_id.
+  uint64 repository_id = 2;
+
+  // unique lookup ID for this snapshot, assigned at create-time
+  uint64 snapshot_id = 3;
+}
+
+message ExcludeDependencySnapshotsRequest {
+  uint64 repository_id = 1;
+  repeated uint64 snapshot_ids = 2;
+}
+
+message ExcludeDependencySnapshotsResponse {
+  repeated uint64 excluded_snapshot_ids = 1;
+}
+
+message GetIncludedDependencySnapshotsRequest {
+  uint64 repository_id = 1;
+}
+
+message GetIncludedDependencySnapshotsResponse {
+  message IncludedSnapshot {
+    uint64 snapshot_id = 1;
+    string correlator = 2;
+    string detector = 3;
+    google.protobuf.Timestamp created_at = 4;
+  }
+
+  repeated IncludedSnapshot included_snapshots = 1;
+}
+
+message GetSnapshotDiffRequest {
+  uint64 repository_id = 1;
+  string basehead = 2;
+}
+
+message GetSnapshotDiffResponse {
+  enum ChangeType {
+    ADDED = 0;
+    REMOVED = 1;
+  }
+
+  // DG-API currently only supports 'runtime' and 'development' scopes,
+  // but we also support the empty scope in this service. We'll make that
+  // explicit here with the expectation that DG-API will probably
+  // default to 'runtime' scope for these dependencies.
+  enum Scope {
+    NONE = 0;
+    RUNTIME = 1;
+    DEVELOPMENT = 2;
+  }
+
+  message SnapshotMetadata {
+    uint64 snapshot_id = 1;
+    string correlator = 2;
+    string detector = 3;
+  }
+
+  message DependencyChange {
+    ChangeType change_type = 1;
+    SnapshotMetadata snapshot_metadata = 2;
+    string manifest = 3;
+    string ecosystem = 4;
+    string name = 5;
+    string version = 6;
+    string package_url = 7;
+    Scope scope = 8;
+  }
+
+  repeated DependencyChange dependency_changes = 1;
+  uint32 base_snapshots_compared = 2;
+  uint32 head_snapshots_compared = 3;
+}
+
+message GetSnapshotDiffStatusRequest {
+  uint64 repository_id = 1;
+  string basehead = 2;
+}
+
+message GetSnapshotDiffStatusResponse {
+  uint32 base_snapshot_count = 1;
+  uint32 head_snapshot_count = 2;
+  repeated string missing_detectors = 3;
+}

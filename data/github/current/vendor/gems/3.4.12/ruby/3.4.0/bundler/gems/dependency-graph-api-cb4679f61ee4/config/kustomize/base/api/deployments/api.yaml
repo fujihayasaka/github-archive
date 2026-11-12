@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: api
+    annotations:
+        heaven.githubapp.com/inject-heaven-env-vars-into-containers: "api"
+        heaven.githubapp.com/image-placeholder: "dependency-graph-api"
+        heaven.githubapp.com/deploy-requirement: "true"
+        moda.github.net/canary-v2: "true"
+        moda.github.net/canary-label: "canary"
+spec:
+    replicas: 15
+    selector:
+        matchLabels:
+            app: dependency-graph-api
+            role: api
+            canary: "api"
+    template:
+        metadata:
+            labels:
+                app: dependency-graph-api
+                role: api
+                canary: "api"
+        spec:
+            dnsPolicy: ClusterFirst
+            volumes:
+                - name: github-metadata
+                  hostPath:
+                    path: /etc/github/metadata.json
+            containers:
+                - name: api
+                  image: dependency-graph-api
+                  resources:
+                    requests:
+                        # Important notes here:
+                        # This dashboard shows usage for api: https://app.datadoghq.com/dash/integration/30322/kubernetes-pods-overview?tpl_var_deployment=api&tpl_var_namespace=dependency-graph-api-api&from_ts=1659116339452&to_ts=1659721139452&live=true
+                        # You're probably never going to see the pod go over 1000m. This makes sense, because we run stock ruby ( see https://buildingvts.com/threading-in-mri-ruby-for-fun-and-performance-34a0e1bc6c70 )
+                        # Puma will run multiple requests concurrently, but not in parallel -- For our application, anything running inside the process will only consume at most one core at a time (PER PUMA WORKER)
+                        # Our Puma worker count is one, so we never really expect this CPU value to go over 1000m (1 core). Rising above this threshold may indicate container OS level processes or one of our dependencies' launching external processes.
+                        # We do have the option of scaling CPU up and increasing Puma worker count. The Copy-On-Write feature means this could save us some total RAM usage.
+                        #  At the time of this writing, we didn't want to finagle with the memory limits so we went for the more naive (and easily scale-out-able) single cpu.
+                        # You can also see recommendations for capacity using this dashboard: https://app.datadoghq.com/dashboard/6vx-iun-ghs/moda-resource-recommendations?tpl_var_kube_deployment=api&tpl_var_kube_namespace=dependency-graph-api-api&from_ts=1659116397626&to_ts=1659721197626&live=true
+                        cpu: 1000m
+                        memory: "1.3Gi"
+                    limits:
+                        # If we ever see things go above 1000m that means something has changed from the above comment block / assumptions, and we should investigate.
+                        # We're allowing higher limits here just to show that in an obvious way on dashboards.
+                        cpu: 1300m
+                        memory: "2Gi"
+                  command: ["./script/kube-server"]
+                  ports:
+                    - name: http
+                      containerPort: 9596
+                      protocol: TCP
+                  readinessProbe:
+                    timeoutSeconds: 1
+                    httpGet:
+                        path: /_ping
+                        port: 9596
+                  lifecycle:
+                    preStop:
+                        exec:
+                            command: ["sleep", "5"]
+                  env:
+                    - name: DOGSTATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                    # used by puma statsd plugin
+                    - name: STATSD_HOST
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: spec.nodeName
+                    - name: STATSD_PORT
+                      value: "28125"
+                    - name: STATSD_METRIC_PREFIX
+                      value: "dependency_graph"
+                    - name: DG_POD_TYPE
+                      value: "api"
+                    - name: MY_POD_NAME
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.name
+                    - name: STATSD_GROUPING
+                      value: api
+                  envFrom:
+                    - configMapRef:
+                        name: environment
+                    - secretRef:
+                        name: vault-secrets
+                  volumeMounts:
+                    - mountPath: /etc/github/metadata.json
+                      name: github-metadata
+                      readOnly: true

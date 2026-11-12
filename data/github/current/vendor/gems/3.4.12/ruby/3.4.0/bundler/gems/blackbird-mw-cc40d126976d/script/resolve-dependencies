@@ -1,0 +1,27 @@
+#!/bin/bash
+#
+# This script is run automatically in Janky CI builds.
+#
+# It populates $PWD/vendor by running 'go mod vendor'
+# (in a container, since Janky provides no go toolchain).
+# This avoids the need for subsequent dockerized build steps to attempt
+# to pass goproxy authentication secrets through docker-compose.
+#
+# Adapted from go-sample-service.
+
+set -euo pipefail
+
+echo "%%%FOLD {Download Go modules}%%%"
+
+[ -n "${BP_GITHUB_TOKEN:-}" ] &&
+  echo "machine goproxy.githubapp.com login nobody password $BP_GITHUB_TOKEN" >> $HOME/.netrc
+
+docker run --rm -t \
+    -v $PWD:/work \
+    -v $HOME/.netrc:/root/.netrc \
+    -w /work \
+    --entrypoint bash \
+    ghcr.io/github/gh-base-image/gh-builder-focal:latest \
+    -c "./script/vendor && chown -R $(id -u) vendor"
+
+echo "%%%END FOLD%%%"

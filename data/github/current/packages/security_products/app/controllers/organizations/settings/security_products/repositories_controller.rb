@@ -106,8 +106,8 @@ class Organizations::Settings::SecurityProducts::RepositoriesController < Orgs::
         summary = AdvancedSecurityLicense.summary(entity: T.must(billable_entity), repository_ids:, sku: GitHub::Turboghas::SKU::Bundled)
         payload[:licenses_needed] = summary.additional_committers
         payload[:licenses_freed] = summary.unique_committers
-      rescue AdvancedSecurityLicense::TurboghasError => e
-        Failbot.report(e)
+      rescue AdvancedSecurityLicense::TurboghasError, Faraday::Error => e
+        Failbot.report!(e)
         payload[:failedToFetchLicenses] = true
       end
     end

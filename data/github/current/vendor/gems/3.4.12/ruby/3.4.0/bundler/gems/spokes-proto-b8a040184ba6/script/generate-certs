@@ -1,0 +1,88 @@
+#!/bin/bash
+#/ Usage: script/generate-certs
+#/ Generates a CA, server cert, and client certs for the example spokes-api environment.
+
+set -e
+set -o nounset
+
+CERTS_REL="certs"
+CERTS="$(cd "$(dirname "$0")/.."; pwd -P)/${CERTS_REL}"
+CERT_ARGS="--depot-path $CERTS"
+
+CA_CN="spokes-api-dev-ca"
+CLIENT_CN="test-client"
+
+CA_KEY="${CERTS}/${CA_CN}.key"
+CA_CRT="${CERTS}/${CA_CN}.crt"
+
+main() {
+  verify_openssl
+
+  rm -rf "${CERTS}"
+  mkdir -p "${CERTS}"
+  generate_ca
+  generate_example_client_cert
+
+  cp "${CERTS}/${CA_CN}.crt" "${CERTS}/chain.pem"
+}
+
+verify_openssl() {
+  if which openssl >&/dev/null; then
+    return
+  fi
+
+  if [ "${CODESPACES:-}" = "true" ]; then
+    install_openssl_on_codespaces
+    return
+  fi
+
+  echo error: script/generate-certs requires openssl.
+  # Exit without error so that this is a no-op during bootstrap.
+  exit 0
+}
+
+install_openssl_on_codespaces() {
+  local sudo=
+  if [ "$(id -u)" -ne 0 ]; then
+    sudo=sudo
+  fi
+  $sudo apt-get install -y openssl
+}
+
+generate_ca() {
+  local cnf="${CERTS}/openssl.cnf"
+
+  mkdir -p "${CERTS}"
+  echo Generating "$(basename "${CA_KEY}")"
+  openssl ecparam -name secp384r1 -genkey -noout -out "${CA_KEY}"
+
+  cp /etc/ssl/openssl.cnf "$cnf"
+  sed -i.bak -e 's/^basicConstraints.*/basicConstraints = critical,CA:true,pathlen:0/' "$cnf"
+  sed -i.bak -e 's/^keyUsage.*//' "$cnf"
+  echo 'keyUsage = critical, cRLSign, keyCertSign' >> "$cnf"
+
+  echo Generating "$(basename "${CA_CRT}")"
+  openssl req -new -x509 -key "${CA_KEY}" \
+    -days 36135 \
+    -subj "/O=GitHub/OU=Git-Infrastructure/CN=${CA_CN}" \
+    -config "$cnf" \
+    -set_serial 1 \
+    -out "$CA_CRT"
+}
+
+generate_example_client_cert() {
+  docker compose -f docker-compose.bootstrap.yml -f docker-compose.yml \
+    run \
+    -u $(id -u ${USER}):$(id -g ${USER}) \
+    create-cert \
+    --output-cert-file "${CERTS_REL}/${CLIENT_CN}.crt" \
+    --output-key-file "${CERTS_REL}/${CLIENT_CN}.key" \
+    "${CLIENT_CN}"
+
+    # Ensure that the the emitted cert files/keys have the read-only permission for everyone
+    # so that it can be read when mounted to docker cotainer.
+    chmod 644 ${CERTS_REL}/${CLIENT_CN}.crt
+    chmod 644 ${CERTS_REL}/${CLIENT_CN}.key
+}
+
+main

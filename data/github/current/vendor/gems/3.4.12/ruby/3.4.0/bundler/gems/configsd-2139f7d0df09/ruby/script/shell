@@ -1,0 +1,40 @@
+#!/bin/bash
+set -e
+
+# Create persistent directories
+mkdir -p .bundle_vendor
+mkdir -p {.bash_history_data,.local,.irb_history_data}
+
+# Define volume mounts
+VOLUMES=(
+	# Project and bundle directories
+	-v "$PWD:/ruby"
+	-v "$PWD/.bundle_vendor:/usr/local/bundle/gems:rw"
+
+	# Persistent data directories
+	-v "$PWD/.bash_history_data:/home/configsd-ruby/.bash_history_data:rw"
+	-v "$PWD/.local:/home/configsd-ruby/.local:rw"
+	-v "$PWD/.irb_history_data:/home/configsd-ruby/.irb_history_data:rw"
+
+	# Read-only dotfiles from host
+	-v "$HOME/.bashrc:/home/configsd-ruby/.bashrc:ro"
+	-v "$HOME/.bash_profile:/home/configsd-ruby/.bash_profile:ro"
+	-v "$HOME/.profile:/home/configsd-ruby/.profile:ro"
+	-v "$HOME/.gitconfig:/home/configsd-ruby/.gitconfig:ro"
+)
+
+# Define environment variables
+ENV_VARS=(
+	-e BUNDLE_RUBYGEMS__PKG__GITHUB__COM="$GITHUB_USER:$GITHUB_TOKEN"
+	-e BUNDLE_PATH=/ruby/.bundle_vendor
+	-e BUNDLE_USER_HOME=/ruby/.bundle_vendor
+	-e HISTFILE=/home/configsd-ruby/.bash_history_data/.bash_history
+	-e IRB_HISTFILE=/home/configsd-ruby/.irb_history_data/.irb_history
+)
+
+docker run --rm -it \
+	"${VOLUMES[@]}" \
+	-u configsd-ruby \
+	"${ENV_VARS[@]}" \
+	-w /ruby \
+	configsd-ruby-dev bash

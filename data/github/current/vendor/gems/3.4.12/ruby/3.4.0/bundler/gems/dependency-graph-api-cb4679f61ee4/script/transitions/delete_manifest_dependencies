@@ -1,0 +1,91 @@
+#!/usr/bin/env ruby
+
+require_relative "../../config/environment"
+
+class DeleteManifestDependencies
+  include DependencyGraph::Tracing
+
+  attr_reader :batch_size, :throttler
+
+  def initialize(batch_size:)
+    @batch_size = batch_size
+    @throttler = DependencyGraph.throttler
+  end
+
+  trace_method :execute
+  def execute
+    while true
+      retries = 0
+      begin
+        throttler.throttle(:"dependency-graph") do
+          start_time = Time.now
+          DependencyGraph.logger.with_named_tags(
+            "gh.dependency_graph.delete_manifest_dependencies.batch_size": batch_size,
+            "gh.dependency_graph.delete_manifest_dependencies.start_time": start_time,
+          ) do
+
+            num_deleted = ManifestDependency.order(id: :asc).limit(batch_size).delete_all
+
+            end_time = Time.now
+            elapsed = end_time - start_time
+            DependencyGraph.logger.info(
+              "Deleted #{num_deleted} rows from #{ManifestDependency.table_name}",
+              "gh.dependency_graph.delete_manifest_dependencies.end_time": end_time,
+              "gh.dependency_graph.delete_manifest_dependencies.elapsed": elapsed,
+            )
+
+            # Escape the loop and function if no rows were deleted
+            return if num_deleted.zero?
+          end
+        end
+      rescue ActiveRecord::StatementInvalid, Freno::Throttler::WaitedTooLong, Freno::Throttler::ClientError => e
+        Failbot.report(e)
+        retries += 1
+        retry if retries < 3
+      end
+    end
+  end
+end
+
+options = {
+  batch_size: 1000
+}
+
+enable_console_appender = false
+enable_query_logging = false
+
+OptionParser.new do |opts|
+  opts.on("--batch-size N", Integer, "Set the number of rows to delete at a time") do |bs|
+    options[:batch_size] = bs
+  end
+
+  opts.on("--stdout", "Enable console appender") do
+    enable_console_appender = true
+  end
+
+  opts.on("--log-sql", "Enable query logging") do
+    enable_query_logging = true
+  end
+end.parse!
+
+if enable_console_appender
+  SemanticLogger.add_appender(io: $stdout) unless SemanticLogger.appenders.console_output?
+end
+
+if enable_query_logging
+  # Special case: if we are in development then print the raw SQL queries.
+  # This is a little nicer to read than the tagged log output.
+  if Rails.env.development?
+    ActiveSupport::Notifications.subscribe("sql.active_record") do |_name, _start, _finish, _id, payload|
+      sql = payload[:sql]
+      puts "#{sql}\n" unless sql.blank?
+    end
+  else
+    # In production/any other environment, log the SQL queries as structured data, as normal.
+    RailsSemanticLogger::ActiveRecord::LogSubscriber.logger.level = :debug
+  end
+end
+
+raise OptionParser::MissingArgument, "--batch-size is required" if options[:batch_size].nil?
+
+DeleteManifestDependencies.new(**options).execute
