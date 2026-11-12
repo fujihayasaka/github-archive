@@ -244,6 +244,49 @@ class Business < ApplicationRecord::Domain::Users
     class_name: "SoftDeletedOrganization",
     dependent: :destroy
 
+  # GHES has one business that owns every organization. Skip the membership join and
+  # business_id filter because older organizations may not have that column populated.
+  # Loaded associations and other environments retain their existing readers.
+  sig { returns(T::Array[T.untyped]) }
+  def organization_ids
+    return super if organizations.loaded?
+    return super unless read_organizations_without_join?
+
+    @organization_ids_without_join ||= Organization
+      .active
+      .excluding_github_enterprise_org
+      .pluck(:id)
+  end
+
+  # Display logins for Actions enterprise-policy checks, using the same GHES fast
+  # path as #organization_ids.
+  sig { returns(T::Array[T.untyped]) }
+  def organization_display_logins
+    return organizations.map(&:display_login) if organizations.loaded?
+    return organizations.pluck(:display_login) unless read_organizations_without_join?
+
+    @organization_display_logins_without_join ||= Organization
+      .active
+      .excluding_github_enterprise_org
+      .pluck(:display_login)
+  end
+
+  # Reset memoized variables on reload. Defined in ApplicationRecord::Base, called in #reload.
+  def reset_memoized_attributes
+    %i[@organization_ids_without_join @organization_display_logins_without_join].each do |ivar|
+      remove_instance_variable(ivar) if instance_variable_defined?(ivar)
+    end
+    super
+  end
+
+  # Only a saved business in a single, non-multi-tenant environment can read all organizations.
+  sig { returns(T::Boolean) }
+  private def read_organizations_without_join?
+    id.present? &&
+      GitHub.single_business_environment? &&
+      !GitHub.multi_tenant_enterprise?
+  end
+
   has_many :enterprise_credential_authorizations,
     class_name: "Business::CredentialAuthorization"
   destroy_dependents_in_background :enterprise_credential_authorizations

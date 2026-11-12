@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package github.secretscanning.v1;
+
+option go_package = "github.com/github/secret-scanning-proto/gen/go/v1/api";
+option ruby_package = "GitHub::Proto::SecretScanning::Api::V1";
+
+import "api/v1/shared.proto";
+
+// PublicKeyAPI contains APIs used by secret scanning for private keys found
+// in scanned source code.
+service PublicKeyAPI {
+  // UnverifyPublicKey unverifies public keys when the associated private key
+  // is found in source code pushed to public repositories.
+  rpc UnverifyPublicKey(UnverifyPublicKeyRequest) returns (UnverifyPublicKeyResponse);
+
+  // VerifyPrivateKey verifies whether private keys are valid.
+  rpc VerifyPrivateKey(VerifyPrivateKeyRequest) returns (VerifyPrivateKeyResponse);
+}
+
+message UnverifyPublicKeyRequest {
+  message PrivateKeyCandidate {
+    // private_key is the private key text found during a scan
+    string private_key = 1;
+
+    // url is the url of the blob that the token was found in
+    string url = 2;
+
+    // type is the type of private key being asked to be univerified (such as SSH Keys or Deploy Keys)
+    string type = 3;
+
+    // identifies where did we find the credential (content, commit, issue etc)
+    TokenSource token_source = 4; 
+  }
+
+  // candidates are the private keys that public keys should be unverified for
+  repeated PrivateKeyCandidate candidates = 2;
+
+  // Id of the repository, used for internal private revocation
+  int64 repository_id = 3;
+
+  // type of repository (gist or repos)
+  RepositoryType repository_type = 4;
+}
+
+message UnverifyPublicKeyResponse {
+  // unverified_count is the number of public keys that were unverified
+  int64 unverified_count = 1;
+
+    message PrivateKey {
+    // unverify_result is what was the result when the private key at this index was attempted to be unverified
+    RevokeResult unverify_result = 1;
+  }
+
+  // results are the univerification results for each private key requested
+  repeated PrivateKey results = 2;
+}
+
+message VerifyPrivateKeyRequest {
+  message PrivateKeyCandidate {
+    // private_key is the private key text found during a scan
+    string private_key = 1;
+  }
+
+  // candidates are the private keys that should be checked
+  repeated PrivateKeyCandidate candidates = 1;
+
+  // Id of the repository, used for internal private revocation
+  int64 repository_id = 2;
+
+  // type of repository (gist or repos)
+  RepositoryType repository_type = 3;
+}
+
+message VerifyPrivateKeyResponse {
+  enum VerificationStatus {
+    UNKNOWN = 0;
+    ACTIVE = 1;
+    REVOKED = 2;
+    UNVERIFIABLE = 3;
+  }
+
+  message PrivateKey {
+    // is_verified is whether the private key at this index was legitimate
+    bool is_verified = 1;
+
+    // verification_status indicates in what state is an private key found
+    VerificationStatus verification_status = 2;
+  }
+
+  // results are the verification results for each private key requested
+  repeated PrivateKey results = 1;
+}

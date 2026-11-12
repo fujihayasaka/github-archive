@@ -38,6 +38,8 @@ module Api::Internal::Twirp::Elm
           cursor = decode_cursor(req.page_token)
           return Twirp::Error.invalid_argument("must be a token returned by this API", argument: "page_token") if cursor.nil?
 
+          # Fetch the raw page before filtering. Pagination must continue from
+          # the raw page even when every status in it is filtered out.
           statuses = Statuses.domain.list_page_for_export(
             repository_id: repo_id,
             limit: per_page,
@@ -46,8 +48,11 @@ module Api::Internal::Twirp::Elm
             id_after: cursor.id_after
           )
 
+          exportable_statuses = statuses_with_existing_commits(repository, statuses)
+
           {
-            export_commit_status_checks: statuses.map { |status| build_status_check_hash(status) },
+            export_commit_status_checks: exportable_statuses.map { |status| build_status_check_hash(status) },
+            # Always calculate the cursor from the unfiltered database page.
             next_page_token: next_page_token_for(statuses)
           }
         end
@@ -59,6 +64,46 @@ module Api::Internal::Twirp::Elm
           return ::Repositories.domain.by_id(repo_id) if FeatureFlag.vexi.enabled?(:repos_by_id_api_twirp, default: false)
 
           Repository.find_by(id: repo_id)
+        end
+
+        # Keeps only statuses whose OIDs currently resolve to commit objects.
+        #
+        # Missing objects and objects that are not commits are omitted. All
+        # other Git and Spokes failures propagate.
+        sig do
+          params(
+            repository: ::Repositories::IRepository,
+            statuses: T::Array[T.untyped]
+          ).returns(T::Array[T.untyped])
+        end
+        def statuses_with_existing_commits(repository, statuses)
+          return statuses if statuses.empty?
+
+          commit_oids = statuses.filter_map do |status|
+            commit_oid = status.commit_oid
+            commit_oid if commit_oid.present?
+          end
+
+          return [] if commit_oids.empty?
+
+          available_oids = commit_availability_checker(repository)
+            .available_oids(commit_oids)
+
+          # select preserves the order of the original status page.
+          statuses.select do |status|
+            commit_oid = status.commit_oid
+            commit_oid.present? && available_oids.include?(commit_oid.downcase)
+          end
+        end
+
+        sig do
+          params(repository: ::Repositories::IRepository)
+            .returns(::Api::Internal::Twirp::Elm::Actions::CommitAvailabilityChecker)
+        end
+        def commit_availability_checker(repository)
+          ::Api::Internal::Twirp::Elm::Actions::CommitAvailabilityChecker.new(
+            repository: repository
+          )
         end
 
         sig { params(repo_id: Integer, message: String, elm_error_code: String).returns(Twirp::Error) }
@@ -123,6 +168,7 @@ module Api::Internal::Twirp::Elm
         sig { params(user: User).returns(String) }
         def creator_url_for_status(user)
           return user.permalink if user.is_a?(Bot)
+
           GitHub::Resources::UrlForModel.new(user).url
         rescue ActionController::UrlGenerationError
           "#{GitHub.url}/#{user.display_login}"

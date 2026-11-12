@@ -18,6 +18,7 @@ class Api::GraphQL < Api::App
     update_logs_with_rate_limits
     update_hydro_with_rate_limits
     update_logs_with_global_id_selection
+    update_logs_with_operation_name
     set_request_metadata
     set_rate_limit_headers
   end
@@ -156,6 +157,15 @@ class Api::GraphQL < Api::App
   def update_logs_with_global_id_selection
     log_data.update(
       "gh.graphql.global_id_type": get_global_id_selection.to_s.downcase
+    )
+  end
+
+  def update_logs_with_operation_name
+    operation_name = request.env["github.graphql.operation_name"]
+    return if operation_name.blank?
+
+    log_data.update(
+      "graphql.operation.name": operation_name
     )
   end
 

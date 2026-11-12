@@ -21,8 +21,9 @@ class Stafftools::Users::UndeletesController < StafftoolsController
 
   def ensure_user_deletion_failed
     delete_job_status = UserDeleteJob.status(this_user.id)
+    soft_deleted = this_user.organization? && this_user.soft_deleted?
     suitable_user = \
-      (this_user.deleted? || this_user.soft_deleted?) &&
+      (this_user.deleted? || soft_deleted) &&
       (delete_job_status.nil? || delete_job_status.error?)
     render_404 unless suitable_user
   end

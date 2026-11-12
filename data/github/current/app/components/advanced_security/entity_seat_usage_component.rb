@@ -9,6 +9,8 @@
 # Banners are not rendered directly in this component, since that approach offers less
 # flexibility about layout.
 class AdvancedSecurity::EntitySeatUsageComponent < ApplicationComponent
+  USAGE_UNAVAILABLE_MESSAGE = "Unable to determine license usage. Please try again later."
+
   sig do
     params(
       entity: T.any(User, Organization, Business),
@@ -19,6 +21,7 @@ class AdvancedSecurity::EntitySeatUsageComponent < ApplicationComponent
     @size = size
     @is_bundled = T.let(entity.advanced_security_license.billable_entity&.advanced_security_products_bundled? == true, T::Boolean)
     @entity = T.let(entity, T.nilable(T.any(User, Organization, Business)))
+    @usage_unavailable = T.let(false, T::Boolean)
   end
 
   sig { returns(T::Boolean) }
@@ -54,7 +57,17 @@ class AdvancedSecurity::EntitySeatUsageComponent < ApplicationComponent
 
   sig { returns(T.nilable(T::Boolean)) }
   def render?
-    @entity&.is_a?(Business) || @entity&.is_a?(Organization)
+    return false unless @entity&.is_a?(Business) || @entity&.is_a?(Organization)
+
+    # When usage is unavailable, the enclosing template shows the warning from banner_message instead.
+    !usage_unavailable?
+  end
+
+  # Whether seat usage couldn't be fetched from TurboGHAS, e.g. because GetSummary timed out.
+  sig { returns(T::Boolean) }
+  def usage_unavailable?
+    components
+    @usage_unavailable
   end
 
   sig { returns(T::Array[AdvancedSecurity::SeatUsageComponent]) }
@@ -106,6 +119,10 @@ class AdvancedSecurity::EntitySeatUsageComponent < ApplicationComponent
         end
       end
     end
+  rescue AdvancedSecurityLicense::TurboghasError, Faraday::Error => e
+    Failbot.report!(e, catalog_service: "github/licensing")
+    @usage_unavailable = true
+    []
   end
 
   # This component provides banner details which the enclosing template/component can use.
@@ -114,17 +131,21 @@ class AdvancedSecurity::EntitySeatUsageComponent < ApplicationComponent
 
   sig { returns(T::Boolean) }
   def banner_required?
-    components.any?(&:banner_required?)
+    usage_unavailable? || components.any?(&:banner_required?)
   end
 
   sig { returns(T::Hash[Symbol, Symbol]) }
   def banner_arguments
+    return { icon: :alert, scheme: :warning } if usage_unavailable?
+
     component = components.find(&:allowance_exceeded?) || components.find(&:banner_required?)
     component ? component.banner_arguments : {}
   end
 
   sig { returns(String) }
   def banner_message
+    return USAGE_UNAVAILABLE_MESSAGE if usage_unavailable?
+
     components.any?(&:banner_required?) ? components.map(&:banner_message).join(" ") : ""
   end
 end

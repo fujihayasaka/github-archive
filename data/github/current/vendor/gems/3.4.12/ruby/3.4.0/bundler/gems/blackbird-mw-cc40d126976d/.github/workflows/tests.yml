@@ -1,0 +1,148 @@
+name: Tests
+on:
+  push:
+    reuse-previous-outcome: false
+  merge_group:
+    reuse-previous-outcome: false
+
+permissions:
+  id-token: write # for setup-goproxy OIDC
+  contents: read
+
+# In the event that there is a new push to the head_ref (only defined on PR
+# events), cancel any running jobs because there are now obsolete, and wasting
+# resources.
+#
+# Via: https://docs.github.com/en/actions/using-jobs/using-concurrency#example-using-a-fallback-value
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CONTAINER_BUILDER_TOKEN: ${{ secrets.CONTAINER_BUILDER_TOKEN }}
+  GITHUB_ACTOR: ${{ github.actor }}
+
+jobs:
+  integration_tests:
+    name: Run end-to-end tests
+    # Must match OS where blackbird c libs are built, both ubuntu-20.04-16core
+    # and blackbird-premium-runners (used by blackbird build) use 20.04
+    runs-on: ubuntu-20.04-32core
+    strategy:
+      fail-fast: false
+      matrix:
+        corpus:
+          - name: blue
+            cluster: zeta
+            mode: dotcom
+            epoch_mode: lexical
+          - name: blue
+            cluster: zeta
+            mode: dotcom
+            epoch_mode: embeddings
+          - name: blue
+            cluster: zeta
+            mode: dotcom
+            epoch_mode: embeddings_graph
+          - name: blue
+            cluster: zeta
+            mode: tenant
+            epoch_mode: hybrid
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          token: ${{ secrets.CONTAINER_BUILDER_TOKEN }}
+      - uses: rui314/setup-mold@f80524ca6eeaa76759b57fb78ddce5d87a20c720
+      - uses: github/setup-goproxy@v1.1.0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+      - uses: actions/cache@v4.2.0
+        with:
+          path: vendor
+          key: ${{ runner.os }}-go-vendor-${{ hashFiles('go.sum') }}
+
+      - run: make test-integration | tee -a test-log.txt
+        shell: bash
+        env:
+          BLACKBIRD_DUMP_LOGS: 1
+          BLACKBIRD_MW_OUTPUT_CORPUS: ${{ matrix.corpus.name }}
+          BLACKBIRD_CLUSTERNAME: ${{ matrix.corpus.cluster }}
+          BLACKBIRD_MW_MODE: ${{ matrix.corpus.mode }}
+          BLACKBIRD_MW_EPOCH_MODE: ${{ matrix.corpus.epoch_mode }}
+          COPILOT_API_HMAC_KEY: ${{ secrets.COPILOT_API_HMAC_KEY }}
+          AZURE_BLACKBIRD_EMBEDDING_SWITZERLANDNORTH_KEY: ${{ secrets.AZURE_BLACKBIRD_EMBEDDING_SWITZERLANDNORTH_KEY }}
+
+      - name: Scan for error messages
+        run: |
+          ./script/extract-test-logs test-log.txt >> $GITHUB_STEP_SUMMARY
+          ./script/extract-annotations test-log.txt
+        if: failure()
+        shell: bash
+
+  db_tests:
+    name: Run database tests (mysql ${{ matrix.mysql.version }})
+    runs-on: ubuntu-20.04 # Must match OS where blackbird c libs are built
+    strategy:
+      matrix:
+        mysql:
+          - version: 8
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@f80524ca6eeaa76759b57fb78ddce5d87a20c720
+      - uses: github/setup-goproxy@v1.1.0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+      - uses: actions/cache@v4.2.0
+        with:
+          path: vendor
+          key: ${{ runner.os }}-go-vendor-${{ hashFiles('go.sum') }}
+      - run: make test-db
+
+  redis_tests:
+    name: Run Redis tests
+    runs-on: ubuntu-20.04 # Must match OS where blackbird c libs are built
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@f80524ca6eeaa76759b57fb78ddce5d87a20c720
+      - uses: github/setup-goproxy@v1.1.0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+      - uses: actions/cache@v4.2.0
+        with:
+          path: vendor
+          key: ${{ runner.os }}-go-vendor-${{ hashFiles('go.sum') }}
+      - run: make test-redis
+
+  go_tests:
+    name: Run Go tests
+    runs-on: ubuntu-20.04 # Must match OS where blackbird c libs are built
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@f80524ca6eeaa76759b57fb78ddce5d87a20c720
+      - uses: github/setup-goproxy@v1.1.0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+      - uses: actions/cache@v4.2.0
+        with:
+          path: vendor
+          key: ${{ runner.os }}-go-vendor-${{ hashFiles('go.sum') }}
+      - run: make test
+
+  ruby_tests:
+    name: Run Ruby client tests
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@32110d4e311bd8996b2a82bf2a43b714ccc91777
+        with:
+          ruby-version: "3.0.1"
+          bundler-cache: true
+      - run: make test-ruby

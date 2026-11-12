@@ -121,7 +121,7 @@ module Api::Internal::Twirp::Actions
         def allow_local_to_enterprise_actions!
           return unless disallowed_actions.any?
 
-          org_logins = repo.owner.business.organizations.pluck(:display_login).map(&:downcase)
+          org_logins = repo.owner.business.organization_display_logins.map(&:downcase)
 
           local_to_enterprise = disallowed_actions.select do |action|
             org_logins.include? action.owner_login

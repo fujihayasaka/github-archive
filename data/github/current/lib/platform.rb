@@ -239,6 +239,14 @@ module Platform
             # and not proceed with cost calculations if so
             at_rate_limit = cost_limiter.should_limit(0)
             if at_rate_limit
+              if request_env
+                blocked_query = GraphQL::Query.new(
+                  schema,
+                  document: document,
+                  operation_name: operation_name
+                )
+                request_env["github.graphql.operation_name"] = blocked_query.selected_operation_name
+              end
               blocked_from = "before_query_evaluation"
               GitHub.dogstats.increment("platform.analyzers.rate_limit_request_query.rate_limited", tags: ["blocked_from:#{blocked_from}"])
               type, id = cost_limiter.configuration.key.split("-")

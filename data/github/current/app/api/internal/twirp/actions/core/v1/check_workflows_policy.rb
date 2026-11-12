@@ -94,7 +94,7 @@ module Api::Internal::Twirp::Actions
         def allow_local_to_enterprise_workflows!
           return unless disallowed_workflows.any?
 
-          org_logins = repo.owner.business.organizations.pluck(:display_login).map(&:downcase)
+          org_logins = repo.owner.business.organization_display_logins.map(&:downcase)
 
           local_to_enterprise = disallowed_workflows.select do |workflow|
             org_logins.include? workflow.owner_login

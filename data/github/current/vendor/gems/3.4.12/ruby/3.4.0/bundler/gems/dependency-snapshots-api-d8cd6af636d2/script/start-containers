@@ -1,0 +1,25 @@
+#!/bin/bash
+# script/start-containers: Launch the containers required for local development
+
+set -ex
+
+RED='\033[1;31m'
+NC='\033[0m'
+
+cd "$(dirname "$0")/.."
+
+if ! docker compose > /dev/null 2>&1; then
+    echo -e "${RED}'docker compose' returns an error.${NC}"
+    echo -e "You may need to install the Docker Compose CLI V2:"
+    echo -e "  https://docs.docker.com/compose/cli-command/"
+    echo -e "Output:\n"
+    exec docker compose
+fi
+
+# Ensure that we are starting a database with the other containers.
+export COMPOSE_FILE=${COMPOSE_FILE:-docker-compose.yml:docker-compose.mysql8.yml}
+
+if [[ -n "$SNAPSHOTS_DEVCONTAINER" || -n "$DS_DEVCONTAINER" ]]; then
+    echo "$GITHUB_TOKEN" | docker login ghcr.io -u token --password-stdin
+fi
+exec docker compose up -d --wait

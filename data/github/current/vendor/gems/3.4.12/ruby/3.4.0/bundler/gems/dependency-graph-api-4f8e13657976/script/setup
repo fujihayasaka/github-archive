@@ -1,0 +1,50 @@
+#!/bin/bash
+
+# script/setup: Set up application for the first time after cloning, or set it
+#               back to the initial first unused state.
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+if [[ -n "$DG_DEVCONTAINER" ]] || [[ -n "$CODESPACES" ]]; then
+  # On the first run in a Codespace, nodenv and bundler may not be
+  # available on the path yet.
+  if ! which bundle > /dev/null; then
+    if [[ -f ~/.rbenv/shims/bundle ]]; then
+      echo "Bundler is installed, but not available on the path."
+      echo "Please run 'source ~/.profile' to fix this."
+    else
+      echo "Bundler is not installed. Please run 'script/bootstrap' to install it."
+    fi
+    exit 1
+  fi
+fi
+
+source script/bootstrap
+source script/_env
+
+# Change hooks path to use hooks in repo
+git config core.hooksPath hooks/
+
+echo "===> Setting up DB..."
+script/poll-for-db 127.0.0.1 3306 root
+
+# reset database to a fresh state.
+bundle exec rake db:create
+bundle exec rake db:github:create
+# This doesn't recreate dbs but ensures that schema hack code
+# is run on RAILS_ENV=test as well (it populates github_test_notify_dga)
+bundle exec rake db:github:create RAILS_ENV=test
+bundle exec bin/rails db:environment:set
+bundle exec rake db:reset db:migrate
+
+if [ -z "$RAILS_ENV" ] && [ -z "$RACK_ENV" ]; then
+  # Only things for a development environment will run inside here
+  # Do things that need to be done to the application to set up for the first
+  # time. Or things needed to be run to to reset the application back to first
+  # use experience. These things are scoped to the application's domain.
+  true
+fi
+
+echo "==> App is now ready to go!"

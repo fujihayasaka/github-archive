@@ -2,6 +2,59 @@
   page_info container_xl: true
 %>
 
+<% content_for :banner do %>
+  <% if this_user.deleted? %>
+    <% delete_user_job_status = UserDeleteJob.status(this_user.id) %>
+    <% if delete_user_job_status.nil? || delete_user_job_status.error? %>
+      <%= render(Primer::Alpha::Banner.new(scheme: :danger, icon: "alert")) do |banner| %>
+        <span <%= test_selector "user-delete-job-failed-message" %>>
+          This account was queued for deletion, but the job failed.
+        </span>
+        <% banner.with_action_content do %>
+          <%= render(Primer::Alpha::Dialog.new(
+            title: "Mark as not deleted",
+            id: "mark-not-deleted",
+          )) do |d| %>
+            <% d.with_show_button(
+              "data-disable-invalid": "",
+              "data-disable-with": "Mark as not deleted"
+            ) { "Mark as not deleted" } %>
+            <% d.with_header(show_divider: true) do %>
+                Mark account as not deleted?
+            <% end %>
+            <% d.with_body do %>
+              <p>
+                Marking the <strong><%= this_user.display_login %></strong> account as not deleted will
+                clear the deleted state so the account is usable again.
+              </p>
+            <% end %>
+            <% d.with_footer(show_divider: true) do %>
+              <%= render(Primer::Beta::Button.new(
+                data: { "close-dialog-id": "mark-not-deleted" }
+              )) { "Cancel" } %>
+
+              <%= form_with(
+                url: stafftools_user_undeletes_path(this_user.display_login),
+                method: :post) do |form| %>
+                <%= render(Primer::Beta::Button.new(
+                  type: :submit,
+                  scheme: :danger,
+                  "data-disable-invalid": "",
+                  "data-disable-with": "Marking as not deleted..."
+                )) { "Mark account as not deleted" } %>
+              <% end %>
+            <% end %>
+          <% end %>
+        <% end %>
+      <% end %>
+    <% else %>
+      <%= render(Primer::Alpha::Banner.new(scheme: :danger, icon: "alert")) do %>
+        This account is queued for deletion.
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>
+
 <% content_for :breadcrumbs do %>
   <%= link_to "Site admin", stafftools_path %>
   /
