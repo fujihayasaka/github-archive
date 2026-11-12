@@ -64,7 +64,7 @@ class Api::RepositoryDependencyGraph < Api::App
           detector_name: data.dig("detector", "name"),
           correlator: data.dig("job", "correlator"),
           scanned_at: data["scanned"],
-          created_at: response&.created_at&.to_time.utc,
+          created_at: response&.created_at&.to_time&.utc,
         )
       end
       deliver :repository_snapshot_create_hash, output[:response], status: output[:status_code]

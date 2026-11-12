@@ -103,11 +103,7 @@ module ActionsPolicy::AccessPolicyDependency
   end
 
   def owner_restricts_allowed_actions?
-    if self.feature_flag_enabled?(:actions_owner_restricts_allowed_actions_fix_all_allowed, default: false)
-      most_restrictive_owner_allowlist.present? && !most_restrictive_owner_allowlist.all_allowed?
-    else
-      most_restrictive_owner_allowlist.present?
-    end
+    most_restrictive_owner_allowlist.present? && !most_restrictive_owner_allowlist.all_allowed?
   end
 
   def owner_requires_sha_pinning?

@@ -23,6 +23,7 @@ module GhostPilot
       render_404 and return unless current_repository
 
       comparison = GitHub::Comparison.from_range_or_ref(current_repository, params[:range], user: current_user)
+      render_404 and return unless comparison&.viewable_by?(current_user)
 
       render GhostPilot::DiffSummaryComponent.new(comparison: comparison), layout: false
     end

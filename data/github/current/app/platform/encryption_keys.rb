@@ -22,5 +22,8 @@ module Platform
 
     # Used for encrypting/decrypting bring your own key (BYOK) secrets for Copilot.
     COPILOT_BYOK_SECRETS = "copilot-byok-secrets-key".freeze
+
+    # Used for encrypting/decrypting ELM exporter secrets.
+    ELM_EXPORTER_SECRETS = "elm-exporter-secrets-key".freeze
   end
 end
