@@ -9,6 +9,7 @@ module SecretScanning
         include GitHub::TokenScanning::TokenScanningPostProcessingHelper
         include SecretScanning::Features::FeatureFlagHelper
         include UrlHelper
+        include UrlHelpers
 
         TIMELINE_EVENTS_INITIAL_SHOW_COUNT = 3
         TIMELINE_EVENTS_LIMIT = 8
@@ -174,18 +175,21 @@ module SecretScanning
           end
 
           if result.is_custom?
+            render_pattern_link = can_access_custom_pattern?(result.custom_pattern)
             payload[:pattern_info] = {
               is_custom: true,
-              render_link: can_access_custom_pattern?(result.custom_pattern),
+              render_link: render_pattern_link,
               id: result.custom_pattern.custom_pattern_id,
-              scope: result.custom_pattern.owner_scope
+              scope: result.custom_pattern.owner_scope,
+              path: render_pattern_link ? custom_pattern_settings_path(result.custom_pattern) : nil,
             }
           else
             payload[:pattern_info] = {
               is_custom: false,
               render_link: false,
               id: nil,
-              scope: nil
+              scope: nil,
+              path: nil,
             }
           end
 
@@ -266,6 +270,9 @@ module SecretScanning
           when :ORGANIZATION_SCOPE
             repo_owner = @repo.owner
             return true if repo_owner.is_a?(::Organization) && SecurityProduct::Permissions::OrgAuthz.new(repo_owner, actor: @user).can_manage_org_security_products?
+          when :BUSINESS_SCOPE
+            business = custom_pattern_business
+            return true if business && business.id == custom_pattern.owner_id && SecurityProduct::Permissions::BusinessAuthz.new(business, actor: @user).can_modify_code_security_policies?
           else
             return false
           end
@@ -308,6 +315,27 @@ module SecretScanning
         end
 
         private
+
+        sig { returns(T.nilable(Business)) }
+        def custom_pattern_business
+          business = @repo.owner&.business
+          business ||= Business.enterprise_managed_business_for(resource: @repo)
+          business ||= GitHub.global_business if GitHub.single_business_environment?
+          business
+        end
+
+        sig { params(custom_pattern: GitHub::Proto::SecretScanning::Api::V2::GetTokenResponse::CustomPatternData).returns(T.nilable(String)) }
+        def custom_pattern_settings_path(custom_pattern)
+          case custom_pattern.owner_scope
+          when :REPOSITORY_SCOPE
+            show_custom_pattern_path(id: custom_pattern.custom_pattern_id, repository: @repo, user_id: @repo.owner_display_login)
+          when :ORGANIZATION_SCOPE
+            settings_org_security_analysis_show_custom_pattern_path(id: custom_pattern.custom_pattern_id, organization_id: @repo.owner_display_login)
+          when :BUSINESS_SCOPE
+            business = custom_pattern_business
+            settings_business_show_custom_pattern_enterprise_path(id: custom_pattern.custom_pattern_id, slug: business.slug) if business
+          end
+        end
 
         sig { returns(T::Boolean) }
         def user_is_org_member?

@@ -6,9 +6,9 @@ module GitHub
     module Freno
       def freno_enabled?
         return false unless GitHub::AppEnvironment.production?
-        return false if GitHub.enterprise?
         return false if GitHub.staging_lab?
         return false if GitHub.environment.fetch("FRENO_DISABLED", "0") == "1"
+        return GitHub.environment.fetch("ENTERPRISE_MYSQL_FRENO_ENABLED", "0") == "1" if GitHub.enterprise?
         true
       end
     end

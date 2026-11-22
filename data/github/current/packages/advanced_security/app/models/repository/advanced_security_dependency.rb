@@ -160,6 +160,7 @@ module Repository::AdvancedSecurityDependency
     end
 
     return false unless self.policy_allows_advanced_security_enablement?(sku: Configurable::AdvancedSecurityAccessPolicy::ENTITY_ALLOWED_ALL) # CAN
+    return true if GitHub.ghas_seat_checks_disabled?
     !(self.enforce_advanced_security_committers_limits? && local_owner.advanced_security_license.allowance_exceeded?) # CAN
     # NOTE: As this is for a brand new repo, we will not be adding more committers. Thus the check above
     #       only cares about whether we are currently over the limit.

@@ -28,10 +28,17 @@ class PullRequests::Orchestrations::ResolveConflicts < PullRequestOrchestration
   # to the existing one would violate branch protection rules. This is an expensive
   # step as it creates a new git ref and calls synchronize! inline but this shouldn't happen often.
   step :create_new_head_ref do
-    return unless new_head_ref
+    return unless new_head_ref = self.new_head_ref
 
     return unless pull_request = self.pull_request
     return unless head_repository = pull_request.head_repository
+
+    if new_head_ref.length + "refs/heads/".length > GitHub::MAX_REF_LENGTH
+      return [:failed, "Invalid ref name"]
+    end
+
+    normalized_ref = Git::Ref.normalize(new_head_ref)
+    return [:failed, "Invalid ref name"] unless normalized_ref && normalized_ref == new_head_ref
 
     unless head_repository.writable_by?(user)
       return [:failed, "Head repository not writable by user"]

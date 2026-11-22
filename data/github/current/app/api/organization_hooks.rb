@@ -284,6 +284,7 @@ class Api::OrganizationHooks < Api::App
   private
 
   def rate_limit_configuration
+    return nil if GitHub.single_tenant_enterprise?
     return nil if FeatureFlag.vexi.enabled?(:gateway_webhook_deliveries_rate_limiter_disabled, current_user, default: false)
 
     Api::RateLimitConfiguration.for(

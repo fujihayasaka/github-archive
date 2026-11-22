@@ -37,7 +37,15 @@ module Dependabot
       scope = scope.order("display_login").filter_spam_for(current_user)
 
       if query.present?
-        scope = scope.like_display_login_or_profile_name(query.strip)
+        stripped_query = query.strip
+        scope = if GitHub::UTF8.valid_unicode3?(stripped_query)
+          scope.like_display_login_or_profile_name(stripped_query)
+        else
+          # users.display_login is utf8mb3, so comparing it with a 4-byte character raises
+          # "Illegal mix of collations". Logins can't contain such characters, so only
+          # search the utf8mb4 display_name column.
+          scope.where("users.display_name LIKE ?", "%#{ActiveRecord::Base.sanitize_sql_like(stripped_query)}%")
+        end
       end
 
       # Batch permission checks using Promise.all to avoid N sequential authzd RPCs.

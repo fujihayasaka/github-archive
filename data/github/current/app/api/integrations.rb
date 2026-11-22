@@ -635,6 +635,7 @@ class Api::Integrations < Api::App
 
   def rate_limit_configuration
     return nil unless WEBHOOK_DELIVERY_PATHS.include?(route_pattern)
+    return nil if GitHub.single_tenant_enterprise?
     return nil if FeatureFlag.vexi.enabled?(:gateway_webhook_deliveries_rate_limiter_disabled, current_integration, default: false)
 
     Api::RateLimitConfiguration.for(

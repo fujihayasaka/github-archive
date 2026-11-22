@@ -24,6 +24,8 @@ module SecurityProductsEnablement
     def initialize(repository, repository_owner, disallowed_skus)
       @repository = repository
       @repository_owner = repository_owner
+      # Disallowed SKUs come only from seat checks.
+      disallowed_skus = nil if GitHub.ghas_seat_checks_disabled?
       @disallowed_skus = T.let(Set.new(disallowed_skus), T::Set[GitHub::Turboghas::SKU])
     end
 

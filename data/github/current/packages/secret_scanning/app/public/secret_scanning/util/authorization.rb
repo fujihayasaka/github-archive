@@ -78,6 +78,30 @@ module SecretScanning::Util
       [true, "user is member of team (#{role_team_name}) with custom role: #{custom_repo_role.name}"]
     end
 
+    sig { params(user: User, custom_org_role: OrganizationRole, organization: T.nilable(Organization)).returns([T::Boolean, String]) }
+    def self.user_has_custom_org_role_directly_or_via_team?(user, custom_org_role, organization)
+      if organization.nil?
+        return [false, "organization is nil"]
+      end
+      matches = Authz.domain.user_roles.actor_assignments_for_user_and_role_on_organization(user: user, organization: organization, organization_role: custom_org_role)
+      if matches["User"].present?
+        return true, "user has org custom role: #{custom_org_role.name}" if T.must(matches["User"]).include?(user.id)
+      end
+      team_actor_ids = []
+      team_actor_ids.concat(T.must(matches["BusinessTeam"])) if matches["BusinessTeam"].present?
+      team_actor_ids.concat(T.must(matches["Team"])) if matches["Team"].present?
+
+      role_team_name = Team
+          .with_business_teams
+          .where(id: team_actor_ids)
+          .limit(1)
+          .pluck(:name)
+          .first
+
+      return [false, "user does not have org custom role"] unless role_team_name.present?
+      [true, "user is member of team (#{role_team_name}) with org custom role: #{custom_org_role.name}"]
+    end
+
     sig { params(business: Business, org: Organization, enterprise_role_ids: T::Array[Integer]).returns([T::Array[User], T::Array[BusinessTeam]]) }
     def self.get_enterprise_role_assignees_visible_to_org(business, org, enterprise_role_ids)
       users = []

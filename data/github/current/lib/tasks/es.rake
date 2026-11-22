@@ -290,8 +290,8 @@ namespace :es do
       RebuildAuditLogsJob.perform_later(cluster: GitHub.es_audit_log_cluster)
     end
 
-    desc "Manual Following and Creation of auto-follower pattern"
-    task :ccr_manual_follow, [:leader_cluster_url, :follower_cluster_url] => :environment do |_t, args|
+    desc "Manual Following and Creation of auto-follower pattern (timeout defaults to 300 seconds)"
+    task :ccr_manual_follow, [:leader_cluster_url, :follower_cluster_url, :timeout] => :environment do |_t, args|
       follower_url = args[:follower_cluster_url]
       leader_url = args[:leader_cluster_url]
 
@@ -300,16 +300,19 @@ namespace :es do
         raise ArgumentError, "Both leader and follower cluster urls are required"
       end
 
-      primary_client = ElastomerClient::Client.new(url: leader_url)
-      replica_client = ElastomerClient::Client.new(url: follower_url)
+      timeout = Integer(args[:timeout] || 300)
+      raise ArgumentError, "Timeout must be greater than zero" unless timeout.positive?
+
+      primary_client = ElastomerClient::Client.new(url: leader_url, read_timeout: timeout, open_timeout: timeout)
+      replica_client = ElastomerClient::Client.new(url: follower_url, read_timeout: timeout, open_timeout: timeout)
 
       Elastomer::App.manage_follower_indices(primary_client, replica_client)
 
       puts "Manual Following and Creation of auto-follower pattern completed"
     end
 
-    desc "Promotion of indexes from follower to leader"
-    task :promote_ccr_follower, [:cluster_url] => :environment do |_t, args|
+    desc "Promotion of indexes from follower to leader (timeout defaults to 300 seconds)"
+    task :promote_ccr_follower, [:cluster_url, :timeout] => :environment do |_t, args|
       cluster_url = args[:cluster_url]
 
       # assert that follower and leader are passed in
@@ -317,7 +320,10 @@ namespace :es do
         raise ArgumentError, "A cluster URL is required"
       end
 
-      client = ElastomerClient::Client.new(url: cluster_url)
+      timeout = Integer(args[:timeout] || 300)
+      raise ArgumentError, "Timeout must be greater than zero" unless timeout.positive?
+
+      client = ElastomerClient::Client.new(url: cluster_url, read_timeout: timeout, open_timeout: timeout)
 
       Elastomer::App.promote_follower_indexes_to_primary(client)
 

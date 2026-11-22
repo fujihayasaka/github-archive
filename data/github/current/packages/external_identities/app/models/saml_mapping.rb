@@ -2,6 +2,8 @@
 # frozen_string_literal: true
 
 class SamlMapping < ApplicationRecord::Domain::Users
+  class NameIdMismatch < StandardError; end
+
   include GitHub::Validations
   include ::Users::BelongsToUser
   belongs_to_user_via_domain
@@ -13,8 +15,29 @@ class SamlMapping < ApplicationRecord::Domain::Users
 
   # Find a SamlMapping entry by nameid and name_id_format
   def self.by_name_id_and_name_id_format(name_id, name_id_format)
-    where(name_id: name_id, name_id_format: name_id_format).first
+    ensure_exact_name_id(where(name_id: name_id, name_id_format: name_id_format).first, name_id)
   end
+
+  def self.by_name_id(name_id)
+    ensure_exact_name_id(find_by(name_id: name_id), name_id)
+  end
+
+  def self.ensure_exact_name_id(mapping, name_id)
+    return mapping unless GitHub.single_tenant_enterprise?
+
+    # MySQL's collation can match a different NameID; do not let it reach another lookup fallback.
+    if mapping && mapping.name_id != name_id
+      GitHub::Authentication.logger.error(
+        "SAML failure - NameID mismatch",
+        "gh.saml_mapping.id" => mapping.id,
+        "gh.user.id" => mapping.user_id,
+      )
+      raise NameIdMismatch, "SAML NameID does not exactly match the stored mapping"
+    end
+
+    mapping
+  end
+  private_class_method :ensure_exact_name_id
 
   def migrate_mapping!(new_name_id, login)
     SamlMapping.transaction do

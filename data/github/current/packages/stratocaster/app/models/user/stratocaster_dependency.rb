@@ -49,6 +49,22 @@ module User::StratocasterDependency
     true
   end
 
+  # The cached timestamp survives deletion of the corresponding feed event.
+  memoize def last_stratocaster_event_at
+    cached_timestamp = Feeds::KV.store.get(stratocaster_event_timestamp_cache_key).value do |error|
+      Failbot.report(error)
+      nil
+    end
+    return Time.parse(cached_timestamp).in_time_zone if cached_timestamp
+
+    response = Stratocaster::Response.new do
+      recent_event_id = GitHub.stratocaster.ids(events_key).first
+      [GitHub.stratocaster.get(recent_event_id)] if recent_event_id
+    end
+    event = response.items.first
+    event&.created_at&.in_time_zone
+  end
+
   def stratocaster_event_timestamp_cache_key
     "user.last-stratocaster-event-timestamp.#{self.id}"
   end

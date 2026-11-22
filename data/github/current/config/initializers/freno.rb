@@ -4,6 +4,7 @@
 require "faraday"
 require "freno/client"
 require "freno/fake_client"
+require "freno/fail_open_client"
 require "freno/replication_delay_cache_decorator"
 
 module Freno
@@ -24,8 +25,9 @@ module Freno
   end
 
   def self.client_class
-    return Client if GitHub.freno_enabled?
-    FakeClient
+    return FakeClient unless GitHub.freno_enabled?
+    return FailOpenClient if GitHub.enterprise?
+    Client
   end
   private_class_method :client_class
 

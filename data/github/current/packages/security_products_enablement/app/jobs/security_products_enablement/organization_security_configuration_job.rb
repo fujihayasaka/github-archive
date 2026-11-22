@@ -504,6 +504,7 @@ module SecurityProductsEnablement
       ).returns(T::Boolean)
     end
     def license_limit_exceeded?(sku, repository_ids)
+      return false if GitHub.ghas_seat_checks_disabled?
       org = T.must_because(organization) { "organization presence is validated before this method is called" }
 
       return false unless sku.purchased?

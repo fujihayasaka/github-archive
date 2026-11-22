@@ -682,6 +682,8 @@ module GitHub
       end
 
       def clear_contexts
+        # QueryStats tracks by default, so sampled RPC cleanup is not enough.
+        Elastomer::QueryStats.instance.clear if defined?(Elastomer::QueryStats)
         GitHub.context.clear
         ::Audit.context.clear
         SensitiveData.context.clear

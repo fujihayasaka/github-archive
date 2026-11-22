@@ -48,7 +48,7 @@ module GitHub
         @full_backtrace = skip?(:backtrace) ? [] : MysqlInstrumenter.full_backtrace
         @location_key = skip?(:backtrace) ? nil : MysqlInstrumenter.location_key(@full_backtrace)
         @backtrace = skip?(:backtrace) ? [] : MysqlInstrumenter.backtrace_locations
-        @digested_sql = skip?(:digested_sql) ? sql : GitHub::SQL::Digester.digest_sql(sql)
+        @digested_sql = GitHub::SQL::Digester.digest_sql(sql) unless skip?(:digested_sql)
         @tags = skip?(:tags) ? [] : MysqlInstrumenter.tags.uniq
 
         freeze
@@ -264,7 +264,9 @@ module GitHub
         )
 
         self.queries << query
-        self.query_counts[query.digested_sql] += 1
+        if query_digest = query.digested_sql
+          self.query_counts[query_digest] += 1
+        end
       end
 
       self.query_stats[cluster_name][connection_role][type] += 1

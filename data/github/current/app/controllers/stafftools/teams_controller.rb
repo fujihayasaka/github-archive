@@ -640,7 +640,8 @@ class Stafftools::TeamsController < StafftoolsController
   end
 
   def reconcile # rubocop:todo GitHub/UseRestfulActions
-    if this_team.externally_managed? && this_team.enterprise_managed_user_enabled?
+    scim_group_on_ghes = GitHub.enterprise? && this_team.external_group_team.present?
+    if this_team.externally_managed? && (this_team.enterprise_managed_user_enabled? || scim_group_on_ghes)
       external_group_id = this_team.external_group_team.external_group_id
       team_id = this_team.id
       ExternalGroupTeamReconcileJob.perform_later(external_group_id: external_group_id, team_id: team_id, caller: self.class.name)
@@ -666,7 +667,7 @@ class Stafftools::TeamsController < StafftoolsController
   end
 
   def sync # rubocop:todo GitHub/UseRestfulActions
-    if this_team.externally_managed?
+    if !GitHub.enterprise? && this_team.externally_managed?
       rpc_response = GroupSyncer.client.sync_team(
         org_id: this_team.organization.global_relay_id,
         team_id: this_team.global_relay_id,

@@ -271,6 +271,9 @@ GitHub.stats_allowlist = %w(
   hydro_client.sink.message_dropped.*
   github.stream_processor.message.*
   github.stream_processor.process.*
+  github.throttler.*
+  github.active_job.smart_database_selection.*
+  github.freno.enterprise.*
 )
 
 # Additional stats metrics to allow when Datadog is enabled
