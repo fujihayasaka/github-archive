@@ -298,6 +298,8 @@ module Platform
         end
 
         result
+      rescue SamlMapping::NameIdMismatch
+        login_conflict_status
       end
 
       # Override UserHandler#find_user to avoid provisioning error when NameID
@@ -332,9 +334,9 @@ module Platform
         return result if result.present?
         # if instance is configured to send request with unspecified, relax the search
         if name_id_format_unspecified?
-          result = SamlMapping.find_by(name_id: name_id)
+          result = SamlMapping.by_name_id(name_id)
           return result if result.present?
-          result = SamlMapping.find_by(name_id: login)
+          result = SamlMapping.by_name_id(login)
           result if result.present?
         end
       end

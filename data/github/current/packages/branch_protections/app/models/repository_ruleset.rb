@@ -1,8 +1,6 @@
 # typed: true
 # frozen_string_literal: true
 
-require "hashdiff"
-
 class RepositoryRuleset < ApplicationRecord::Repositories
   include Instrumentation::Model
   include GitHub::Memoizer
@@ -268,7 +266,7 @@ class RepositoryRuleset < ApplicationRecord::Repositories
         condition.parameters = condition_hash[:parameters] || {}
 
         next unless condition.changed?
-        next if condition.changed_attributes.keys == ["parameters"] && Hashdiff.diff(condition.attributes["parameters"] || {}, condition.changed_attributes["parameters"] || {}).empty?
+        next if condition.changed_attributes.keys == ["parameters"] && (condition.attributes["parameters"] || {}) == (condition.changed_attributes["parameters"] || {})
 
         raise ConditionValidationError.new(condition, condition.parameter_errors) if !condition.valid? && condition.parameter_errors&.any?
 
@@ -323,7 +321,7 @@ class RepositoryRuleset < ApplicationRecord::Repositories
         rule.parameters = rule.recognized_parameters if remove_unknown_parameters
 
         next unless rule.changed?
-        next if rule.changed_attributes.keys == ["parameters"] && Hashdiff.diff(rule.attributes["parameters"] || {}, rule.changed_attributes["parameters"] || {}).empty?
+        next if rule.changed_attributes.keys == ["parameters"] && (rule.attributes["parameters"] || {}) == (rule.changed_attributes["parameters"] || {})
 
         rule.updated_by_id = actor_id || GitHub.context[:actor_id]
 

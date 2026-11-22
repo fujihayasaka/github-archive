@@ -104,17 +104,17 @@ class Platform::Provisioning::EnterpriseServerSCIMIdentityProvisioner < Platform
   #
   # Returns Result object
   def after_provision_identity(identity:, user:, actor_id:, inviter_type:)
+    name_id = user_data.name_id
+    name_id_format = user_data.name_id_metadata["Format"] unless name_id.nil?
+    mapping = find_saml_mapping(name_id, user_data.user_name, name_id_format) unless name_id.nil?
+
     result = super
     return result unless result.success?
 
     result = role_reconciler.reconcile(identity: identity, actor_id: actor_id)
     return result if result && !result.success?
 
-    name_id = user_data.name_id
     unless name_id.nil?
-      name_id_format = user_data.name_id_metadata["Format"]
-      mapping = find_saml_mapping(name_id, user_data.user_name, name_id_format)
-
       if mapping
         if has_custom_username_attribute?
           mapping.migrate_mapping!(name_id, user_data.user_name)
@@ -126,29 +126,31 @@ class Platform::Provisioning::EnterpriseServerSCIMIdentityProvisioner < Platform
     end
 
     self.class.success_identity_status(identity)
+  rescue SamlMapping::NameIdMismatch
+    self.class.login_conflict_status
   end
 
   # Protected: A hook trigger method that will be executed after updated identity is saved
   #
   # Returns Result object
   def after_update_identity(identity:, user:, actor_id:, sso_invitation_token:)
+    name_id = user_data.name_id
+    name_id_format = user_data.name_id_metadata["Format"] unless name_id.nil?
+    mapping = find_saml_mapping(name_id, user_data.user_name, name_id_format) unless name_id.nil?
+
     result = super
     return result unless result.success?
 
     result = role_reconciler.reconcile(identity: identity, actor_id: actor_id)
     return result if result && !result.success?
 
-    name_id = user_data.name_id
-    unless name_id.nil?
-      name_id_format = user_data.name_id_metadata["Format"]
-      mapping = find_saml_mapping(name_id, user_data.user_name, name_id_format)
-
-      if mapping && has_custom_username_attribute?
-        mapping.migrate_mapping!(name_id, user_data.user_name)
-      end
+    if mapping && has_custom_username_attribute?
+      mapping.migrate_mapping!(name_id, user_data.user_name)
     end
 
     self.class.success_identity_status(identity)
+  rescue SamlMapping::NameIdMismatch
+    self.class.login_conflict_status
   end
 
   def after_deprovision_identity(identity:, user:, actor_id:)
@@ -212,9 +214,9 @@ class Platform::Provisioning::EnterpriseServerSCIMIdentityProvisioner < Platform
     return result if result.present?
     # if instance is configured to send request with unspecified, relax the search
     if name_id_format_unspecified?
-      result = SamlMapping.find_by(name_id: name_id)
+      result = SamlMapping.by_name_id(name_id)
       return result if result.present?
-      result = SamlMapping.find_by(name_id: login)
+      result = SamlMapping.by_name_id(login)
       result if result.present?
     end
   end

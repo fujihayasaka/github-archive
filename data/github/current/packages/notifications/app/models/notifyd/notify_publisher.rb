@@ -31,6 +31,8 @@ module Notifyd
     #                  and the adapter classes are defined and maintained by Notifyd integrators.
     # Returns nothing.
     def async_publish(actor_id:, subject_id:, subject_klass:, context: {})
+      return unless self.class.notifyd_enabled?
+
       job_class = Notifyd::PublishNotifyMessageJob
       # Once a subject is created/updated, hamzo verifies if the content is spammy.
       # We need to give the job 10 seconds to be run. This time allows hamzo to verify if user that triggered the notification is spammy.

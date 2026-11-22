@@ -485,6 +485,8 @@ module GitHub
       end
 
       def clear_contexts
+        # QueryStats tracks by default, so clear it before every message.
+        Elastomer::QueryStats.instance.clear if defined?(Elastomer::QueryStats)
         GitHub.context.clear
         ::Audit.context.clear
         SensitiveData.context.clear
