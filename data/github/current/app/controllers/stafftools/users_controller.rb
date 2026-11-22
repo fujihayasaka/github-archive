@@ -171,7 +171,7 @@ class Stafftools::UsersController < StafftoolsController
 
       if current_user.patsv2_enabled?
         @counts[:personal_access_tokens] = ProgrammaticAccessGrant.with_target(this_user).count
-        @counts[:personal_access_token_requests] = ProgrammaticAccessGrantRequest.with_target(this_user).count
+        @counts[:personal_access_token_requests] = ProgrammaticAccessGrantRequest.with_target(this_user).joins(:user_programmatic_access).count
       end
     end
 

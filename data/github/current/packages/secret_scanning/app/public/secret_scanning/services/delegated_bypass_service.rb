@@ -216,11 +216,18 @@ module SecretScanning
         )
       end
       def self.split_bypass_reviewers_ids_by_type(bypass_reviewers, reviewers_source)
+        role_reviewer_ids = bypass_reviewers.filter_map do |reviewer|
+          reviewer_type = GitHub::Proto::SecretScanning::Scans::V2::BypassReviewer::BypassReviewerType.resolve(T.cast(reviewer.reviewer_type, Symbol))
+          reviewer.reviewer_id if reviewer_type == GitHub::Proto::SecretScanning::Scans::V2::BypassReviewer::BypassReviewerType::ROLE
+        end
+        roles_by_id = Authz.domain.roles.with_ids(role_reviewer_ids).index_by(&:id)
+
         user_ids = []
         role_ids = []
         team_ids = []
         business_team_ids = []
         enterprise_role_ids = []
+        org_role_ids = []
         if reviewers_source.is_a?(Repository) && reviewers_source.owner.present? && reviewers_source.owner.is_a?(Organization)
           org_owner = T.cast(reviewers_source.owner, Organization)
         end
@@ -238,7 +245,12 @@ module SecretScanning
           when GitHub::Proto::SecretScanning::Scans::V2::BypassReviewer::BypassReviewerType::TEAM
             team_ids.push(reviewer.reviewer_id)
           when GitHub::Proto::SecretScanning::Scans::V2::BypassReviewer::BypassReviewerType::ROLE
-            role_ids.push(reviewer.reviewer_id)
+            role = roles_by_id[reviewer.reviewer_id]
+            if role&.is_a?(RepositoryRole)
+              role_ids.push(reviewer.reviewer_id)
+            elsif role&.is_a?(OrganizationRole)
+              org_role_ids.push(reviewer.reviewer_id)
+            end
           when GitHub::Proto::SecretScanning::Scans::V2::BypassReviewer::BypassReviewerType::ORG_ADMIN
             # We're going to have to revisit this logic for the org-level experience!!
             unless org_owner.nil?
@@ -260,29 +272,47 @@ module SecretScanning
           team_ids: team_ids,
           business_team_ids: business_team_ids,
           role_ids: role_ids,
-          enterprise_role_ids: enterprise_role_ids
+          enterprise_role_ids: enterprise_role_ids,
+          org_role_ids: org_role_ids,
         )
       end
 
       sig do
         params(
           role_ids: T::Array[Integer],
+          org_role_ids: T::Array[Integer],
           repository: Repository,
         ).returns([
           T::Array[User],
           T::Array[Team],
         ])
       end
-      def self.get_users_teams_from_role_ids(role_ids, repository)
-        return [[], []] if role_ids.empty?
+      def self.get_users_teams_from_role_ids(role_ids, org_role_ids, repository)
+        return [[], []] if role_ids.empty? && org_role_ids.empty?
         users = []
         teams = []
 
-        default_roles, custom_roles = Authz.domain.roles.with_ids(role_ids).partition(&:preset?)
+        default_roles, repo_custom_roles = Authz.domain.roles.with_ids(role_ids).partition(&:preset?)
 
-        if custom_roles.any?
-          users.push(User.where(id: UserRole.where(actor_type: "User", target: repository, role_id: custom_roles).pluck(:actor_id)))
-          teams.push(Team.with_business_teams.where(id: UserRole.where(actor_type: %w[Team BusinessTeam], target: repository, role_id: custom_roles).pluck(:actor_id)))
+        if repo_custom_roles.any?
+          users.push(User.where(id: UserRole.where(actor_type: "User", target: repository, role_id: repo_custom_roles).pluck(:actor_id)))
+          teams.push(Team.with_business_teams.where(id: UserRole.where(actor_type: %w[Team BusinessTeam], target: repository, role_id: repo_custom_roles).pluck(:actor_id)))
+        end
+
+        if org_role_ids.any?
+          organization = repository.owner
+          if organization.is_a?(Organization)
+            org_role_assignees = RoleAssignmentList::OrgRoleAssignees.new(organization:, direct_only: false, role_ids: org_role_ids)
+            users.push(User.where(id: org_role_assignees.user_assignee_ids))
+
+            actor_types_and_ids = Authz.domain.user_roles.batch_role_assignments_with_role_ids_for_target(
+              target: organization,
+              role_ids: org_role_ids,
+            )
+            business_team_ids = actor_types_and_ids.fetch(BusinessTeam.user_role_target_type, [])
+            users.push(User.where(id: Orgs.domain.teams.user_ids_for_business_teams(business_team_ids))) if business_team_ids.any?
+            teams.push(Team.with_business_teams.where(id: org_role_assignees.team_assignee_ids + business_team_ids))
+          end
         end
 
         if default_roles.any?
@@ -338,7 +368,7 @@ module SecretScanning
         users = User.where(id: reviewer_ids_by_type.user_ids).to_a
 
         # Get users and teams assigned to regular roles
-        role_users, teams = SecretScanning::Services::DelegatedBypassService.get_users_teams_from_role_ids(reviewer_ids_by_type.role_ids, repository)
+        role_users, teams = SecretScanning::Services::DelegatedBypassService.get_users_teams_from_role_ids(reviewer_ids_by_type.role_ids, reviewer_ids_by_type.org_role_ids, repository)
         users.concat(role_users) if role_users.any?
         teams.concat(Team.where(id: reviewer_ids_by_type.team_ids).to_a) if reviewer_ids_by_type.team_ids.any?
 
@@ -503,10 +533,13 @@ module SecretScanning
             # This is a default role, so check the repo permissions hash
             permissions = repository.permissions_hash_for(actor: user)
             return true, "user has default role: #{role.name}" if permissions.fetch(Team::ABILITIES_TO_PERMISSIONS[role.name].to_sym, nil)
-          else
-            # We know by this point that the role is a custom role
-            repo_role = T.cast(role, RepositoryRole)
-            can_review, reason = SecretScanning::Util::Authorization.user_has_custom_role_directly_or_via_team?(user, repo_role, repository)
+          elsif role.is_a?(RepositoryRole)
+            # The role is a custom repo role
+            can_review, reason = SecretScanning::Util::Authorization.user_has_custom_role_directly_or_via_team?(user, role, repository)
+            return can_review, reason if can_review
+          elsif role.is_a?(OrganizationRole)
+            # The role is a custom org role
+            can_review, reason = SecretScanning::Util::Authorization.user_has_custom_org_role_directly_or_via_team?(user, role, repository.organization)
             return can_review, reason if can_review
           end
         when GitHub::Proto::SecretScanning::Scans::V2::BypassReviewer::BypassReviewerType::ORG_ADMIN

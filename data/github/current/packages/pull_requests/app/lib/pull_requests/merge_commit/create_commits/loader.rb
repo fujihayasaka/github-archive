@@ -16,10 +16,8 @@ module PullRequests
 
         sig { returns(T.any(Request, Enums::InvalidRequestReason)) }
         memoize def request
-          cprmc_inline_mergeable_update = feature_enabled?(:cprmc_inline_mergeable_update)
-
           # If we have a pending ref update, don't bother running the behavior of this job. Wait for it to settle.
-          if cprmc_inline_mergeable_update && pending_ref_update?
+          if pending_ref_update?
             return Enums::InvalidRequestReason::DuplicateRequest
           end
 
@@ -69,13 +67,6 @@ module PullRequests
 
           unless head_branch_sha = refs.read(head_repository, head_ref_name)
             return Enums::InvalidRequestReason::MissingHeadBranchSha
-          end
-
-          unless cprmc_inline_mergeable_update
-            # If we've generated the commit but it has not performed the batch ref update yet, skip it.
-            if duplicate_merge_commit_request?(base_branch_sha:, head_branch_sha:)
-              return Enums::InvalidRequestReason::DuplicateRequest
-            end
           end
 
           merge_commit = read_and_determine_commit(base_repository, merge_commit_sha)

@@ -683,6 +683,59 @@ module Authz
         map_actor_type_to_actor_ids(results)
       end
 
+      # Public: Retrieve actor assignments for a specific user and their teams on an organization target.
+      #
+      # The method includes roles assigned:
+      # - Directly to the user on the organization
+      # - To teams the user is a member of on the organization
+      # - To business teams the user is a member of on the organization
+      #
+      # user            - The User to check for role assignments
+      # organization    - The Organization to check roles on
+      # organization_role - The Role to filter by
+      #
+      # Returns a Hash mapping actor types to arrays of actor IDs that have the specified role
+      # on the organization for the user, either directly or through team memberships.
+      #
+      # Examples:
+      #   # Get all actor assignments for a user on an organization for a specific custom role
+      #   actor_assignments_for_user_and_role_on_organization(user: user, organization: org, organization_role: custom_role)
+      #   # => { "User" => [123], "Team" => [456, 789] }
+      #
+      #   # Returns empty hash if user has no matching roles on organization
+      #   actor_assignments_for_user_and_role_on_organization(user: different_user, organization: org, organization_role: custom_role)
+      #   # => {}
+      sig do
+        params(
+          user: User,
+          organization: Organization,
+          organization_role: OrganizationRole
+        ).returns(ActorTypeToIds)
+      end
+      def actor_assignments_for_user_and_role_on_organization(user:, organization:, organization_role:) # rubocop:disable Metrics/MethodLength
+        team_ids = Orgs.domain.teams.team_ids_for_user(user, organization_id: organization.id)
+
+        business_team_ids = []
+        business = organization.business
+        if business.present?
+          business_team_ids = Orgs.domain.teams.business_team_ids_for(
+            business_id: business.id,
+            user_id: user.id
+          )
+        end
+
+        actor_type_to_ids = { "User" => [user.id] }
+        actor_type_to_ids["Team"] = team_ids if team_ids.any?
+        actor_type_to_ids["BusinessTeam"] = business_team_ids if business_team_ids.any?
+
+        query = where_target_org(target: organization)
+        query = query.or(where_target_org_business(target: organization)) if business_query_enabled?(organization)
+        query = query.and(where_actors_by_type_map(actor_type_to_ids: actor_type_to_ids))
+        query = query.where(role_id: organization_role.id)
+        results = query.distinct.pluck(:actor_id, :actor_type)
+        map_actor_type_to_actor_ids(results)
+      end
+
       # Public: Find 'base extended' roles assignments for the given actors
       # within the context of a set of organizations and businesses.
       #

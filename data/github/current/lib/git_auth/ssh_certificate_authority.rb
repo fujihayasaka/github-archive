@@ -187,12 +187,18 @@ module GitAuth
     end
     private_class_method :has_login_extensions?
 
+    def self.use_first_present_extension?
+      return true if GitHub.enterprise? && !GitHub.multi_tenant_enterprise?
+
+      FeatureFlag.vexi.enabled?(:gitauth_ssh_cert_first_present_extension, default: false)
+    end
+    private_class_method :use_first_present_extension?
+
     def self.get_user_info_by_id_extension(parsed_certificate)
       id_exts = parsed_certificate.extensions.values_at(*get_valid_id_extensions).compact
+      id_exts = id_exts.first(1) if use_first_present_extension?
       return [:no_id, nil] if id_exts.empty?
 
-      # lookup users from extension values, preferring user from GHES-specific
-      # extension, but always falling back to main github.com extension.
       query = Arel.sql(<<-SQL, ids: id_exts)
         SELECT id, login, display_login, created_at, raw_data
         FROM users
@@ -240,10 +246,9 @@ module GitAuth
 
     def self.get_user_info_by_login_extension(parsed_certificate)
       login_exts = parsed_certificate.extensions.values_at(*get_valid_login_extensions).compact
+      login_exts = login_exts.first(1) if use_first_present_extension?
       return [:no_user, nil] if login_exts.empty?
 
-      # lookup users from extension values, preferring user from GHES-specific
-      # extension, but always falling back to main github.com extension.
       query = if GitHub.multi_tenant_enterprise?
         tenant_id = GitHub::CurrentTenant.get.try(:id) || User::MultiTenantEnterpriseManagedDependency::NON_ENTERPRISE_MANAGED_BUSINESS_ID
         Arel.sql(<<-SQL, logins: login_exts, business_id: tenant_id)

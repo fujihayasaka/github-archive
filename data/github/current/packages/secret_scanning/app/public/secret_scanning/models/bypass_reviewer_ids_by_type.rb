@@ -9,6 +9,7 @@ module SecretScanning
       const :business_team_ids, T::Array[Integer]
       const :role_ids, T::Array[Integer]
       const :enterprise_role_ids, T::Array[Integer]
+      const :org_role_ids, T::Array[Integer]
     end
   end
 end

@@ -126,10 +126,14 @@ class AdvancedSecurityLicense
 
   sig { params(repo: Repository).returns(T::Boolean) }
   def enabling_repo_exceeds_seat_allowance?(repo)
+    return false if GitHub.ghas_seat_checks_disabled?
     return false unless purchased?
     return false if unlimited_seats?
 
-    seat_usage_increase_if_enabled_for_repo(repo) > remaining_seats
+    additional = seat_usage_increase_if_enabled_for_repo(repo)
+    return false if additional.zero?
+
+    additional > remaining_seats
   end
 
   sig { returns(T::Boolean) }
@@ -147,6 +151,7 @@ class AdvancedSecurityLicense
 
   sig { returns(T::Boolean) }
   def enabling_for_all_repos_would_exceed_seat_allowance?
+    return false if GitHub.ghas_seat_checks_disabled?
     return false unless purchased?
     return false if unlimited_seats?
     return false if @billable_entity.nil?

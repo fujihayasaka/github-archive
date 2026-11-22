@@ -1,0 +1,1 @@
+import{n as e}from"./use-app-payload-BhLZdagC.js";function t(){return e()}export{t};

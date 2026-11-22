@@ -57,7 +57,7 @@ module ApplicationController::ReturnToDependency
 
   sig { returns(T::Array[String]) }
   def safe_redirect_hosts
-    [
+    hosts = [
       GitHub.urls.host_name,
       GitHub.urls.raw_host_name,
       GitHub.pages_host_name_v2,
@@ -68,6 +68,24 @@ module ApplicationController::ReturnToDependency
       Notebook.host_url,
       Viewscreen.host_url,
       GitHub.classroom_host,
-    ].uniq.compact
+    ]
+    hosts.concat(private_mode_subdomain_hosts) if GitHub.subdomain_private_mode_enabled?
+    hosts.uniq.compact
+  end
+
+  private
+
+  # With private mode and subdomain isolation enabled, nginx sends requests for
+  # these subdomains that lack a valid private mode session to
+  # /sessions/_auth_request_bounce with a return_to URL on the subdomain.
+  # These settings are full URLs, so reduce them to hostnames.
+  sig { returns(T::Array[String]) }
+  def private_mode_subdomain_hosts
+    [
+      GitHub.alambic_avatar_url,
+      GitHub.storage_private_mode_url,
+      Notebook.host_url,
+      Viewscreen.host_url,
+    ].map { |url| Addressable::URI.parse(url).host if url.present? }.compact
   end
 end

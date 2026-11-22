@@ -833,7 +833,7 @@ class PullRequests::PageData::SharedController < AbstractRepositoryController
 
     thread_ids = params[:thread_ids].split(",").map(&:to_i) if params[:thread_ids].present?
 
-    threads = PullRequestReviewThread.where(id: thread_ids).visible_to(current_user)
+    threads = @pull_request.review_threads.where(id: thread_ids).visible_to(current_user)
 
     positioned_threads = PullRequests::PageData::ThreadPreviewPositioning::Loader.load(
       threads: threads.to_a,

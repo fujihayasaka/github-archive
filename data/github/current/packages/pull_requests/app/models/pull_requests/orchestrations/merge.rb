@@ -155,16 +155,6 @@ module PullRequests::Orchestrations
       end
     end
 
-    step :ensure_head_ref_removed do
-      return unless pull_request = self.pull_request
-      return unless head_repository = pull_request.head_repository
-      return if head_repository.feature_flag_enabled_or_raise?(:async_cleanup_head_ref_on_merge) # rubocop:disable GitHub/FeatureManagement/NoVexiActorFeatureFlagEnabledOrRaiseUsage
-
-      if head_repository.delete_branch_on_merge?
-        cleanup_head_ref!(pull_request)
-      end
-    end
-
     step :trigger_post_merge_events do
       return unless pull_request = self.pull_request
 
@@ -203,10 +193,9 @@ module PullRequests::Orchestrations
       end
     end
 
-    step :remove_head_ref_if_configured do
+    step :ensure_head_ref_removed do
       return unless pull_request = self.pull_request
       return unless head_repository = pull_request.head_repository
-      return unless head_repository.feature_flag_enabled_or_raise?(:async_cleanup_head_ref_on_merge) # rubocop:disable GitHub/FeatureManagement/NoVexiActorFeatureFlagEnabledOrRaiseUsage
 
       if head_repository.delete_branch_on_merge?
         cleanup_head_ref!(pull_request)

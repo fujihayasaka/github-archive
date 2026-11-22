@@ -385,7 +385,8 @@ module User::DormancyDependency
     return true if last_watch && last_watch >= cutoff
 
     # Check for dashboard events, the most fundamental indicator of activity
-    return true if last_conduit_event_at && last_conduit_event_at >= cutoff
+    last_event = last_event_at
+    return true if last_event && last_event >= cutoff
 
     # Finally, check the audit log for any non-failure events
     # this includes logins, email verification and password resets
@@ -509,7 +510,7 @@ module User::DormancyDependency
     dormancy_status[:last_comment] = latest_comments.empty? ? nil : latest_comments.max
 
     # Check for dashboard events, the most fundamental indicator of activity
-    dormancy_status[:last_event] = last_conduit_event_at
+    dormancy_status[:last_event] = last_event_at
 
     # Password resets, Email verification, Logins all covered by audit logs
     # Finally, check the audit log for any non-failure events

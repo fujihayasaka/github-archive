@@ -14,7 +14,7 @@ module Stratocaster
     def initialize(&blk)
       @items = begin
         Array(blk.call)
-      rescue RuntimeError, ActiveRecord::NoDatabaseError, Errno::ECONNREFUSED => error
+      rescue RuntimeError, ActiveRecord::NoDatabaseError, ActiveRecord::StatementInvalid, Errno::ECONNREFUSED => error
         GitHub.dogstats.increment("stratocaster.unavailable")
         Failbot.report(error, app: "github-stratocaster")
         @error = error

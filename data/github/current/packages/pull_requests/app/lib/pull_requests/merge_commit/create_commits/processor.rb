@@ -153,16 +153,14 @@ module PullRequests
 
           if merge_commit.is_a?(Commits::Reused)
             if rebase_commit.is_a?(Commits::Reused) || rebase_commit.is_a?(Commits::Skipped)
-              if @command.feature_enabled?(:cprmc_inline_mergeable_update)
-                case result = update_mergeable_columns(pull_request_id: request.pull_request_id, merge_commit:)
-                when ICommand::Result::Success
-                  return Result.new(outcome: Result::Outcome::UpdatedMergeability, merge_commit:, rebase_commit:)
-                when ICommand::Result::PullRequestAlreadyMergedError
-                  return Result.new(outcome: Result::Outcome::AlreadyMerged, merge_commit:, rebase_commit:)
-                when ICommand::Result::Error
-                  return Result.new(outcome: Result::Outcome::Error, merge_commit:, rebase_commit:)
-                else T.absurd(result)
-                end
+              case result = update_mergeable_columns(pull_request_id: request.pull_request_id, merge_commit:)
+              when ICommand::Result::Success
+                return Result.new(outcome: Result::Outcome::UpdatedMergeability, merge_commit:, rebase_commit:)
+              when ICommand::Result::PullRequestAlreadyMergedError
+                return Result.new(outcome: Result::Outcome::AlreadyMerged, merge_commit:, rebase_commit:)
+              when ICommand::Result::Error
+                return Result.new(outcome: Result::Outcome::Error, merge_commit:, rebase_commit:)
+              else T.absurd(result)
               end
             end
           end
