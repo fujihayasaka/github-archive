@@ -10,14 +10,23 @@ module User::AccountManagementDependency
 
   requires_ancestor { ::User }
 
+  sig { returns(T.nilable(Time)) }
+  def last_event_at
+    if GitHub.conduit_enabled?(user: self)
+      last_conduit_event_at
+    else
+      last_stratocaster_event_at
+    end
+  end
+
   # Public: The last date the user was active.
   #
-  # Takes into account stratocaster events, active session events, access via PATs and SSH keys, and interactions on Enterprise.
+  # Takes into account feed events, active session events, access via PATs and SSH keys, and interactions on Enterprise.
   #
   sig { returns(T.nilable(Time)) }
   def last_active_timestamp
     [
-      last_conduit_event_at,
+      last_event_at,
       last_active_session_at,
       oauth_accesses.personal_tokens.order(accessed_at: :desc).pick(:accessed_at),
       public_keys.order(accessed_at: :desc).pick(:accessed_at),

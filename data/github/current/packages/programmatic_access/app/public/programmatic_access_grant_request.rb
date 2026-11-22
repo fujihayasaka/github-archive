@@ -109,7 +109,10 @@ module ProgrammaticAccessGrantRequest
   end
 
   def self.targeted_organization_ids(next_id: nil)
-    orgs_with_requests = OrganizationProgrammaticAccessGrantRequest.distinct.order(organization_id: :asc)
+    orgs_with_requests = OrganizationProgrammaticAccessGrantRequest
+      .joins(:user_programmatic_access)
+      .distinct
+      .order(organization_id: :asc)
     orgs_with_requests = orgs_with_requests.where("organization_id >= ?", next_id) if next_id
 
     orgs_with_requests.pluck(:organization_id)

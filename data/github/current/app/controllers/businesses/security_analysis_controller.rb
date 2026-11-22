@@ -278,7 +278,7 @@ class Businesses::SecurityAnalysisController < Businesses::BusinessController
             end
           end
         end
-      rescue AdvancedSecurityLicense::TurboghasError => e
+      rescue AdvancedSecurityLicense::TurboghasError, Faraday::Error => e
         Failbot.report(e)
         errors << "internal_ghas_error"
       end

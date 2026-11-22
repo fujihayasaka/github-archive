@@ -30,6 +30,7 @@ class Stafftools::PersonalAccessTokens::GrantRequests::PendingApprovalsControlle
   def index
     paginated_requests = ProgrammaticAccessGrantRequest
       .with_target(this_user)
+      .joins(:user_programmatic_access)
       .includes(user_programmatic_access: :owner)
       .paginate(page: current_page, per_page: PER_PAGE)
 

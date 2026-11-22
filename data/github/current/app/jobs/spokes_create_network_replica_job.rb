@@ -142,13 +142,14 @@ class SpokesCreateNetworkReplicaJob < ApplicationJob
         # in the sync job because that doesn't have enough information.
         GitHub::DGit::Maintenance::set_network_state(network_id, host, GitHub::DGit::ACTIVE)
 
-        unless repo_ids.empty?
-          # Sync each repo into existence.  The sync job takes care fo
-          # setting up the repo and getting all the data.
-          repo_ids.map do |repo_id|
-            GitHub.logger.info("start", "code.namespace" => "SpokesSyncCacheReplicaJob", "code.function" => "perform_now")
-            SpokesSyncCacheReplicaJob.perform_now(repo_id, host)
-          end
+        # Sync each repository into existence without collecting every
+        # repository ID in memory.
+        GitHub::DGit::Util.each_repository_replica_for_network_replica(network_id, existing_network_replica_id) do |repo_id, repo_type, _, _|
+          next unless repo_type == GitHub::DGit::RepoType::REPO
+          next unless Repository.exists?(id: repo_id)
+
+          GitHub.logger.info("start", "code.namespace" => "SpokesSyncCacheReplicaJob", "code.function" => "perform_now")
+          SpokesSyncCacheReplicaJob.perform_now(repo_id, host)
         end
       else
         # Repair it into existence.  Shazam.

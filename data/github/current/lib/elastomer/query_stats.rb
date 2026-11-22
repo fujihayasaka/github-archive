@@ -4,26 +4,36 @@
 require "github/colorize"
 
 module Elastomer
-  # Simple container for collecting ES query stats. These numbers are
+  # Simple per-thread container for collecting ES query stats. These numbers are
   # displayed in the staff bar, and the actual queries are shown via a dialog.
   class QueryStats
     include Singleton
     include Enumerable
 
-    # This is a singleton. Use the `QueryStats.instance` to get the instance.
-    def initialize
-      @ary = []
-      @track = true
-      clear
-    end
+    THREAD_STATE_KEY = :elastomer_query_stats_state
+    State = Struct.new(:queries, :count, :time, :track, keyword_init: true)
 
     # Convenience method for checking for timeouts.
     def self.timed_out?
       instance.any? { |stat| stat.timed_out }
     end
 
-    attr_reader :count, :time
-    attr_accessor :track
+    def count
+      state.count
+    end
+
+    def time
+      state.time
+    end
+
+    def track
+      state.track
+    end
+
+    def track=(value)
+      state.track = value
+    end
+
     alias :track? :track
 
     # Add a new query hash to the stats collector.
@@ -33,29 +43,45 @@ module Elastomer
     # Returns this QueryStats instance.
     def <<(hash)
       if track?
-        @count += 1
-        @time += hash[:time]
-        @ary << Stat.new(hash)
+        state.count += 1
+        state.time += hash[:time]
+        state.queries << Stat.new(hash)
       end
       self
     end
 
     # Remove all current stats and clear out our list of queries.
     def clear
-      @ary.clear
-      @count = 0
-      @time  = 0
+      state.queries.clear
+      state.count = 0
+      state.time = 0
     end
 
     # Iterate over the list of query stats. This method will yield a Stat
     # instance to the block.
     def each(&block)
-      @ary.each(&block)
+      state.queries.each(&block)
     end
 
     # Filters the list of query stats. This yields a smaller list of stats.
     def filter(&block)
-      @ary.filter(&block)
+      state.queries.filter(&block)
+    end
+
+    private
+
+    def state
+      thread = if defined?(GitHub::DataCollector) && GitHub::DataCollector.respond_to?(:collector_thread)
+        GitHub::DataCollector.collector_thread
+      else
+        Thread.current
+      end
+
+      thread.thread_variable_get(THREAD_STATE_KEY) ||
+        thread.thread_variable_set(
+          THREAD_STATE_KEY,
+          State.new(queries: [], count: 0, time: 0, track: true)
+        )
     end
 
     # Little convenience wrapper around the query stats. It provides accessors
